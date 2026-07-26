@@ -84,7 +84,13 @@ const DashboardPage = () => {
       const priceMap = new Map<number, ItemPrice>();
       prices.forEach(p => priceMap.set(p.item_id, p));
       
-      const computed: TopRecipe[] = recipesList.map(recipe => {
+      function hasAllPrices(recipe: DofusDBRecipe): boolean {
+        const resultPrice = priceMap.get(recipe.resultId)?.price || 0;
+        if (resultPrice <= 0) return false;
+        return recipe.ingredientIds.every(id => (priceMap.get(id)?.price || 0) > 0);
+      }
+      
+      const computed: TopRecipe[] = recipesList.filter(hasAllPrices).map(recipe => {
         const resultPrice = priceMap.get(recipe.resultId)?.price || 0;
         const craftCost = recipe.ingredientIds.reduce((sum, ingId, index) => {
           const qty = recipe.quantities[index] || 0;
@@ -106,7 +112,7 @@ const DashboardPage = () => {
         };
       });
       
-      const top = computed.filter(r => r.margin > 0).sort((a, b) => b.margin - a.margin).slice(0, 10);
+      const top = computed.filter(r => r.margin > 0).sort((a, b) => (b.marginPercent || 0) - (a.marginPercent || 0)).slice(0, 10);
       setTopRecipes(top);
     } catch (err) {
       console.error('Error fetching top recipes:', err);

@@ -16,17 +16,16 @@ const JOBS = [
   { id: 2, name: 'Bûcheron' },
   { id: 11, name: 'Forgeron' },
   { id: 13, name: 'Sculpteur' },
-  { id: 14, name: 'Cordonnier' },
-  { id: 15, name: 'Bijoutier' },
-  { id: 16, name: 'Tailleur' },
-  { id: 17, name: 'Alchimiste' },
-  { id: 18, name: 'Boulanger' },
+  { id: 15, name: 'Cordonnier' },
+  { id: 16, name: 'Bijoutier' },
   { id: 24, name: 'Mineur' },
-  { id: 25, name: 'Pêcheur' },
-  { id: 26, name: 'Chasseur' },
-  { id: 27, name: 'Paysan' },
-  { id: 36, name: 'Façonneur' },
-  { id: 41, name: 'Bricoleur' },
+  { id: 26, name: 'Alchimiste' },
+  { id: 27, name: 'Tailleur' },
+  { id: 28, name: 'Paysan' },
+  { id: 36, name: 'Pêcheur' },
+  { id: 41, name: 'Chasseur' },
+  { id: 60, name: 'Façonneur' },
+  { id: 65, name: 'Bricoleur' },
 ];
 
 const RecipesContent = () => {
@@ -121,11 +120,11 @@ const RecipesContent = () => {
   }, [jobId, minLevel, maxLevel, globalSearch, prices]);
 
   useEffect(() => {
-    // Only load recipes once prices are loaded
-    if (prices.size > 0 || (globalSearch && globalSearch.length >= 2)) {
+    // Only load recipes once prices are loaded or if we are searching/filtering
+    if (prices.size > 0 || (globalSearch && globalSearch.length >= 2) || jobId || minLevel || maxLevel) {
       loadRecipes();
     }
-  }, [loadRecipes, prices.size, globalSearch]);
+  }, [loadRecipes, prices.size, globalSearch, jobId, minLevel, maxLevel]);
 
   function getMargin(recipe: DofusDBRecipe): number {
     const resultPrice = prices.get(recipe.resultId)?.price || 0;
@@ -153,9 +152,20 @@ const RecipesContent = () => {
       return true;
     })
     .sort((a, b) => {
+      if (globalSearch || jobId || minLevel || maxLevel) {
+        const nameA = a.resultName?.fr || '';
+        const nameB = b.resultName?.fr || '';
+        return nameA.localeCompare(nameB);
+      }
+
       const marginA = getMargin(a);
       const marginB = getMargin(b);
-      return marginB - marginA;
+      const costA = a.ingredientIds.reduce((sum, ingId, index) => sum + (prices.get(ingId)?.price || 0) * (a.quantities[index] || 0), 0);
+      const costB = b.ingredientIds.reduce((sum, ingId, index) => sum + (prices.get(ingId)?.price || 0) * (b.quantities[index] || 0), 0);
+      const marginPercentA = costA > 0 ? (marginA / costA) * 100 : 0;
+      const marginPercentB = costB > 0 ? (marginB / costB) * 100 : 0;
+      
+      return marginPercentB - marginPercentA;
     });
 
   const handleSell = (item: {
@@ -287,7 +297,7 @@ const RecipesContent = () => {
       {/* Sort indicator */}
       <div className="flex items-center gap-2 text-xs text-dark-500">
         <ArrowDownAZ size={14} />
-        Trié par rentabilité décroissante
+        {globalSearch || jobId || minLevel || maxLevel ? 'Trié par ordre alphabétique' : 'Trié par rentabilité décroissante'}
       </div>
 
       {/* Recipes list */}

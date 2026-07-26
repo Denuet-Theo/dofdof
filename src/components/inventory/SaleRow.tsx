@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import Modal from '@/components/ui/Modal';
+import Input from '@/components/ui/Input';
 import { Check, Trash2, Edit2 } from 'lucide-react';
 
 interface SaleRowProps {
@@ -16,28 +18,97 @@ interface SaleRowProps {
 
 const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
   const [loading, setLoading] = useState(false);
+  const [isSellModalOpen, setIsSellModalOpen] = useState(false);
+  const [sellCount, setSellCount] = useState('');
+  const [error, setError] = useState('');
 
-  const handleMarkSold = async () => {
+  const handleMarkSoldClick = () => {
+    if (sale.lot_count > 1) {
+      setSellCount(sale.lot_count.toString());
+      setIsSellModalOpen(true);
+    } else {
+      executeSale(1);
+    }
+  };
+
+  const executeSale = async (countToSell: number) => {
     setLoading(true);
+    setError('');
     const supabase = createClient();
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (supabase
-        .from('user_sales') as any)
-        .update({
-          status: 'sold',
-          sold_at: new Date().toISOString(),
-        })
-        .eq('id', sale.id);
+      if (countToSell === sale.lot_count) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error } = await (supabase
+          .from('user_sales') as any)
+          .update({
+            status: 'sold',
+            sold_at: new Date().toISOString(),
+          })
+          .eq('id', sale.id);
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        const remaining = sale.lot_count - countToSell;
+        const total = sale.lot_count;
+        
+        const remainingCraftCost = Math.floor((sale.craft_cost || 0) * (remaining / total));
+        const remainingTaxPaid = Math.floor((sale.tax_paid || 0) * (remaining / total));
+        const remainingQuantity = sale.lot_size * remaining;
+        
+        const soldCraftCost = (sale.craft_cost || 0) - remainingCraftCost;
+        const soldTaxPaid = (sale.tax_paid || 0) - remainingTaxPaid;
+        const soldQuantity = sale.lot_size * countToSell;
+
+        // 1. Update existing to remaining
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { error: updateError } = await (supabase.from('user_sales') as any).update({
+          lot_count: remaining,
+          quantity: remainingQuantity,
+          craft_cost: remainingCraftCost,
+          tax_paid: remainingTaxPaid,
+        }).eq('id', sale.id);
+
+        if (updateError) throw updateError;
+
+        // 2. Insert new for sold
+        const { error: insertError } = await supabase.from('user_sales').insert({
+          user_id: sale.user_id,
+          item_id: sale.item_id,
+          item_name: sale.item_name,
+          icon_url: sale.icon_url,
+          quantity: soldQuantity,
+          unit_price: sale.unit_price,
+          craft_cost: soldCraftCost,
+          tax_paid: soldTaxPaid,
+          lot_size: sale.lot_size,
+          lot_count: countToSell,
+          status: 'sold',
+          created_at: sale.created_at,
+          sold_at: new Date().toISOString(),
+        });
+
+        if (insertError) throw insertError;
+      }
+
+      setIsSellModalOpen(false);
       onUpdate();
     } catch (err) {
       console.error('Error marking sold:', err);
+      setError(err instanceof Error ? err.message : 'Erreur lors de la vente');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePartialSaleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const count = parseInt(sellCount, 10);
+    if (isNaN(count) || count < 1 || count > sale.lot_count) {
+      setError(`Quantité invalide (1 à ${sale.lot_count})`);
+      return;
+    }
+    executeSale(count);
   };
 
   const handleDelete = async () => {
@@ -164,7 +235,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
         {sale.status === 'active' && (
           <Button
             size="sm"
-            onClick={handleMarkSold}
+            onClick={handleMarkSoldClick}
             loading={loading}
             variant="primary"
             className="px-2"
@@ -184,6 +255,45 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
           <Trash2 size={14} />
         </Button>
       </div>
+
+      <Modal
+        isOpen={isSellModalOpen}
+        onClose={() => setIsSellModalOpen(false)}
+        title="Lots vendus"
+      >
+        <form onSubmit={handlePartialSaleSubmit} className="space-y-4">
+          <p className="text-sm text-dark-200">
+            Combien de lots de {sale.lot_size} avez-vous vendus ? (Max: {sale.lot_count})
+          </p>
+          <Input
+            type="number"
+            value={sellCount}
+            onChange={(e) => setSellCount(e.target.value)}
+            min="1"
+            max={sale.lot_count.toString()}
+            required
+            autoFocus
+          />
+          {error && (
+            <div className="p-3 rounded-xl bg-loss/10 border border-loss/20 text-loss text-sm">
+              {error}
+            </div>
+          )}
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsSellModalOpen(false)}
+              className="flex-1"
+            >
+              Annuler
+            </Button>
+            <Button type="submit" loading={loading} className="flex-1">
+              Valider
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

@@ -84,6 +84,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
           lot_size: sale.lot_size,
           lot_count: countToSell,
           status: 'sold',
+          is_resale: sale.is_resale,
           created_at: sale.created_at,
           sold_at: new Date().toISOString(),
         });
@@ -197,6 +198,11 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
           >
             {sale.status === 'sold' ? 'Vendu' : 'En vente'}
           </Badge>
+          {sale.is_resale && (
+            <Badge variant="info" className="bg-purple-500/20 text-purple-400 border-purple-500/30">
+              Achat HDV
+            </Badge>
+          )}
           <span className="text-[10px] font-medium text-kamas">
             {sale.lot_count}x lot de {sale.lot_size}
           </span>
@@ -212,7 +218,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
       {/* Margins */}
       <div className="hidden sm:block text-right flex-shrink-0">
         <KamasDisplay amount={sale.craft_cost || 0} size="sm" className="text-dark-300" />
-        <p className="text-[10px] text-dark-500">Coût craft</p>
+        <p className="text-[10px] text-dark-500">{sale.is_resale ? "Coût d'achat" : 'Coût craft'}</p>
       </div>
       <div className="hidden sm:block text-right flex-shrink-0">
         <KamasDisplay amount={sale.tax_paid || 0} size="sm" className="text-loss" />

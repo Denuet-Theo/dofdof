@@ -27,6 +27,7 @@ create table public.user_sales (
   lot_size integer default 1 check (lot_size in (1, 10, 100)),
   lot_count integer default 1,
   status text check (status in ('active', 'sold')) default 'active',
+  is_resale boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()),
   sold_at timestamp with time zone
 );

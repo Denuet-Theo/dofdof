@@ -20,6 +20,7 @@ export interface UserSale {
   lot_size: 1 | 10 | 100 | 1000;
   lot_count: number;
   status: 'active' | 'sold';
+  is_resale: boolean;
   created_at: string;
   sold_at: string | null;
 }
@@ -127,6 +128,7 @@ export interface Database {
           lot_size?: 1 | 10 | 100 | 1000;
           lot_count?: number;
           status?: 'active' | 'sold';
+          is_resale?: boolean;
           created_at?: string;
           sold_at?: string | null;
         };
@@ -143,6 +145,7 @@ export interface Database {
           lot_size?: 1 | 10 | 100 | 1000;
           lot_count?: number;
           status?: 'active' | 'sold';
+          is_resale?: boolean;
           sold_at?: string | null;
           created_at?: string;
         };

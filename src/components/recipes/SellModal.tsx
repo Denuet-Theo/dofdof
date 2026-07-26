@@ -25,6 +25,8 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
   const [lotSize, setLotSize] = useState<1 | 10 | 100 | 1000>(1);
   const [lotCount, setLotCount] = useState('1');
   const [lotPrice, setLotPrice] = useState('');
+  const [isResale, setIsResale] = useState(false);
+  const [purchasePrice, setPurchasePrice] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,6 +44,8 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
       setLotSize(1);
       setLotCount('1');
       setLotPrice('');
+      setIsResale(false);
+      setPurchasePrice('');
       setError('');
     }
   }, [isOpen]);
@@ -67,7 +71,11 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
 
     // Snapshot variables
     const totalItems = lotSize * count;
-    const totalCraftCost = item.craftCost * totalItems;
+    const unitPurchase = parseInt(purchasePrice, 10);
+    const totalCraftCost = isResale 
+      ? (isNaN(unitPurchase) ? 0 : unitPurchase * totalItems)
+      : (item.craftCost * totalItems);
+
     // La taxe HDV est de 2% du prix de mise en vente (prix du lot * nombre de lots)
     const totalSaleValue = price * count;
     const initialTax = Math.floor(totalSaleValue * 0.02);
@@ -88,6 +96,7 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
         lot_size: lotSize,
         lot_count: count,
         status: 'active' as const,
+        is_resale: isResale,
       });
 
       if (insertError) throw insertError;
@@ -106,8 +115,12 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
   const parsedLotPrice = parseInt(lotPrice, 10) || 0;
   const parsedCount = parseInt(lotCount, 10) || 0;
   
+  const parsedPurchasePrice = parseInt(purchasePrice, 10) || 0;
+  
   const totalItems = lotSize * parsedCount;
-  const totalCraftCost = item ? item.craftCost * totalItems : 0;
+  const totalCraftCost = item 
+    ? (isResale ? parsedPurchasePrice * totalItems : item.craftCost * totalItems)
+    : 0;
   const totalSaleValue = parsedLotPrice * parsedCount;
   const taxAmount = Math.floor(totalSaleValue * 0.02);
   const netMargin = totalSaleValue - totalCraftCost - taxAmount;
@@ -123,11 +136,30 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
               alt={item.name}
               className="w-12 h-12 rounded-lg bg-dark-700/50 object-contain"
             />
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-dark-100">{item.name}</p>
               <p className="text-sm text-dark-500 flex gap-1">
                 Coût craft unitaire: <KamasDisplay amount={item.craftCost} size="sm" />
               </p>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-dark-300 font-medium cursor-pointer">
+                Achat HDV
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsResale(!isResale)}
+                className={`w-11 h-6 rounded-full transition-colors relative ${
+                  isResale ? 'bg-kamas' : 'bg-dark-600'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
+                    isResale ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
           </div>
 
@@ -172,14 +204,27 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
             />
           </div>
 
+          {isResale && (
+            <div className="pt-2">
+              <Input
+                label="Prix d'achat unitaire (Kamas)"
+                type="number"
+                value={purchasePrice}
+                onChange={(e) => setPurchasePrice(e.target.value)}
+                min="0"
+                required={isResale}
+              />
+            </div>
+          )}
+
           {/* Recapitulation */}
           <div className="bg-dark-800/30 p-4 rounded-xl space-y-2 border border-dark-700/30">
             <div className="flex justify-between text-sm">
-              <span className="text-dark-400">Total à crafter</span>
+              <span className="text-dark-400">{isResale ? 'Total acheté' : 'Total à crafter'}</span>
               <span className="font-medium text-dark-100">{totalItems} unités</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-dark-400">Coût de craft total</span>
+              <span className="text-dark-400">{isResale ? "Coût d'achat total" : 'Coût de craft total'}</span>
               <KamasDisplay amount={totalCraftCost} size="sm" />
             </div>
             <div className="flex justify-between text-sm text-loss">

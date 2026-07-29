@@ -24,7 +24,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
 
   const handleMarkSoldClick = () => {
     if (sale.lot_count > 1) {
-      setSellCount(sale.lot_count.toString());
+      setSellCount('1');
       setIsSellModalOpen(true);
     } else {
       executeSale(1);

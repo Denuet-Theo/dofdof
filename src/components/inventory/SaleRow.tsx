@@ -38,60 +38,12 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
     const supabase = createClient();
 
     try {
-      if (countToSell === sale.lot_count) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase
-          .from('user_sales') as any)
-          .update({
-            status: 'sold',
-            sold_at: new Date().toISOString(),
-          })
-          .eq('id', sale.id);
+      const { error } = await supabase.rpc('sell_lots', {
+        p_sale_id: sale.id,
+        p_count: countToSell,
+      });
 
-        if (error) throw error;
-      } else {
-        const remaining = sale.lot_count - countToSell;
-        const total = sale.lot_count;
-        
-        const remainingCraftCost = Math.floor((sale.craft_cost || 0) * (remaining / total));
-        const remainingTaxPaid = Math.floor((sale.tax_paid || 0) * (remaining / total));
-        const remainingQuantity = sale.lot_size * remaining;
-        
-        const soldCraftCost = (sale.craft_cost || 0) - remainingCraftCost;
-        const soldTaxPaid = (sale.tax_paid || 0) - remainingTaxPaid;
-        const soldQuantity = sale.lot_size * countToSell;
-
-        // 1. Update existing to remaining
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: updateError } = await (supabase.from('user_sales') as any).update({
-          lot_count: remaining,
-          quantity: remainingQuantity,
-          craft_cost: remainingCraftCost,
-          tax_paid: remainingTaxPaid,
-        }).eq('id', sale.id);
-
-        if (updateError) throw updateError;
-
-        // 2. Insert new for sold
-        const { error: insertError } = await supabase.from('user_sales').insert({
-          user_id: sale.user_id,
-          item_id: sale.item_id,
-          item_name: sale.item_name,
-          icon_url: sale.icon_url,
-          quantity: soldQuantity,
-          unit_price: sale.unit_price,
-          craft_cost: soldCraftCost,
-          tax_paid: soldTaxPaid,
-          lot_size: sale.lot_size,
-          lot_count: countToSell,
-          status: 'sold',
-          is_resale: sale.is_resale,
-          created_at: sale.created_at,
-          sold_at: new Date().toISOString(),
-        });
-
-        if (insertError) throw insertError;
-      }
+      if (error) throw error;
 
       setIsSellModalOpen(false);
       onUpdate();

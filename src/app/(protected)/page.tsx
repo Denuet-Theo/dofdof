@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale, ItemPrice, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
+import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import TopRecipes from '@/components/dashboard/TopRecipes';
@@ -85,23 +86,11 @@ const DashboardPage = () => {
       const priceMap = new Map<number, ItemPrice>();
       prices.forEach(p => priceMap.set(p.item_id, p));
       
-      function hasAllPrices(recipe: DofusDBRecipe): boolean {
+      const computed: TopRecipe[] = recipesList.filter(recipe => recipeHasAllPrices(recipe, priceMap)).map(recipe => {
         const resultPrice = priceMap.get(recipe.resultId)?.price || 0;
-        if (resultPrice <= 0) return false;
-        return recipe.ingredientIds.every(id => (priceMap.get(id)?.price || 0) > 0);
-      }
-      
-      const computed: TopRecipe[] = recipesList.filter(hasAllPrices).map(recipe => {
-        const resultPrice = priceMap.get(recipe.resultId)?.price || 0;
-        const craftCost = recipe.ingredientIds.reduce((sum, ingId, index) => {
-          const qty = recipe.quantities[index] || 0;
-          return sum + (priceMap.get(ingId)?.price || 0) * qty;
-        }, 0);
-        
-        const hdvTax = Math.floor(resultPrice * 0.02);
-        const margin = resultPrice - craftCost - hdvTax;
-        const marginPercent = craftCost > 0 ? Math.round((margin / craftCost) * 100) : 0;
-        
+        const craftCost = computeCraftCost(recipe, priceMap);
+        const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
+
         return {
           id: recipe.resultId,
           name: recipe.resultName?.fr || `Item #${recipe.resultId}`,

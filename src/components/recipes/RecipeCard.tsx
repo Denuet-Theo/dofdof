@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button';
 import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import { ShoppingCart, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
+import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
 interface RecipeCardProps {
   recipe: DofusDBRecipe;
@@ -35,21 +36,10 @@ const RecipeCard = ({
   expanded = false,
   onToggle,
 }: RecipeCardProps) => {
-  // Calculate craft cost
-  const craftCost = recipe.ingredientIds.reduce((sum, ingId, index) => {
-    const qty = recipe.quantities[index] || 0;
-    const unitPrice = ingredientPrices.get(ingId)?.price || 0;
-    return sum + unitPrice * qty;
-  }, 0);
-
-  const hdvTax = Math.floor(resultPrice * 0.02);
-  const margin = resultPrice - craftCost - hdvTax;
-  const marginPercent =
-    craftCost > 0 ? Math.round((margin / craftCost) * 100) : 0;
+  const craftCost = computeCraftCost(recipe, ingredientPrices);
+  const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
   const isProfitable = margin > 0;
-  const hasAllPrices =
-    resultPrice > 0 &&
-    recipe.ingredientIds.every((id) => ingredientPrices.has(id));
+  const hasAllPrices = recipeHasAllPrices(recipe, ingredientPrices);
 
   return (
     <div

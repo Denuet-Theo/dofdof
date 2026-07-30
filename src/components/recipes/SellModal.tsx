@@ -7,6 +7,7 @@ import Modal from '@/components/ui/Modal';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import { createClient } from '@/lib/supabase/client';
 import { ShoppingCart } from 'lucide-react';
+import { HDV_TAX_RATE } from '@/lib/utils/recipes';
 
 interface SellModalProps {
   isOpen: boolean;
@@ -78,7 +79,7 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
 
     // La taxe HDV est de 2% du prix de mise en vente (prix du lot * nombre de lots)
     const totalSaleValue = price * count;
-    const initialTax = Math.floor(totalSaleValue * 0.02);
+    const initialTax = Math.floor(totalSaleValue * HDV_TAX_RATE);
     // Le unit_price enregistré dans Supabase sera le prix de 1 unité pour garder la rétrocompatibilité (bien que lot_size gère l'affichage maintenant)
     const unitPrice = Math.floor(price / lotSize);
 
@@ -122,7 +123,7 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
     ? (isResale ? parsedPurchasePrice * totalItems : item.craftCost * totalItems)
     : 0;
   const totalSaleValue = parsedLotPrice * parsedCount;
-  const taxAmount = Math.floor(totalSaleValue * 0.02);
+  const taxAmount = Math.floor(totalSaleValue * HDV_TAX_RATE);
   const netMargin = totalSaleValue - totalCraftCost - taxAmount;
 
   return (

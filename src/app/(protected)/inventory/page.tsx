@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale } from '@/lib/supabase/types';
+import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import SaleRow from '@/components/inventory/SaleRow';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
@@ -54,23 +55,17 @@ const InventoryPage = () => {
 
   // Global calculations for active sales
   const totalActiveSalesValue = activeSales.reduce(
-    (sum, s) => sum + (s.unit_price * s.lot_size * s.lot_count),
+    (sum, s) => sum + getSaleValue(s),
     0
   );
-  
+
   const totalActiveProfit = activeSales.reduce(
-    (sum, s) => {
-      const val = (s.unit_price * s.lot_size * s.lot_count);
-      return sum + (val - (s.craft_cost || 0) - (s.tax_paid || 0));
-    },
+    (sum, s) => sum + getSaleProfit(s),
     0
   );
 
   const totalSoldProfit = soldSales.reduce(
-    (sum, s) => {
-      const val = (s.unit_price * s.lot_size * s.lot_count);
-      return sum + (val - (s.craft_cost || 0) - (s.tax_paid || 0));
-    },
+    (sum, s) => sum + getSaleProfit(s),
     0
   );
 

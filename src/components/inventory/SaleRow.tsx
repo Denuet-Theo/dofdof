@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { UserSale } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
+import { getSaleProfit } from '@/lib/utils/sales';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -137,10 +138,9 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
   // Prix d'un lot = unit_price * lot_size (ex: 100 * 10 = 1000)
   // Total vente = prix d'un lot * lot_count (ex: 1000 * 5 = 5000)
   const lotPrice = sale.unit_price * sale.lot_size;
-  const totalSaleValue = lotPrice * sale.lot_count;
-  
+
   // Profit = Valeur totale - coût de craft - taxes payées
-  const netProfit = totalSaleValue - (sale.craft_cost || 0) - (sale.tax_paid || 0);
+  const netProfit = getSaleProfit(sale);
 
   const dateStr = new Date(sale.created_at).toLocaleDateString('fr-FR', {
     day: '2-digit',

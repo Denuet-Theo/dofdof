@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale, ItemPrice, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
-import { getSaleProfit } from '@/lib/utils/sales';
+import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import TopRecipes from '@/components/dashboard/TopRecipes';
@@ -130,15 +130,12 @@ const DashboardPage = () => {
   const soldSales = sales.filter((s) => s.status === 'sold');
   const activeSales = sales.filter((s) => s.status === 'active');
 
-  const totalRevenue = soldSales.reduce(
-    (sum, s) => sum + s.unit_price * s.quantity,
-    0
-  );
+  const totalRevenue = soldSales.reduce((sum, s) => sum + getSaleValue(s), 0);
 
   const totalProfit = soldSales.reduce((sum, s) => sum + getSaleProfit(s), 0);
 
   const totalActiveValue = activeSales.reduce(
-    (sum, s) => sum + s.unit_price * s.quantity,
+    (sum, s) => sum + getSaleValue(s),
     0
   );
 
@@ -157,10 +154,7 @@ const DashboardPage = () => {
       return saleDate.toDateString() === date.toDateString();
     });
 
-    const revenue = daySales.reduce(
-      (sum, s) => sum + s.unit_price * s.quantity,
-      0
-    );
+    const revenue = daySales.reduce((sum, s) => sum + getSaleValue(s), 0);
 
     const profit = daySales.reduce((sum, s) => sum + getSaleProfit(s), 0);
 

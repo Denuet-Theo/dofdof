@@ -14,6 +14,7 @@ import { parseGaugeInfo, computeValuePerKama, GaugeInfo } from '@/lib/utils/gaug
 const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abreuvoir', 'Mangeoire'];
 // typeId 33 = "Pain": restores PV (e.g. Briochette) or Énergie (e.g. Borodinski) depending on the item
 const PV_TYPE_ID = '33';
+const FOOD_CHIPS = ['PV', 'Énergie'];
 
 type SortBy = 'ratio' | 'alpha' | 'level';
 
@@ -22,9 +23,10 @@ const GaugesPage = () => {
   const [prices, setPrices] = useState<Map<number, ItemPrice>>(new Map());
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  // Restricts results to one gauge name (e.g. only 'PV', not 'Énergie') when browsing a
-  // category that mixes several gauges — free-text search leaves this unset.
-  const [activeGaugeFilter, setActiveGaugeFilter] = useState<string | null>(null);
+  // Free-text term from the search box and the quick-select chip combine into one query,
+  // instead of the chip overriding whatever the user already typed.
+  const [textQuery, setTextQuery] = useState('');
+  const [selectedChip, setSelectedChip] = useState<string | null>(null);
   const [minLevel, setMinLevel] = useState('');
   const [maxLevel, setMaxLevel] = useState('');
   const [sortBy, setSortBy] = useState<SortBy>('ratio');
@@ -43,10 +45,15 @@ const GaugesPage = () => {
     loadPrices();
   }, []);
 
-  const runFetch = useCallback(async (params: URLSearchParams, gaugeFilter: string | null) => {
+  const runFetch = useCallback(async (params: URLSearchParams | null) => {
+    if (!params) {
+      setItems([]);
+      setSearched(false);
+      return;
+    }
+
     setLoading(true);
     setSearched(true);
-    setActiveGaugeFilter(gaugeFilter);
     try {
       const res = await fetch(`/api/dofusdb/items?${params}`);
       const data: DofusDBResponse<DofusDBItem> = await res.json();
@@ -59,17 +66,27 @@ const GaugesPage = () => {
     }
   }, []);
 
-  const handleSearch = useCallback(
-    (query: string, gaugeFilter: string | null = null) =>
-      runFetch(new URLSearchParams({ q: query, limit: '50' }), gaugeFilter),
-    [runFetch]
-  );
+  useEffect(() => {
+    const hasText = textQuery.length >= 2;
+    if (!hasText && !selectedChip) {
+      runFetch(null);
+      return;
+    }
 
-  const handleBrowseTypeId = useCallback(
-    (typeId: string, gaugeFilter: string | null) =>
-      runFetch(new URLSearchParams({ typeId, limit: '50' }), gaugeFilter),
-    [runFetch]
-  );
+    const params = new URLSearchParams({ limit: '50' });
+    if (FOOD_CHIPS.includes(selectedChip || '')) {
+      params.set('typeId', PV_TYPE_ID);
+      if (hasText) params.set('q', textQuery);
+    } else {
+      const words = [textQuery, selectedChip].filter((w): w is string => !!w).join(' ');
+      params.set('q', words);
+    }
+    runFetch(params);
+  }, [textQuery, selectedChip, runFetch]);
+
+  const handleChipClick = (chip: string) => {
+    setSelectedChip((current) => (current === chip ? null : chip));
+  };
 
   const handlePriceSaved = (itemId: number, price: number, updated_at: string) => {
     setPrices((prev) => {
@@ -90,7 +107,7 @@ const GaugesPage = () => {
   const filteredRows = items
     .map((item) => ({ item, gaugeInfo: parseGaugeInfo(item) }))
     .filter((row): row is { item: DofusDBItem; gaugeInfo: GaugeInfo } => row.gaugeInfo !== null)
-    .filter((row) => !activeGaugeFilter || row.gaugeInfo.gaugeName === activeGaugeFilter)
+    .filter((row) => !selectedChip || row.gaugeInfo.gaugeName === selectedChip)
     .filter((row) => !minLevel || row.item.level >= Number(minLevel))
     .filter((row) => !maxLevel || row.item.level <= Number(maxLevel))
     .map((row) => {
@@ -116,6 +133,13 @@ const GaugesPage = () => {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
+  const chipClass = (active: boolean) =>
+    `px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+      active
+        ? 'bg-kamas/15 text-kamas border-kamas/40'
+        : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40 hover:text-kamas'
+    }`;
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
@@ -132,21 +156,20 @@ const GaugesPage = () => {
       </div>
 
       <SearchBar
-        onSearch={handleSearch}
+        onSearch={setTextQuery}
         loading={loading}
         placeholder="Rechercher un carburant ou un aliment (ex: Baffeur, Briochette...)"
       />
 
-      {/* Quick presets */}
+      {/* Quick presets — combine with the search box above instead of replacing it */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-dark-500">Jauges d&apos;enclos :</span>
         {ELEVAGE_GAUGES.map((gauge) => (
           <button
             key={gauge}
             type="button"
-            onClick={() => handleSearch(gauge, gauge)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-dark-800/80 border border-dark-600/50
-              text-dark-300 transition-all hover:border-kamas/40 hover:text-kamas cursor-pointer"
+            onClick={() => handleChipClick(gauge)}
+            className={chipClass(selectedChip === gauge)}
           >
             {gauge}
           </button>
@@ -154,17 +177,15 @@ const GaugesPage = () => {
         <span className="text-xs text-dark-500 ml-2">Aliments :</span>
         <button
           type="button"
-          onClick={() => handleBrowseTypeId(PV_TYPE_ID, 'PV')}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-dark-800/80 border border-dark-600/50
-            text-dark-300 transition-all hover:border-kamas/40 hover:text-kamas cursor-pointer"
+          onClick={() => handleChipClick('PV')}
+          className={chipClass(selectedChip === 'PV')}
         >
           PV (Briochette...)
         </button>
         <button
           type="button"
-          onClick={() => handleBrowseTypeId(PV_TYPE_ID, 'Énergie')}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-dark-800/80 border border-dark-600/50
-            text-dark-300 transition-all hover:border-kamas/40 hover:text-kamas cursor-pointer"
+          onClick={() => handleChipClick('Énergie')}
+          className={chipClass(selectedChip === 'Énergie')}
         >
           Énergie (Borodinski...)
         </button>

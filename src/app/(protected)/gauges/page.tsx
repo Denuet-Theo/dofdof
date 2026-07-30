@@ -2,13 +2,14 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { DofusDBItem, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import { DofusDBItem, DofusDBRecipe, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import GaugeItemCard from '@/components/gauges/GaugeItemCard';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
 import { Gauge as GaugeIcon, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { parseGaugeInfo, computeValuePerKama, GaugeInfo } from '@/lib/utils/gauges';
+import { computeCraftCost } from '@/lib/utils/recipes';
 
 // The 6 gauges fed by "Carburant d'enclos" items in the élevage profession
 const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abreuvoir', 'Mangeoire'];
@@ -31,6 +32,10 @@ const GaugesPage = () => {
   const [maxLevel, setMaxLevel] = useState('');
   const [sortBy, setSortBy] = useState<SortBy>('ratio');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Off by default: rentability uses the sell price only. When on, craftable items use
+  // whichever is cheaper between buying at the sell price and crafting from ingredients.
+  const [includeCraft, setIncludeCraft] = useState(false);
+  const [recipesByResultId, setRecipesByResultId] = useState<Map<number, DofusDBRecipe>>(new Map());
 
   useEffect(() => {
     const loadPrices = async () => {
@@ -84,8 +89,56 @@ const GaugesPage = () => {
     runFetch(params);
   }, [textQuery, selectedChip, runFetch]);
 
+  useEffect(() => {
+    if (!includeCraft) return;
+
+    const craftableIds = items.filter((i) => i.hasRecipe).map((i) => i.id);
+
+    const fetchRecipes = async () => {
+      if (craftableIds.length === 0) {
+        setRecipesByResultId(new Map());
+        return;
+      }
+      try {
+        const params = new URLSearchParams({
+          resultIds: craftableIds.join(','),
+          limit: String(craftableIds.length),
+        });
+        const res = await fetch(`/api/dofusdb/recipes?${params}`);
+        const data: DofusDBResponse<DofusDBRecipe> = await res.json();
+        const map = new Map<number, DofusDBRecipe>();
+        (data.data || []).forEach((recipe) => map.set(recipe.resultId, recipe));
+        setRecipesByResultId(map);
+      } catch (err) {
+        console.error('Recipe fetch error:', err);
+        setRecipesByResultId(new Map());
+      }
+    };
+    fetchRecipes();
+  }, [includeCraft, items]);
+
   const handleChipClick = (chip: string) => {
     setSelectedChip((current) => (current === chip ? null : chip));
+  };
+
+  // Picks the cheaper of "buy at the sell price" vs "craft from ingredients" when both are
+  // known; falls back to whichever one is actually known when the other isn't.
+  const computeEffectivePrice = (sellPrice: number, itemId: number) => {
+    if (!includeCraft) return { price: sellPrice, usedCraft: false };
+
+    const recipe = recipesByResultId.get(itemId);
+    if (!recipe) return { price: sellPrice, usedCraft: false };
+
+    const allIngredientsPriced = recipe.ingredientIds.every(
+      (id) => (prices.get(id)?.price || 0) > 0
+    );
+    if (!allIngredientsPriced) return { price: sellPrice, usedCraft: false };
+
+    const craftCost = computeCraftCost(recipe, prices);
+    if (craftCost > 0 && (sellPrice <= 0 || craftCost < sellPrice)) {
+      return { price: craftCost, usedCraft: true };
+    }
+    return { price: sellPrice, usedCraft: false };
   };
 
   const handlePriceSaved = (itemId: number, price: number, updated_at: string) => {
@@ -111,8 +164,15 @@ const GaugesPage = () => {
     .filter((row) => !minLevel || row.item.level >= Number(minLevel))
     .filter((row) => !maxLevel || row.item.level <= Number(maxLevel))
     .map((row) => {
-      const price = prices.get(row.item.id)?.price || 0;
-      return { ...row, price, ratio: computeValuePerKama(row.gaugeInfo.rechargeAmount, price) };
+      const sellPrice = prices.get(row.item.id)?.price || 0;
+      const { price, usedCraft } = computeEffectivePrice(sellPrice, row.item.id);
+      return {
+        ...row,
+        sellPrice,
+        price,
+        usedCraft,
+        ratio: computeValuePerKama(row.gaugeInfo.rechargeAmount, price),
+      };
     });
 
   const bestId = filteredRows.reduce<number | undefined>((bestItemId, row) => {
@@ -236,6 +296,16 @@ const GaugesPage = () => {
             Réinitialiser
           </Button>
         </div>
+
+        <label className="flex items-center gap-2 mt-4 text-xs text-dark-400 cursor-pointer w-fit">
+          <input
+            type="checkbox"
+            checked={includeCraft}
+            onChange={(e) => setIncludeCraft(e.target.checked)}
+            className="accent-kamas cursor-pointer"
+          />
+          Inclure le prix de craft (utilise le moins cher entre l&apos;achat et la fabrication)
+        </label>
       </div>
 
       {/* Sort controls */}
@@ -273,7 +343,7 @@ const GaugesPage = () => {
         </div>
       ) : sortedRows.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-children">
-          {sortedRows.map(({ item, gaugeInfo, ratio }) => (
+          {sortedRows.map(({ item, gaugeInfo, ratio, price, usedCraft }) => (
             <GaugeItemCard
               key={item.id}
               item={item}
@@ -281,6 +351,8 @@ const GaugesPage = () => {
               currentPrice={prices.get(item.id)?.price}
               updatedAt={prices.get(item.id)?.updated_at}
               ratio={ratio}
+              effectivePrice={price}
+              usedCraft={usedCraft}
               isBest={item.id === bestId}
               onPriceSaved={handlePriceSaved}
             />

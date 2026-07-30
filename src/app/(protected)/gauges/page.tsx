@@ -119,8 +119,6 @@ const GaugesPage = () => {
   }, [textQuery, selectedChip, runFetch]);
 
   useEffect(() => {
-    if (!includeCraft) return;
-
     const craftableIds = items.filter((i) => i.hasRecipe).map((i) => i.id);
 
     const fetchRecipes = async () => {
@@ -144,30 +142,29 @@ const GaugesPage = () => {
       }
     };
     fetchRecipes();
-  }, [includeCraft, items]);
+  }, [items]);
 
   const handleChipClick = (chip: string) => {
     setSelectedChip((current) => (current === chip ? null : chip));
   };
 
-  // Picks the cheaper of "buy at the sell price" vs "craft from ingredients" when both are
-  // known; falls back to whichever one is actually known when the other isn't.
-  const computeEffectivePrice = (sellPrice: number, itemId: number) => {
-    if (!includeCraft) return { price: sellPrice, usedCraft: false };
+  // Sell rentability and craft rentability are always both computed (when known) so the card
+  // can show both; `includeCraft` only decides which one feeds the page's sort/best-value pick.
+  const computePricing = (item: DofusDBItem, gaugeInfo: GaugeInfo) => {
+    const sellPrice = prices.get(item.id)?.price || 0;
+    const sellRatio = computeValuePerKama(gaugeInfo.rechargeAmount, sellPrice);
 
-    const recipe = recipesByResultId.get(itemId);
-    if (!recipe) return { price: sellPrice, usedCraft: false };
+    const recipe = recipesByResultId.get(item.id);
+    const allIngredientsPriced =
+      !!recipe && recipe.ingredientIds.every((id) => (prices.get(id)?.price || 0) > 0);
+    const craftCost = recipe && allIngredientsPriced ? computeCraftCost(recipe, prices) : 0;
+    const craftRatio = craftCost > 0 ? computeValuePerKama(gaugeInfo.rechargeAmount, craftCost) : 0;
 
-    const allIngredientsPriced = recipe.ingredientIds.every(
-      (id) => (prices.get(id)?.price || 0) > 0
-    );
-    if (!allIngredientsPriced) return { price: sellPrice, usedCraft: false };
+    const usedCraft = includeCraft && craftCost > 0 && (sellPrice <= 0 || craftCost < sellPrice);
+    const price = usedCraft ? craftCost : sellPrice;
+    const ratio = usedCraft ? craftRatio : sellRatio;
 
-    const craftCost = computeCraftCost(recipe, prices);
-    if (craftCost > 0 && (sellPrice <= 0 || craftCost < sellPrice)) {
-      return { price: craftCost, usedCraft: true };
-    }
-    return { price: sellPrice, usedCraft: false };
+    return { sellPrice, sellRatio, recipe, craftCost, craftRatio, price, usedCraft, ratio };
   };
 
   const handlePriceSaved = (itemId: number, price: number, updated_at: string) => {
@@ -192,17 +189,7 @@ const GaugesPage = () => {
     .filter((row) => !selectedChip || row.gaugeInfo.gaugeName === selectedChip)
     .filter((row) => !minLevel || row.item.level >= Number(minLevel))
     .filter((row) => !maxLevel || row.item.level <= Number(maxLevel))
-    .map((row) => {
-      const sellPrice = prices.get(row.item.id)?.price || 0;
-      const { price, usedCraft } = computeEffectivePrice(sellPrice, row.item.id);
-      return {
-        ...row,
-        sellPrice,
-        price,
-        usedCraft,
-        ratio: computeValuePerKama(row.gaugeInfo.rechargeAmount, price),
-      };
-    });
+    .map((row) => ({ ...row, ...computePricing(row.item, row.gaugeInfo) }));
 
   const bestId = filteredRows.reduce<number | undefined>((bestItemId, row) => {
     if (row.ratio <= 0) return bestItemId;
@@ -333,7 +320,7 @@ const GaugesPage = () => {
             onChange={(e) => setIncludeCraft(e.target.checked)}
             className="accent-kamas cursor-pointer"
           />
-          Inclure le prix de craft (utilise le moins cher entre l&apos;achat et la fabrication)
+          Utiliser le prix de craft pour le classement quand il est moins cher que l&apos;achat
         </label>
       </div>
 
@@ -372,16 +359,20 @@ const GaugesPage = () => {
         </div>
       ) : sortedRows.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-children">
-          {sortedRows.map(({ item, gaugeInfo, ratio, price, usedCraft }) => (
+          {sortedRows.map(({ item, gaugeInfo, price, usedCraft, sellRatio, craftRatio, craftCost, recipe }) => (
             <GaugeItemCard
               key={item.id}
               item={item}
               gaugeInfo={gaugeInfo}
               currentPrice={prices.get(item.id)?.price}
               updatedAt={prices.get(item.id)?.updated_at}
-              ratio={ratio}
               effectivePrice={price}
               usedCraft={usedCraft}
+              sellRatio={sellRatio}
+              craftRatio={craftRatio}
+              craftCost={craftCost}
+              recipe={recipe}
+              ingredientPrices={prices}
               isBest={item.id === bestId}
               onPriceSaved={handlePriceSaved}
             />

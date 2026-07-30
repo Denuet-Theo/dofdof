@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { DofusDBItem } from '@/lib/supabase/types';
+import { DofusDBItem, DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { Save, Check, Trophy, Copy, Hammer } from 'lucide-react';
+import { Save, Check, Trophy, Copy, Hammer, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
 import { GaugeInfo } from '@/lib/utils/gauges';
 
@@ -14,11 +14,15 @@ interface GaugeItemCardProps {
   gaugeInfo: GaugeInfo;
   currentPrice?: number;
   updatedAt?: string;
-  ratio: number;
-  /** The price actually used to compute `ratio` — the sell price, or the craft cost when cheaper. */
+  /** The price actually used for the page's ranking — the sell price, or the craft cost when cheaper. */
   effectivePrice: number;
   /** Whether `effectivePrice` came from crafting instead of the sell price. */
   usedCraft: boolean;
+  sellRatio: number;
+  craftRatio: number;
+  craftCost: number;
+  recipe?: DofusDBRecipe;
+  ingredientPrices: Map<number, ItemPrice>;
   isBest: boolean;
   onPriceSaved?: (itemId: number, price: number, updated_at: string) => void;
 }
@@ -28,9 +32,13 @@ const GaugeItemCard = ({
   gaugeInfo,
   currentPrice,
   updatedAt,
-  ratio,
   effectivePrice,
   usedCraft,
+  sellRatio,
+  craftRatio,
+  craftCost,
+  recipe,
+  ingredientPrices,
   isBest,
   onPriceSaved,
 }: GaugeItemCardProps) => {
@@ -38,6 +46,7 @@ const GaugeItemCard = ({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const handleCopyName = async () => {
     const name = item.name?.fr || `Item #${item.id}`;
@@ -175,23 +184,91 @@ const GaugeItemCard = ({
             </Button>
           </div>
 
-          {ratio > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs">
-              <span className="text-dark-500">Rentabilité :</span>
-              <span className={`font-semibold ${usedCraft ? 'text-purple-400' : 'text-kamas'}`}>
-                {ratio.toFixed(2)}
-              </span>
-              <span className="text-dark-400">pts de jauge / kama</span>
-              {usedCraft && (
-                <span
-                  title={`Calculé avec le prix de craft (${effectivePrice.toLocaleString('fr-FR')} kamas), moins cher que l'achat`}
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full
-                    bg-purple-400/10 text-purple-400 border border-purple-400/20"
-                >
-                  <Hammer size={10} />
-                  Craft
-                </span>
+          {/* Rentability: sell price always shown, craft price shown separately when known */}
+          {(sellRatio > 0 || craftRatio > 0) && (
+            <div className="mt-2 space-y-1 text-xs">
+              {sellRatio > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-dark-500">Rentabilité (achat) :</span>
+                  <span
+                    className={`font-semibold ${usedCraft ? 'text-dark-300' : 'text-kamas'}`}
+                  >
+                    {sellRatio.toFixed(2)}
+                  </span>
+                  <span className="text-dark-400">pts/kama</span>
+                </div>
               )}
+              {craftRatio > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-dark-500">Rentabilité (craft) :</span>
+                  <span
+                    className={`font-semibold ${usedCraft ? 'text-purple-400' : 'text-dark-300'}`}
+                  >
+                    {craftRatio.toFixed(2)}
+                  </span>
+                  <span className="text-dark-400">pts/kama</span>
+                  {usedCraft && (
+                    <span
+                      title={`Utilisé pour le classement (${effectivePrice.toLocaleString('fr-FR')} kamas, moins cher que l'achat)`}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full
+                        bg-purple-400/10 text-purple-400 border border-purple-400/20"
+                    >
+                      <Hammer size={10} />
+                      Craft
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recipe */}
+          {item.hasRecipe && recipe && (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="flex items-center gap-1 mt-2 text-xs text-dark-500 hover:text-kamas transition-colors cursor-pointer"
+            >
+              {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {expanded ? 'Masquer la recette' : 'Voir la recette'}
+            </button>
+          )}
+
+          {expanded && recipe && (
+            <div className="mt-2 pt-2 border-t border-dark-700/30 space-y-1.5 animate-fade-in">
+              {recipe.ingredients?.map((ingredient, index) => {
+                const qty = recipe.quantities[index] || 0;
+                const unitPrice = ingredientPrices.get(ingredient.id)?.price || 0;
+                const totalPrice = unitPrice * qty;
+
+                return (
+                  <div key={ingredient.id} className="flex items-center gap-2 text-xs">
+                    <img
+                      src={ingredient.img}
+                      alt={ingredient.name?.fr || ''}
+                      className="w-6 h-6 rounded-md bg-dark-700/50 object-contain flex-shrink-0"
+                      loading="lazy"
+                    />
+                    <span className="flex-1 min-w-0 truncate text-dark-300">
+                      {ingredient.name?.fr || `Item #${ingredient.id}`}{' '}
+                      <span className="text-dark-500">× {qty}</span>
+                    </span>
+                    {unitPrice > 0 ? (
+                      <span className="text-dark-400 flex-shrink-0">
+                        {totalPrice.toLocaleString('fr-FR')} ⚜️
+                      </span>
+                    ) : (
+                      <span className="text-loss italic flex-shrink-0">Pas de prix</span>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between text-xs pt-1.5 mt-1.5 border-t border-dark-700/20">
+                <span className="text-dark-500">Coût total craft</span>
+                <span className="font-semibold text-dark-200">
+                  {craftCost > 0 ? `${craftCost.toLocaleString('fr-FR')} ⚜️` : '—'}
+                </span>
+              </div>
             </div>
           )}
         </div>

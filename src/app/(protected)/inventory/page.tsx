@@ -101,8 +101,12 @@ const InventoryPage = () => {
         .eq('id', editingSale.id);
 
       if (saleError) throw saleError;
-      
+
       // 2. Update the global item_prices to benefit everyone
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       const { error: priceError } = await supabase.from('item_prices').upsert(
         {
           item_id: editingSale.item_id,
@@ -110,6 +114,7 @@ const InventoryPage = () => {
           icon_url: editingSale.icon_url,
           price: newUnitPrice,
           updated_at: new Date().toISOString(),
+          updated_by: user?.id,
         },
         { onConflict: 'item_id' }
       );

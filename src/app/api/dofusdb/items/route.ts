@@ -4,28 +4,47 @@ export const GET = async (request: NextRequest) => {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get('q') || '';
   const limit = searchParams.get('limit') || '20';
+  const skip = searchParams.get('skip') || '0';
+  const typeId = searchParams.get('typeId');
+  const hasQuery = query.length >= 2;
 
-  if (!query || query.length < 2) {
+  // A typeId lets callers browse a whole item category (e.g. all "Pain" items)
+  // without a name to search for, so only bail out when neither is usable.
+  if (!hasQuery && !typeId) {
     return NextResponse.json({ total: 0, data: [] });
   }
 
-  // Normalize query: remove accents and lowercase for slug search
-  const normalizedQuery = query
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s'-]/g, '')
-    .trim();
-
   try {
     const url = new URL('https://api.dofusdb.fr/items');
-    url.searchParams.set('slug.fr[$regex]', normalizedQuery);
     url.searchParams.set('$limit', limit);
+    url.searchParams.set('$skip', skip);
+    if (typeId) {
+      url.searchParams.set('typeId', typeId);
+    }
+    if (hasQuery) {
+      // Normalize query: remove accents and lowercase for slug search
+      const normalizedQuery = query
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s'-]/g, '')
+        .trim();
+      url.searchParams.set('slug.fr[$regex]', normalizedQuery);
+    }
     url.searchParams.set('$select[]', 'id');
     // Need multiple $select — use append
-    ['name', 'level', 'img', 'typeId', 'type', 'slug', 'hasRecipe', 'iconId'].forEach(
-      (field) => url.searchParams.append('$select[]', field)
-    );
+    [
+      'name',
+      'level',
+      'img',
+      'typeId',
+      'type',
+      'slug',
+      'hasRecipe',
+      'iconId',
+      'description',
+      'effects',
+    ].forEach((field) => url.searchParams.append('$select[]', field));
 
     const res = await fetch(url.toString(), {
       next: { revalidate: 300 }, // Cache for 5 minutes

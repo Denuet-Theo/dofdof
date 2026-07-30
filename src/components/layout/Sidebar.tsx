@@ -7,6 +7,7 @@ import {
   Search,
   ChefHat,
   Package,
+  Gauge,
   LogOut,
   Sparkles,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/items', label: 'Items & Prix', icon: Search },
   { href: '/recipes', label: 'Recettes', icon: ChefHat },
+  { href: '/gauges', label: 'Jauges', icon: Gauge },
   { href: '/inventory', label: 'Inventaire', icon: Package },
 ];
 

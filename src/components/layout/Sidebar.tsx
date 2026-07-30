@@ -91,10 +91,12 @@ const Sidebar = () => {
         <p className="px-4 pt-2 text-[10px] text-dark-600">
           {process.env.NEXT_PUBLIC_APP_COMMIT || 'dev'}
           {process.env.NEXT_PUBLIC_APP_BUILD_DATE &&
-            ` · ${new Date(process.env.NEXT_PUBLIC_APP_BUILD_DATE).toLocaleDateString('fr-FR', {
+            ` · ${new Date(process.env.NEXT_PUBLIC_APP_BUILD_DATE).toLocaleString('fr-FR', {
               day: '2-digit',
               month: '2-digit',
               year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
             })}`}
         </p>
       </div>

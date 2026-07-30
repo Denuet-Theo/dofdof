@@ -5,7 +5,7 @@ import { DofusDBItem } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { Save, Check, Trophy } from 'lucide-react';
+import { Save, Check, Trophy, Copy } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
 import { GaugeInfo } from '@/lib/utils/gauges';
 
@@ -31,6 +31,18 @@ const GaugeItemCard = ({
   const [price, setPrice] = useState(currentPrice?.toString() || '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyName = async () => {
+    const name = item.name?.fr || `Item #${item.id}`;
+    try {
+      await navigator.clipboard.writeText(name);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('Clipboard copy failed:', err);
+    }
+  };
 
   const handleSavePrice = async () => {
     const numPrice = parseInt(price, 10);
@@ -76,13 +88,28 @@ const GaugeItemCard = ({
       }`}
     >
       <div className="flex items-start gap-4">
-        <div className="w-16 h-16 rounded-xl bg-dark-700/50 flex items-center justify-center flex-shrink-0 overflow-hidden group-hover:scale-105 transition-transform">
-          <img
-            src={item.img}
-            alt={item.name?.fr || ''}
-            className="w-12 h-12 object-contain"
-            loading="lazy"
-          />
+        <div className="relative flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleCopyName}
+            title="Copier le nom dans le presse-papier"
+            className="relative w-16 h-16 rounded-xl bg-dark-700/50 flex items-center justify-center overflow-hidden group-hover:scale-105 transition-transform cursor-pointer"
+          >
+            <img
+              src={item.img}
+              alt={item.name?.fr || ''}
+              className="w-12 h-12 object-contain"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 flex items-center justify-center bg-dark-950/70 opacity-0 hover:opacity-100 transition-opacity">
+              <Copy size={16} className="text-dark-100" />
+            </div>
+          </button>
+          {copied && (
+            <span className="absolute -top-2 -right-2 z-10 whitespace-nowrap px-2 py-0.5 rounded-full bg-gain text-dark-950 text-[10px] font-semibold shadow-lg animate-fade-in">
+              Copié !
+            </span>
+          )}
         </div>
 
         <div className="flex-1 min-w-0">

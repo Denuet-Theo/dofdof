@@ -29,7 +29,11 @@ export const GET = async (request: NextRequest) => {
         .toLowerCase()
         .replace(/[^a-z0-9\s'-]/g, '')
         .trim();
-      url.searchParams.set('slug.fr[$regex]', normalizedQuery);
+      // Each word must appear somewhere in the slug, in any order, so combining a free-text
+      // term with a gauge name (e.g. "potion foudroyeur") narrows instead of overriding.
+      const words = normalizedQuery.split(/\s+/).filter(Boolean);
+      const regex = words.map((word) => `(?=.*${word})`).join('');
+      url.searchParams.set('slug.fr[$regex]', regex);
     }
     url.searchParams.set('$select[]', 'id');
     // Need multiple $select — use append

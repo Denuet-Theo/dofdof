@@ -88,6 +88,15 @@ const Sidebar = () => {
           <LogOut size={18} />
           Déconnexion
         </button>
+        <p className="px-4 pt-2 text-[10px] text-dark-600">
+          {process.env.NEXT_PUBLIC_APP_COMMIT || 'dev'}
+          {process.env.NEXT_PUBLIC_APP_BUILD_DATE &&
+            ` · ${new Date(process.env.NEXT_PUBLIC_APP_BUILD_DATE).toLocaleDateString('fr-FR', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            })}`}
+        </p>
       </div>
     </aside>
   );

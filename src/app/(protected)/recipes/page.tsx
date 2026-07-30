@@ -213,10 +213,11 @@ const RecipesContent = () => {
       </div>
 
       {/* Global Search */}
-      <SearchBar 
-        onSearch={setGlobalSearch} 
-        loading={loading && !!globalSearch} 
-        placeholder="Rechercher une recette par nom (ex: Boudin noir)..." 
+      <SearchBar
+        onSearch={setGlobalSearch}
+        loading={loading && !!globalSearch}
+        placeholder="Rechercher une recette par nom (ex: Boudin noir)..."
+        defaultValue={initialSearch}
       />
 
       {/* Filters */}

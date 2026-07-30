@@ -5,7 +5,7 @@ import { DofusDBItem } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { Save, Check, Trophy, Copy } from 'lucide-react';
+import { Save, Check, Trophy, Copy, Hammer } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
 import { GaugeInfo } from '@/lib/utils/gauges';
 
@@ -15,6 +15,10 @@ interface GaugeItemCardProps {
   currentPrice?: number;
   updatedAt?: string;
   ratio: number;
+  /** The price actually used to compute `ratio` — the sell price, or the craft cost when cheaper. */
+  effectivePrice: number;
+  /** Whether `effectivePrice` came from crafting instead of the sell price. */
+  usedCraft: boolean;
   isBest: boolean;
   onPriceSaved?: (itemId: number, price: number, updated_at: string) => void;
 }
@@ -25,6 +29,8 @@ const GaugeItemCard = ({
   currentPrice,
   updatedAt,
   ratio,
+  effectivePrice,
+  usedCraft,
   isBest,
   onPriceSaved,
 }: GaugeItemCardProps) => {
@@ -170,10 +176,23 @@ const GaugeItemCard = ({
           </div>
 
           {ratio > 0 && (
-            <p className="text-xs text-dark-400 mt-2">
-              <span className="text-kamas font-semibold">{ratio.toFixed(2)}</span> points de
-              jauge par kama
-            </p>
+            <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs">
+              <span className="text-dark-500">Rentabilité :</span>
+              <span className={`font-semibold ${usedCraft ? 'text-purple-400' : 'text-kamas'}`}>
+                {ratio.toFixed(2)}
+              </span>
+              <span className="text-dark-400">pts de jauge / kama</span>
+              {usedCraft && (
+                <span
+                  title={`Calculé avec le prix de craft (${effectivePrice.toLocaleString('fr-FR')} kamas), moins cher que l'achat`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full
+                    bg-purple-400/10 text-purple-400 border border-purple-400/20"
+                >
+                  <Hammer size={10} />
+                  Craft
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

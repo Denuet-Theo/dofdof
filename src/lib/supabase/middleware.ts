@@ -36,6 +36,11 @@ export const updateSession = async (request: NextRequest) => {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Reject unauthenticated API requests instead of letting them through
+  if (!user && request.nextUrl.pathname.startsWith('/api')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   // Redirect unauthenticated users to login (except for login page and API routes)
   if (
     !user &&

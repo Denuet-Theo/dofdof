@@ -1,16 +1,21 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { getSupabaseEnv } from './env';
+import { getSupabaseEnv, isSupabaseConfigured } from './env';
 import type { Database } from './types';
 
 export const createClient = async () => {
   const cookieStore = await cookies();
   const { url, anonKey } = getSupabaseEnv();
 
+  const auth = isSupabaseConfigured()
+    ? undefined
+    : { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false };
+
   return createServerClient<Database>(
     url,
     anonKey,
     {
+      auth,
       cookies: {
         getAll() {
           return cookieStore.getAll();

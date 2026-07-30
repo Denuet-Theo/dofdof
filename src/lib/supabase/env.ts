@@ -7,11 +7,15 @@ const FALLBACK_ANON_KEY = 'placeholder-anon-key';
 
 const warnedVars = new Set<string>();
 
+// `process.env[name]` (dynamic lookup) is NOT statically analyzable by Next.js's
+// build-time inliner, so NEXT_PUBLIC_ vars read that way never make it into the
+// browser bundle. Each call site must pass the value via a literal
+// `process.env.NEXT_PUBLIC_...` expression so it can be inlined.
 function readEnv(
   name: 'NEXT_PUBLIC_SUPABASE_URL' | 'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  value: string | undefined,
   fallback: string
 ): string {
-  const value = process.env[name];
   if (!value) {
     if (!warnedVars.has(name)) {
       warnedVars.add(name);
@@ -29,6 +33,10 @@ export const isSupabaseConfigured = () =>
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
 export const getSupabaseEnv = () => ({
-  url: readEnv('NEXT_PUBLIC_SUPABASE_URL', FALLBACK_URL),
-  anonKey: readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', FALLBACK_ANON_KEY),
+  url: readEnv('NEXT_PUBLIC_SUPABASE_URL', process.env.NEXT_PUBLIC_SUPABASE_URL, FALLBACK_URL),
+  anonKey: readEnv(
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    FALLBACK_ANON_KEY
+  ),
 });

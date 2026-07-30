@@ -32,6 +32,12 @@ const ItemsPage = () => {
   }, []);
 
   const handleSearch = useCallback(async (query: string) => {
+    if (!query) {
+      setItems([]);
+      setSearched(false);
+      return;
+    }
+
     setLoading(true);
     setSearched(true);
 

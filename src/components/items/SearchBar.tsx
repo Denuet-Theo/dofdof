@@ -22,11 +22,11 @@ const SearchBar = ({
       clearTimeout(debounceRef.current);
     }
 
-    if (query.length >= 2) {
-      debounceRef.current = setTimeout(() => {
-        onSearch(query);
-      }, 300);
-    }
+    // Always propagate, including when cleared back below 2 chars — otherwise the parent
+    // keeps searching for whatever was last typed even after the user erases the box.
+    debounceRef.current = setTimeout(() => {
+      onSearch(query);
+    }, 300);
 
     return () => {
       if (debounceRef.current) {

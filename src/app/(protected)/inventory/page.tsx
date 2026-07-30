@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale } from '@/lib/supabase/types';
+import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
+import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
 import SaleRow from '@/components/inventory/SaleRow';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
@@ -54,23 +56,17 @@ const InventoryPage = () => {
 
   // Global calculations for active sales
   const totalActiveSalesValue = activeSales.reduce(
-    (sum, s) => sum + (s.unit_price * s.lot_size * s.lot_count),
+    (sum, s) => sum + getSaleValue(s),
     0
   );
-  
+
   const totalActiveProfit = activeSales.reduce(
-    (sum, s) => {
-      const val = (s.unit_price * s.lot_size * s.lot_count);
-      return sum + (val - (s.craft_cost || 0) - (s.tax_paid || 0));
-    },
+    (sum, s) => sum + getSaleProfit(s),
     0
   );
 
   const totalSoldProfit = soldSales.reduce(
-    (sum, s) => {
-      const val = (s.unit_price * s.lot_size * s.lot_count);
-      return sum + (val - (s.craft_cost || 0) - (s.tax_paid || 0));
-    },
+    (sum, s) => sum + getSaleProfit(s),
     0
   );
 
@@ -91,14 +87,14 @@ const InventoryPage = () => {
     
     // Taxe de modification = 1% de la valeur totale de la vente (nouveau prix * lot_count)
     const newTotalSaleValue = price * editingSale.lot_count;
-    const modTax = Math.floor(newTotalSaleValue * 0.01);
+    const modTax = Math.floor(newTotalSaleValue * PRICE_EDIT_TAX_RATE);
     const newTaxPaid = (editingSale.tax_paid || 0) + modTax;
     const newUnitPrice = Math.floor(price / editingSale.lot_size);
 
     try {
       // 1. Update the sale
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: saleError } = await (supabase.from('user_sales') as any)
+      const { error: saleError } = await supabase
+        .from('user_sales')
         .update({
           unit_price: newUnitPrice,
           tax_paid: newTaxPaid,
@@ -106,8 +102,12 @@ const InventoryPage = () => {
         .eq('id', editingSale.id);
 
       if (saleError) throw saleError;
-      
+
       // 2. Update the global item_prices to benefit everyone
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       const { error: priceError } = await supabase.from('item_prices').upsert(
         {
           item_id: editingSale.item_id,
@@ -115,6 +115,7 @@ const InventoryPage = () => {
           icon_url: editingSale.icon_url,
           price: newUnitPrice,
           updated_at: new Date().toISOString(),
+          updated_by: user?.id,
         },
         { onConflict: 'item_id' }
       );
@@ -290,7 +291,7 @@ const InventoryPage = () => {
             <div className="bg-dark-800/30 p-4 rounded-xl space-y-2 border border-dark-700/30">
               <div className="flex justify-between text-sm text-loss">
                 <span>Taxe de modification (1%)</span>
-                <span>- {Math.floor((parseInt(newLotPrice, 10) || 0) * editingSale.lot_count * 0.01).toLocaleString('fr-FR')} ⚜️</span>
+                <span>- {Math.floor((parseInt(newLotPrice, 10) || 0) * editingSale.lot_count * PRICE_EDIT_TAX_RATE).toLocaleString('fr-FR')} ⚜️</span>
               </div>
               <p className="text-[10px] text-dark-500 mt-2 leading-tight">
                 Cette taxe sera déduite de ton bénéfice net calculé sur cet inventaire. Le nouveau prix sera également mis à jour globalement pour ce serveur.

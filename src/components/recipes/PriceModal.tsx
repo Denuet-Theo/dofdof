@@ -49,6 +49,10 @@ const PriceModal = ({ isOpen, onClose, item, onPriceSaved }: PriceModalProps) =>
     const supabase = createClient();
 
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       const updated_at = new Date().toISOString();
       const { error: upsertError } = await supabase.from('item_prices').upsert(
         {
@@ -57,6 +61,7 @@ const PriceModal = ({ isOpen, onClose, item, onPriceSaved }: PriceModalProps) =>
           icon_url: item.iconUrl,
           price: numPrice,
           updated_at,
+          updated_by: user?.id,
         },
         { onConflict: 'item_id' }
       );

@@ -11,22 +11,8 @@ import SearchBar from '@/components/items/SearchBar';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
 import { ChefHat, Filter, ArrowDownAZ, RefreshCw } from 'lucide-react';
-
-const JOBS = [
-  { id: 2, name: 'Bûcheron' },
-  { id: 11, name: 'Forgeron' },
-  { id: 13, name: 'Sculpteur' },
-  { id: 15, name: 'Cordonnier' },
-  { id: 16, name: 'Bijoutier' },
-  { id: 24, name: 'Mineur' },
-  { id: 26, name: 'Alchimiste' },
-  { id: 27, name: 'Tailleur' },
-  { id: 28, name: 'Paysan' },
-  { id: 36, name: 'Pêcheur' },
-  { id: 41, name: 'Chasseur' },
-  { id: 60, name: 'Façonneur' },
-  { id: 65, name: 'Bricoleur' },
-];
+import { JOBS } from '@/lib/constants/jobs';
+import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
 const RecipesContent = () => {
   const searchParams = useSearchParams();
@@ -128,18 +114,12 @@ const RecipesContent = () => {
 
   function getMargin(recipe: DofusDBRecipe): number {
     const resultPrice = prices.get(recipe.resultId)?.price || 0;
-    const craftCost = recipe.ingredientIds.reduce((sum, ingId, index) => {
-      const qty = recipe.quantities[index] || 0;
-      return sum + (prices.get(ingId)?.price || 0) * qty;
-    }, 0);
-    const hdvTax = Math.floor(resultPrice * 0.02);
-    return resultPrice - craftCost - hdvTax;
+    const craftCost = computeCraftCost(recipe, prices);
+    return computeMargin(resultPrice, craftCost).margin;
   }
-  
+
   function hasAllPrices(recipe: DofusDBRecipe): boolean {
-    const resultPrice = prices.get(recipe.resultId)?.price || 0;
-    if (resultPrice <= 0) return false;
-    return recipe.ingredientIds.every(id => (prices.get(id)?.price || 0) > 0);
+    return recipeHasAllPrices(recipe, prices);
   }
 
   // Sort recipes by profitability
@@ -160,8 +140,8 @@ const RecipesContent = () => {
 
       const marginA = getMargin(a);
       const marginB = getMargin(b);
-      const costA = a.ingredientIds.reduce((sum, ingId, index) => sum + (prices.get(ingId)?.price || 0) * (a.quantities[index] || 0), 0);
-      const costB = b.ingredientIds.reduce((sum, ingId, index) => sum + (prices.get(ingId)?.price || 0) * (b.quantities[index] || 0), 0);
+      const costA = computeCraftCost(a, prices);
+      const costB = computeCraftCost(b, prices);
       const marginPercentA = costA > 0 ? (marginA / costA) * 100 : 0;
       const marginPercentB = costB > 0 ? (marginB / costB) * 100 : 0;
       

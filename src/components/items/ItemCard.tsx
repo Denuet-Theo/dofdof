@@ -30,6 +30,10 @@ const ItemCard = ({ item, currentPrice, updatedAt, onPriceSaved }: ItemCardProps
     const updated_at = new Date().toISOString();
 
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       const { error } = await supabase.from('item_prices').upsert(
         {
           item_id: item.id,
@@ -37,6 +41,7 @@ const ItemCard = ({ item, currentPrice, updatedAt, onPriceSaved }: ItemCardProps
           icon_url: item.img,
           price: numPrice,
           updated_at,
+          updated_by: user?.id,
         },
         { onConflict: 'item_id' }
       );

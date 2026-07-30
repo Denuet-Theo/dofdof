@@ -1,14 +1,17 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { getSupabaseEnv } from './env';
 
 export const updateSession = async (request: NextRequest) => {
   let supabaseResponse = NextResponse.next({
     request,
   });
 
+  const { url, anonKey } = getSupabaseEnv();
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {
@@ -32,6 +35,11 @@ export const updateSession = async (request: NextRequest) => {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Reject unauthenticated API requests instead of letting them through
+  if (!user && request.nextUrl.pathname.startsWith('/api')) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   // Redirect unauthenticated users to login (except for login page and API routes)
   if (

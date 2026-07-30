@@ -1,7 +1,8 @@
-// Not real credentials — just syntactically valid enough for the Supabase client to
-// construct without throwing. Any actual request made with these will fail (network
-// error), which callers already handle via their existing try/catch + error state.
-const FALLBACK_URL = 'https://placeholder.supabase.co';
+// Not a real Supabase project — just a syntactically valid, same-origin URL so the
+// Supabase client constructs without throwing. Any actual request made with these
+// will still fail (this host doesn't serve Supabase's REST/Auth API), which callers
+// already handle via their existing try/catch + error state.
+const FALLBACK_URL = 'https://dofdof.onrender.com';
 const FALLBACK_ANON_KEY = 'placeholder-anon-key';
 
 const warnedVars = new Set<string>();

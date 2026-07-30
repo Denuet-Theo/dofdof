@@ -1,6 +1,7 @@
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import { TrendingUp, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { JOBS } from '@/lib/constants/jobs';
 
 interface TopRecipe {
   id: number;
@@ -17,22 +18,6 @@ interface TopRecipesProps {
   jobId?: string;
   onJobChange?: (jobId: string) => void;
 }
-
-const JOBS = [
-  { id: 2, name: 'Bûcheron' },
-  { id: 11, name: 'Forgeron' },
-  { id: 13, name: 'Sculpteur' },
-  { id: 15, name: 'Cordonnier' },
-  { id: 16, name: 'Bijoutier' },
-  { id: 24, name: 'Mineur' },
-  { id: 26, name: 'Alchimiste' },
-  { id: 27, name: 'Tailleur' },
-  { id: 28, name: 'Paysan' },
-  { id: 36, name: 'Pêcheur' },
-  { id: 41, name: 'Chasseur' },
-  { id: 60, name: 'Façonneur' },
-  { id: 65, name: 'Bricoleur' },
-];
 
 const TopRecipes = ({ recipes, jobId = '', onJobChange }: TopRecipesProps) => {
   return (

@@ -11,22 +11,7 @@ import SearchBar from '@/components/items/SearchBar';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
 import { ChefHat, Filter, ArrowDownAZ, RefreshCw } from 'lucide-react';
-
-const JOBS = [
-  { id: 2, name: 'Bûcheron' },
-  { id: 11, name: 'Forgeron' },
-  { id: 13, name: 'Sculpteur' },
-  { id: 15, name: 'Cordonnier' },
-  { id: 16, name: 'Bijoutier' },
-  { id: 24, name: 'Mineur' },
-  { id: 26, name: 'Alchimiste' },
-  { id: 27, name: 'Tailleur' },
-  { id: 28, name: 'Paysan' },
-  { id: 36, name: 'Pêcheur' },
-  { id: 41, name: 'Chasseur' },
-  { id: 60, name: 'Façonneur' },
-  { id: 65, name: 'Bricoleur' },
-];
+import { JOBS } from '@/lib/constants/jobs';
 
 const RecipesContent = () => {
   const searchParams = useSearchParams();

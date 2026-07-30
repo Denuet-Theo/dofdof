@@ -4,19 +4,28 @@
 const FALLBACK_URL = 'https://placeholder.supabase.co';
 const FALLBACK_ANON_KEY = 'placeholder-anon-key';
 
+const warnedVars = new Set<string>();
+
 function readEnv(
   name: 'NEXT_PUBLIC_SUPABASE_URL' | 'NEXT_PUBLIC_SUPABASE_ANON_KEY',
   fallback: string
 ): string {
   const value = process.env[name];
   if (!value) {
-    console.error(
-      `Missing environment variable: ${name}. Supabase requests will fail until it's set in your deployment's environment variables.`
-    );
+    if (!warnedVars.has(name)) {
+      warnedVars.add(name);
+      console.error(
+        `Missing environment variable: ${name}. Supabase requests will fail until it's set in your deployment's environment variables.`
+      );
+    }
     return fallback;
   }
   return value;
 }
+
+export const isSupabaseConfigured = () =>
+  Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+  Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
 export const getSupabaseEnv = () => ({
   url: readEnv('NEXT_PUBLIC_SUPABASE_URL', FALLBACK_URL),

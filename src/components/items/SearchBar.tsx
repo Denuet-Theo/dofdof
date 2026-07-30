@@ -7,14 +7,16 @@ interface SearchBarProps {
   onSearch: (query: string) => void;
   loading?: boolean;
   placeholder?: string;
+  defaultValue?: string;
 }
 
 const SearchBar = ({
   onSearch,
   loading = false,
   placeholder = 'Rechercher un item Dofus...',
+  defaultValue = '',
 }: SearchBarProps) => {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(defaultValue);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale, ItemPrice, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
+import { getSaleProfit } from '@/lib/utils/sales';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import TopRecipes from '@/components/dashboard/TopRecipes';
@@ -134,6 +135,8 @@ const DashboardPage = () => {
     0
   );
 
+  const totalProfit = soldSales.reduce((sum, s) => sum + getSaleProfit(s), 0);
+
   const totalActiveValue = activeSales.reduce(
     (sum, s) => sum + s.unit_price * s.quantity,
     0
@@ -159,10 +162,12 @@ const DashboardPage = () => {
       0
     );
 
+    const profit = daySales.reduce((sum, s) => sum + getSaleProfit(s), 0);
+
     return {
       date: dateStr,
       revenue,
-      profit: Math.round(revenue * 0.85), // Approximate: 15% tax estimate
+      profit,
     };
   });
 
@@ -206,7 +211,7 @@ const DashboardPage = () => {
           title="Bénéfices Estimés"
           value={
             <KamasDisplay
-              amount={Math.round(totalRevenue * 0.85)}
+              amount={totalProfit}
               size="lg"
               colored
             />

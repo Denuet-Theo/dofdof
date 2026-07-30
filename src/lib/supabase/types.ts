@@ -57,6 +57,14 @@ export interface DofusDBItem {
     };
   };
   hasRecipe: boolean;
+  effects?: {
+    from: number;
+    to: number;
+    characteristic: number;
+    category: number;
+    elementId: number;
+    effectId: number;
+  }[];
 }
 
 export interface DofusDBRecipe {

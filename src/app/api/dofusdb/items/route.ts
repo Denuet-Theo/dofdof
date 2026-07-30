@@ -19,7 +19,12 @@ export const GET = async (request: NextRequest) => {
     url.searchParams.set('$limit', limit);
     url.searchParams.set('$skip', skip);
     if (typeId) {
-      url.searchParams.set('typeId', typeId);
+      const typeIds = typeId.split(',').map((t) => t.trim()).filter(Boolean);
+      if (typeIds.length > 1) {
+        typeIds.forEach((t) => url.searchParams.append('typeId[$in][]', t));
+      } else if (typeIds.length === 1) {
+        url.searchParams.set('typeId', typeIds[0]);
+      }
     }
     if (hasQuery) {
       // Normalize query: remove accents and lowercase for slug search

@@ -13,9 +13,13 @@ import { computeCraftCost } from '@/lib/utils/recipes';
 
 // The 6 gauges fed by "Carburant d'enclos" items in the élevage profession
 const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abreuvoir', 'Mangeoire'];
-// typeId 33 = "Pain": restores PV (e.g. Briochette) or Énergie (e.g. Borodinski) depending on the item
-const PV_TYPE_ID = '33';
+// Every item type across all jobs whose consumables restore PV or Énergie: Pain, Friandise,
+// Poisson comestible, Viande comestible, Boisson, Viande primitive — not just bread/Paysan.
+const FOOD_TYPE_IDS = '33,42,49,69,79,187';
 const FOOD_CHIPS = ['PV', 'Énergie'];
+const PAGE_SIZE = 50;
+// Headroom above the ~600 items currently spread across the food types above.
+const MAX_FOOD_ITEMS = 700;
 
 type SortBy = 'ratio' | 'alpha' | 'level';
 
@@ -50,7 +54,7 @@ const GaugesPage = () => {
     loadPrices();
   }, []);
 
-  const runFetch = useCallback(async (params: URLSearchParams | null) => {
+  const runFetch = useCallback(async (params: URLSearchParams | null, paginate: boolean) => {
     if (!params) {
       setItems([]);
       setSearched(false);
@@ -60,9 +64,33 @@ const GaugesPage = () => {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await fetch(`/api/dofusdb/items?${params}`);
-      const data: DofusDBResponse<DofusDBItem> = await res.json();
-      setItems(data.data || []);
+      params.set('limit', String(PAGE_SIZE));
+      const firstRes = await fetch(`/api/dofusdb/items?${params}`);
+      const firstData: DofusDBResponse<DofusDBItem> = await firstRes.json();
+      let allItems = firstData.data || [];
+
+      // The PV/Énergie browse spans ~600 items across 6 item types — one page of 50 would
+      // silently drop most of them, so fetch the rest in parallel up to a safety cap.
+      if (paginate) {
+        const total = Math.min(firstData.total ?? allItems.length, MAX_FOOD_ITEMS);
+        const skips: number[] = [];
+        for (let skip = PAGE_SIZE; skip < total; skip += PAGE_SIZE) skips.push(skip);
+
+        if (skips.length > 0) {
+          const pages = await Promise.all(
+            skips.map(async (skip) => {
+              const pageParams = new URLSearchParams(params);
+              pageParams.set('skip', String(skip));
+              const res = await fetch(`/api/dofusdb/items?${pageParams}`);
+              const data: DofusDBResponse<DofusDBItem> = await res.json();
+              return data.data || [];
+            })
+          );
+          allItems = allItems.concat(...pages);
+        }
+      }
+
+      setItems(allItems);
     } catch (err) {
       console.error('Search error:', err);
       setItems([]);
@@ -74,19 +102,20 @@ const GaugesPage = () => {
   useEffect(() => {
     const hasText = textQuery.length >= 2;
     if (!hasText && !selectedChip) {
-      runFetch(null);
+      runFetch(null, false);
       return;
     }
 
-    const params = new URLSearchParams({ limit: '50' });
-    if (FOOD_CHIPS.includes(selectedChip || '')) {
-      params.set('typeId', PV_TYPE_ID);
+    const isFoodChip = FOOD_CHIPS.includes(selectedChip || '');
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+    if (isFoodChip) {
+      params.set('typeId', FOOD_TYPE_IDS);
       if (hasText) params.set('q', textQuery);
     } else {
       const words = [textQuery, selectedChip].filter((w): w is string => !!w).join(' ');
       params.set('q', words);
     }
-    runFetch(params);
+    runFetch(params, isFoodChip && !hasText);
   }, [textQuery, selectedChip, runFetch]);
 
   useEffect(() => {

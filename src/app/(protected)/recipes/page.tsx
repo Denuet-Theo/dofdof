@@ -10,7 +10,7 @@ import PriceModal from '@/components/recipes/PriceModal';
 import SearchBar from '@/components/items/SearchBar';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
-import { ChefHat, Filter, ArrowDownAZ, RefreshCw } from 'lucide-react';
+import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { JOBS } from '@/lib/constants/jobs';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
@@ -25,6 +25,8 @@ const RecipesContent = () => {
   const [minLevel, setMinLevel] = useState('');
   const [maxLevel, setMaxLevel] = useState('');
   const [globalSearch, setGlobalSearch] = useState(initialSearch);
+  const [sortBy, setSortBy] = useState<'margin' | 'alpha' | 'level'>('margin');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [sellItem, setSellItem] = useState<{
     id: number;
@@ -61,13 +63,14 @@ const RecipesContent = () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: '50' });
-      
+      const hasLevelOrJobFilter = !!(jobId || minLevel || maxLevel);
+
       // If global search is active, we must find the item IDs first
       if (globalSearch && globalSearch.length >= 2) {
         const itemsRes = await fetch(`/api/dofusdb/items?q=${encodeURIComponent(globalSearch)}&limit=10`);
         const itemsData: DofusDBResponse<DofusDBItem> = await itemsRes.json();
         const itemIds = (itemsData.data || []).map(i => i.id);
-        
+
         if (itemIds.length > 0) {
           params.set('resultIds', itemIds.join(','));
         } else {
@@ -76,8 +79,11 @@ const RecipesContent = () => {
           setLoading(false);
           return;
         }
+      } else if (hasLevelOrJobFilter) {
+        // Browsing by job/level: query the full recipe catalog, not just priced items
+        params.set('limit', '100');
       } else {
-        // No search: fetch recipes for items we have priced
+        // No search or filter: fetch recipes for items we have priced
         const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
         if (pricedIds.length > 0) {
           // Chunk to avoid URL too long if user has many prices. Let's take the first 100 for now.
@@ -125,27 +131,32 @@ const RecipesContent = () => {
   // Sort recipes by profitability
   const sortedRecipes = [...recipes]
     .filter(recipe => {
-      // If there is no search, only show recipes where we have all prices
-      if (!globalSearch) {
+      // If there is no active search/filter, only show recipes where we have all prices
+      if (!globalSearch && !jobId && !minLevel && !maxLevel) {
         return hasAllPrices(recipe);
       }
       return true;
     })
     .sort((a, b) => {
-      if (globalSearch || jobId || minLevel || maxLevel) {
+      let cmp: number;
+
+      if (sortBy === 'alpha') {
         const nameA = a.resultName?.fr || '';
         const nameB = b.resultName?.fr || '';
-        return nameA.localeCompare(nameB);
+        cmp = nameA.localeCompare(nameB);
+      } else if (sortBy === 'level') {
+        cmp = (a.resultLevel || 0) - (b.resultLevel || 0);
+      } else {
+        const marginA = getMargin(a);
+        const marginB = getMargin(b);
+        const costA = computeCraftCost(a, prices);
+        const costB = computeCraftCost(b, prices);
+        const marginPercentA = costA > 0 ? (marginA / costA) * 100 : 0;
+        const marginPercentB = costB > 0 ? (marginB / costB) * 100 : 0;
+        cmp = marginPercentA - marginPercentB;
       }
 
-      const marginA = getMargin(a);
-      const marginB = getMargin(b);
-      const costA = computeCraftCost(a, prices);
-      const costB = computeCraftCost(b, prices);
-      const marginPercentA = costA > 0 ? (marginA / costA) * 100 : 0;
-      const marginPercentB = costB > 0 ? (marginB / costB) * 100 : 0;
-      
-      return marginPercentB - marginPercentA;
+      return sortDir === 'asc' ? cmp : -cmp;
     });
 
   const handleSell = (item: {
@@ -274,10 +285,30 @@ const RecipesContent = () => {
         </div>
       </div>
 
-      {/* Sort indicator */}
+      {/* Sort controls */}
       <div className="flex items-center gap-2 text-xs text-dark-500">
         <ArrowDownAZ size={14} />
-        {globalSearch || jobId || minLevel || maxLevel ? 'Trié par ordre alphabétique' : 'Trié par rentabilité décroissante'}
+        <span>Trier par</span>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as 'margin' | 'alpha' | 'level')}
+          className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
+            text-dark-200 text-xs transition-all hover:border-dark-500 focus:border-kamas/50
+            cursor-pointer"
+        >
+          <option value="margin">Rentabilité</option>
+          <option value="alpha">Alphabétique</option>
+          <option value="level">Niveau</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+          className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
+            text-dark-200 transition-all hover:border-dark-500 cursor-pointer"
+        >
+          {sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+          {sortDir === 'asc' ? 'Croissant' : 'Décroissant'}
+        </button>
       </div>
 
       {/* Recipes list */}

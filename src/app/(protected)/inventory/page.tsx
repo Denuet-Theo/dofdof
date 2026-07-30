@@ -97,8 +97,8 @@ const InventoryPage = () => {
 
     try {
       // 1. Update the sale
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: saleError } = await (supabase.from('user_sales') as any)
+      const { error: saleError } = await supabase
+        .from('user_sales')
         .update({
           unit_price: newUnitPrice,
           tax_paid: newTaxPaid,

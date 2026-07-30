@@ -1,13 +1,16 @@
-export interface ItemPrice {
+// These must stay `type` aliases, not `interface` — using an interface here as a Database
+// `Row` type breaks TypeScript's inference in @supabase/postgrest-js's insert/upsert
+// generics, collapsing the accepted value type to `never[]`.
+export type ItemPrice = {
   item_id: number;
   item_name: string;
   icon_url: string | null;
   price: number;
   updated_at: string;
   updated_by: string | null;
-}
+};
 
-export interface UserSale {
+export type UserSale = {
   id: string;
   user_id: string;
   item_id: number;
@@ -23,7 +26,7 @@ export interface UserSale {
   is_resale: boolean;
   created_at: string;
   sold_at: string | null;
-}
+};
 
 export interface DofusDBItem {
   id: number;

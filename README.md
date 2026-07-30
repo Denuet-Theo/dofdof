@@ -20,6 +20,35 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Database migrations
+
+Schema changes live as timestamped SQL files in `supabase/migrations/`, applied via the
+[Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)
+(already a project dependency — invoke it with `npx supabase` or the `npm run db:*` scripts
+below).
+
+One-time setup, per environment you deploy to:
+
+```bash
+npm run db:link -- --project-ref <your-project-ref>
+```
+
+To apply pending migrations to that linked project:
+
+```bash
+npm run db:push
+```
+
+To create a new migration:
+
+```bash
+npm run db:migration:new <name>
+```
+
+This creates an empty `supabase/migrations/<timestamp>_<name>.sql` file — write the schema
+change there, then `npm run db:push` it. Never hand-edit a migration that has already been
+pushed to a shared environment; add a new one instead.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

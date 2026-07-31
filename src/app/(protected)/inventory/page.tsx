@@ -6,8 +6,10 @@ import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
 import SaleRow from '@/components/inventory/SaleRow';
+import ItemPreview from '@/components/items/ItemPreview';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
+import EmptyState from '@/components/ui/EmptyState';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -240,19 +242,15 @@ const InventoryPage = () => {
           ))}
         </div>
       ) : (
-        <div className="text-center py-16">
-          <Package size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">
-            {activeTab === 'active'
-              ? 'Aucun item en vente'
-              : 'Aucune vente réalisée'}
-          </p>
-          <p className="text-dark-500 text-sm mt-1">
-            {activeTab === 'active'
+        <EmptyState
+          icon={Package}
+          title={activeTab === 'active' ? 'Aucun item en vente' : 'Aucune vente réalisée'}
+          description={
+            activeTab === 'active'
               ? 'Mets des items en vente depuis le Calculateur de Recettes'
-              : 'Marque tes items comme vendus pour les voir ici'}
-          </p>
-        </div>
+              : 'Marque tes items comme vendus pour les voir ici'
+          }
+        />
       )}
       
       {/* Edit Price Modal */}
@@ -263,19 +261,11 @@ const InventoryPage = () => {
       >
         {editingSale && (
           <form onSubmit={handleEditPriceSubmit} className="space-y-5">
-            <div className="flex items-center gap-4 p-4 rounded-xl bg-dark-800/50">
-              <img
-                src={editingSale.icon_url || ''}
-                alt={editingSale.item_name}
-                className="w-12 h-12 rounded-lg bg-dark-700/50 object-contain"
-              />
-              <div>
-                <p className="font-semibold text-dark-100">{editingSale.item_name}</p>
-                <p className="text-sm text-dark-500">
-                  {editingSale.lot_count}x lot de {editingSale.lot_size}
-                </p>
-              </div>
-            </div>
+            <ItemPreview
+              name={editingSale.item_name}
+              iconUrl={editingSale.icon_url}
+              subtitle={`${editingSale.lot_count}x lot de ${editingSale.lot_size}`}
+            />
 
             <Input
               label={`Nouveau prix du lot (x${editingSale.lot_size})`}
@@ -291,7 +281,16 @@ const InventoryPage = () => {
             <div className="bg-dark-800/30 p-4 rounded-xl space-y-2 border border-dark-700/30">
               <div className="flex justify-between text-sm text-loss">
                 <span>Taxe de modification (1%)</span>
-                <span>- {Math.floor((parseInt(newLotPrice, 10) || 0) * editingSale.lot_count * PRICE_EDIT_TAX_RATE).toLocaleString('fr-FR')} ⚜️</span>
+                <span className="flex items-center gap-1">
+                  -
+                  <KamasDisplay
+                    amount={Math.floor(
+                      (parseInt(newLotPrice, 10) || 0) * editingSale.lot_count * PRICE_EDIT_TAX_RATE
+                    )}
+                    size="sm"
+                    className="text-loss"
+                  />
+                </span>
               </div>
               <p className="text-[10px] text-dark-500 mt-2 leading-tight">
                 Cette taxe sera déduite de ton bénéfice net calculé sur cet inventaire. Le nouveau prix sera également mis à jour globalement pour ce serveur.

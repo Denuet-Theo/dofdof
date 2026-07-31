@@ -56,8 +56,10 @@ const RecipeCard = ({
           const totalPrice = unitPrice * qty;
 
           return (
-            <div
+            <ItemCard
               key={ingredient.id}
+              layout="row"
+              variant="flat"
               onClick={() =>
                 onIngredientClick?.({
                   id: ingredient.id,
@@ -66,18 +68,13 @@ const RecipeCard = ({
                   price: unitPrice,
                 })
               }
-              className="flex items-center gap-3 p-2 rounded-lg bg-dark-800/30 hover:bg-dark-700/40 cursor-pointer transition-colors group/ing"
             >
-              <ItemCard.Icon
-                src={ingredient.img}
-                alt={ingredient.name?.fr || ''}
-                size="sm"
-                className="group-hover:scale-100"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-dark-200 truncate group-hover/ing:text-kamas transition-colors">
+              <ItemCard.Icon src={ingredient.img} alt={ingredient.name?.fr || ''} size="sm" />
+
+              <ItemCard.Body>
+                <ItemCard.Title className="group-hover/item:text-kamas transition-colors">
                   {ingredient.name?.fr || `Item #${ingredient.id}`}
-                </p>
+                </ItemCard.Title>
                 <div className="flex items-center gap-2 mt-0.5">
                   <p className="text-[10px] text-dark-500">× {qty}</p>
                   {ingPriceObj?.updated_at && (
@@ -86,8 +83,9 @@ const RecipeCard = ({
                     </span>
                   )}
                 </div>
-              </div>
-              <div className="text-right flex items-center gap-2">
+              </ItemCard.Body>
+
+              <ItemCard.Actions>
                 {unitPrice > 0 ? (
                   <KamasDisplay amount={totalPrice} size="sm" />
                 ) : (
@@ -95,10 +93,10 @@ const RecipeCard = ({
                 )}
                 <Edit2
                   size={12}
-                  className="text-dark-500 opacity-0 group-hover/ing:opacity-100 transition-opacity"
+                  className="text-dark-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
                 />
-              </div>
-            </div>
+              </ItemCard.Actions>
+            </ItemCard>
           );
         })}
       </div>

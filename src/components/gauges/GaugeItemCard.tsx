@@ -171,7 +171,7 @@ const GaugeItemCard = ({
                     src={ingredient.img}
                     alt={ingredient.name?.fr || ''}
                     size="sm"
-                    className="group-hover:scale-100"
+                    className="group-hover/item:scale-100"
                   />
                   <span className="flex-1 min-w-0 truncate text-dark-300">
                     {ingredient.name?.fr || `Item #${ingredient.id}`}{' '}

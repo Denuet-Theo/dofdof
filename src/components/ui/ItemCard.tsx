@@ -20,9 +20,28 @@ const ICON_SIZES: Record<IconSize, { well: string; img: string }> = {
   lg: { well: 'w-16 h-16 rounded-xl', img: 'w-12 h-12' },
 };
 
+/**
+ * `glass` is the standalone card sitting on the page background.
+ * `flat` is the same card nested inside another panel (Top 10 rows, ingredient rows),
+ * where a second layer of glass would muddy the one underneath.
+ */
+type Variant = 'glass' | 'flat';
+
+const VARIANTS: Record<Variant, { shell: string; inner: string }> = {
+  glass: {
+    shell: 'glass rounded-2xl hover:shadow-lg hover:shadow-kamas/5',
+    inner: 'gap-4 p-4',
+  },
+  flat: {
+    shell: 'bg-dark-800/30 rounded-xl hover:bg-dark-800/60',
+    inner: 'gap-3 p-3',
+  },
+};
+
 interface ItemCardProps {
   children: ReactNode;
   layout?: Layout;
+  variant?: Variant;
   /** Draws the gold ring used to mark a stand-out card (best ratio, etc.). */
   highlight?: boolean;
   /** Fades the card back, for items that are done (sold). */
@@ -40,6 +59,7 @@ interface ItemCardProps {
 const ItemCard = ({
   children,
   layout = 'grid',
+  variant = 'glass',
   highlight = false,
   dimmed = false,
   expanded,
@@ -47,12 +67,12 @@ const ItemCard = ({
   className = '',
 }: ItemCardProps) => {
   const expandable = expanded !== undefined;
+  const styles = VARIANTS[variant];
 
   return (
     <div
       className={`
-        glass rounded-2xl transition-all duration-300 group
-        hover:shadow-lg hover:shadow-kamas/5
+        ${styles.shell} transition-all duration-300 group/item
         ${expandable ? 'overflow-hidden' : ''}
         ${highlight ? 'ring-1 ring-kamas/40' : ''}
         ${dimmed ? 'opacity-75' : ''}
@@ -62,7 +82,7 @@ const ItemCard = ({
       <div
         onClick={onClick}
         className={`
-          flex gap-4 p-4
+          flex ${styles.inner}
           ${layout === 'row' ? 'items-center' : 'items-start'}
           ${onClick ? 'cursor-pointer hover:bg-dark-800/30 transition-colors' : ''}
         `}
@@ -93,7 +113,7 @@ const Icon = ({ src, alt, size = 'md', overlay, onClick, title, className = '' }
 
   const shell = `
     relative ${well} bg-dark-700/50 flex items-center justify-center
-    flex-shrink-0 overflow-hidden group-hover:scale-105 transition-transform
+    flex-shrink-0 overflow-hidden group-hover/item:scale-105 transition-transform
     ${className}
   `;
 

@@ -11,41 +11,12 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { describeTarget, requireDbUrl } from './lib/db-url.mjs';
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const dbUrl = process.env.SUPABASE_DB_URL;
-
-// Render sets RENDER=true on every service. Locally, a missing connection string is
-// a normal state (plain `npm start`) and shouldn't block boot — but on a deployed
-// service it is a misconfiguration, and skipping silently would leave the app
-// serving a stale schema while the deploy still looks green. That silent-success
-// case is the worst outcome, so on Render it's a hard failure.
-const onRender = process.env.RENDER === 'true';
-
-if (!dbUrl) {
-  if (onRender) {
-    console.error(
-      '[migrate] SUPABASE_DB_URL is not set, but this is a Render deploy. Refusing ' +
-        'to start with an unmigrated schema. Set it in the Render dashboard ' +
-        '(Environment), using the direct connection string, not the pooler.'
-    );
-    process.exit(1);
-  }
-  console.warn('[migrate] SUPABASE_DB_URL is not set — skipping migrations.');
-  process.exit(0);
-}
-
-// The connection string carries the database password, so never log it back out.
-function describeTarget(url) {
-  try {
-    const { host, pathname } = new URL(url);
-    return `${host}${pathname}`;
-  } catch {
-    return 'the configured database';
-  }
-}
+const dbUrl = requireDbUrl('migrate', 'Refusing to start with an unmigrated schema.');
 
 console.log(`[migrate] Applying pending migrations to ${describeTarget(dbUrl)}...`);
 

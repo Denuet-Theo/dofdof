@@ -4,9 +4,11 @@ interface BadgeProps {
   children: ReactNode;
   variant?: 'default' | 'success' | 'danger' | 'warning' | 'info' | 'craft';
   className?: string;
+  /** Native tooltip, for badges that stand in for a longer explanation. */
+  title?: string;
 }
 
-const Badge = ({ children, variant = 'default', className = '' }: BadgeProps) => {
+const Badge = ({ children, variant = 'default', className = '', title }: BadgeProps) => {
   const variants = {
     default: 'bg-dark-700/60 text-dark-300 border-dark-600/30',
     success: 'bg-gain/10 text-gain border-gain/20',
@@ -18,6 +20,7 @@ const Badge = ({ children, variant = 'default', className = '' }: BadgeProps) =>
 
   return (
     <span
+      title={title}
       className={`
         inline-flex items-center px-2.5 py-0.5 rounded-full
         text-xs font-medium border

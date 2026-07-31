@@ -153,12 +153,6 @@ body {
   background: transparent;
 }
 
-/* === Kamas icon === */
-.kamas-icon::after {
-  content: ' ⚜️';
-  font-size: 0.85em;
-}
-
 /* === Focus rings === */
 input:focus, textarea:focus, select:focus, button:focus-visible {
   outline: 2px solid rgba(245, 158, 11, 0.5);

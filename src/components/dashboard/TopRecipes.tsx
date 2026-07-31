@@ -71,7 +71,12 @@ const TopRecipes = ({ recipes, jobId = '', onJobChange }: TopRecipesProps) => {
                 #{index + 1}
               </div>
 
-              <ItemCard.Icon src={recipe.iconUrl} alt={recipe.name} size="sm" />
+              <ItemCard.Icon
+                src={recipe.iconUrl}
+                alt={recipe.name}
+                size="sm"
+                scaleOnHover={false}
+              />
 
               <ItemCard.Body>
                 <ItemCard.Title>{recipe.name}</ItemCard.Title>

@@ -69,10 +69,15 @@ const RecipeCard = ({
                 })
               }
             >
-              <ItemCard.Icon src={ingredient.img} alt={ingredient.name?.fr || ''} size="sm" />
+              <ItemCard.Icon
+                src={ingredient.img}
+                alt={ingredient.name?.fr || ''}
+                size="sm"
+                scaleOnHover={false}
+              />
 
               <ItemCard.Body>
-                <ItemCard.Title className="group-hover/item:text-kamas transition-colors">
+                <ItemCard.Title className="group-hover/row:text-kamas transition-colors">
                   {ingredient.name?.fr || `Item #${ingredient.id}`}
                 </ItemCard.Title>
                 <div className="flex items-center gap-2 mt-0.5">
@@ -93,7 +98,7 @@ const RecipeCard = ({
                 )}
                 <Edit2
                   size={12}
-                  className="text-dark-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                  className="text-dark-500 opacity-0 group-hover/row:opacity-100 transition-opacity"
                 />
               </ItemCard.Actions>
             </ItemCard>

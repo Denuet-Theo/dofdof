@@ -27,14 +27,21 @@ const ICON_SIZES: Record<IconSize, { well: string; img: string }> = {
  */
 type Variant = 'glass' | 'flat';
 
-const VARIANTS: Record<Variant, { shell: string; inner: string }> = {
+/**
+ * Each variant carries its own group name. Tailwind's `group-hover/name:` compiles to a
+ * plain descendant selector, so a shared name would let an outer card's hover fire the
+ * hover styles of every card nested inside it.
+ */
+const VARIANTS: Record<Variant, { shell: string; inner: string; group: string }> = {
   glass: {
     shell: 'glass rounded-2xl hover:shadow-lg hover:shadow-kamas/5',
     inner: 'gap-4 p-4',
+    group: 'group/card',
   },
   flat: {
     shell: 'bg-dark-800/30 rounded-xl hover:bg-dark-800/60',
     inner: 'gap-3 p-3',
+    group: 'group/row',
   },
 };
 
@@ -72,7 +79,7 @@ const ItemCard = ({
   return (
     <div
       className={`
-        ${styles.shell} transition-all duration-300 group/item
+        ${styles.shell} ${styles.group} transition-all duration-300
         ${expandable ? 'overflow-hidden' : ''}
         ${highlight ? 'ring-1 ring-kamas/40' : ''}
         ${dimmed ? 'opacity-75' : ''}
@@ -105,15 +112,30 @@ interface IconProps {
   overlay?: ReactNode;
   onClick?: () => void;
   title?: string;
+  /**
+   * Grow slightly when the surrounding card is hovered. Turn it off for icons in rows
+   * nested inside another card, which would otherwise also react to the outer card.
+   */
+  scaleOnHover?: boolean;
   className?: string;
 }
 
-const Icon = ({ src, alt, size = 'md', overlay, onClick, title, className = '' }: IconProps) => {
+const Icon = ({
+  src,
+  alt,
+  size = 'md',
+  overlay,
+  onClick,
+  title,
+  scaleOnHover = true,
+  className = '',
+}: IconProps) => {
   const { well, img } = ICON_SIZES[size];
 
   const shell = `
     relative ${well} bg-dark-700/50 flex items-center justify-center
-    flex-shrink-0 overflow-hidden group-hover/item:scale-105 transition-transform
+    flex-shrink-0 overflow-hidden transition-transform
+    ${scaleOnHover ? 'group-hover/card:scale-105' : ''}
     ${className}
   `;
 

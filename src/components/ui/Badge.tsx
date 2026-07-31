@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 
 interface BadgeProps {
   children: ReactNode;
-  variant?: 'default' | 'success' | 'danger' | 'warning' | 'info';
+  variant?: 'default' | 'success' | 'danger' | 'warning' | 'info' | 'craft';
   className?: string;
 }
 
@@ -12,7 +12,8 @@ const Badge = ({ children, variant = 'default', className = '' }: BadgeProps) =>
     success: 'bg-gain/10 text-gain border-gain/20',
     danger: 'bg-loss/10 text-loss border-loss/20',
     warning: 'bg-kamas/10 text-kamas border-kamas/20',
-    info: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    info: 'bg-info/10 text-info-light border-info/20',
+    craft: 'bg-craft/10 text-craft border-craft/20',
   };
 
   return (

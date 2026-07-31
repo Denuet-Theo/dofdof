@@ -8,6 +8,9 @@
   --color-gain-light: #34D399;
   --color-loss: #EF4444;
   --color-loss-light: #F87171;
+  --color-info: #3B82F6;
+  --color-info-light: #60A5FA;
+  --color-craft: #A78BFA;
   --color-dark-950: #0A0A0F;
   --color-dark-900: #111118;
   --color-dark-800: #1A1A24;
@@ -99,9 +102,12 @@ body {
 }
 
 /* === Stagger children === */
+/* The results grids hold 50+ cards, so anything past the 12th shares the final delay
+   rather than fading in seconds after the page settled. */
 .stagger-children > * {
   opacity: 0;
   animation: fade-in 0.4s ease-out forwards;
+  animation-delay: 0.6s;
 }
 .stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
 .stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
@@ -111,6 +117,9 @@ body {
 .stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
 .stagger-children > *:nth-child(7) { animation-delay: 0.35s; }
 .stagger-children > *:nth-child(8) { animation-delay: 0.4s; }
+.stagger-children > *:nth-child(9) { animation-delay: 0.45s; }
+.stagger-children > *:nth-child(10) { animation-delay: 0.5s; }
+.stagger-children > *:nth-child(11) { animation-delay: 0.55s; }
 
 /* === Gradient text === */
 .text-gradient-gold {
@@ -133,6 +142,15 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-dark-500);
+}
+
+/* Opt-in scrollbar for panels that scroll inside the page (Top 10 list). */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-dark-600) transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* === Kamas icon === */

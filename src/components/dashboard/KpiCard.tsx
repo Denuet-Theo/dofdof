@@ -1,12 +1,21 @@
 import { ReactNode } from 'react';
 import { LucideIcon } from 'lucide-react';
 
+// Tailwind only ships classes it can find as complete strings in the source, so these have to
+// be spelled out — a template literal like `bg-${accentColor}/10` silently produces no CSS.
+const ACCENTS = {
+  kamas: { well: 'bg-kamas/10', icon: 'text-kamas' },
+  gain: { well: 'bg-gain/10', icon: 'text-gain' },
+  loss: { well: 'bg-loss/10', icon: 'text-loss' },
+  info: { well: 'bg-info/10', icon: 'text-info-light' },
+} as const;
+
 interface KpiCardProps {
   title: string;
   value: ReactNode;
   icon: LucideIcon;
   trend?: { value: number; label: string };
-  accentColor?: string;
+  accentColor?: keyof typeof ACCENTS;
 }
 
 const KpiCard = ({
@@ -16,6 +25,8 @@ const KpiCard = ({
   trend,
   accentColor = 'kamas',
 }: KpiCardProps) => {
+  const accent = ACCENTS[accentColor];
+
   return (
     <div className="glass rounded-2xl p-6 hover:shadow-lg hover:shadow-kamas/5 transition-all duration-300 group">
       <div className="flex items-start justify-between">
@@ -36,10 +47,10 @@ const KpiCard = ({
           )}
         </div>
         <div
-          className={`w-12 h-12 rounded-xl bg-${accentColor}/10 flex items-center justify-center
+          className={`w-12 h-12 rounded-xl ${accent.well} flex items-center justify-center
             group-hover:scale-110 transition-transform duration-300`}
         >
-          <Icon size={22} className={`text-${accentColor}`} />
+          <Icon size={22} className={accent.icon} />
         </div>
       </div>
     </div>

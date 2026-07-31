@@ -49,6 +49,43 @@ This creates an empty `supabase/migrations/<timestamp>_<name>.sql` file — writ
 change there, then `npm run db:push` it. Never hand-edit a migration that has already been
 pushed to a shared environment; add a new one instead.
 
+### Migrations on startup (Render)
+
+`npm start` runs the `prestart` hook first, which applies any pending migrations via
+`scripts/run-migrations.mjs` before `next start` serves traffic. Render runs the app as a
+single long-lived process, so this happens once per deploy.
+
+It is driven by one environment variable, set in the Render dashboard:
+
+| Variable | Value |
+| --- | --- |
+| `SUPABASE_DB_URL` | Direct Postgres connection string from **Project Settings → Database → Connection string → URI** |
+
+Notes:
+
+- Use the **direct** connection (`db.<ref>.supabase.co:5432`), not the transaction-mode
+  pooler — migrations run DDL in a transaction and the pooler will not handle it correctly.
+- The password must be **percent-encoded** in the URI (the CLI requires this), so a `@` in
+  the password becomes `%40`.
+- This is a privileged credential and is deliberately separate from the app's own
+  `NEXT_PUBLIC_SUPABASE_*` vars — those are an anon key and cannot run DDL. Keep it out of
+  any `NEXT_PUBLIC_` variable, which would ship it to the browser.
+- Render's build must install devDependencies (the Supabase CLI is one), e.g.
+  `npm ci --include=dev && npm run build`.
+
+Behaviour:
+
+- **Unset `SUPABASE_DB_URL`** — migrations are skipped with a warning and the app boots.
+  This keeps a plain local `npm start` working.
+- **Migration fails** — startup is aborted with a non-zero exit, so the deploy fails rather
+  than serving requests against an unexpected schema.
+
+To dry-run the same step locally without starting the server:
+
+```bash
+SUPABASE_DB_URL=<uri> npm run db:migrate
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

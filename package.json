@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prestart": "node scripts/run-migrations.mjs",
     "start": "next start",
+    "db:migrate": "node scripts/run-migrations.mjs",
     "lint": "eslint",
     "db:link": "supabase link",
     "db:migration:new": "supabase migration new",

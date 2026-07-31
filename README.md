@@ -106,6 +106,34 @@ To dry-run the same step locally without starting the server:
 SUPABASE_DB_URL=<uri> npm run db:migrate
 ```
 
+### DofusDB catalog mirror
+
+Item and recipe data comes from the public `api.dofusdb.fr`. Rather than proxying every page
+load, the catalog is mirrored into our own Postgres — it only changes when the game patches,
+and it is small (21 738 items, 4 858 recipes, ~30 MB with indexes).
+
+```bash
+npm run db:sync       # full sync (needs SUPABASE_DB_URL)
+npm run db:sync:dry   # fetch + map everything, touch no database
+```
+
+A cold sync takes about 10 seconds. `scripts/sync-dofusdb.mjs` pages the API 5 requests at a
+time with retry and backoff, then swaps both tables in **one transaction** via a temporary
+staging table: if it dies partway, the previous mirror is untouched and the fix is to re-run
+it. This requires the *direct* connection, not the pooler — a `TEMP` table does not survive
+transaction-mode pooling.
+
+It writes through `SUPABASE_DB_URL` rather than a service-role key. That variable already
+exists for migrations and already carries more privilege than a service-role key would, so
+adding one would be a second secret to rotate for no extra capability.
+
+**Weapons and cosmetics are out of scope, but nothing is filtered at ingest.** Weapons appear
+as *ingredients* of in-scope recipes — «&nbsp;Quintaine&nbsp;» (`resultId 19644`, an *objet de
+quête*) needs «&nbsp;Fléau d'armes&nbsp;» (`typeId 7`) — and the UI maps `recipe.ingredients`
+into `recipe.quantities` **by array index**, so dropping one silently shifts every later
+quantity and corrupts the craft cost. Instead each row carries `super_type_id`, and exclusion
+is an opt-in filter at query time. (There is no cosmetic item type in this dataset at all.)
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

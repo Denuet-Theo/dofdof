@@ -10,8 +10,10 @@ export interface GaugeInfo {
 // "Ce carburant permet de recharger la jauge de Baffeur d'un enclos de 5000 sans dépasser 90 000."
 // The "sans dépasser" clause is absent on the top (Élixir) tier, whose fixed amount is already the cap:
 // "Ce carburant permet de recharger la jauge de Baffeur d'un enclos de 5000."
+// Gauge names starting with a vowel are elided — "la jauge d'Abreuvoir d'un enclos de 3000" — so
+// both "de " and "d'" have to be accepted before the name.
 const GAUGE_DESCRIPTION_RE =
-  /recharger la jauge de ([^\d]+?) d['’]un enclos de ([\d\s  ]+?)(?:\s*sans dépasser ([\d\s  ]+))?\s*\./i;
+  /recharger la jauge d(?:e |['’])([^\d]+?) d['’]un enclos de ([\d\s  ]+?)(?:\s*sans dépasser ([\d\s  ]+))?\s*\./i;
 
 const parseNumber = (raw: string) => parseInt(raw.replace(/[\s  ]/g, ''), 10);
 

@@ -17,10 +17,22 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 
 const dbUrl = process.env.SUPABASE_DB_URL;
 
-// No connection string is a normal state — a plain local `npm start`, or a preview
-// environment pointed at an already-migrated database. Boot the app rather than
-// blocking it; a *failed* push below is what deserves a hard stop.
+// Render sets RENDER=true on every service. Locally, a missing connection string is
+// a normal state (plain `npm start`) and shouldn't block boot — but on a deployed
+// service it is a misconfiguration, and skipping silently would leave the app
+// serving a stale schema while the deploy still looks green. That silent-success
+// case is the worst outcome, so on Render it's a hard failure.
+const onRender = process.env.RENDER === 'true';
+
 if (!dbUrl) {
+  if (onRender) {
+    console.error(
+      '[migrate] SUPABASE_DB_URL is not set, but this is a Render deploy. Refusing ' +
+        'to start with an unmigrated schema. Set it in the Render dashboard ' +
+        '(Environment), using the direct connection string, not the pooler.'
+    );
+    process.exit(1);
+  }
   console.warn('[migrate] SUPABASE_DB_URL is not set — skipping migrations.');
   process.exit(0);
 }
@@ -45,8 +57,11 @@ try {
   cliPath = require.resolve('supabase/dist/supabase.js');
 } catch {
   console.error(
-    '[migrate] The Supabase CLI is not installed. It is a devDependency, so make ' +
-      'sure the deploy installs devDependencies (e.g. `npm ci --include=dev`).'
+    '[migrate] The Supabase CLI is not installed. It is a devDependency, and npm ' +
+      'omits (and prunes) those whenever NODE_ENV=production. Render sets that at ' +
+      'runtime, so an `npm install` in the Start Command will delete the CLI that ' +
+      'the build installed. Install deps in the Build Command instead, and keep the ' +
+      'Start Command to `npm run start`.'
   );
   process.exit(1);
 }

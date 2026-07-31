@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
-import { createClient } from '@/lib/supabase/client';
+import ItemPreview from '@/components/items/ItemPreview';
+import { saveItemPrice } from '@/lib/hooks/useItemPrices';
 import { Save } from 'lucide-react';
 
 interface PriceModalProps {
@@ -46,29 +47,15 @@ const PriceModal = ({ isOpen, onClose, item, onPriceSaved }: PriceModalProps) =>
     setLoading(true);
     setError('');
 
-    const supabase = createClient();
-
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const updatedAt = await saveItemPrice({
+        itemId: item.id,
+        itemName: item.name,
+        iconUrl: item.iconUrl,
+        price: numPrice,
+      });
 
-      const updated_at = new Date().toISOString();
-      const { error: upsertError } = await supabase.from('item_prices').upsert(
-        {
-          item_id: item.id,
-          item_name: item.name,
-          icon_url: item.iconUrl,
-          price: numPrice,
-          updated_at,
-          updated_by: user?.id,
-        },
-        { onConflict: 'item_id' }
-      );
-
-      if (upsertError) throw upsertError;
-
-      onPriceSaved?.(item.id, numPrice, updated_at);
+      onPriceSaved?.(item.id, numPrice, updatedAt);
       onClose();
     } catch (err) {
       setError(
@@ -83,20 +70,11 @@ const PriceModal = ({ isOpen, onClose, item, onPriceSaved }: PriceModalProps) =>
     <Modal isOpen={isOpen} onClose={onClose} title="Ajuster le prix">
       {item && (
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Item preview */}
-          <div className="flex items-center gap-4 p-4 rounded-xl bg-dark-800/50">
-            <img
-              src={item.iconUrl}
-              alt={item.name}
-              className="w-12 h-12 rounded-lg bg-dark-700/50 object-contain"
-            />
-            <div>
-              <p className="font-semibold text-dark-100">{item.name}</p>
-              <p className="text-sm text-dark-500">
-                Ajuste le prix moyen en HDV
-              </p>
-            </div>
-          </div>
+          <ItemPreview
+            name={item.name}
+            iconUrl={item.iconUrl}
+            subtitle="Ajuste le prix moyen en HDV"
+          />
 
           <Input
             label="Prix (kamas)"

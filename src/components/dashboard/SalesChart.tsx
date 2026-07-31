@@ -9,6 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import KamasDisplay from '@/components/ui/KamasDisplay';
 
 interface SalesDataPoint {
   date: string;
@@ -44,9 +45,7 @@ const CustomTooltip = ({
           <span className="text-dark-300">
             {entry.dataKey === 'revenue' ? 'Revenus' : 'Profits'}:
           </span>
-          <span className="font-semibold text-dark-100">
-            {entry.value.toLocaleString('fr-FR')} ⚜️
-          </span>
+          <KamasDisplay amount={entry.value} size="md" className="font-semibold text-dark-100" />
         </div>
       ))}
     </div>

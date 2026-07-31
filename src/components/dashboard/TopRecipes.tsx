@@ -1,3 +1,4 @@
+import ItemCard from '@/components/ui/ItemCard';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import { TrendingUp, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
@@ -53,13 +54,11 @@ const TopRecipes = ({ recipes, jobId = '', onJobChange }: TopRecipesProps) => {
           </p>
         ) : (
           recipes.map((recipe, index) => (
-            <div
-              key={recipe.id}
-              className="flex items-center gap-3 p-3 rounded-xl bg-dark-800/30 hover:bg-dark-800/60 transition-colors"
-            >
-              {/* Rank */}
+            // Nested inside a panel, so the glass shell is swapped for a flat fill —
+            // everything else (icon well, title, metric column) comes from the shared card.
+            <ItemCard key={recipe.id} layout="row" variant="flat">
               <div
-                className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs flex-shrink-0 ${
                   index === 0
                     ? 'bg-kamas/20 text-kamas'
                     : index === 1
@@ -72,19 +71,16 @@ const TopRecipes = ({ recipes, jobId = '', onJobChange }: TopRecipesProps) => {
                 #{index + 1}
               </div>
 
-              {/* Icon */}
-              <img
+              <ItemCard.Icon
                 src={recipe.iconUrl}
                 alt={recipe.name}
-                className="w-8 h-8 rounded-lg bg-dark-700/50 object-contain shrink-0"
+                size="sm"
+                scaleOnHover={false}
               />
 
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-dark-200 truncate">
-                  {recipe.name}
-                </p>
-                <div className="flex items-center gap-3 text-[10px] text-dark-500">
+              <ItemCard.Body>
+                <ItemCard.Title>{recipe.name}</ItemCard.Title>
+                <div className="flex items-center gap-3 text-[10px] text-dark-500 mt-0.5">
                   <span>
                     Coût: <KamasDisplay amount={recipe.craftCost} size="sm" />
                   </span>
@@ -92,23 +88,22 @@ const TopRecipes = ({ recipes, jobId = '', onJobChange }: TopRecipesProps) => {
                     Vente: <KamasDisplay amount={recipe.sellPrice} size="sm" />
                   </span>
                 </div>
-              </div>
+              </ItemCard.Body>
 
-              {/* Margin */}
-              <div className="shrink-0 flex flex-col items-end">
-                <KamasDisplay
-                  amount={recipe.margin}
-                  size="sm"
-                  colored
-                  className="font-bold"
-                />
-                {recipe.marginPercent !== undefined && (
-                  <span className={`text-[10px] ${recipe.margin > 0 ? 'text-gain' : 'text-loss'}`}>
-                    {recipe.marginPercent > 0 ? '+' : ''}{recipe.marginPercent}%
-                  </span>
-                )}
-              </div>
-            </div>
+              <ItemCard.Metrics>
+                <div className="flex flex-col items-end flex-shrink-0">
+                  <KamasDisplay amount={recipe.margin} size="sm" colored className="font-bold" />
+                  {recipe.marginPercent !== undefined && (
+                    <span
+                      className={`text-[10px] ${recipe.margin > 0 ? 'text-gain' : 'text-loss'}`}
+                    >
+                      {recipe.marginPercent > 0 ? '+' : ''}
+                      {recipe.marginPercent}%
+                    </span>
+                  )}
+                </div>
+              </ItemCard.Metrics>
+            </ItemCard>
           ))
         )}
       </div>

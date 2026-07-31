@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { UserSale } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import { getSaleProfit } from '@/lib/utils/sales';
+import ItemCard from '@/components/ui/ItemCard';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
@@ -109,33 +110,14 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
     : null;
 
   return (
-    <div
-      className={`glass rounded-xl p-4 flex items-center gap-4 transition-all duration-300 hover:shadow-md ${
-        sale.status === 'sold' ? 'opacity-75' : ''
-      }`}
-    >
-      {/* Item icon */}
-      <div className="w-12 h-12 rounded-xl bg-dark-700/50 flex items-center justify-center flex-shrink-0 overflow-hidden">
-        {sale.icon_url ? (
-          <img
-            src={sale.icon_url}
-            alt={sale.item_name}
-            className="w-10 h-10 object-contain"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-10 h-10 bg-dark-600 rounded-lg" />
-        )}
-      </div>
+    <ItemCard layout="row" dimmed={sale.status === 'sold'}>
+      <ItemCard.Icon src={sale.icon_url} alt={sale.item_name} size="md" />
 
-      {/* Info */}
-      <div className="flex-1 min-w-0">
+      <ItemCard.Body>
         <div className="flex items-center gap-2">
-          <p className="text-sm font-semibold text-dark-100 truncate">
-            {sale.item_name}
-          </p>
+          <ItemCard.Title>{sale.item_name}</ItemCard.Title>
           {sale.status === 'active' && onEditPrice && (
-            <button 
+            <button
               onClick={() => onEditPrice(sale)}
               className="text-dark-500 hover:text-kamas transition-colors"
               title="Modifier le prix (Taxe 1%)"
@@ -144,52 +126,37 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          <Badge
-            variant={sale.status === 'sold' ? 'success' : 'warning'}
-          >
+        <ItemCard.Badges>
+          <Badge variant={sale.status === 'sold' ? 'success' : 'warning'}>
             {sale.status === 'sold' ? 'Vendu' : 'En vente'}
           </Badge>
-          {sale.is_resale && (
-            <Badge variant="info" className="bg-purple-500/20 text-purple-400 border-purple-500/30">
-              Achat HDV
-            </Badge>
-          )}
+          {sale.is_resale && <Badge variant="craft">Achat HDV</Badge>}
           <span className="text-[10px] font-medium text-kamas">
             {sale.lot_count}x lot de {sale.lot_size}
           </span>
           <span className="text-[10px] text-dark-500">• {dateStr}</span>
           {soldDateStr && (
-            <span className="text-[10px] text-gain">
-              Vendu le {soldDateStr}
-            </span>
+            <span className="text-[10px] text-gain">Vendu le {soldDateStr}</span>
           )}
-        </div>
-      </div>
+        </ItemCard.Badges>
+      </ItemCard.Body>
 
-      {/* Margins */}
-      <div className="hidden sm:block text-right flex-shrink-0">
-        <KamasDisplay amount={sale.craft_cost || 0} size="sm" className="text-dark-300" />
-        <p className="text-[10px] text-dark-500">{sale.is_resale ? "Coût d'achat" : 'Coût craft'}</p>
-      </div>
-      <div className="hidden sm:block text-right flex-shrink-0">
-        <KamasDisplay amount={sale.tax_paid || 0} size="sm" className="text-loss" />
-        <p className="text-[10px] text-dark-500">Taxes HDV</p>
-      </div>
+      <ItemCard.Metrics className="gap-4">
+        <ItemCard.Metric label={sale.is_resale ? "Coût d'achat" : 'Coût craft'} hideOnMobile>
+          <KamasDisplay amount={sale.craft_cost || 0} size="sm" className="text-dark-300" />
+        </ItemCard.Metric>
+        <ItemCard.Metric label="Taxes HDV" hideOnMobile>
+          <KamasDisplay amount={sale.tax_paid || 0} size="sm" className="text-loss" />
+        </ItemCard.Metric>
+        <ItemCard.Metric label={`prix du lot (x${sale.lot_size})`}>
+          <KamasDisplay amount={lotPrice} size="sm" className="text-dark-300" />
+        </ItemCard.Metric>
+        <ItemCard.Metric label="bénéfice net" className="min-w-[100px]">
+          <KamasDisplay amount={netProfit} size="md" colored className="font-bold" />
+        </ItemCard.Metric>
+      </ItemCard.Metrics>
 
-      {/* Price */}
-      <div className="text-right flex-shrink-0">
-        <KamasDisplay amount={lotPrice} size="sm" className="text-dark-300" />
-        <p className="text-[10px] text-dark-500">prix du lot (x{sale.lot_size})</p>
-      </div>
-
-      <div className="text-right flex-shrink-0 min-w-[100px]">
-        <KamasDisplay amount={netProfit} size="md" colored className="font-bold text-dark-100" />
-        <p className="text-[10px] text-dark-500">bénéfice net</p>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+      <ItemCard.Actions className="ml-2">
         {sale.status === 'active' && (
           <Button
             size="sm"
@@ -212,7 +179,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
         >
           <Trash2 size={14} />
         </Button>
-      </div>
+      </ItemCard.Actions>
 
       <Modal
         isOpen={isSellModalOpen}
@@ -252,7 +219,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
           </div>
         </form>
       </Modal>
-    </div>
+    </ItemCard>
   );
 };
 

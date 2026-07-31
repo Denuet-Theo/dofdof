@@ -1,35 +1,22 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { DofusDBItem, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import { useState, useCallback } from 'react';
+import { DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
-import ItemCard from '@/components/items/ItemCard';
+import ItemPriceCard from '@/components/items/ItemPriceCard';
 import Skeleton from '@/components/ui/Skeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import { Search, Database } from 'lucide-react';
 
 type Tab = 'all' | 'resources' | 'craftable';
 
 const ItemsPage = () => {
   const [items, setItems] = useState<DofusDBItem[]>([]);
-  const [prices, setPrices] = useState<Map<number, ItemPrice>>(new Map());
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('all');
-
-  // Load existing prices from Supabase
-  useEffect(() => {
-    const loadPrices = async () => {
-      const supabase = createClient();
-      const { data } = await supabase.from('item_prices').select('*');
-      if (data) {
-        const priceMap = new Map<number, ItemPrice>();
-        data.forEach((p: ItemPrice) => priceMap.set(p.item_id, p));
-        setPrices(priceMap);
-      }
-    };
-    loadPrices();
-  }, []);
+  const { prices, applyPriceSaved } = useItemPrices();
 
   const handleSearch = useCallback(async (query: string) => {
     if (!query) {
@@ -54,22 +41,6 @@ const ItemsPage = () => {
       setLoading(false);
     }
   }, []);
-
-  const handlePriceSaved = (itemId: number, price: number, updated_at: string) => {
-    setPrices((prev) => {
-      const next = new Map(prev);
-      const existing = next.get(itemId);
-      next.set(itemId, {
-        item_id: itemId,
-        price,
-        updated_at,
-        item_name: existing?.item_name || '',
-        icon_url: existing?.icon_url || null,
-        updated_by: existing?.updated_by || null,
-      });
-      return next;
-    });
-  };
 
   const filteredItems = items.filter(item => {
     if (activeTab === 'resources') return !item.hasRecipe;
@@ -140,36 +111,28 @@ const ItemsPage = () => {
           {filteredItems.map((item) => {
             const itemPrice = prices.get(item.id);
             return (
-              <ItemCard
+              <ItemPriceCard
                 key={item.id}
                 item={item}
                 currentPrice={itemPrice?.price}
                 updatedAt={itemPrice?.updated_at}
-                onPriceSaved={handlePriceSaved}
+                onPriceSaved={applyPriceSaved}
               />
             );
           })}
         </div>
       ) : searched ? (
-        <div className="text-center py-16">
-          <Database size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">
-            Aucun résultat trouvé
-          </p>
-          <p className="text-dark-500 text-sm mt-1">
-            Essaie avec un autre terme de recherche ou change de filtre
-          </p>
-        </div>
+        <EmptyState
+          icon={Database}
+          title="Aucun résultat trouvé"
+          description="Essaie avec un autre terme de recherche ou change de filtre"
+        />
       ) : (
-        <div className="text-center py-16">
-          <Search size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">
-            Recherche un item pour commencer
-          </p>
-          <p className="text-dark-500 text-sm mt-1">
-            Tape le nom d&apos;un item Dofus (ex: &quot;épée&quot;, &quot;bouclier&quot;, &quot;anneau&quot;)
-          </p>
-        </div>
+        <EmptyState
+          icon={Search}
+          title="Recherche un item pour commencer"
+          description={'Tape le nom d’un item Dofus (ex: « épée », « bouclier », « anneau »)'}
+        />
       )}
     </div>
   );

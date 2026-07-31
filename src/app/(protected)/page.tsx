@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { UserSale, ItemPrice, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
+import { UserSale, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
+import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import TopRecipes from '@/components/dashboard/TopRecipes';
@@ -30,9 +31,9 @@ interface TopRecipe {
 
 const DashboardPage = () => {
   const [sales, setSales] = useState<UserSale[]>([]);
-  const [prices, setPrices] = useState<ItemPrice[]>([]);
+  const { prices } = useItemPrices();
   const [loading, setLoading] = useState(true);
-  
+
   const [jobId, setJobId] = useState<string>('');
   const [topRecipes, setTopRecipes] = useState<TopRecipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(false);
@@ -41,16 +42,12 @@ const DashboardPage = () => {
     const supabase = createClient();
 
     try {
-      const [salesRes, pricesRes] = await Promise.all([
-        supabase
-          .from('user_sales')
-          .select('*')
-          .order('created_at', { ascending: false }),
-        supabase.from('item_prices').select('*'),
-      ]);
+      const { data } = await supabase
+        .from('user_sales')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      if (salesRes.data) setSales(salesRes.data);
-      if (pricesRes.data) setPrices(pricesRes.data);
+      if (data) setSales(data);
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {
@@ -64,16 +61,18 @@ const DashboardPage = () => {
 
   // Fetch actual recipes to compute accurate Top 10
   const fetchTopRecipes = useCallback(async () => {
-    if (prices.length === 0) return;
+    if (prices.size === 0) return;
     setLoadingRecipes(true);
     try {
-      const itemIds = prices.filter(p => p.price > 0).map(p => p.item_id);
+      const itemIds = Array.from(prices.values())
+        .filter((p) => p.price > 0)
+        .map((p) => p.item_id);
       if (itemIds.length === 0) {
         setTopRecipes([]);
         setLoadingRecipes(false);
         return;
       }
-      
+
       const params = new URLSearchParams({ limit: '100' });
       params.set('resultIds', itemIds.join(','));
       if (jobId) params.set('jobId', jobId);
@@ -83,12 +82,10 @@ const DashboardPage = () => {
       const data: DofusDBResponse<DofusDBRecipe> = await res.json();
       
       const recipesList = data.data || [];
-      const priceMap = new Map<number, ItemPrice>();
-      prices.forEach(p => priceMap.set(p.item_id, p));
-      
-      const computed: TopRecipe[] = recipesList.filter(recipe => recipeHasAllPrices(recipe, priceMap)).map(recipe => {
-        const resultPrice = priceMap.get(recipe.resultId)?.price || 0;
-        const craftCost = computeCraftCost(recipe, priceMap);
+
+      const computed: TopRecipe[] = recipesList.filter(recipe => recipeHasAllPrices(recipe, prices)).map(recipe => {
+        const resultPrice = prices.get(recipe.resultId)?.price || 0;
+        const craftCost = computeCraftCost(recipe, prices);
         const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
 
         return {
@@ -223,7 +220,7 @@ const DashboardPage = () => {
           <SalesChart data={chartData} />
         </div>
         <div>
-          {loadingRecipes && prices.length > 0 && topRecipes.length === 0 ? (
+          {loadingRecipes && prices.size > 0 && topRecipes.length === 0 ? (
             <div className="glass rounded-2xl p-6 h-full flex flex-col">
               <Skeleton className="h-6 w-1/3 mb-6" />
               <div className="space-y-3">

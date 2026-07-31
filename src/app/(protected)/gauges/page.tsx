@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { DofusDBItem, DofusDBRecipe, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import { DofusDBItem, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import GaugeItemCard from '@/components/gauges/GaugeItemCard';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
+import EmptyState from '@/components/ui/EmptyState';
+import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import { Gauge as GaugeIcon, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { parseGaugeInfo, computeValuePerKama, GaugeInfo } from '@/lib/utils/gauges';
 import { computeCraftCost } from '@/lib/utils/recipes';
@@ -25,7 +26,7 @@ type SortBy = 'ratio' | 'alpha' | 'level';
 
 const GaugesPage = () => {
   const [items, setItems] = useState<DofusDBItem[]>([]);
-  const [prices, setPrices] = useState<Map<number, ItemPrice>>(new Map());
+  const { prices, applyPriceSaved } = useItemPrices();
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   // Free-text term from the search box and the quick-select chip combine into one query,
@@ -40,19 +41,6 @@ const GaugesPage = () => {
   // whichever is cheaper between buying at the sell price and crafting from ingredients.
   const [includeCraft, setIncludeCraft] = useState(false);
   const [recipesByResultId, setRecipesByResultId] = useState<Map<number, DofusDBRecipe>>(new Map());
-
-  useEffect(() => {
-    const loadPrices = async () => {
-      const supabase = createClient();
-      const { data } = await supabase.from('item_prices').select('*');
-      if (data) {
-        const priceMap = new Map<number, ItemPrice>();
-        data.forEach((p: ItemPrice) => priceMap.set(p.item_id, p));
-        setPrices(priceMap);
-      }
-    };
-    loadPrices();
-  }, []);
 
   const runFetch = useCallback(async (params: URLSearchParams | null, paginate: boolean) => {
     if (!params) {
@@ -165,22 +153,6 @@ const GaugesPage = () => {
     const ratio = usedCraft ? craftRatio : sellRatio;
 
     return { sellPrice, sellRatio, recipe, craftCost, craftRatio, price, usedCraft, ratio };
-  };
-
-  const handlePriceSaved = (itemId: number, price: number, updated_at: string) => {
-    setPrices((prev) => {
-      const next = new Map(prev);
-      const existing = next.get(itemId);
-      next.set(itemId, {
-        item_id: itemId,
-        price,
-        updated_at,
-        item_name: existing?.item_name || '',
-        icon_url: existing?.icon_url || null,
-        updated_by: existing?.updated_by || null,
-      });
-      return next;
-    });
   };
 
   const filteredRows = items
@@ -374,28 +346,22 @@ const GaugesPage = () => {
               recipe={recipe}
               ingredientPrices={prices}
               isBest={item.id === bestId}
-              onPriceSaved={handlePriceSaved}
+              onPriceSaved={applyPriceSaved}
             />
           ))}
         </div>
       ) : searched ? (
-        <div className="text-center py-16">
-          <GaugeIcon size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">Aucun résultat trouvé</p>
-          <p className="text-dark-500 text-sm mt-1">
-            Essaie avec un autre nom, ou élargis les filtres de niveau
-          </p>
-        </div>
+        <EmptyState
+          icon={GaugeIcon}
+          title="Aucun résultat trouvé"
+          description="Essaie avec un autre nom, ou élargis les filtres de niveau"
+        />
       ) : (
-        <div className="text-center py-16">
-          <GaugeIcon size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">
-            Recherche une jauge ou un aliment pour commencer
-          </p>
-          <p className="text-dark-500 text-sm mt-1">
-            Renseigne les prix pour faire apparaître le meilleur rapport par kama
-          </p>
-        </div>
+        <EmptyState
+          icon={GaugeIcon}
+          title="Recherche une jauge ou un aliment pour commencer"
+          description="Renseigne les prix pour faire apparaître le meilleur rapport par kama"
+        />
       )}
     </div>
   );

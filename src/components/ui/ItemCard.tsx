@@ -121,8 +121,17 @@ const Icon = ({ src, alt, size = 'md', overlay, onClick, title, className = '' }
   );
 };
 
-const Body = ({ children, className = '' }: { children: ReactNode; className?: string }) => (
-  <div className={`flex-1 min-w-0 ${className}`}>{children}</div>
+interface BodyProps {
+  children: ReactNode;
+  className?: string;
+  /** Set when the info column is separately clickable from the card itself. */
+  onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+}
+
+const Body = ({ children, className = '', onClick }: BodyProps) => (
+  <div className={`flex-1 min-w-0 ${className}`} onClick={onClick}>
+    {children}
+  </div>
 );
 
 const Title = ({ children, className = '' }: { children: ReactNode; className?: string }) => (

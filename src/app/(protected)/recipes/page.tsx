@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
-import { DofusDBRecipe, DofusDBItem, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import { DofusDBRecipe, DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
 import RecipeCard from '@/components/recipes/RecipeCard';
 import SellModal from '@/components/recipes/SellModal';
 import PriceModal from '@/components/recipes/PriceModal';
 import SearchBar from '@/components/items/SearchBar';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
+import EmptyState from '@/components/ui/EmptyState';
+import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { JOBS } from '@/lib/constants/jobs';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
@@ -19,7 +20,7 @@ const RecipesContent = () => {
   const initialSearch = searchParams.get('search') || '';
   
   const [recipes, setRecipes] = useState<DofusDBRecipe[]>([]);
-  const [prices, setPrices] = useState<Map<number, ItemPrice>>(new Map());
+  const { prices, applyPriceSaved } = useItemPrices();
   const [loading, setLoading] = useState(true);
   const [jobId, setJobId] = useState<string>('');
   const [minLevel, setMinLevel] = useState('');
@@ -44,20 +45,6 @@ const RecipesContent = () => {
     price?: number;
   } | null>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
-
-  // Load prices from Supabase
-  useEffect(() => {
-    const loadPrices = async () => {
-      const supabase = createClient();
-      const { data } = await supabase.from('item_prices').select('*');
-      if (data) {
-        const priceMap = new Map<number, ItemPrice>();
-        data.forEach((p: ItemPrice) => priceMap.set(p.item_id, p));
-        setPrices(priceMap);
-      }
-    };
-    loadPrices();
-  }, []);
 
   const loadRecipes = useCallback(async () => {
     setLoading(true);
@@ -178,23 +165,6 @@ const RecipesContent = () => {
   }) => {
     setEditPriceItem(item);
     setShowPriceModal(true);
-  };
-  
-  const handlePriceSaved = (itemId: number, newPrice: number, updated_at: string) => {
-    // Update local state instantly so the margin re-calculates without refetching
-    setPrices(prev => {
-      const next = new Map(prev);
-      const existing = next.get(itemId);
-      next.set(itemId, {
-        item_id: itemId,
-        price: newPrice,
-        updated_at,
-        item_name: existing?.item_name || '',
-        icon_url: existing?.icon_url || null,
-        updated_by: existing?.updated_by || null,
-      });
-      return next;
-    });
   };
 
   return (
@@ -335,15 +305,11 @@ const RecipesContent = () => {
           ))}
         </div>
       ) : (
-        <div className="text-center py-16">
-          <ChefHat size={48} className="mx-auto text-dark-600 mb-4" />
-          <p className="text-dark-400 text-lg font-medium">
-            Aucune recette trouvée
-          </p>
-          <p className="text-dark-500 text-sm mt-1">
-            Modifie les filtres pour voir d&apos;autres recettes
-          </p>
-        </div>
+        <EmptyState
+          icon={ChefHat}
+          title="Aucune recette trouvée"
+          description={'Modifie les filtres pour voir d’autres recettes'}
+        />
       )}
 
       {/* Modals */}
@@ -364,7 +330,7 @@ const RecipesContent = () => {
           setEditPriceItem(null);
         }}
         item={editPriceItem}
-        onPriceSaved={handlePriceSaved}
+        onPriceSaved={applyPriceSaved}
       />
     </div>
   );

@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
 import KamasDisplay from '@/components/ui/KamasDisplay';
+import ItemPreview from '@/components/items/ItemPreview';
 import { createClient } from '@/lib/supabase/client';
 import { ShoppingCart } from 'lucide-react';
 import { HDV_TAX_RATE } from '@/lib/utils/recipes';
@@ -130,39 +131,35 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
     <Modal isOpen={isOpen} onClose={onClose} title="Mettre en vente">
       {item && (
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Item preview */}
-          <div className="flex items-center gap-4 p-4 rounded-xl bg-dark-800/50">
-            <img
-              src={item.iconUrl}
-              alt={item.name}
-              className="w-12 h-12 rounded-lg bg-dark-700/50 object-contain"
-            />
-            <div className="flex-1">
-              <p className="font-semibold text-dark-100">{item.name}</p>
-              <p className="text-sm text-dark-500 flex gap-1">
+          <ItemPreview
+            name={item.name}
+            iconUrl={item.iconUrl}
+            subtitle={
+              <span className="flex gap-1">
                 Coût craft unitaire: <KamasDisplay amount={item.craftCost} size="sm" />
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-dark-300 font-medium cursor-pointer">
-                Achat HDV
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsResale(!isResale)}
-                className={`w-11 h-6 rounded-full transition-colors relative ${
-                  isResale ? 'bg-kamas' : 'bg-dark-600'
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
-                    isResale ? 'translate-x-6' : 'translate-x-1'
+              </span>
+            }
+            action={
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <label className="text-sm text-dark-300 font-medium cursor-pointer">
+                  Achat HDV
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsResale(!isResale)}
+                  className={`w-11 h-6 rounded-full transition-colors relative ${
+                    isResale ? 'bg-kamas' : 'bg-dark-600'
                   }`}
-                />
-              </button>
-            </div>
-          </div>
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${
+                      isResale ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            }
+          />
 
           <div className="space-y-3">
             <label className="text-sm font-medium text-dark-200">
@@ -230,7 +227,9 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
             </div>
             <div className="flex justify-between text-sm text-loss">
               <span>Taxe de mise en vente (2%)</span>
-              <span>- {taxAmount.toLocaleString('fr-FR')} ⚜️</span>
+              <span className="flex items-center gap-1">
+                -<KamasDisplay amount={taxAmount} size="sm" className="text-loss" />
+              </span>
             </div>
             <div className="h-px w-full bg-dark-700/50 my-2" />
             <div className="flex justify-between font-semibold">

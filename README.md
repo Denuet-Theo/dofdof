@@ -55,7 +55,22 @@ pushed to a shared environment; add a new one instead.
 `scripts/run-migrations.mjs` before `next start` serves traffic. Render runs the app as a
 single long-lived process, so this happens once per deploy.
 
-It is driven by one environment variable, set in the Render dashboard:
+#### Render service configuration
+
+The build and start phases must stay separate. Render sets `NODE_ENV=production` at
+**runtime only**, and npm treats that as `--omit=dev` — so an `npm install` in the *Start
+Command* prunes the devDependencies the build installed, deleting the Supabase CLI (and
+`typescript`, and `tailwindcss`) from `node_modules`.
+
+| Setting | Value |
+| --- | --- |
+| Build Command | `npm install && npm run build` |
+| Start Command | `npm run start` |
+
+Do not put `npm install` or `npm run build` in the Start Command. Use `&&` rather than `;`
+so a failed step actually stops the deploy instead of continuing to the next one.
+
+#### Environment
 
 | Variable | Value |
 | --- | --- |
@@ -70,15 +85,20 @@ Notes:
 - This is a privileged credential and is deliberately separate from the app's own
   `NEXT_PUBLIC_SUPABASE_*` vars — those are an anon key and cannot run DDL. Keep it out of
   any `NEXT_PUBLIC_` variable, which would ship it to the browser.
-- Render's build must install devDependencies (the Supabase CLI is one), e.g.
-  `npm ci --include=dev && npm run build`.
 
 Behaviour:
 
-- **Unset `SUPABASE_DB_URL`** — migrations are skipped with a warning and the app boots.
-  This keeps a plain local `npm start` working.
+- **Unset `SUPABASE_DB_URL` on Render** (detected via Render's `RENDER=true`) — startup is
+  aborted. A deployed service that skipped its migrations would otherwise look green while
+  serving a stale schema, which is the worst possible outcome.
+- **Unset `SUPABASE_DB_URL` locally** — migrations are skipped with a warning and the app
+  boots, so a plain local `npm start` still works.
 - **Migration fails** — startup is aborted with a non-zero exit, so the deploy fails rather
   than serving requests against an unexpected schema.
+
+The script prints exactly one `[migrate] ...` line per boot, so the startup logs always say
+which of these happened. No `[migrate]` line at all means the `prestart` hook never ran —
+check that the Start Command goes through npm.
 
 To dry-run the same step locally without starting the server:
 

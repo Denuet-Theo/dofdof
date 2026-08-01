@@ -18,9 +18,14 @@ const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abr
 // Poisson comestible, Viande comestible, Boisson, Viande primitive — not just bread/Paysan.
 const FOOD_TYPE_IDS = '33,42,49,69,79,187';
 const FOOD_CHIPS = ['PV', 'Énergie'];
-const PAGE_SIZE = 50;
-// Headroom above the ~600 items currently spread across the food types above.
+// Headroom above the ~605 items currently spread across the food types above.
 const MAX_FOOD_ITEMS = 700;
+// One request now covers the whole browse. The 50 this used to be was DofusDB's
+// hard `$limit` cap, not a choice: it forced a 13-request fan-out, and each of
+// those requests paid a remote auth round-trip in the proxy before reaching the
+// data. The Postgres mirror has no such cap, so we ask for the lot at once and
+// keep the pagination loop below purely as a safety net.
+const PAGE_SIZE = MAX_FOOD_ITEMS;
 
 type SortBy = 'ratio' | 'alpha' | 'level';
 
@@ -57,8 +62,8 @@ const GaugesPage = () => {
       const firstData: DofusDBResponse<DofusDBItem> = await firstRes.json();
       let allItems = firstData.data || [];
 
-      // The PV/Énergie browse spans ~600 items across 6 item types — one page of 50 would
-      // silently drop most of them, so fetch the rest in parallel up to a safety cap.
+      // The PV/Énergie browse spans ~605 items across 6 item types, which one page now
+      // covers. This only does anything if a patch pushes the catalog past MAX_FOOD_ITEMS.
       if (paginate) {
         const total = Math.min(firstData.total ?? allItems.length, MAX_FOOD_ITEMS);
         const skips: number[] = [];

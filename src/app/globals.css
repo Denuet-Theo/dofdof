@@ -80,11 +80,11 @@ body {
 }
 
 .animate-fade-in {
-  animation: fade-in 0.4s ease-out forwards;
+  animation: fade-in 0.18s ease-out forwards;
 }
 
 .animate-slide-up {
-  animation: slide-up 0.5s ease-out forwards;
+  animation: slide-up 0.22s ease-out forwards;
 }
 
 .animate-shimmer {
@@ -102,24 +102,29 @@ body {
 }
 
 /* === Stagger children === */
-/* The results grids hold 50+ cards, so anything past the 12th shares the final delay
-   rather than fading in seconds after the page settled. */
+/* The results grids hold 50+ cards (258 on the /gauges PV browse), so anything past
+   the 12th shares the final delay rather than fading in seconds after the page settled.
+
+   These delays gate how fast results *feel*, not how fast they arrive: the grid used
+   to need 0.6s of delay + 0.4s of fade before it was fully readable, against a query
+   that now answers in tens of milliseconds. Keeping the stagger's shape but a quarter
+   of its duration reads as instant while still avoiding a hard pop-in. */
 .stagger-children > * {
   opacity: 0;
-  animation: fade-in 0.4s ease-out forwards;
-  animation-delay: 0.6s;
+  animation: fade-in 0.18s ease-out forwards;
+  animation-delay: 0.14s;
 }
-.stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
-.stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
-.stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
-.stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
-.stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
-.stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
-.stagger-children > *:nth-child(7) { animation-delay: 0.35s; }
-.stagger-children > *:nth-child(8) { animation-delay: 0.4s; }
-.stagger-children > *:nth-child(9) { animation-delay: 0.45s; }
-.stagger-children > *:nth-child(10) { animation-delay: 0.5s; }
-.stagger-children > *:nth-child(11) { animation-delay: 0.55s; }
+.stagger-children > *:nth-child(1) { animation-delay: 0.012s; }
+.stagger-children > *:nth-child(2) { animation-delay: 0.024s; }
+.stagger-children > *:nth-child(3) { animation-delay: 0.036s; }
+.stagger-children > *:nth-child(4) { animation-delay: 0.048s; }
+.stagger-children > *:nth-child(5) { animation-delay: 0.06s; }
+.stagger-children > *:nth-child(6) { animation-delay: 0.072s; }
+.stagger-children > *:nth-child(7) { animation-delay: 0.084s; }
+.stagger-children > *:nth-child(8) { animation-delay: 0.096s; }
+.stagger-children > *:nth-child(9) { animation-delay: 0.108s; }
+.stagger-children > *:nth-child(10) { animation-delay: 0.12s; }
+.stagger-children > *:nth-child(11) { animation-delay: 0.132s; }
 
 /* === Gradient text === */
 .text-gradient-gold {

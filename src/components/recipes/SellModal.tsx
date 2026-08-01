@@ -8,7 +8,7 @@ import KamasDisplay from '@/components/ui/KamasDisplay';
 import ItemPreview from '@/components/items/ItemPreview';
 import { createClient } from '@/lib/supabase/client';
 import { ShoppingCart } from 'lucide-react';
-import { HDV_TAX_RATE } from '@/lib/utils/recipes';
+import { HDV_TAX_RATE, computeMargin } from '@/lib/utils/recipes';
 
 interface SellModalProps {
   isOpen: boolean;
@@ -124,8 +124,11 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
     ? (isResale ? parsedPurchasePrice * totalItems : item.craftCost * totalItems)
     : 0;
   const totalSaleValue = parsedLotPrice * parsedCount;
-  const taxAmount = Math.floor(totalSaleValue * HDV_TAX_RATE);
-  const netMargin = totalSaleValue - totalCraftCost - taxAmount;
+  const {
+    hdvTax: taxAmount,
+    margin: netMargin,
+    marginPercent,
+  } = computeMargin(totalSaleValue, totalCraftCost);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Mettre en vente">
@@ -234,7 +237,17 @@ const SellModal = ({ isOpen, onClose, item, onSold }: SellModalProps) => {
             <div className="h-px w-full bg-dark-700/50 my-2" />
             <div className="flex justify-between font-semibold">
               <span className="text-dark-200">Bénéfice estimé</span>
-              <KamasDisplay amount={netMargin} colored />
+              <span className="flex items-center gap-1">
+                <KamasDisplay amount={netMargin} colored />
+                {totalCraftCost > 0 && (
+                  <span
+                    className={`text-[10px] ${netMargin > 0 ? 'text-gain' : netMargin < 0 ? 'text-loss' : 'text-dark-300'}`}
+                  >
+                    ({marginPercent > 0 ? '+' : ''}
+                    {marginPercent}%)
+                  </span>
+                )}
+              </span>
             </div>
           </div>
 

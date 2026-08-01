@@ -28,43 +28,35 @@ export type UserSale = {
   sold_at: string | null;
 };
 
+export interface DofusDBEffect {
+  from: number;
+  to: number;
+  characteristic: number;
+  category: number;
+  elementId: number;
+  effectId: number;
+}
+
+// Ces formes sont désormais servies depuis le miroir local (`dofus_items` /
+// `dofus_recipes`), plus directement depuis api.dofusdb.fr. DofusDB renvoie cinq
+// langues ; l'app n'a jamais lu que le français, donc le miroir ne stocke que
+// `fr` et ces types sont restreints en conséquence. Le compilateur garantit
+// ainsi qu'aucun appelant ne dépend d'une locale qu'on ne stocke plus.
 export interface DofusDBItem {
   id: number;
   typeId: number;
   iconId: number;
   level: number;
-  name: {
-    fr: string;
-    en: string;
-    de: string;
-    es: string;
-    pt: string;
-  };
-  description: {
-    fr: string;
-    en: string;
-  };
+  name: { fr: string };
+  description: { fr: string };
   img: string;
-  slug: {
-    fr: string;
-    en: string;
-  };
+  slug: { fr: string };
   type: {
     id: number;
-    name: {
-      fr: string;
-      en: string;
-    };
+    name: { fr: string };
   };
   hasRecipe: boolean;
-  effects?: {
-    from: number;
-    to: number;
-    characteristic: number;
-    category: number;
-    elementId: number;
-    effectId: number;
-  }[];
+  effects?: DofusDBEffect[];
 }
 
 export interface DofusDBRecipe {
@@ -76,20 +68,14 @@ export interface DofusDBRecipe {
   quantities: number[];
   jobId: number;
   skillId: number;
-  resultName: {
-    fr: string;
-    en: string;
-  };
+  resultName: { fr: string };
   result: DofusDBItem & {
     price: number;
   };
   ingredients: DofusDBItem[];
   job: {
     id: number;
-    name: {
-      fr: string;
-      en: string;
-    };
+    name: { fr: string };
     img: string;
   };
 }
@@ -100,6 +86,51 @@ export interface DofusDBResponse<T> {
   skip: number;
   data: T[];
 }
+
+// Lignes du miroir du catalogue (voir 20260801090000_dofus_catalog_mirror.sql).
+// Alimentées par scripts/sync-dofusdb.mjs ; l'app les lit uniquement, d'où
+// l'absence d'Insert/Update exploitables côté client (RLS en select seul).
+export type DofusItemRow = {
+  id: number;
+  type_id: number;
+  super_type_id: number;
+  icon_id: number;
+  level: number;
+  name_fr: string;
+  type_name_fr: string;
+  description_fr: string;
+  slug_fr: string;
+  has_recipe: boolean;
+  effects: DofusDBEffect[];
+  img: string;
+  synced_at: string;
+};
+
+export type DofusRecipeRow = {
+  id: number;
+  result_id: number;
+  result_type_id: number;
+  result_super_type_id: number;
+  result_level: number;
+  result_name_fr: string;
+  // Alignés par index : quantities[i] correspond à ingredient_ids[i].
+  ingredient_ids: number[];
+  quantities: number[];
+  job_id: number;
+  job_name_fr: string;
+  job_img: string;
+  skill_id: number;
+  synced_at: string;
+};
+
+export type DofusSyncStateRow = {
+  resource: string;
+  last_success_at: string | null;
+  last_attempt_at: string | null;
+  row_count: number;
+  upstream_total: number | null;
+  last_error: string | null;
+};
 
 export interface Database {
   public: {
@@ -160,6 +191,24 @@ export interface Database {
           sold_at?: string | null;
           created_at?: string;
         };
+        Relationships: [];
+      };
+      dofus_items: {
+        Row: DofusItemRow;
+        Insert: DofusItemRow;
+        Update: Partial<DofusItemRow>;
+        Relationships: [];
+      };
+      dofus_recipes: {
+        Row: DofusRecipeRow;
+        Insert: DofusRecipeRow;
+        Update: Partial<DofusRecipeRow>;
+        Relationships: [];
+      };
+      dofus_sync_state: {
+        Row: DofusSyncStateRow;
+        Insert: DofusSyncStateRow;
+        Update: Partial<DofusSyncStateRow>;
         Relationships: [];
       };
     };

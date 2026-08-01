@@ -131,7 +131,7 @@ const RECIPES_QUERY = '$sort[id]=1&$populate=false';
 
 // ------------------------------------------------------------------- mapping
 
-const toItemRow = (item, types) => {
+export const toItemRow = (item, types) => {
   const type = types.get(item.typeId);
   return {
     id: item.id,
@@ -149,7 +149,7 @@ const toItemRow = (item, types) => {
   };
 };
 
-const toRecipeRow = (recipe, types, jobs) => {
+export const toRecipeRow = (recipe, types, jobs) => {
   const type = types.get(recipe.resultTypeId);
   const job = jobs.get(recipe.jobId);
   return {

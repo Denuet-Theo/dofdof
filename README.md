@@ -52,8 +52,9 @@ pushed to a shared environment; add a new one instead.
 ### Migrations on startup (Render)
 
 `npm start` runs the `prestart` hook first, which applies any pending migrations via
-`scripts/run-migrations.mjs` before `next start` serves traffic. Render runs the app as a
-single long-lived process, so this happens once per deploy.
+`scripts/run-migrations.mjs` and then refreshes the DofusDB catalog mirror via
+`scripts/sync-dofusdb.mjs --if-stale`, before `next start` serves traffic. Render runs the
+app as a single long-lived process, so this happens once per deploy.
 
 #### Render service configuration
 
@@ -100,6 +101,9 @@ The script prints exactly one `[migrate] ...` line per boot, so the startup logs
 which of these happened. No `[migrate]` line at all means the `prestart` hook never ran —
 check that the Start Command goes through npm.
 
+Migrations run *before* the catalog sync, so a migration that adds a column is always in
+place before the sync tries to fill it.
+
 To dry-run the same step locally without starting the server:
 
 ```bash
@@ -126,6 +130,32 @@ transaction-mode pooling.
 It writes through `SUPABASE_DB_URL` rather than a service-role key. That variable already
 exists for migrations and already carries more privilege than a service-role key would, so
 adding one would be a second secret to rotate for no extra capability.
+
+#### On startup
+
+`prestart` runs `sync-dofusdb.mjs --if-stale` after the migrations. That mode reads
+`dofus_sync_state` first and classifies the mirror:
+
+| State | Meaning | On success | If the sync fails |
+| --- | --- | --- | --- |
+| **fresh** | synced less than `DOFUSDB_SYNC_MAX_AGE_HOURS` ago (default 168 h / 7 days) | skips in ~50 ms, one log line | — |
+| **stale** | older than that | full sync, ~10 s | **boots anyway** with a warning |
+| **cold** | table empty, or migrations have not run yet | full sync, ~10 s | **aborts startup on Render** |
+
+The asymmetry is the point. A *stale* catalog is still perfectly usable, so blocking a deploy
+because DofusDB is briefly unreachable would be worse than the outage itself. A *cold*
+catalog makes every catalog-backed route fail, and a deploy that goes green in that state is
+the worst possible outcome — the same reasoning as the migration step above.
+
+So the steady-state cost is one indexed query on a two-row table per boot, and a real sync
+runs at most once a week. It delays the new instance binding its port by ~10 s when it does
+run; Render holds the old instance until then, so this delays cutover rather than causing
+downtime.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `DOFUSDB_SYNC_MAX_AGE_HOURS` | `168` | How old the mirror may get before a boot re-syncs it |
+| `DOFUSDB_SYNC_ON_BOOT` | unset | Set to `0` to skip the boot sync entirely — an escape hatch if a DofusDB outage ever wedges a deploy. Does not affect an explicit `npm run db:sync`. |
 
 **Weapons and cosmetics are out of scope, but nothing is filtered at ingest.** Weapons appear
 as *ingredients* of in-scope recipes — «&nbsp;Quintaine&nbsp;» (`resultId 19644`, an *objet de

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "prestart": "node scripts/run-migrations.mjs",
+    "prestart": "node scripts/run-migrations.mjs && node scripts/sync-dofusdb.mjs --if-stale",
     "start": "next start",
     "db:migrate": "node scripts/run-migrations.mjs",
     "db:sync": "node scripts/sync-dofusdb.mjs",

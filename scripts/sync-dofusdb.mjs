@@ -16,6 +16,7 @@
 // une vraie connexion Postgres permet l'échange transactionnel ci-dessous.
 
 import pg from 'pg';
+import { pathToFileURL } from 'node:url';
 import { describeTarget, isRender, requireDbUrl } from './lib/db-url.mjs';
 
 const API = 'https://api.dofusdb.fr';
@@ -35,6 +36,11 @@ const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const ifStale = args.has('--if-stale');
 const maxAgeHours = Number(process.env.DOFUSDB_SYNC_MAX_AGE_HOURS ?? 168);
+// Coupe-circuit d'exploitation : `prestart` enchaîne cette synchro, donc une
+// panne durable côté DofusDB pourrait bloquer un déploiement. Passer
+// DOFUSDB_SYNC_ON_BOOT=0 dans le dashboard Render débloque sans revert de code.
+// N'affecte que --if-stale : un `npm run db:sync` explicite tourne toujours.
+const syncOnBoot = process.env.DOFUSDB_SYNC_ON_BOOT !== '0';
 
 /**
  * Supabase n'accepte que des connexions TLS, et node-postgres ne l'active pas de
@@ -235,6 +241,32 @@ const recordState = (client, resource, rowCount, upstreamTotal) =>
 
 // ------------------------------------------------------------------ fraîcheur
 
+/**
+ * Règle de classification du miroir, isolée du I/O pour être testable seule.
+ *
+ * L'asymétrie entre 'cold' et 'stale' est le cœur du mode --if-stale : un
+ * catalogue périmé reste utilisable, un catalogue absent ne l'est pas.
+ *
+ * @param {Array<{resource: string, last_success_at: Date | string | null, row_count: number}>} states
+ * @param {number} maxAgeHours
+ * @param {number} [now]
+ * @returns {'cold' | 'stale' | 'fresh'}
+ */
+export function classifyFreshness(states, maxAgeHours, now = Date.now()) {
+  const byResource = new Map(states.map((state) => [state.resource, state]));
+
+  let result = 'fresh';
+  for (const resource of ['items', 'recipes']) {
+    const state = byResource.get(resource);
+    // Une ressource jamais synchronisée, ou synchronisée à vide, rend le miroir
+    // inutilisable : 'cold' l'emporte sur tout le reste, d'où le retour immédiat.
+    if (!state || !state.last_success_at || state.row_count === 0) return 'cold';
+    const ageHours = (now - new Date(state.last_success_at).getTime()) / 3_600_000;
+    if (ageHours > maxAgeHours) result = 'stale';
+  }
+  return result;
+}
+
 /** @returns {'cold' | 'stale' | 'fresh'} */
 async function readFreshness(dbUrl) {
   const client = new pg.Client(clientConfig(dbUrl));
@@ -243,15 +275,7 @@ async function readFreshness(dbUrl) {
     const { rows } = await client.query(
       `select resource, last_success_at, row_count from public.dofus_sync_state`
     );
-    const byResource = new Map(rows.map((row) => [row.resource, row]));
-
-    for (const resource of ['items', 'recipes']) {
-      const state = byResource.get(resource);
-      if (!state || !state.last_success_at || state.row_count === 0) return 'cold';
-      const ageHours = (Date.now() - new Date(state.last_success_at).getTime()) / 3_600_000;
-      if (ageHours > maxAgeHours) return 'stale';
-    }
-    return 'fresh';
+    return classifyFreshness(rows, maxAgeHours);
   } catch (err) {
     // 42P01 = relation inexistante : les migrations n'ont pas encore tourné.
     if (err.code === '42P01') return 'cold';
@@ -265,6 +289,11 @@ async function readFreshness(dbUrl) {
 
 async function main() {
   const startedAt = Date.now();
+
+  if (ifStale && !syncOnBoot) {
+    log('DOFUSDB_SYNC_ON_BOOT=0 — skipping the boot sync.');
+    return;
+  }
 
   const dbUrl = dryRun
     ? null
@@ -365,17 +394,23 @@ async function main() {
   log(`Done in ${seconds(Date.now() - startedAt)} (${retryCount} retries).`);
 }
 
-main().catch((err) => {
-  console.error(`[sync] Sync failed: ${err.message ?? err}`);
+// Ce module exporte classifyFreshness pour pouvoir la tester seule : sans ce
+// garde, un simple import déclencherait une synchronisation complète.
+const executedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-  // Un catalogue *périmé* reste parfaitement utilisable : bloquer le démarrage
-  // parce que DofusDB est momentanément indisponible serait pire que la panne.
-  // Un catalogue *vide* fait répondre 503 à toutes les routes de l'app, et un
-  // déploiement au vert dans cet état est le pire résultat possible — donc sur
-  // Render c'est fatal (même raisonnement que le commit 1479192).
-  if (ifStale && (freshness === 'stale' || !isRender())) {
-    warn('Continuing boot with the existing catalog.');
-    process.exit(0);
-  }
-  process.exit(1);
-});
+if (executedDirectly) {
+  main().catch((err) => {
+    console.error(`[sync] Sync failed: ${err.message ?? err}`);
+
+    // Un catalogue *périmé* reste parfaitement utilisable : bloquer le démarrage
+    // parce que DofusDB est momentanément indisponible serait pire que la panne.
+    // Un catalogue *vide* fait répondre 503 à toutes les routes de l'app, et un
+    // déploiement au vert dans cet état est le pire résultat possible — donc sur
+    // Render c'est fatal (même raisonnement que le commit 1479192).
+    if (ifStale && (freshness === 'stale' || !isRender())) {
+      warn('Continuing boot with the existing catalog.');
+      process.exit(0);
+    }
+    process.exit(1);
+  });
+}

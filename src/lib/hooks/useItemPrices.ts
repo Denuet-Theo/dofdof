@@ -45,6 +45,32 @@ export const saveItemPrice = async ({
 };
 
 /**
+ * A copy of `prices` with one price replaced. Kept separate from the hook because a
+ * caller sometimes needs the post-save map *before* React has re-rendered with it —
+ * comparing a recipe's profitability before and after a save, for instance.
+ */
+export const mergePrice = (
+  prices: Map<number, ItemPrice>,
+  itemId: number,
+  price: number,
+  updatedAt: string
+): Map<number, ItemPrice> => {
+  const next = new Map(prices);
+  const existing = next.get(itemId);
+
+  next.set(itemId, {
+    item_id: itemId,
+    price,
+    updated_at: updatedAt,
+    item_name: existing?.item_name || '',
+    icon_url: existing?.icon_url || null,
+    updated_by: existing?.updated_by || null,
+  });
+
+  return next;
+};
+
+/**
  * Loads every known item price once and keeps them keyed by `item_id`.
  * Every page that shows prices reads from the same shape.
  */
@@ -63,19 +89,7 @@ export const useItemPrices = () => {
 
   /** Merge a just-saved price in locally so derived figures recompute without a refetch. */
   const applyPriceSaved = useCallback((itemId: number, price: number, updatedAt: string) => {
-    setPrices((prev) => {
-      const next = new Map(prev);
-      const existing = next.get(itemId);
-      next.set(itemId, {
-        item_id: itemId,
-        price,
-        updated_at: updatedAt,
-        item_name: existing?.item_name || '',
-        icon_url: existing?.icon_url || null,
-        updated_by: existing?.updated_by || null,
-      });
-      return next;
-    });
+    setPrices((prev) => mergePrice(prev, itemId, price, updatedAt));
   }, []);
 
   return { prices, applyPriceSaved };

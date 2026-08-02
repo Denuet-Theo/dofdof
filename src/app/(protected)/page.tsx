@@ -10,6 +10,7 @@ import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import TopRecipes, { TopRecipe } from '@/components/dashboard/TopRecipes';
+import PriceSuggestions from '@/components/dashboard/PriceSuggestions';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
 import { Coins, TrendingUp, Package, Sparkles } from 'lucide-react';
@@ -168,6 +169,7 @@ const DashboardPage = () => {
           <Skeleton className="h-32" count={3} />
         </div>
         <Skeleton className="h-80" />
+        <Skeleton className="h-96" />
       </div>
     );
   }
@@ -244,6 +246,10 @@ const DashboardPage = () => {
           )}
         </div>
       </div>
+
+      {/* Le pendant du Top 10 : celui-ci classe ce qui *manque* pour que d'autres
+          recettes puissent y entrer. */}
+      <PriceSuggestions prices={prices} onPriceSaved={applyPriceSaved} />
     </div>
   );
 };

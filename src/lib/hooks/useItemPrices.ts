@@ -71,6 +71,35 @@ export const mergePrice = (
 };
 
 /**
+ * PostgREST plafonne toute réponse à `max_rows` (1000, cf. supabase/config.toml)
+ * sans le signaler. Un `select('*')` nu rendait donc une carte silencieusement
+ * tronquée au-delà de 1000 prix : les items coupés passaient partout pour « jamais
+ * tarifés », et leurs recettes pour « prix manquants ». D'où la pagination.
+ */
+const PRICES_PAGE_SIZE = 1000;
+
+/** L'ordre importe peu, mais il doit être stable : sans `order`, deux pages peuvent
+ *  se recouvrir ou se manquer. */
+const fetchAllPrices = async (): Promise<ItemPrice[]> => {
+  const supabase = createClient();
+  const all: ItemPrice[] = [];
+
+  for (let from = 0; ; from += PRICES_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('item_prices')
+      .select('*')
+      .order('item_id', { ascending: true })
+      .range(from, from + PRICES_PAGE_SIZE - 1);
+
+    if (error) throw error;
+
+    const page = data ?? [];
+    all.push(...page);
+    if (page.length < PRICES_PAGE_SIZE) return all;
+  }
+};
+
+/**
  * Loads every known item price once and keeps them keyed by `item_id`.
  * Every page that shows prices reads from the same shape.
  */
@@ -79,10 +108,12 @@ export const useItemPrices = () => {
 
   useEffect(() => {
     const load = async () => {
-      const supabase = createClient();
-      const { data } = await supabase.from('item_prices').select('*');
-      if (!data) return;
-      setPrices(new Map(data.map((p: ItemPrice) => [p.item_id, p])));
+      try {
+        const rows = await fetchAllPrices();
+        setPrices(new Map(rows.map((p) => [p.item_id, p])));
+      } catch (err) {
+        console.error('Error loading item prices:', err);
+      }
     };
     load();
   }, []);

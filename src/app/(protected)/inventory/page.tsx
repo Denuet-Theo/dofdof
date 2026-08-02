@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
@@ -19,8 +19,12 @@ import { Package, ShoppingBag, Coins, TrendingUp, Save } from 'lucide-react';
 type Tab = 'active' | 'sold';
 
 const InventoryPage = () => {
-  const [sales, setSales] = useState<UserSale[]>([]);
-  const [loading, setLoading] = useState(true);
+  // `null` until the first load lands, which is what tells the skeleton apart from a
+  // genuinely empty inventory — the transition below is only false-y before it starts.
+  const [sales, setSales] = useState<UserSale[] | null>(null);
+  // An async transition already tracks "a load is in flight", so there is no loading
+  // flag to raise — which is what let the fetch move out of the effect body.
+  const [loading, startLoading] = useTransition();
   const [activeTab, setActiveTab] = useState<Tab>('active');
   
   const [editingSale, setEditingSale] = useState<UserSale | null>(null);
@@ -28,31 +32,30 @@ const InventoryPage = () => {
   const [savingPrice, setSavingPrice] = useState(false);
   const [editError, setEditError] = useState('');
 
-  const loadSales = useCallback(async () => {
-    setLoading(true);
-    const supabase = createClient();
+  const loadSales = useCallback(() => {
+    startLoading(async () => {
+      const supabase = createClient();
 
-    try {
-      const { data, error } = await supabase
-        .from('user_sales')
-        .select('*')
-        .order('created_at', { ascending: false });
+      try {
+        const { data, error } = await supabase
+          .from('user_sales')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setSales(data || []);
-    } catch (err) {
-      console.error('Error loading inventory:', err);
-    } finally {
-      setLoading(false);
-    }
+        if (error) throw error;
+        setSales(data || []);
+      } catch (err) {
+        console.error('Error loading inventory:', err);
+      }
+    });
   }, []);
 
   useEffect(() => {
     loadSales();
   }, [loadSales]);
 
-  const activeSales = sales.filter((s) => s.status === 'active');
-  const soldSales = sales.filter((s) => s.status === 'sold');
+  const activeSales = (sales ?? []).filter((s) => s.status === 'active');
+  const soldSales = (sales ?? []).filter((s) => s.status === 'sold');
 
   const currentSales = activeTab === 'active' ? activeSales : soldSales;
 
@@ -231,7 +234,7 @@ const InventoryPage = () => {
       </div>
 
       {/* Sales list */}
-      {loading ? (
+      {loading || sales === null ? (
         <div className="space-y-3">
           <Skeleton className="h-20" count={4} />
         </div>

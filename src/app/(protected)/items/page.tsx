@@ -114,6 +114,7 @@ const ItemsPage = () => {
               <ItemPriceCard
                 key={item.id}
                 item={item}
+                prices={prices}
                 currentPrice={itemPrice?.price}
                 updatedAt={itemPrice?.updated_at}
                 onPriceSaved={applyPriceSaved}

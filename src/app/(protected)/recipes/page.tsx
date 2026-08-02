@@ -17,6 +17,17 @@ import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'luc
 import { JOBS } from '@/lib/constants/jobs';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
+/** Cartes révélées à chaque « Voir plus ». */
+const VISIBLE_STEP = 30;
+
+/**
+ * Taille d'une page côté serveur, pour les vues qui parcourent le catalogue au
+ * lieu des seuls items tarifés. La branche « métier/niveau » était figée à 100
+ * sans `skip` : elle montrait les 100 recettes d'id le plus bas du métier, et
+ * rien ne permettait d'aller voir les suivantes.
+ */
+const CATALOG_PAGE_SIZE = 100;
+
 const RecipesContent = () => {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
@@ -24,8 +35,13 @@ const RecipesContent = () => {
   // `null` until a load has settled. The transition below only covers a load that is
   // actually running, so it can't stand in for "we haven't started yet".
   const [recipes, setRecipes] = useState<DofusDBRecipe[] | null>(null);
+  // Ce que le serveur dit avoir en tout pour la requête courante, pour savoir
+  // s'il reste une page à demander une fois les cartes chargées épuisées.
+  const [total, setTotal] = useState(0);
+  const [visible, setVisible] = useState(VISIBLE_STEP);
   const { prices, applyPriceSaved } = useItemPrices();
   const [loading, startLoading] = useTransition();
+  const [loadingMore, startLoadingMore] = useTransition();
   const [jobId, setJobId] = useState<string>('');
   const [minLevel, setMinLevel] = useState('');
   const [maxLevel, setMaxLevel] = useState('');
@@ -39,57 +55,67 @@ const RecipesContent = () => {
   const [editPriceItem, setEditPriceItem] = useState<PriceTarget | null>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
 
+  /**
+   * Une page de résultats pour les filtres courants.
+   *
+   * `total` est ce que le serveur compte pour la requête, indépendamment de la
+   * fenêtre renvoyée — sauf sur la branche des items tarifés, qui rapatrie tout
+   * d'un coup et n'a donc jamais de page suivante à demander.
+   */
+  const fetchPage = useCallback(
+    async (skip: number): Promise<{ data: DofusDBRecipe[]; total: number }> => {
+      const params = new URLSearchParams({
+        limit: String(CATALOG_PAGE_SIZE),
+        skip: String(skip),
+      });
+      const hasLevelOrJobFilter = !!(jobId || minLevel || maxLevel);
+
+      // If global search is active, we must find the item IDs first
+      if (globalSearch && globalSearch.length >= 2) {
+        const itemsRes = await fetch(`/api/dofusdb/items?q=${encodeURIComponent(globalSearch)}&limit=10`);
+        const itemsData: DofusDBResponse<DofusDBItem> = await itemsRes.json();
+        const itemIds = (itemsData.data || []).map(i => i.id);
+
+        // Force no results if item not found
+        if (itemIds.length === 0) return { data: [], total: 0 };
+        params.set('resultIds', itemIds.join(','));
+      } else if (!hasLevelOrJobFilter) {
+        // No search or filter: fetch recipes for items we have priced
+        const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
+        // User has no prices set and no search, don't fetch random recipes
+        if (pricedIds.length === 0) return { data: [], total: 0 };
+
+        // Le vivier entier, découpé en tranches par le helper. Il était coupé
+        // aux 100 premiers ids, donc au-delà de 100 prix la page ne montrait
+        // qu'une part arbitraire des recettes réellement calculables — et le
+        // tri par rentabilité juste en dessous classait sur cette part-là.
+        const data = await fetchRecipesForItems(pricedIds);
+        return { data, total: data.length };
+      }
+      // Browsing by job/level: query the full recipe catalog, not just priced items
+
+      if (jobId) params.set('jobId', jobId);
+      if (minLevel) params.set('minLevel', minLevel);
+      if (maxLevel) params.set('maxLevel', maxLevel);
+
+      const res = await fetch(`/api/dofusdb/recipes?${params}`);
+      const body: DofusDBResponse<DofusDBRecipe> = await res.json();
+      return { data: body.data || [], total: body.total || 0 };
+    },
+    [jobId, minLevel, maxLevel, globalSearch, prices]
+  );
+
   const loadRecipes = useCallback(() => {
     startLoading(async () => {
       try {
-        const params = new URLSearchParams({ limit: '50' });
-        const hasLevelOrJobFilter = !!(jobId || minLevel || maxLevel);
-
-        // If global search is active, we must find the item IDs first
-        if (globalSearch && globalSearch.length >= 2) {
-          const itemsRes = await fetch(`/api/dofusdb/items?q=${encodeURIComponent(globalSearch)}&limit=10`);
-          const itemsData: DofusDBResponse<DofusDBItem> = await itemsRes.json();
-          const itemIds = (itemsData.data || []).map(i => i.id);
-
-          if (itemIds.length > 0) {
-            params.set('resultIds', itemIds.join(','));
-          } else {
-            // Force no results if item not found
-            setRecipes([]);
-            return;
-          }
-        } else if (hasLevelOrJobFilter) {
-          // Browsing by job/level: query the full recipe catalog, not just priced items
-          params.set('limit', '100');
-        } else {
-          // No search or filter: fetch recipes for items we have priced
-          const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
-          if (pricedIds.length === 0) {
-            // User has no prices set and no search, don't fetch random recipes
-            setRecipes([]);
-            return;
-          }
-
-          // Le vivier entier, découpé en tranches par le helper. Il était coupé
-          // aux 100 premiers ids, donc au-delà de 100 prix la page ne montrait
-          // qu'une part arbitraire des recettes réellement calculables — et le
-          // tri par rentabilité juste en dessous classait sur cette part-là.
-          setRecipes(await fetchRecipesForItems(pricedIds));
-          return;
-        }
-
-        if (jobId) params.set('jobId', jobId);
-        if (minLevel) params.set('minLevel', minLevel);
-        if (maxLevel) params.set('maxLevel', maxLevel);
-
-        const res = await fetch(`/api/dofusdb/recipes?${params}`);
-        const data: DofusDBResponse<DofusDBRecipe> = await res.json();
-        setRecipes(data.data || []);
+        const page = await fetchPage(0);
+        setRecipes(page.data);
+        setTotal(page.total);
       } catch (err) {
         console.error('Error loading recipes:', err);
       }
     });
-  }, [jobId, minLevel, maxLevel, globalSearch, prices]);
+  }, [fetchPage]);
 
   useEffect(() => {
     // Only load recipes once prices are loaded or if we are searching/filtering
@@ -97,6 +123,32 @@ const RecipesContent = () => {
       loadRecipes();
     }
   }, [loadRecipes, prices.size, globalSearch, jobId, minLevel, maxLevel]);
+
+  // Changer de filtre repart du haut de la liste ; un simple rechargement (prix
+  // modifié, bouton Actualiser) garde la profondeur déjà atteinte. D'où la remise
+  // à zéro dans les gestionnaires plutôt que dans un effet sur les filtres.
+  //
+  // Stables par ailleurs : `SearchBar` garde `onSearch` en dépendance d'effet, et
+  // un callback recréé à chaque rendu y relancerait la recherche en boucle.
+  const changeSearch = useCallback((value: string) => {
+    setGlobalSearch(value);
+    setVisible(VISIBLE_STEP);
+  }, []);
+
+  const changeJob = useCallback((value: string) => {
+    setJobId(value);
+    setVisible(VISIBLE_STEP);
+  }, []);
+
+  const changeMinLevel = useCallback((value: string) => {
+    setMinLevel(value);
+    setVisible(VISIBLE_STEP);
+  }, []);
+
+  const changeMaxLevel = useCallback((value: string) => {
+    setMaxLevel(value);
+    setVisible(VISIBLE_STEP);
+  }, []);
 
   function getMargin(recipe: DofusDBRecipe): number {
     const resultPrice = prices.get(recipe.resultId)?.price || 0;
@@ -139,6 +191,33 @@ const RecipesContent = () => {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
+  const loaded = recipes?.length ?? 0;
+  // Deux réserves distinctes : ce qui est déjà chargé mais pas encore affiché,
+  // et ce que le serveur garde en attente. La seconde est toujours nulle sur la
+  // vue des items tarifés, qui a tout rapatrié d'un coup.
+  const hidden = Math.max(0, sortedRecipes.length - visible);
+  const unfetched = Math.max(0, total - loaded);
+  const remaining = hidden + unfetched;
+
+  const loadMore = () => {
+    // Rien à demander tant qu'il reste des cartes chargées à révéler.
+    if (hidden > 0) {
+      setVisible(v => v + VISIBLE_STEP);
+      return;
+    }
+
+    startLoadingMore(async () => {
+      try {
+        const page = await fetchPage(loaded);
+        setRecipes(prev => [...(prev ?? []), ...page.data]);
+        setTotal(page.total);
+        setVisible(v => v + VISIBLE_STEP);
+      } catch (err) {
+        console.error('Error loading more recipes:', err);
+      }
+    });
+  };
+
   const handleSell = (item: SellTarget) => {
     setSellItem(item);
     setShowSellModal(true);
@@ -166,7 +245,7 @@ const RecipesContent = () => {
 
       {/* Global Search */}
       <SearchBar
-        onSearch={setGlobalSearch}
+        onSearch={changeSearch}
         loading={loading && !!globalSearch}
         placeholder="Rechercher une recette par nom (ex: Boudin noir)..."
         defaultValue={initialSearch}
@@ -183,7 +262,7 @@ const RecipesContent = () => {
             <label className="text-xs text-dark-400 mb-1 block">Métier</label>
             <select
               value={jobId}
-              onChange={(e) => setJobId(e.target.value)}
+              onChange={(e) => changeJob(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
                 text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50
                 cursor-pointer"
@@ -204,7 +283,7 @@ const RecipesContent = () => {
             <input
               type="number"
               value={minLevel}
-              onChange={(e) => setMinLevel(e.target.value)}
+              onChange={(e) => changeMinLevel(e.target.value)}
               placeholder="1"
               min="1"
               className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
@@ -219,7 +298,7 @@ const RecipesContent = () => {
             <input
               type="number"
               value={maxLevel}
-              onChange={(e) => setMaxLevel(e.target.value)}
+              onChange={(e) => changeMaxLevel(e.target.value)}
               placeholder="200"
               min="1"
               className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
@@ -270,21 +349,37 @@ const RecipesContent = () => {
           <Skeleton className="h-20" count={5} />
         </div>
       ) : sortedRecipes.length > 0 ? (
-        <div className="space-y-3 stagger-children">
-          {sortedRecipes.map((recipe) => (
-            <RecipeCard
-              key={recipe.id}
-              recipe={recipe}
-              ingredientPrices={prices}
-              resultPrice={prices.get(recipe.resultId)?.price || 0}
-              onSell={handleSell}
-              onIngredientClick={handleIngredientClick}
-              expanded={expandedId === recipe.id}
-              onToggle={() =>
-                setExpandedId(expandedId === recipe.id ? null : recipe.id)
-              }
-            />
-          ))}
+        <div className="space-y-3">
+          <div className="space-y-3 stagger-children">
+            {sortedRecipes.slice(0, visible).map((recipe) => (
+              <RecipeCard
+                key={recipe.id}
+                recipe={recipe}
+                ingredientPrices={prices}
+                resultPrice={prices.get(recipe.resultId)?.price || 0}
+                onSell={handleSell}
+                onIngredientClick={handleIngredientClick}
+                expanded={expandedId === recipe.id}
+                onToggle={() =>
+                  setExpandedId(expandedId === recipe.id ? null : recipe.id)
+                }
+              />
+            ))}
+          </div>
+
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <p className="text-xs text-dark-500">
+              {Math.min(visible, sortedRecipes.length)} recette
+              {Math.min(visible, sortedRecipes.length) > 1 ? 's' : ''} affichée
+              {Math.min(visible, sortedRecipes.length) > 1 ? 's' : ''}
+              {remaining > 0 && ` sur ${sortedRecipes.length + unfetched}`}
+            </p>
+            {remaining > 0 && (
+              <Button variant="secondary" size="sm" onClick={loadMore} loading={loadingMore}>
+                Voir plus ({remaining})
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <EmptyState

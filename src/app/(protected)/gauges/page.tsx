@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useTransition } from 'react';
 import { DofusDBItem, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import GaugeItemCard from '@/components/gauges/GaugeItemCard';
@@ -32,8 +32,7 @@ type SortBy = 'ratio' | 'alpha' | 'level';
 const GaugesPage = () => {
   const [items, setItems] = useState<DofusDBItem[]>([]);
   const { prices, applyPriceSaved } = useItemPrices();
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const [loading, startLoading] = useTransition();
   // Free-text term from the search box and the quick-select chip combine into one query,
   // instead of the chip overriding whatever the user already typed.
   const [textQuery, setTextQuery] = useState('');
@@ -47,57 +46,50 @@ const GaugesPage = () => {
   const [includeCraft, setIncludeCraft] = useState(false);
   const [recipesByResultId, setRecipesByResultId] = useState<Map<number, DofusDBRecipe>>(new Map());
 
-  const runFetch = useCallback(async (params: URLSearchParams | null, paginate: boolean) => {
-    if (!params) {
-      setItems([]);
-      setSearched(false);
-      return;
-    }
+  // Whether the user has asked for anything at all. Derived rather than stored, so the
+  // "no query" case needs no state reset — which is what kept it out of the effect body.
+  const hasText = textQuery.length >= 2;
+  const searched = hasText || !!selectedChip;
 
-    setLoading(true);
-    setSearched(true);
-    try {
-      params.set('limit', String(PAGE_SIZE));
-      const firstRes = await fetch(`/api/dofusdb/items?${params}`);
-      const firstData: DofusDBResponse<DofusDBItem> = await firstRes.json();
-      let allItems = firstData.data || [];
+  const runFetch = useCallback((params: URLSearchParams, paginate: boolean) => {
+    startLoading(async () => {
+      try {
+        params.set('limit', String(PAGE_SIZE));
+        const firstRes = await fetch(`/api/dofusdb/items?${params}`);
+        const firstData: DofusDBResponse<DofusDBItem> = await firstRes.json();
+        let allItems = firstData.data || [];
 
-      // The PV/Énergie browse spans ~605 items across 6 item types, which one page now
-      // covers. This only does anything if a patch pushes the catalog past MAX_FOOD_ITEMS.
-      if (paginate) {
-        const total = Math.min(firstData.total ?? allItems.length, MAX_FOOD_ITEMS);
-        const skips: number[] = [];
-        for (let skip = PAGE_SIZE; skip < total; skip += PAGE_SIZE) skips.push(skip);
+        // The PV/Énergie browse spans ~605 items across 6 item types, which one page now
+        // covers. This only does anything if a patch pushes the catalog past MAX_FOOD_ITEMS.
+        if (paginate) {
+          const total = Math.min(firstData.total ?? allItems.length, MAX_FOOD_ITEMS);
+          const skips: number[] = [];
+          for (let skip = PAGE_SIZE; skip < total; skip += PAGE_SIZE) skips.push(skip);
 
-        if (skips.length > 0) {
-          const pages = await Promise.all(
-            skips.map(async (skip) => {
-              const pageParams = new URLSearchParams(params);
-              pageParams.set('skip', String(skip));
-              const res = await fetch(`/api/dofusdb/items?${pageParams}`);
-              const data: DofusDBResponse<DofusDBItem> = await res.json();
-              return data.data || [];
-            })
-          );
-          allItems = allItems.concat(...pages);
+          if (skips.length > 0) {
+            const pages = await Promise.all(
+              skips.map(async (skip) => {
+                const pageParams = new URLSearchParams(params);
+                pageParams.set('skip', String(skip));
+                const res = await fetch(`/api/dofusdb/items?${pageParams}`);
+                const data: DofusDBResponse<DofusDBItem> = await res.json();
+                return data.data || [];
+              })
+            );
+            allItems = allItems.concat(...pages);
+          }
         }
-      }
 
-      setItems(allItems);
-    } catch (err) {
-      console.error('Search error:', err);
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
+        setItems(allItems);
+      } catch (err) {
+        console.error('Search error:', err);
+        setItems([]);
+      }
+    });
   }, []);
 
   useEffect(() => {
-    const hasText = textQuery.length >= 2;
-    if (!hasText && !selectedChip) {
-      runFetch(null, false);
-      return;
-    }
+    if (!searched) return;
 
     const isFoodChip = FOOD_CHIPS.includes(selectedChip || '');
     const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
@@ -109,7 +101,7 @@ const GaugesPage = () => {
       params.set('q', words);
     }
     runFetch(params, isFoodChip && !hasText);
-  }, [textQuery, selectedChip, runFetch]);
+  }, [textQuery, selectedChip, hasText, searched, runFetch]);
 
   useEffect(() => {
     const craftableIds = items.filter((i) => i.hasRecipe).map((i) => i.id);
@@ -160,7 +152,8 @@ const GaugesPage = () => {
     return { sellPrice, sellRatio, recipe, craftCost, craftRatio, price, usedCraft, ratio };
   };
 
-  const filteredRows = items
+  // Gated on `searched` so clearing the box empties the list without a state reset.
+  const filteredRows = (searched ? items : [])
     .map((item) => ({ item, gaugeInfo: parseGaugeInfo(item) }))
     .filter((row): row is { item: DofusDBItem; gaugeInfo: GaugeInfo } => row.gaugeInfo !== null)
     .filter((row) => !selectedChip || row.gaugeInfo.gaugeName === selectedChip)
@@ -336,7 +329,7 @@ const GaugesPage = () => {
         </div>
       ) : sortedRows.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-children">
-          {sortedRows.map(({ item, gaugeInfo, price, usedCraft, sellRatio, craftRatio, craftCost, recipe }) => (
+          {sortedRows.map(({ item, gaugeInfo, price, usedCraft, sellRatio, craftRatio, recipe }) => (
             <GaugeItemCard
               key={item.id}
               item={item}
@@ -347,7 +340,6 @@ const GaugesPage = () => {
               usedCraft={usedCraft}
               sellRatio={sellRatio}
               craftRatio={craftRatio}
-              craftCost={craftCost}
               recipe={recipe}
               ingredientPrices={prices}
               isBest={item.id === bestId}

@@ -110,6 +110,8 @@ interface IconProps {
   size?: IconSize;
   /** Shown centred over the image on hover — turns the icon into a button. */
   overlay?: ReactNode;
+  /** Keeps the overlay up without hover, for confirming an action that just happened. */
+  overlayVisible?: boolean;
   onClick?: () => void;
   title?: string;
   /**
@@ -125,6 +127,7 @@ const Icon = ({
   alt,
   size = 'md',
   overlay,
+  overlayVisible = false,
   onClick,
   title,
   scaleOnHover = true,
@@ -147,7 +150,11 @@ const Icon = ({
         <div className={`${img} rounded-lg bg-dark-600`} />
       )}
       {overlay ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-dark-950/70 opacity-0 hover:opacity-100 transition-opacity">
+        <div
+          className={`absolute inset-0 flex items-center justify-center bg-dark-950/70 transition-opacity ${
+            overlayVisible ? 'opacity-100' : 'opacity-0 hover:opacity-100'
+          }`}
+        >
           {overlay}
         </div>
       ) : null}

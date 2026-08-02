@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
@@ -8,7 +8,7 @@ import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
-import TopRecipes from '@/components/dashboard/TopRecipes';
+import TopRecipes, { TopRecipe } from '@/components/dashboard/TopRecipes';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
 import { Coins, TrendingUp, Package, Sparkles } from 'lucide-react';
@@ -19,40 +19,33 @@ interface SalesDataPoint {
   profit: number;
 }
 
-interface TopRecipe {
-  id: number;
-  name: string;
-  iconUrl: string;
-  margin: number;
-  marginPercent?: number;
-  sellPrice: number;
-  craftCost: number;
-}
-
 const DashboardPage = () => {
-  const [sales, setSales] = useState<UserSale[]>([]);
-  const { prices } = useItemPrices();
-  const [loading, setLoading] = useState(true);
+  // `null` until the first load lands — the transitions below only report time spent
+  // inside a running load, not the gap before the effect kicks one off.
+  const [sales, setSales] = useState<UserSale[] | null>(null);
+  const { prices, applyPriceSaved } = useItemPrices();
+  const [loadingSales, startLoadingSales] = useTransition();
 
   const [jobId, setJobId] = useState<string>('');
   const [topRecipes, setTopRecipes] = useState<TopRecipe[]>([]);
-  const [loadingRecipes, setLoadingRecipes] = useState(false);
+  const [loadingRecipes, startLoadingRecipes] = useTransition();
 
-  const loadData = useCallback(async () => {
-    const supabase = createClient();
+  const loadData = useCallback(() => {
+    startLoadingSales(async () => {
+      const supabase = createClient();
 
-    try {
-      const { data } = await supabase
-        .from('user_sales')
-        .select('*')
-        .order('created_at', { ascending: false });
+      try {
+        const { data } = await supabase
+          .from('user_sales')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (data) setSales(data);
-    } catch (err) {
-      console.error('Error loading dashboard data:', err);
-    } finally {
-      setLoading(false);
-    }
+        setSales(data ?? []);
+      } catch (err) {
+        console.error('Error loading dashboard data:', err);
+        setSales([]);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -60,52 +53,59 @@ const DashboardPage = () => {
   }, [loadData]);
 
   // Fetch actual recipes to compute accurate Top 10
-  const fetchTopRecipes = useCallback(async () => {
+  const fetchTopRecipes = useCallback(() => {
     if (prices.size === 0) return;
-    setLoadingRecipes(true);
-    try {
-      const itemIds = Array.from(prices.values())
-        .filter((p) => p.price > 0)
-        .map((p) => p.item_id);
+
+    const itemIds = Array.from(prices.values())
+      .filter((p) => p.price > 0)
+      .map((p) => p.item_id);
+
+    startLoadingRecipes(async () => {
       if (itemIds.length === 0) {
         setTopRecipes([]);
-        setLoadingRecipes(false);
         return;
       }
 
-      const params = new URLSearchParams({ limit: '100' });
-      params.set('resultIds', itemIds.join(','));
-      if (jobId) params.set('jobId', jobId);
-      
-      const res = await fetch(`/api/dofusdb/recipes?${params}`);
-      if (!res.ok) throw new Error('Failed to fetch recipes');
-      const data: DofusDBResponse<DofusDBRecipe> = await res.json();
-      
-      const recipesList = data.data || [];
+      try {
+        const params = new URLSearchParams({ limit: '100' });
+        params.set('resultIds', itemIds.join(','));
+        if (jobId) params.set('jobId', jobId);
 
-      const computed: TopRecipe[] = recipesList.filter(recipe => recipeHasAllPrices(recipe, prices)).map(recipe => {
-        const resultPrice = prices.get(recipe.resultId)?.price || 0;
-        const craftCost = computeCraftCost(recipe, prices);
-        const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
+        const res = await fetch(`/api/dofusdb/recipes?${params}`);
+        if (!res.ok) throw new Error('Failed to fetch recipes');
+        const data: DofusDBResponse<DofusDBRecipe> = await res.json();
 
-        return {
-          id: recipe.resultId,
-          name: recipe.resultName?.fr || `Item #${recipe.resultId}`,
-          iconUrl: recipe.result?.img || '',
-          margin,
-          marginPercent,
-          sellPrice: resultPrice,
-          craftCost
-        };
-      });
-      
-      const top = computed.filter(r => r.margin > 0).sort((a, b) => (b.marginPercent || 0) - (a.marginPercent || 0)).slice(0, 10);
-      setTopRecipes(top);
-    } catch (err) {
-      console.error('Error fetching top recipes:', err);
-    } finally {
-      setLoadingRecipes(false);
-    }
+        const recipesList = data.data || [];
+
+        const computed: TopRecipe[] = recipesList
+          .filter((recipe) => recipeHasAllPrices(recipe, prices))
+          .map((recipe) => {
+            const resultPrice = prices.get(recipe.resultId)?.price || 0;
+            const craftCost = computeCraftCost(recipe, prices);
+            const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
+
+            return {
+              id: recipe.resultId,
+              name: recipe.resultName?.fr || `Item #${recipe.resultId}`,
+              iconUrl: recipe.result?.img || '',
+              margin,
+              marginPercent,
+              sellPrice: resultPrice,
+              craftCost,
+              // Carried through so a row can open the recipe popin, not just rank it.
+              recipe,
+            };
+          });
+
+        const top = computed
+          .filter((r) => r.margin > 0)
+          .sort((a, b) => (b.marginPercent || 0) - (a.marginPercent || 0))
+          .slice(0, 10);
+        setTopRecipes(top);
+      } catch (err) {
+        console.error('Error fetching top recipes:', err);
+      }
+    });
   }, [prices, jobId]);
 
   useEffect(() => {
@@ -113,8 +113,8 @@ const DashboardPage = () => {
   }, [fetchTopRecipes]);
 
   // Compute KPIs
-  const soldSales = sales.filter((s) => s.status === 'sold');
-  const activeSales = sales.filter((s) => s.status === 'active');
+  const soldSales = (sales ?? []).filter((s) => s.status === 'sold');
+  const activeSales = (sales ?? []).filter((s) => s.status === 'active');
 
   const totalRevenue = soldSales.reduce((sum, s) => sum + getSaleValue(s), 0);
 
@@ -151,7 +151,7 @@ const DashboardPage = () => {
     };
   });
 
-  if (loading) {
+  if (loadingSales || sales === null) {
     return (
       <div className="space-y-8">
         <div>
@@ -228,7 +228,13 @@ const DashboardPage = () => {
               </div>
             </div>
           ) : (
-            <TopRecipes recipes={topRecipes} jobId={jobId} onJobChange={setJobId} />
+            <TopRecipes
+              recipes={topRecipes}
+              prices={prices}
+              jobId={jobId}
+              onJobChange={setJobId}
+              onPriceSaved={applyPriceSaved}
+            />
           )}
         </div>
       </div>

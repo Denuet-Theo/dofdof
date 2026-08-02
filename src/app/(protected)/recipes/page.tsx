@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useTransition, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DofusDBRecipe, DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
 import RecipeCard from '@/components/recipes/RecipeCard';
+import { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
 import SellModal from '@/components/recipes/SellModal';
 import PriceModal from '@/components/recipes/PriceModal';
 import SearchBar from '@/components/items/SearchBar';
@@ -19,9 +20,11 @@ const RecipesContent = () => {
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
   
-  const [recipes, setRecipes] = useState<DofusDBRecipe[]>([]);
+  // `null` until a load has settled. The transition below only covers a load that is
+  // actually running, so it can't stand in for "we haven't started yet".
+  const [recipes, setRecipes] = useState<DofusDBRecipe[] | null>(null);
   const { prices, applyPriceSaved } = useItemPrices();
-  const [loading, setLoading] = useState(true);
+  const [loading, startLoading] = useTransition();
   const [jobId, setJobId] = useState<string>('');
   const [minLevel, setMinLevel] = useState('');
   const [maxLevel, setMaxLevel] = useState('');
@@ -29,73 +32,59 @@ const RecipesContent = () => {
   const [sortBy, setSortBy] = useState<'margin' | 'alpha' | 'level'>('margin');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [sellItem, setSellItem] = useState<{
-    id: number;
-    name: string;
-    iconUrl: string;
-    price: number;
-    craftCost: number;
-  } | null>(null);
+  const [sellItem, setSellItem] = useState<SellTarget | null>(null);
   const [showSellModal, setShowSellModal] = useState(false);
-  
-  const [editPriceItem, setEditPriceItem] = useState<{
-    id: number;
-    name: string;
-    iconUrl: string;
-    price?: number;
-  } | null>(null);
+
+  const [editPriceItem, setEditPriceItem] = useState<PriceTarget | null>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
 
-  const loadRecipes = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: '50' });
-      const hasLevelOrJobFilter = !!(jobId || minLevel || maxLevel);
+  const loadRecipes = useCallback(() => {
+    startLoading(async () => {
+      try {
+        const params = new URLSearchParams({ limit: '50' });
+        const hasLevelOrJobFilter = !!(jobId || minLevel || maxLevel);
 
-      // If global search is active, we must find the item IDs first
-      if (globalSearch && globalSearch.length >= 2) {
-        const itemsRes = await fetch(`/api/dofusdb/items?q=${encodeURIComponent(globalSearch)}&limit=10`);
-        const itemsData: DofusDBResponse<DofusDBItem> = await itemsRes.json();
-        const itemIds = (itemsData.data || []).map(i => i.id);
+        // If global search is active, we must find the item IDs first
+        if (globalSearch && globalSearch.length >= 2) {
+          const itemsRes = await fetch(`/api/dofusdb/items?q=${encodeURIComponent(globalSearch)}&limit=10`);
+          const itemsData: DofusDBResponse<DofusDBItem> = await itemsRes.json();
+          const itemIds = (itemsData.data || []).map(i => i.id);
 
-        if (itemIds.length > 0) {
-          params.set('resultIds', itemIds.join(','));
-        } else {
-          // Force no results if item not found
-          setRecipes([]);
-          setLoading(false);
-          return;
-        }
-      } else if (hasLevelOrJobFilter) {
-        // Browsing by job/level: query the full recipe catalog, not just priced items
-        params.set('limit', '100');
-      } else {
-        // No search or filter: fetch recipes for items we have priced
-        const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
-        if (pricedIds.length > 0) {
-          // Chunk to avoid URL too long if user has many prices. Let's take the first 100 for now.
-          params.set('resultIds', pricedIds.slice(0, 100).join(','));
+          if (itemIds.length > 0) {
+            params.set('resultIds', itemIds.join(','));
+          } else {
+            // Force no results if item not found
+            setRecipes([]);
+            return;
+          }
+        } else if (hasLevelOrJobFilter) {
+          // Browsing by job/level: query the full recipe catalog, not just priced items
           params.set('limit', '100');
         } else {
-          // User has no prices set and no search, don't fetch random recipes
-          setRecipes([]);
-          setLoading(false);
-          return;
+          // No search or filter: fetch recipes for items we have priced
+          const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
+          if (pricedIds.length > 0) {
+            // Chunk to avoid URL too long if user has many prices. Let's take the first 100 for now.
+            params.set('resultIds', pricedIds.slice(0, 100).join(','));
+            params.set('limit', '100');
+          } else {
+            // User has no prices set and no search, don't fetch random recipes
+            setRecipes([]);
+            return;
+          }
         }
+
+        if (jobId) params.set('jobId', jobId);
+        if (minLevel) params.set('minLevel', minLevel);
+        if (maxLevel) params.set('maxLevel', maxLevel);
+
+        const res = await fetch(`/api/dofusdb/recipes?${params}`);
+        const data: DofusDBResponse<DofusDBRecipe> = await res.json();
+        setRecipes(data.data || []);
+      } catch (err) {
+        console.error('Error loading recipes:', err);
       }
-
-      if (jobId) params.set('jobId', jobId);
-      if (minLevel) params.set('minLevel', minLevel);
-      if (maxLevel) params.set('maxLevel', maxLevel);
-
-      const res = await fetch(`/api/dofusdb/recipes?${params}`);
-      const data: DofusDBResponse<DofusDBRecipe> = await res.json();
-      setRecipes(data.data || []);
-    } catch (err) {
-      console.error('Error loading recipes:', err);
-    } finally {
-      setLoading(false);
-    }
+    });
   }, [jobId, minLevel, maxLevel, globalSearch, prices]);
 
   useEffect(() => {
@@ -116,7 +105,7 @@ const RecipesContent = () => {
   }
 
   // Sort recipes by profitability
-  const sortedRecipes = [...recipes]
+  const sortedRecipes = [...(recipes ?? [])]
     .filter(recipe => {
       // If there is no active search/filter, only show recipes where we have all prices
       if (!globalSearch && !jobId && !minLevel && !maxLevel) {
@@ -146,23 +135,12 @@ const RecipesContent = () => {
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
-  const handleSell = (item: {
-    id: number;
-    name: string;
-    iconUrl: string;
-    price: number;
-    craftCost: number;
-  }) => {
+  const handleSell = (item: SellTarget) => {
     setSellItem(item);
     setShowSellModal(true);
   };
-  
-  const handleIngredientClick = (item: {
-    id: number;
-    name: string;
-    iconUrl: string;
-    price?: number;
-  }) => {
+
+  const handleIngredientClick = (item: PriceTarget) => {
     setEditPriceItem(item);
     setShowPriceModal(true);
   };
@@ -283,7 +261,7 @@ const RecipesContent = () => {
       </div>
 
       {/* Recipes list */}
-      {loading ? (
+      {loading || recipes === null ? (
         <div className="space-y-3">
           <Skeleton className="h-20" count={5} />
         </div>

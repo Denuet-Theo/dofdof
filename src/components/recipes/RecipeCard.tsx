@@ -1,29 +1,24 @@
+'use client';
+
+import { useState } from 'react';
 import ItemCard from '@/components/ui/ItemCard';
+import CopyableIcon from '@/components/ui/CopyableIcon';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import RecipeDetails, { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
+import RecipeModal from '@/components/recipes/RecipeModal';
 import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
-import { ShoppingCart, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
-import { formatTimeAgo } from '@/lib/utils/date';
+import { ChevronDown, ChevronUp, Edit2, Eye } from 'lucide-react';
+import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
 interface RecipeCardProps {
   recipe: DofusDBRecipe;
   ingredientPrices: Map<number, ItemPrice>;
   resultPrice: number;
-  onSell: (item: {
-    id: number;
-    name: string;
-    iconUrl: string;
-    price: number;
-    craftCost: number;
-  }) => void;
-  onIngredientClick?: (item: {
-    id: number;
-    name: string;
-    iconUrl: string;
-    price?: number;
-  }) => void;
+  onSell: (item: SellTarget) => void;
+  onIngredientClick?: (item: PriceTarget) => void;
   expanded?: boolean;
   onToggle?: () => void;
 }
@@ -37,6 +32,11 @@ const RecipeCard = ({
   expanded = false,
   onToggle,
 }: RecipeCardProps) => {
+  // The ingredient grid needs the full width of the row; under `lg` there is none left
+  // once the figures are in, so the recipe moves to the popin the other surfaces use.
+  const fitsInline = useMediaQuery('(min-width: 1024px)');
+  const [showPopin, setShowPopin] = useState(false);
+
   const craftCost = computeCraftCost(recipe, ingredientPrices);
   const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
   const isProfitable = margin > 0;
@@ -46,148 +46,114 @@ const RecipeCard = ({
   const iconUrl =
     recipe.result?.img || `https://api.dofusdb.fr/img/items/${recipe.result?.iconId || 0}.png`;
 
+  const editResultPrice = () =>
+    onIngredientClick?.({ id: recipe.resultId, name, iconUrl, price: resultPrice });
+
   const details = (
-    <>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-        {recipe.ingredients?.map((ingredient, index) => {
-          const qty = recipe.quantities[index] || 0;
-          const ingPriceObj = ingredientPrices.get(ingredient.id);
-          const unitPrice = ingPriceObj?.price || 0;
-          const totalPrice = unitPrice * qty;
-
-          return (
-            <ItemCard
-              key={ingredient.id}
-              layout="row"
-              variant="flat"
-              onClick={() =>
-                onIngredientClick?.({
-                  id: ingredient.id,
-                  name: ingredient.name?.fr || '',
-                  iconUrl: ingredient.img,
-                  price: unitPrice,
-                })
-              }
-            >
-              <ItemCard.Icon
-                src={ingredient.img}
-                alt={ingredient.name?.fr || ''}
-                size="sm"
-                scaleOnHover={false}
-              />
-
-              <ItemCard.Body>
-                <ItemCard.Title className="group-hover/row:text-kamas transition-colors">
-                  {ingredient.name?.fr || `Item #${ingredient.id}`}
-                </ItemCard.Title>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <p className="text-[10px] text-dark-500">× {qty}</p>
-                  {ingPriceObj?.updated_at && (
-                    <span className="text-[9px] text-dark-600">
-                      ({formatTimeAgo(ingPriceObj.updated_at)})
-                    </span>
-                  )}
-                </div>
-              </ItemCard.Body>
-
-              <ItemCard.Actions>
-                {unitPrice > 0 ? (
-                  <KamasDisplay amount={totalPrice} size="sm" />
-                ) : (
-                  <span className="text-[10px] text-loss italic">Pas de prix</span>
-                )}
-                <Edit2
-                  size={12}
-                  className="text-dark-500 opacity-0 group-hover/row:opacity-100 transition-opacity"
-                />
-              </ItemCard.Actions>
-            </ItemCard>
-          );
-        })}
-      </div>
-
-      <Button
-        onClick={() =>
-          onSell({
-            id: recipe.resultId,
-            name: recipe.resultName?.fr || '',
-            iconUrl: recipe.result?.img || '',
-            price: resultPrice,
-            craftCost,
-          })
-        }
-        size="sm"
-        className="w-full"
-        disabled={!hasAllPrices}
-      >
-        <ShoppingCart size={14} />
-        Mettre en vente
-      </Button>
-    </>
+    <RecipeDetails
+      recipe={recipe}
+      prices={ingredientPrices}
+      resultPrice={resultPrice}
+      onEditPrice={(item) => onIngredientClick?.(item)}
+      onSell={onSell}
+    />
   );
 
   return (
-    <ItemCard
-      layout="row"
-      onClick={onToggle}
-      expanded={expanded ? details : undefined}
-      className={isProfitable && hasAllPrices ? 'hover:shadow-gain/5 border-gain/10' : ''}
-    >
-      <ItemCard.Icon src={iconUrl} alt={name} size="md" />
-
-      <ItemCard.Body
-        className="group/result cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onIngredientClick?.({
-            id: recipe.resultId,
-            name: recipe.resultName?.fr || '',
-            iconUrl: recipe.result?.img || '',
-            price: resultPrice,
-          });
-        }}
+    <>
+      <ItemCard
+        layout="row"
+        onClick={fitsInline ? onToggle : () => setShowPopin(true)}
+        expanded={fitsInline && expanded ? details : undefined}
+        className={isProfitable && hasAllPrices ? 'hover:shadow-gain/5 border-gain/10' : ''}
       >
-        <div className="flex items-center gap-2">
-          <ItemCard.Title className="group-hover/result:text-kamas transition-colors">
-            {name}
-          </ItemCard.Title>
-          <Edit2
-            size={12}
-            className="text-dark-500 opacity-0 group-hover/result:opacity-100 transition-opacity"
-          />
-        </div>
-        <ItemCard.Badges>
-          <Badge variant="warning">Niv. {recipe.resultLevel}</Badge>
-          {recipe.job?.name?.fr && <Badge>{recipe.job.name.fr}</Badge>}
-        </ItemCard.Badges>
-      </ItemCard.Body>
+        {/* `toast={false}`: an expanded card clips its content, which would cut the badge. */}
+        <CopyableIcon src={iconUrl} name={name} size="md" toast={false} />
 
-      <ItemCard.Metrics>
-        <ItemCard.Metric label="Coût">
-          <KamasDisplay amount={craftCost} size="sm" className="text-dark-300" />
-        </ItemCard.Metric>
-        <ItemCard.Metric label="Vente">
-          <KamasDisplay amount={resultPrice} size="sm" className="text-dark-200" />
-        </ItemCard.Metric>
-        <ItemCard.Metric label="Marge (-2% tax)" className="min-w-[80px]">
-          {hasAllPrices ? (
-            <div className="flex items-center gap-1 justify-end">
-              <KamasDisplay amount={margin} size="sm" colored />
-              <span className={`text-[10px] ${isProfitable ? 'text-gain' : 'text-loss'}`}>
-                ({marginPercent > 0 ? '+' : ''}
-                {marginPercent}%)
-              </span>
+        <ItemCard.Body>
+          {/* Only the name edits the price — the badges beside it are "the rest of the
+              line" and belong to the recipe, like anywhere else on the row. */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              editResultPrice();
+            }}
+            title="Modifier le prix de vente"
+            className="group/result flex items-center gap-2 max-w-full cursor-pointer"
+          >
+            <ItemCard.Title className="group-hover/result:text-kamas transition-colors">
+              {name}
+            </ItemCard.Title>
+            <Edit2
+              size={12}
+              className="text-dark-500 flex-shrink-0 opacity-0 group-hover/result:opacity-100 transition-opacity"
+            />
+          </button>
+          <ItemCard.Badges>
+            <Badge variant="warning">Niv. {recipe.resultLevel}</Badge>
+            {recipe.job?.name?.fr && <Badge>{recipe.job.name.fr}</Badge>}
+          </ItemCard.Badges>
+        </ItemCard.Body>
+
+        <ItemCard.Metrics>
+          {/* Dropped on phones so the margin and the recipe button keep their room —
+              the popin shows all three figures again. */}
+          <ItemCard.Metric label="Coût" hideOnMobile>
+            <KamasDisplay amount={craftCost} size="sm" className="text-dark-300" />
+          </ItemCard.Metric>
+          <ItemCard.Metric label="Vente" hideOnMobile>
+            <KamasDisplay amount={resultPrice} size="sm" className="text-dark-200" />
+          </ItemCard.Metric>
+          <ItemCard.Metric label="Marge (-2% tax)" className="min-w-[80px]">
+            {hasAllPrices ? (
+              <div className="flex items-center gap-1 justify-end">
+                <KamasDisplay amount={margin} size="sm" colored />
+                <span className={`text-[10px] ${isProfitable ? 'text-gain' : 'text-loss'}`}>
+                  ({marginPercent > 0 ? '+' : ''}
+                  {marginPercent}%)
+                </span>
+              </div>
+            ) : (
+              <span className="text-xs text-dark-500 italic block">Prix manquants</span>
+            )}
+          </ItemCard.Metric>
+
+          {fitsInline ? (
+            <div className="text-dark-500">
+              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </div>
           ) : (
-            <span className="text-xs text-dark-500 italic block">Prix manquants</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              // The label collapses to the icon on phones, so name the button explicitly.
+              aria-label="Voir la recette"
+              title="Voir la recette"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPopin(true);
+              }}
+            >
+              <Eye size={14} />
+              <span className="hidden sm:inline">Voir la recette</span>
+            </Button>
           )}
-        </ItemCard.Metric>
+        </ItemCard.Metrics>
+      </ItemCard>
 
-        <div className="text-dark-500">
-          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </div>
-      </ItemCard.Metrics>
-    </ItemCard>
+      {/* The page owns the price and sell modals already, so the popin defers to them. */}
+      {!fitsInline && (
+        <RecipeModal
+          isOpen={showPopin}
+          onClose={() => setShowPopin(false)}
+          recipe={recipe}
+          prices={ingredientPrices}
+          onEditPrice={onIngredientClick}
+          onSell={onSell}
+        />
+      )}
+    </>
   );
 };
 

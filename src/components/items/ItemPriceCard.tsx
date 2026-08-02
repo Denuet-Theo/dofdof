@@ -5,6 +5,7 @@ import { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
 import ItemCard from '@/components/ui/ItemCard';
 import Badge from '@/components/ui/Badge';
 import CopyableIcon from '@/components/ui/CopyableIcon';
+import HdvBadge from '@/components/items/HdvBadge';
 import ItemPriceInput from '@/components/items/ItemPriceInput';
 import RecipeModal from '@/components/recipes/RecipeModal';
 import { Eye } from 'lucide-react';
@@ -39,6 +40,7 @@ const ItemPriceCard = ({
           <ItemCard.Badges>
             <Badge variant="warning">Niv. {item.level}</Badge>
             {item.type?.name?.fr && <Badge>{item.type.name.fr}</Badge>}
+            <HdvBadge superTypeId={item.superTypeId} />
             {item.hasRecipe && (
               // Used to be a link to /recipes?search=, which threw away the search and
               // the tab on the way out. The popin keeps the page exactly where it is.

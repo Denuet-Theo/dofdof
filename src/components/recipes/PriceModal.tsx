@@ -16,6 +16,7 @@ interface PriceModalProps {
     name: string;
     iconUrl: string;
     price?: number;
+    superTypeId?: number;
   } | null;
   onPriceSaved?: (itemId: number, price: number, updated_at: string) => void;
 }
@@ -76,6 +77,7 @@ const PriceForm = ({
       <ItemPreview
         name={item.name}
         iconUrl={item.iconUrl}
+        superTypeId={item.superTypeId}
         subtitle="Ajuste le prix moyen en HDV"
       />
 

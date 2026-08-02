@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button';
 import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import { ShoppingCart, Edit2 } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
+import { getHdvLabel } from '@/lib/dofus/hdv';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
 
 /** The item whose price is being edited — what every "click the line" handler receives. */
@@ -15,6 +16,8 @@ export interface PriceTarget {
   name: string;
   iconUrl: string;
   price?: number;
+  /** Optionnel : sert à afficher l'HDV, et tous les appelants ne le connaissent pas. */
+  superTypeId?: number;
 }
 
 export interface SellTarget {
@@ -23,6 +26,7 @@ export interface SellTarget {
   iconUrl: string;
   price: number;
   craftCost: number;
+  superTypeId?: number;
 }
 
 interface RecipeDetailsProps {
@@ -75,6 +79,7 @@ const RecipeDetails = ({
                   name: ingredient.name?.fr || '',
                   iconUrl: ingredient.img,
                   price: unitPrice,
+                  superTypeId: ingredient.superTypeId,
                 })
               }
             >
@@ -92,6 +97,13 @@ const RecipeDetails = ({
                 </ItemCard.Title>
                 <div className="flex items-center gap-2 mt-0.5">
                   <p className="text-[10px] text-dark-500">× {qty}</p>
+                  {/* En texte plutôt qu'en `HdvBadge` : une pastille par ingrédient
+                      écraserait une ligne déjà dense, sur huit lignes de recette. */}
+                  {getHdvLabel(ingredient.superTypeId) && (
+                    <span className="text-[9px] text-craft">
+                      {getHdvLabel(ingredient.superTypeId)}
+                    </span>
+                  )}
                   {ingPriceObj?.updated_at && (
                     <span className="text-[9px] text-dark-600">
                       ({formatTimeAgo(ingPriceObj.updated_at)})
@@ -151,6 +163,7 @@ const RecipeDetails = ({
             iconUrl: recipe.result?.img || '',
             price: resultPrice,
             craftCost,
+            superTypeId: recipe.result?.superTypeId,
           })
         }
         size="sm"

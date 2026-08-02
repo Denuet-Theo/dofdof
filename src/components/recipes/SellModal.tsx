@@ -19,6 +19,7 @@ interface SellModalProps {
     iconUrl: string;
     price: number;
     craftCost: number;
+    superTypeId?: number;
   } | null;
   onSold?: () => void;
 }
@@ -133,6 +134,7 @@ const SellForm = ({
       <ItemPreview
         name={item.name}
         iconUrl={item.iconUrl}
+        superTypeId={item.superTypeId}
         subtitle={
           <span className="flex gap-1">
             Coût craft unitaire: <KamasDisplay amount={item.craftCost} size="sm" />

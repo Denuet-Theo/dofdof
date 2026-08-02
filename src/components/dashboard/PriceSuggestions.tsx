@@ -5,6 +5,7 @@ import ItemCard from '@/components/ui/ItemCard';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import CopyableIcon from '@/components/ui/CopyableIcon';
+import HdvBadge from '@/components/items/HdvBadge';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Skeleton from '@/components/ui/Skeleton';
 import PriceModal from '@/components/recipes/PriceModal';
@@ -213,6 +214,7 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
                           name: row.item_name,
                           iconUrl: row.img,
                           price: row.current_price ?? 0,
+                          superTypeId: row.super_type_id,
                         })
                       }
                     >
@@ -226,7 +228,8 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
 
                       <ItemCard.Body>
                         <ItemCard.Title>{row.item_name}</ItemCard.Title>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <HdvBadge superTypeId={row.super_type_id} />
                           {done ? (
                             <Badge variant="success">
                               <Check size={10} className="mr-1" />

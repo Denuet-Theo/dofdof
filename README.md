@@ -112,20 +112,50 @@ SUPABASE_DB_URL=<uri> npm run db:migrate
 
 ### DofusDB catalog mirror
 
-Item and recipe data comes from the public `api.dofusdb.fr`. Rather than proxying every page
-load, the catalog is mirrored into our own Postgres — it only changes when the game patches,
-and it is small (21 738 items, 4 858 recipes, ~30 MB with indexes).
+Item, recipe and bestiary data comes from the public `api.dofusdb.fr`. Rather than proxying
+every page load, the catalog is mirrored into our own Postgres — it only changes when the game
+patches, and it is small (21 738 items, 4 858 recipes, 5 134 monsters, 23 133 drop rows,
+~40 MB with indexes).
 
 ```bash
 npm run db:sync       # full sync (needs SUPABASE_DB_URL)
 npm run db:sync:dry   # fetch + map everything, touch no database
 ```
 
-A cold sync takes about 10 seconds. `scripts/sync-dofusdb.mjs` pages the API 5 requests at a
-time with retry and backoff, then swaps both tables in **one transaction** via a temporary
+A cold sync takes about 12 seconds. `scripts/sync-dofusdb.mjs` pages the API 5 requests at a
+time with retry and backoff, then swaps every table in **one transaction** via a temporary
 staging table: if it dies partway, the previous mirror is untouched and the fix is to re-run
 it. This requires the *direct* connection, not the pooler — a `TEMP` table does not survive
 transaction-mode pooling.
+
+Monsters are swapped before drops: `dofus_drops.monster_id` carries a foreign key, and
+pruning a monster that upstream dropped cascades to its drop rows. `dofus_drops` is keyed on
+`(monster_id, object_id, criterions)` rather than the first two alone — 518 rows out of 12 150
+share a monster and an object while differing only by the quest state that gates them.
+
+#### Farm targets
+
+`farm_targets()` (migration `20260802210000`) ranks monsters by expected kamas per fight, by
+joining the drop mirror to `item_prices`. It is served by `/api/dofusdb/farm`; every filter is
+optional and its default lives in the SQL signature.
+
+Two caveats worth knowing before trusting the ranking:
+
+- **Quest-gated drops are excluded by default.** They surface at 100 % and dominate the ranking
+  while not being farmable in a loop: 17.6 % of drop rows carry a quest criterion, and those
+  account for 43.2 % of every row showing 100 %. On a 300-monster sample the default drops
+  Larve Bleue from 1 826 to 870 kamas by removing one quest object. Pass `excludeQuestDrops=0`
+  to put them back.
+
+  This is the *only* interpretation the function makes of `criterions`, and it is deliberately
+  narrow — it matches `Q[aofsc][=!<>]` and nothing else. The mirror still stores the raw
+  expression. The blunt alternative, `unconditionalOnly=1`, drops every conditional row: it is
+  opt-in because 56.7 % of rows carry a non-quest condition (`PL` player level, `PO` a cap on
+  copies already owned) that stays perfectly farmable. On the same sample it shrinks the pool
+  from 276 monsters to 178, where the quest filter leaves all 276 standing.
+- **Resistances are bounds across grades, not per-grade values.** They differ between grades for
+  54.9 % of monsters, so each element is stored as a `_min`/`_max` pair. Negative values are
+  vulnerabilities, which is what the `elements` + `maxResistance` filter is for.
 
 It writes through `SUPABASE_DB_URL` rather than a service-role key. That variable already
 exists for migrations and already carries more privilege than a service-role key would, so

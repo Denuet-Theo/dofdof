@@ -27,6 +27,14 @@ export type HdvCategoryId = keyof typeof HDV_CATEGORIES;
 export type HdvLabel = (typeof HDV_CATEGORIES)[HdvCategoryId];
 
 /**
+ * Le super-type des objets de quête — les seuls que l'on ne tarifera jamais,
+ * d'où le filtre du panneau « Prix à remplir ». La suggestion étant classée en
+ * base, la valeur est aussi écrite en dur dans `price_suggestions()`
+ * (20260802160000).
+ */
+export const QUEST_SUPER_TYPE_ID = 14;
+
+/**
  * super_type_id → categoryId, relevé sur api.dofusdb.fr/item-types.
  * Le nom en commentaire est celui du super-type, pour que la ligne reste
  * relisible sans rouvrir l'API.

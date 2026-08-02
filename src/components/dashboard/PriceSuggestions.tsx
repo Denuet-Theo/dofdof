@@ -26,6 +26,7 @@ import {
   SUGGESTIONS_PER_BUCKET,
 } from '@/lib/hooks/usePriceSuggestions';
 import { formatTimeAgo } from '@/lib/utils/date';
+import { JOBS } from '@/lib/constants/jobs';
 import {
   Check,
   ClipboardList,
@@ -33,6 +34,7 @@ import {
   PackageCheck,
   RefreshCw,
   Scale,
+  Scroll,
   Shuffle,
   type LucideIcon,
 } from 'lucide-react';
@@ -114,7 +116,12 @@ interface PriceSuggestionsProps {
  * donc le catalogue non rempli est un angle mort qui s'auto-entretient.
  */
 const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
-  const { suggestions, loading, reload } = usePriceSuggestions();
+  // Les objets de quête sont exclus par défaut : ils ne se revendent pas, donc
+  // une suggestion de prix sur l'un d'eux est toujours du bruit. Le bouton les
+  // fait revenir pour qui tient quand même à les tarifer.
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [includeQuest, setIncludeQuest] = useState(false);
+  const { suggestions, loading, reload } = usePriceSuggestions({ jobId, includeQuest });
   const [priceTarget, setPriceTarget] = useState<PriceTarget | null>(null);
   const [filled, setFilled] = useState<Set<number>>(new Set());
   const [unlocked, setUnlocked] = useState<ProfitableRecipe[]>([]);
@@ -158,7 +165,7 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
 
   return (
     <div className="glass rounded-2xl p-6">
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <ClipboardList size={20} className="text-kamas" />
@@ -169,10 +176,51 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
           </p>
         </div>
 
-        <Button variant="ghost" size="sm" onClick={reload} loading={loading}>
-          <RefreshCw size={14} />
-          Actualiser
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Le métier filtre le graphe des recettes en base, pas les 16 lignes
+              rendues : les blocs sont reclassés à l'intérieur du métier, donc
+              « utilisées partout » veut bien dire « partout en bijouterie ». */}
+          <select
+            aria-label="Métier du craft"
+            value={jobId ?? ''}
+            onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)}
+            className="px-3 py-1.5 rounded-lg bg-dark-800/80 border border-dark-600/50
+              text-dark-200 text-xs transition-all hover:border-dark-500 focus:border-kamas/50
+              cursor-pointer"
+          >
+            <option value="">Tous les métiers</option>
+            {JOBS.map((job) => (
+              <option key={job.id} value={job.id}>
+                {job.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            aria-pressed={includeQuest}
+            onClick={() => setIncludeQuest((v) => !v)}
+            title={
+              includeQuest
+                ? 'Les objets de quête sont proposés'
+                : 'Les objets de quête sont écartés'
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs
+              transition-all cursor-pointer ${
+                includeQuest
+                  ? 'bg-kamas/10 border-kamas/40 text-kamas'
+                  : 'bg-dark-800/80 border-dark-600/50 text-dark-400 hover:border-dark-500'
+              }`}
+          >
+            <Scroll size={14} />
+            Objets de quête
+          </button>
+
+          <Button variant="ghost" size="sm" onClick={reload} loading={loading}>
+            <RefreshCw size={14} />
+            Actualiser
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">

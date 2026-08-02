@@ -5,6 +5,7 @@ import { DofusDBItem, DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import ItemCard from '@/components/ui/ItemCard';
 import Badge from '@/components/ui/Badge';
 import CopyableIcon from '@/components/ui/CopyableIcon';
+import HdvBadge from '@/components/items/HdvBadge';
 import ItemPriceInput from '@/components/items/ItemPriceInput';
 import RecipeModal from '@/components/recipes/RecipeModal';
 import { Trophy, Hammer, Eye } from 'lucide-react';
@@ -73,6 +74,7 @@ const GaugeItemCard = ({
                   ? ` (max ${gaugeInfo.capAmount.toLocaleString('fr-FR')})`
                   : ''}
             </Badge>
+            <HdvBadge superTypeId={item.superTypeId} />
             {updatedAt && (
               <span className="text-[10px] text-dark-500">MAJ : {formatTimeAgo(updatedAt)}</span>
             )}

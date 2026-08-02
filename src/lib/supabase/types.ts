@@ -46,6 +46,7 @@ export type PriceSuggestion = {
   item_id: number;
   item_name: string;
   img: string;
+  super_type_id: number;
   has_recipe: boolean;
   /** `null` quand aucune ligne `item_prices` n'existe — l'item n'a jamais été rempli. */
   current_price: number | null;
@@ -74,6 +75,8 @@ export interface DofusDBEffect {
 export interface DofusDBItem {
   id: number;
   typeId: number;
+  /** Détermine l'hôtel de vente de l'item — voir `lib/dofus/hdv.ts`. */
+  superTypeId: number;
   iconId: number;
   level: number;
   name: { fr: string };

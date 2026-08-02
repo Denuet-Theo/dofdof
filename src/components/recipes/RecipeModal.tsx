@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import Skeleton from '@/components/ui/Skeleton';
 import CopyableIcon from '@/components/ui/CopyableIcon';
+import HdvBadge from '@/components/items/HdvBadge';
 import RecipeDetails, { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
 import PriceModal from '@/components/recipes/PriceModal';
 import SellModal from '@/components/recipes/SellModal';
@@ -101,7 +102,13 @@ const RecipeModal = ({
                 <button
                   type="button"
                   onClick={() =>
-                    handleEditPrice({ id: active.resultId, name, iconUrl, price: resultPrice })
+                    handleEditPrice({
+                      id: active.resultId,
+                      name,
+                      iconUrl,
+                      price: resultPrice,
+                      superTypeId: active.result?.superTypeId,
+                    })
                   }
                   className="group/name flex items-center gap-2 max-w-full cursor-pointer"
                   title="Modifier le prix de vente"
@@ -118,6 +125,7 @@ const RecipeModal = ({
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <Badge variant="warning">Niv. {active.resultLevel}</Badge>
                   {active.job?.name?.fr && <Badge>{active.job.name.fr}</Badge>}
+                  <HdvBadge superTypeId={active.result?.superTypeId} />
                 </div>
               </div>
             </div>

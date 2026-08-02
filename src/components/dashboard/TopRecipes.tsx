@@ -118,6 +118,7 @@ const TopRecipes = ({
                       name: recipe.name,
                       iconUrl: recipe.iconUrl,
                       price: recipe.sellPrice,
+                      superTypeId: recipe.recipe.result?.superTypeId,
                     });
                   }}
                   title="Modifier le prix de vente"

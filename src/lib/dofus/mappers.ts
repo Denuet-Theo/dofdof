@@ -26,6 +26,7 @@ type RecipeRow = Omit<DofusRecipeRow, 'synced_at'>;
 export const toDofusDBItem = (row: ItemRow): DofusDBItem => ({
   id: row.id,
   typeId: row.type_id,
+  superTypeId: row.super_type_id,
   iconId: row.icon_id,
   level: row.level,
   name: { fr: row.name_fr },
@@ -51,6 +52,8 @@ export const toDofusDBItem = (row: ItemRow): DofusDBItem => ({
 export const placeholderItem = (id: number, nameFr?: string): DofusDBItem => ({
   id,
   typeId: 0,
+  // 0 = inconnu : `getHdvLabel` n'affichera aucune étiquette plutôt qu'une fausse.
+  superTypeId: 0,
   iconId: 0,
   level: 0,
   name: { fr: nameFr ?? `Item #${id}` },

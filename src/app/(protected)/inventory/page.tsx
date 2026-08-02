@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useTransition } from 'react';
+import { useState, useEffect, useCallback, useMemo, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
+import { useItemJobs } from '@/lib/hooks/useItemJobs';
+import { JOBS } from '@/lib/constants/jobs';
 import SaleRow from '@/components/inventory/SaleRow';
 import ItemPreview from '@/components/items/ItemPreview';
 import KamasDisplay from '@/components/ui/KamasDisplay';
@@ -14,9 +16,12 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
-import { Package, ShoppingBag, Coins, TrendingUp, Save } from 'lucide-react';
+import { Package, ShoppingBag, Coins, TrendingUp, Save, Filter, X } from 'lucide-react';
 
 type Tab = 'active' | 'sold';
+
+/** `lot_size` est contraint à ces quatre valeurs côté base. */
+const LOT_SIZES = [1, 10, 100, 1000] as const;
 
 const InventoryPage = () => {
   // `null` until the first load lands, which is what tells the skeleton apart from a
@@ -26,7 +31,11 @@ const InventoryPage = () => {
   // flag to raise — which is what let the fetch move out of the effect body.
   const [loading, startLoading] = useTransition();
   const [activeTab, setActiveTab] = useState<Tab>('active');
-  
+
+  const [search, setSearch] = useState('');
+  const [lotSize, setLotSize] = useState('');
+  const [jobId, setJobId] = useState('');
+
   const [editingSale, setEditingSale] = useState<UserSale | null>(null);
   const [newLotPrice, setNewLotPrice] = useState('');
   const [savingPrice, setSavingPrice] = useState(false);
@@ -54,12 +63,35 @@ const InventoryPage = () => {
     loadSales();
   }, [loadSales]);
 
-  const activeSales = (sales ?? []).filter((s) => s.status === 'active');
-  const soldSales = (sales ?? []).filter((s) => s.status === 'sold');
+  // `user_sales` ne porte pas de métier : il se déduit de la recette qui produit
+  // l'item. La liste des ids est mémoïsée pour ne pas relancer la résolution à
+  // chaque frappe dans le champ de recherche.
+  const saleItemIds = useMemo(() => (sales ?? []).map((s) => s.item_id), [sales]);
+  const jobByItem = useItemJobs(saleItemIds);
+
+  const hasFilters = !!(search.trim() || lotSize || jobId);
+
+  const resetFilters = () => {
+    setSearch('');
+    setLotSize('');
+    setJobId('');
+  };
+
+  const term = search.trim().toLowerCase();
+  const filteredSales = (sales ?? []).filter((sale) => {
+    if (term && !sale.item_name.toLowerCase().includes(term)) return false;
+    if (lotSize && sale.lot_size !== Number(lotSize)) return false;
+    // Un item sans recette n'a aucun métier : il ne matche donc aucune sélection.
+    if (jobId && jobByItem.get(sale.item_id) !== Number(jobId)) return false;
+    return true;
+  });
+
+  const activeSales = filteredSales.filter((s) => s.status === 'active');
+  const soldSales = filteredSales.filter((s) => s.status === 'sold');
 
   const currentSales = activeTab === 'active' ? activeSales : soldSales;
 
-  // Global calculations for active sales
+  // Calculs sur la sélection courante : les cartes suivent les filtres.
   const totalActiveSalesValue = activeSales.reduce(
     (sum, s) => sum + getSaleValue(s),
     0
@@ -157,7 +189,77 @@ const InventoryPage = () => {
         </p>
       </div>
 
-      {/* Stats */}
+      {/* Filters */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Filter size={16} className="text-kamas" />
+            <h3 className="text-sm font-semibold text-dark-200">Filtres</h3>
+          </div>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="flex items-center gap-1 text-xs text-dark-400 hover:text-kamas transition-colors cursor-pointer"
+            >
+              <X size={12} />
+              Réinitialiser
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex-1 min-w-[200px]">
+            <label className="text-xs text-dark-400 mb-1 block">Nom</label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un item..."
+              className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                text-dark-100 text-sm placeholder:text-dark-500 transition-all
+                hover:border-dark-500 focus:border-kamas/50"
+            />
+          </div>
+
+          <div className="flex-1 min-w-[180px]">
+            <label className="text-xs text-dark-400 mb-1 block">Métier</label>
+            <select
+              value={jobId}
+              onChange={(e) => setJobId(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50
+                cursor-pointer"
+            >
+              <option value="">Tous les métiers</option>
+              {JOBS.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="w-36">
+            <label className="text-xs text-dark-400 mb-1 block">Taille de lot</label>
+            <select
+              value={lotSize}
+              onChange={(e) => setLotSize(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50
+                cursor-pointer"
+            >
+              <option value="">Toutes</option>
+              {LOT_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  x{size}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats — recalculées sur la sélection courante */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
         <Card>
           <div className="flex items-center gap-3">
@@ -202,7 +304,8 @@ const InventoryPage = () => {
               <Coins size={18} className="text-gain" />
             </div>
             <div>
-              <p className="text-xs text-dark-500">Bénéfice Net Global</p>
+              {/* Plus « Global » : ces totaux suivent désormais les filtres. */}
+              <p className="text-xs text-dark-500">Bénéfice Net</p>
               <KamasDisplay amount={totalSoldProfit + totalActiveProfit} size="md" className="font-bold text-gain" colored />
             </div>
           </div>
@@ -246,12 +349,20 @@ const InventoryPage = () => {
         </div>
       ) : (
         <EmptyState
-          icon={Package}
-          title={activeTab === 'active' ? 'Aucun item en vente' : 'Aucune vente réalisée'}
+          icon={hasFilters ? Filter : Package}
+          title={
+            hasFilters
+              ? 'Aucun résultat'
+              : activeTab === 'active'
+                ? 'Aucun item en vente'
+                : 'Aucune vente réalisée'
+          }
           description={
-            activeTab === 'active'
-              ? 'Mets des items en vente depuis le Calculateur de Recettes'
-              : 'Marque tes items comme vendus pour les voir ici'
+            hasFilters
+              ? 'Aucune ligne ne correspond à ces filtres. Élargis la sélection ou réinitialise-la.'
+              : activeTab === 'active'
+                ? 'Mets des items en vente depuis le Calculateur de Recettes'
+                : 'Marque tes items comme vendus pour les voir ici'
           }
         />
       )}

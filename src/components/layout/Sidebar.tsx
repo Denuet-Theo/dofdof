@@ -8,6 +8,7 @@ import {
   ChefHat,
   Package,
   Gauge,
+  Swords,
   LogOut,
   Sparkles,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ const navItems = [
   { href: '/items', label: 'Items & Prix', icon: Search },
   { href: '/recipes', label: 'Recettes', icon: ChefHat },
   { href: '/gauges', label: 'Jauges', icon: Gauge },
+  { href: '/farm', label: 'Farm', icon: Swords },
   { href: '/inventory', label: 'Inventaire', icon: Package },
 ];
 

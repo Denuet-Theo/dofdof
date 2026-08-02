@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { UserSale, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
+import { MAX_RESULT_IDS } from '@/lib/dofus/constants';
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import KpiCard from '@/components/dashboard/KpiCard';
 import SalesChart from '@/components/dashboard/SalesChart';
@@ -67,7 +68,12 @@ const DashboardPage = () => {
       }
 
       try {
-        const params = new URLSearchParams({ limit: '100' });
+        // Aligné sur MAX_RESULT_IDS : la route tronque `resultIds` à 500 ids et
+        // le miroir garantit une recette par item, donc le vivier ne peut pas
+        // dépasser 500. Avec une fenêtre plus courte, le classement portait sur
+        // les N recettes d'id le plus bas (la route trie par id, pas par marge)
+        // et le « Top 10 » n'était pas le vrai top dès 100 items tarifés.
+        const params = new URLSearchParams({ limit: String(MAX_RESULT_IDS) });
         params.set('resultIds', itemIds.join(','));
         if (jobId) params.set('jobId', jobId);
 

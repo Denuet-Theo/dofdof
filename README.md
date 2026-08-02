@@ -139,7 +139,23 @@ share a monster and an object while differing only by the quest state that gates
 joining the drop mirror to `item_prices`. It is served by `/api/dofusdb/farm`; every filter is
 optional and its default lives in the SQL signature.
 
-Two caveats worth knowing before trusting the ranking:
+Prospecting does **not** scale drop rates proportionally. The multiplier is
+`public.prospecting_multiplier(pp) = ((pp + 233) / 333) ^ 1.413`, which equals 1 at 100 PP —
+the prospecting the stored base rate corresponds to. It is an empirical fit (migration
+`20260802220000`), measured in game across 5 items, 4 monsters and base rates from 7.1 % to
+60 %; all nine observations land within 0.16 percentage points. The proportional formula it
+replaces was off by 33.9 points RMSE, and by +51 at 333 PP.
+
+Three properties were each tested separately and hold: the effect is multiplicative on the
+base rate, it does not depend on the monster (level 1 and level 200 monsters sharing a 10 %
+base read identically), and the result is capped at 100 %.
+
+Note the fit is anchored on four prospecting values between 140 and 333 — below 140 it
+extrapolates. The two constants are not separately identified (a larger offset trades against
+a larger exponent), but the whole valley of solutions agrees on the curve within 0.5 points
+across the measured range.
+
+Three caveats worth knowing before trusting the ranking:
 
 - **Quest-gated drops are excluded by default.** They surface at 100 % and dominate the ranking
   while not being farmable in a loop: 17.6 % of drop rows carry a quest criterion, and those

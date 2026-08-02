@@ -28,6 +28,35 @@ export type UserSale = {
   sold_at: string | null;
 };
 
+/**
+ * Une ligne rendue par la fonction `price_suggestions` (voir
+ * 20260802120000_price_suggestions.sql). Les colonnes de métrique sont nullables
+ * parce qu'elles n'ont de valeur que pour leur propre bloc : `recipe_count` pour
+ * `most_used`, `craft_cost` pour `ready_recipe`, `cost_share`/`context_name`
+ * pour `cost_driver`.
+ */
+export type PriceSuggestionBucket =
+  | 'most_used'
+  | 'ready_recipe'
+  | 'cost_driver'
+  | 'random';
+
+export type PriceSuggestion = {
+  bucket: PriceSuggestionBucket;
+  item_id: number;
+  item_name: string;
+  img: string;
+  has_recipe: boolean;
+  /** `null` quand aucune ligne `item_prices` n'existe — l'item n'a jamais été rempli. */
+  current_price: number | null;
+  updated_at: string | null;
+  recipe_count: number | null;
+  craft_cost: number | null;
+  /** Part du coût de craft, dans ]0,1]. */
+  cost_share: number | null;
+  context_name: string | null;
+};
+
 export interface DofusDBEffect {
   from: number;
   to: number;
@@ -217,6 +246,14 @@ export interface Database {
       sell_lots: {
         Args: { p_sale_id: string; p_count: number };
         Returns: undefined;
+      };
+      price_suggestions: {
+        Args: {
+          p_stale_days?: number;
+          p_fallback_days?: number;
+          p_per_bucket?: number;
+        };
+        Returns: PriceSuggestion[];
       };
     };
     Enums: Record<string, never>;

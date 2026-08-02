@@ -255,6 +255,9 @@ export interface Database {
           p_stale_days?: number;
           p_fallback_days?: number;
           p_per_bucket?: number;
+          /** `null` = tous les métiers. */
+          p_job_id?: number | null;
+          p_include_quest?: boolean;
         };
         Returns: PriceSuggestion[];
       };

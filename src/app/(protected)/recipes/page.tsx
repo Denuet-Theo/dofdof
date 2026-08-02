@@ -12,6 +12,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
+import { fetchRecipesForItems } from '@/lib/dofus/fetch-recipes';
 import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { JOBS } from '@/lib/constants/jobs';
 import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
@@ -63,15 +64,18 @@ const RecipesContent = () => {
         } else {
           // No search or filter: fetch recipes for items we have priced
           const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
-          if (pricedIds.length > 0) {
-            // Chunk to avoid URL too long if user has many prices. Let's take the first 100 for now.
-            params.set('resultIds', pricedIds.slice(0, 100).join(','));
-            params.set('limit', '100');
-          } else {
+          if (pricedIds.length === 0) {
             // User has no prices set and no search, don't fetch random recipes
             setRecipes([]);
             return;
           }
+
+          // Le vivier entier, découpé en tranches par le helper. Il était coupé
+          // aux 100 premiers ids, donc au-delà de 100 prix la page ne montrait
+          // qu'une part arbitraire des recettes réellement calculables — et le
+          // tri par rentabilité juste en dessous classait sur cette part-là.
+          setRecipes(await fetchRecipesForItems(pricedIds));
+          return;
         }
 
         if (jobId) params.set('jobId', jobId);

@@ -155,6 +155,98 @@ export type DofusRecipeRow = {
   synced_at: string;
 };
 
+/** Les cinq éléments, dans l'ordre figé par `ELEMENTS` du script de sync. */
+export const ELEMENTS = ['earth', 'air', 'fire', 'water', 'neutral'] as const;
+export type Element = (typeof ELEMENTS)[number];
+
+/** `res_fire_max`, `res_earth_min`… — dérivé pour que les colonnes ne dérivent pas des éléments. */
+type ResistanceColumns = {
+  [K in Element as `res_${K}_min` | `res_${K}_max`]: number;
+};
+
+export type DofusMonsterRow = ResistanceColumns & {
+  id: number;
+  name_fr: string;
+  slug_fr: string;
+  race: number;
+  is_boss: boolean;
+  is_mini_boss: boolean;
+  /** 2 839 monstres sur 5 134 le portent : bien plus large que « exclusif aux quêtes ». */
+  is_quest_monster: boolean;
+  is_bounty: boolean;
+  hide_in_bestiary: boolean;
+  level_min: number;
+  level_max: number;
+  /** grade_levels[i] = niveau du grade i. De 3 à 11 entrées selon les monstres. */
+  grade_levels: number[];
+  grade_count: number;
+  subarea_ids: number[];
+  img: string;
+  synced_at: string;
+};
+
+export type DofusDropRow = {
+  monster_id: number;
+  object_id: number;
+  /** Expression de critères DofusDB, brute. Fait partie de la clé primaire. */
+  criterions: string;
+  has_criterions: boolean;
+  percent_grade_1: number;
+  percent_grade_2: number;
+  percent_grade_3: number;
+  percent_grade_4: number;
+  percent_grade_5: number;
+  /** Colonne générée : le plus grand des cinq grades. Jamais écrite par le client. */
+  percent_max: number;
+  max_count: number;
+  synced_at: string;
+};
+
+export type DofusAreaRow = {
+  id: number;
+  name_fr: string;
+  synced_at: string;
+};
+
+export type DofusSubareaRow = {
+  id: number;
+  area_id: number;
+  name_fr: string;
+  level: number;
+  synced_at: string;
+};
+
+/** Une ligne de drop telle que `farm_targets` la sérialise dans `top_drops`. */
+export type FarmDrop = {
+  objectId: number;
+  name: string;
+  img: string;
+  /** Taux après application de la prospection, plafonné à 100. */
+  percent: number;
+  price: number;
+  hasCriterions: boolean;
+  /** Expression brute, non interprétée. Vide quand il n'y a pas de condition. */
+  criterions: string;
+};
+
+export type FarmTarget = {
+  monster_id: number;
+  monster_name: string;
+  img: string;
+  level_min: number;
+  level_max: number;
+  grade_count: number;
+  is_boss: boolean;
+  is_mini_boss: boolean;
+  subarea_names: string[];
+  /** Par élément, le couple [min, max] sur l'ensemble des grades. */
+  resistances: Record<Element, [number, number]>;
+  drop_count: number;
+  /** Espérance de gain pour un combat, à la prospection demandée. */
+  kamas_per_fight: number;
+  top_drops: FarmDrop[];
+};
+
 export type DofusSyncStateRow = {
   resource: string;
   last_success_at: string | null;
@@ -237,6 +329,31 @@ export interface Database {
         Update: Partial<DofusRecipeRow>;
         Relationships: [];
       };
+      dofus_monsters: {
+        Row: DofusMonsterRow;
+        Insert: DofusMonsterRow;
+        Update: Partial<DofusMonsterRow>;
+        Relationships: [];
+      };
+      dofus_drops: {
+        Row: DofusDropRow;
+        // percent_max est généré par Postgres : jamais fourni à l'insertion.
+        Insert: Omit<DofusDropRow, 'percent_max'>;
+        Update: Partial<Omit<DofusDropRow, 'percent_max'>>;
+        Relationships: [];
+      };
+      dofus_areas: {
+        Row: DofusAreaRow;
+        Insert: DofusAreaRow;
+        Update: Partial<DofusAreaRow>;
+        Relationships: [];
+      };
+      dofus_subareas: {
+        Row: DofusSubareaRow;
+        Insert: DofusSubareaRow;
+        Update: Partial<DofusSubareaRow>;
+        Relationships: [];
+      };
       dofus_sync_state: {
         Row: DofusSyncStateRow;
         Insert: DofusSyncStateRow;
@@ -260,6 +377,34 @@ export interface Database {
           p_include_quest?: boolean;
         };
         Returns: PriceSuggestion[];
+      };
+      farm_targets: {
+        // Tous optionnels : les valeurs par défaut vivent dans la signature SQL
+        // (migration 20260802210000), la route n'envoie que ce qui est demandé.
+        Args: {
+          p_min_level?: number;
+          p_max_level?: number;
+          p_subarea_ids?: number[];
+          p_area_id?: number;
+          p_exclude_boss?: boolean;
+          p_exclude_mini_boss?: boolean;
+          p_exclude_quest?: boolean;
+          p_exclude_bounty?: boolean;
+          p_exclude_hidden?: boolean;
+          p_min_percent?: number;
+          /** 100 = référence des taux DofusDB. */
+          p_prospecting?: number;
+          p_priced_only?: boolean;
+          p_crafted_only?: boolean;
+          /** Actif par défaut côté SQL. */
+          p_exclude_quest_drops?: boolean;
+          p_unconditional_only?: boolean;
+          /** Sous-ensemble de `ELEMENTS`. */
+          p_elements?: Element[];
+          p_max_resistance?: number;
+          p_limit?: number;
+        };
+        Returns: FarmTarget[];
       };
     };
     Enums: Record<string, never>;

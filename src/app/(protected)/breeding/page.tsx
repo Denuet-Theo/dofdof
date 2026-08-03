@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Egg, AlertTriangle, Info } from 'lucide-react';
+import { Egg, AlertTriangle, Info, PenLine } from 'lucide-react';
 import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
-import PriceEditor from '@/components/breeding/PriceEditor';
+import PriceEntry from '@/components/breeding/PriceEntry';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type FamilyId } from '@/lib/hooks/useBreeding';
@@ -21,12 +21,11 @@ const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
   const [sortBy, setSortBy] = useState<SortBy>('margin');
   const [pricedOnly, setPricedOnly] = useState(false);
-  const [editing, setEditing] = useState<{ colorId: string; mountLevel: 0 | 200 } | null>(null);
+  const [entryMode, setEntryMode] = useState(false);
 
   const {
     tree,
     rows,
-    prices,
     settings,
     genetonValuation,
     sacrificePrice,
@@ -47,12 +46,11 @@ const BreedingPage = () => {
         // traitées comme gratuites.
         return (a.estimate.cost ?? Infinity) - (b.estimate.cost ?? Infinity);
       }
-      return (b.estimate.marginLevel0 ?? -Infinity) - (a.estimate.marginLevel0 ?? -Infinity);
+      return (b.estimate.bestMargin ?? -Infinity) - (a.estimate.bestMargin ?? -Infinity);
     });
   }, [rows, sortBy, pricedOnly]);
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
-  const editingRow = editing ? rows.find((row) => row.colorId === editing.colorId) : null;
 
   return (
     <div className="space-y-6">
@@ -160,7 +158,23 @@ const BreedingPage = () => {
           />
           Seulement les couleurs tarifées
         </label>
+
+        <button
+          type="button"
+          onClick={() => setEntryMode((value) => !value)}
+          className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all
+            cursor-pointer ${
+              entryMode
+                ? 'bg-kamas/15 text-kamas border-kamas/40'
+                : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+            }`}
+        >
+          <PenLine size={13} />
+          {entryMode ? 'Fermer la saisie' : 'Saisir les prix'}
+        </button>
       </div>
+
+      {entryMode && !loading && <PriceEntry rows={rows} onSavePrice={savePrice} />}
 
       {loading ? (
         <div className="space-y-3">
@@ -177,31 +191,11 @@ const BreedingPage = () => {
       ) : (
         <div className="space-y-2">
           {sorted.map((row) => (
-            <ColorRow
-              key={row.colorId}
-              row={row}
-              onEditPrice={(colorId, mountLevel) => setEditing({ colorId, mountLevel })}
-            />
+            <ColorRow key={row.colorId} row={row} onSavePrice={savePrice} />
           ))}
         </div>
       )}
 
-      {editing && editingRow && (
-        <PriceEditor
-          name={editingRow.name}
-          mountLevel={editing.mountLevel}
-          current={
-            editing.mountLevel === 0
-              ? (prices.get(editing.colorId)?.level0 ?? null)
-              : (prices.get(editing.colorId)?.level200 ?? null)
-          }
-          onClose={() => setEditing(null)}
-          onSave={async (price) => {
-            await savePrice(editing.colorId, editing.mountLevel, price);
-            setEditing(null);
-          }}
-        />
-      )}
     </div>
   );
 };

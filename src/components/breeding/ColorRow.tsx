@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronRight, TriangleAlert } from 'lucide-react';
 import KamasDisplay from '@/components/ui/KamasDisplay';
+import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
@@ -10,6 +11,13 @@ const STRATEGY_LABEL = {
   buy: { label: 'Acheter', className: 'bg-dark-700/60 text-dark-300' },
   capture: { label: 'Capturer', className: 'bg-sky-500/15 text-sky-300' },
   breed: { label: 'Élever', className: 'bg-kamas/15 text-kamas' },
+} as const;
+
+/** Étiquette courte, pour l'en-tête de colonne. */
+const EXIT_SHORT = {
+  sell0: 'vente niv 0',
+  sell200: 'vente niv 200',
+  sacrifice: 'extraction',
 } as const;
 
 const EXIT_LABEL = {
@@ -20,10 +28,10 @@ const EXIT_LABEL = {
 
 type Props = {
   row: BreedingRow;
-  onEditPrice: (colorId: string, mountLevel: 0 | 200) => void;
+  onSavePrice: (colorId: string, mountLevel: 0 | 200, price: number) => Promise<boolean>;
 };
 
-const ColorRow = ({ row, onEditPrice }: Props) => {
+const ColorRow = ({ row, onSavePrice }: Props) => {
   const [open, setOpen] = useState(false);
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
@@ -77,7 +85,7 @@ const ColorRow = ({ row, onEditPrice }: Props) => {
         </div>
 
         <div className="text-right shrink-0 w-32">
-          <p className="text-[10px] text-dark-500">Marge (niv 0)</p>
+          <p className="text-[10px] text-dark-500">Marge ({EXIT_SHORT[estimate.bestExit]})</p>
           {margin === null ? (
             <p className="text-sm text-dark-600">prix manquant</p>
           ) : (
@@ -97,26 +105,15 @@ const ColorRow = ({ row, onEditPrice }: Props) => {
 
       {open && (
         <div className="px-5 pb-5 pt-1 border-t border-dark-700/40 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-            <div>
-              <p className="text-dark-500 mb-1">Prix niveau 0</p>
-              <button
-                type="button"
-                onClick={() => onEditPrice(row.colorId, 0)}
-                className="text-dark-200 hover:text-kamas transition-colors cursor-pointer"
-              >
-                {estimate.priceLevel0?.toLocaleString('fr-FR') ?? 'à renseigner'}
-              </button>
-            </div>
-            <div>
-              <p className="text-dark-500 mb-1">Prix niveau 200</p>
-              <button
-                type="button"
-                onClick={() => onEditPrice(row.colorId, 200)}
-                className="text-dark-200 hover:text-kamas transition-colors cursor-pointer"
-              >
-                {estimate.priceLevel200?.toLocaleString('fr-FR') ?? 'à renseigner'}
-              </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
+            <div className="md:col-span-1">
+              <p className="text-dark-500 mb-2">Prix à l&apos;hôtel de vente</p>
+              <ColorPriceInputs
+                colorId={row.colorId}
+                level0={estimate.priceLevel0}
+                level200={estimate.priceLevel200}
+                onSave={onSavePrice}
+              />
             </div>
             <div>
               <p className="text-dark-500 mb-1">Meilleure sortie</p>

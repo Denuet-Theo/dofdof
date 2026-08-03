@@ -276,6 +276,7 @@ export type UserBreedingSettings = {
   minutes_per_fight: number;
   net_recovery_rate: number;
   recycle_steriles: boolean;
+  never_sell_mounts: boolean;
   updated_at: string;
 };
 
@@ -312,6 +313,7 @@ export interface Database {
           minutes_per_fight?: number;
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
+          never_sell_mounts?: boolean;
           updated_at?: string;
         };
         Update: {
@@ -321,6 +323,7 @@ export interface Database {
           minutes_per_fight?: number;
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
+          never_sell_mounts?: boolean;
           updated_at?: string;
         };
         Relationships: [];

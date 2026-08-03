@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   minutes_per_fight: 12,
   net_recovery_rate: 0.8,
   recycle_steriles: true,
+  never_sell_mounts: false,
 };
 
 export type BreedingRow = {
@@ -165,6 +166,7 @@ export const useBreeding = (family: FamilyId) => {
           .filter(([, price]) => price > 0)
       ),
       recycleSteriles: settings.recycle_steriles,
+      neverSell: settings.never_sell_mounts,
     });
 
     return tree.colors
@@ -177,7 +179,7 @@ export const useBreeding = (family: FamilyId) => {
         estimate: estimates.get(color.id)!,
       }))
       .filter((row) => row.estimate !== undefined);
-  }, [tree, prices, supplies, genetonValuation, priceOf, settings.recycle_steriles]);
+  }, [tree, prices, supplies, genetonValuation, priceOf, settings]);
 
   /** Enregistre un prix et le reflète localement sans recharger toute la page. */
   const savePrice = useCallback(

@@ -36,9 +36,10 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
 
-  // Une marge ne veut rien dire sans prix de vente : mieux vaut inviter à le
-  // saisir que d'afficher un zéro qui se lirait comme « pas rentable ».
-  const margin = estimate.marginLevel0;
+  // La marge suit la sortie retenue — vente ou extraction — et non la seule
+  // vente niveau 0 : sans revente, celle-ci est nulle par construction et
+  // afficherait « prix manquant » sur toute la liste.
+  const margin = estimate.bestMargin;
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -87,7 +88,10 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
         <div className="text-right shrink-0 w-32">
           <p className="text-[10px] text-dark-500">Marge ({EXIT_SHORT[estimate.bestExit]})</p>
           {margin === null ? (
-            <p className="text-sm text-dark-600">prix manquant</p>
+            // Plus « prix manquant » : depuis que la marge se compte contre le
+            // coût d'acquisition, l'absence vient d'une couleur qu'on ne sait ni
+            // acheter, ni capturer, ni élever — pas d'un prix de vente absent.
+            <p className="text-sm text-dark-600">coût inconnu</p>
           ) : (
             <p className={`text-sm font-semibold ${margin > 0 ? 'text-profit' : 'text-loss'}`}>
               {margin > 0 ? '+' : ''}

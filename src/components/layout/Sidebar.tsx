@@ -9,6 +9,7 @@ import {
   Package,
   Gauge,
   Swords,
+  Egg,
   LogOut,
   Sparkles,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ const navItems = [
   { href: '/recipes', label: 'Recettes', icon: ChefHat },
   { href: '/gauges', label: 'Jauges', icon: Gauge },
   { href: '/farm', label: 'Farm', icon: Swords },
+  { href: '/breeding', label: 'Élevage', icon: Egg },
   { href: '/inventory', label: 'Inventaire', icon: Package },
 ];
 

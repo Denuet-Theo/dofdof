@@ -256,9 +256,75 @@ export type DofusSyncStateRow = {
   last_error: string | null;
 };
 
+/** Une ligne de `breeding_color_prices` (migration 20260803120000). */
+export type BreedingColorPrice = {
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  color_id: string;
+  /** 0 = poulain à la naissance, 200 = monture montée au maximum. */
+  mount_level: 0 | 200;
+  price: number;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+/** Une ligne de `user_breeding_settings`, privée à chaque éleveur. */
+export type UserBreedingSettings = {
+  user_id: string;
+  breeder_level: number;
+  enclos_count: number;
+  kamas_per_hour: number;
+  minutes_per_fight: number;
+  net_recovery_rate: number;
+  recycle_steriles: boolean;
+  updated_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
+      breeding_color_prices: {
+        Row: BreedingColorPrice;
+        Insert: {
+          family: BreedingColorPrice['family'];
+          color_id: string;
+          mount_level: 0 | 200;
+          price?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          family?: BreedingColorPrice['family'];
+          color_id?: string;
+          mount_level?: 0 | 200;
+          price?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
+      user_breeding_settings: {
+        Row: UserBreedingSettings;
+        Insert: {
+          user_id?: string;
+          breeder_level?: number;
+          enclos_count?: number;
+          kamas_per_hour?: number;
+          minutes_per_fight?: number;
+          net_recovery_rate?: number;
+          recycle_steriles?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          breeder_level?: number;
+          enclos_count?: number;
+          kamas_per_hour?: number;
+          minutes_per_fight?: number;
+          net_recovery_rate?: number;
+          recycle_steriles?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       item_prices: {
         Row: ItemPrice;
         Insert: {

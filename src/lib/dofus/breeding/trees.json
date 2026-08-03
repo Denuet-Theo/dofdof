@@ -1,0 +1,4983 @@
+{
+  "extractedAt": "2026-08-03T20:20:09.567Z",
+  "geneton": {
+    "id": 33512,
+    "name": "Généton"
+  },
+  "genetonExchange": [
+    {
+      "itemId": 798,
+      "name": "Petit Parchemin d'Agilité",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 686,
+      "name": "Petit Parchemin d'Intelligence",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 809,
+      "name": "Petit Parchemin de Chance",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 683,
+      "name": "Petit Parchemin de Force",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 802,
+      "name": "Petit Parchemin de Sagesse",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 806,
+      "name": "Petit Parchemin de Vitalité",
+      "tier": "petit",
+      "genetons": 10,
+      "requiresBelow": 25
+    },
+    {
+      "itemId": 799,
+      "name": "Parchemin d'Agilité",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 815,
+      "name": "Parchemin d'Intelligence",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 811,
+      "name": "Parchemin de Chance",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 795,
+      "name": "Parchemin de Force",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 803,
+      "name": "Parchemin de Sagesse",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 807,
+      "name": "Parchemin de Vitalité",
+      "tier": "normal",
+      "genetons": 50,
+      "requiresBelow": 50
+    },
+    {
+      "itemId": 800,
+      "name": "Grand Parchemin d'Agilité",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 816,
+      "name": "Grand Parchemin d'Intelligence",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 812,
+      "name": "Grand Parchemin de Chance",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 796,
+      "name": "Grand Parchemin de Force",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 804,
+      "name": "Grand Parchemin de Sagesse",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 808,
+      "name": "Grand Parchemin de Vitalité",
+      "tier": "grand",
+      "genetons": 100,
+      "requiresBelow": 80
+    },
+    {
+      "itemId": 801,
+      "name": "Puissant Parchemin d'Agilité",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    },
+    {
+      "itemId": 817,
+      "name": "Puissant Parchemin d'Intelligence",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    },
+    {
+      "itemId": 814,
+      "name": "Puissant Parchemin de Chance",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    },
+    {
+      "itemId": 797,
+      "name": "Puissant Parchemin de Force",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    },
+    {
+      "itemId": 805,
+      "name": "Puissant Parchemin de Sagesse",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    },
+    {
+      "itemId": 810,
+      "name": "Puissant Parchemin de Vitalité",
+      "tier": "puissant",
+      "genetons": 160,
+      "requiresBelow": null
+    }
+  ],
+  "families": [
+    {
+      "id": "dragodinde",
+      "familyId": 1,
+      "certificateTypeId": 97,
+      "sacrificeItem": {
+        "id": 33515,
+        "name": "Neurone de dragodinde"
+      },
+      "sourceUrl": "https://dragodinde.fr/build/assets/dragodindeTree-B_lcfb-y.js",
+      "colors": [
+        {
+          "id": "rousse",
+          "name": "Rousse",
+          "generation": 1,
+          "source": null,
+          "itemId": 7809,
+          "itemName": "Dragodinde Rousse Sauvage",
+          "recipes": []
+        },
+        {
+          "id": "doree",
+          "name": "Doree",
+          "generation": 1,
+          "source": null,
+          "itemId": 7817,
+          "itemName": "Dragodinde Dorée",
+          "recipes": []
+        },
+        {
+          "id": "amande",
+          "name": "Amande",
+          "generation": 1,
+          "source": null,
+          "itemId": 7807,
+          "itemName": "Dragodinde Amande Sauvage",
+          "recipes": []
+        },
+        {
+          "id": "amande_doree",
+          "name": "Amande-Doree",
+          "generation": 2,
+          "source": "site",
+          "itemId": 7823,
+          "itemName": "Dragodinde Amande et Dorée",
+          "recipes": [
+            [
+              "amande",
+              "doree"
+            ]
+          ]
+        },
+        {
+          "id": "amande_rousse",
+          "name": "Amande-Rousse",
+          "generation": 2,
+          "source": "site",
+          "itemId": 7828,
+          "itemName": "Dragodinde Amande et Rousse",
+          "recipes": [
+            [
+              "amande",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "doree_rousse",
+          "name": "Doree-Rousse",
+          "generation": 2,
+          "source": "site",
+          "itemId": 7836,
+          "itemName": "Dragodinde Dorée et Rousse",
+          "recipes": [
+            [
+              "doree",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "indigo",
+          "name": "Indigo",
+          "generation": 3,
+          "source": "site",
+          "itemId": 7816,
+          "itemName": "Dragodinde Indigo",
+          "recipes": [
+            [
+              "amande_doree",
+              "amande_rousse"
+            ]
+          ]
+        },
+        {
+          "id": "ebene",
+          "name": "Ebene",
+          "generation": 3,
+          "source": "site",
+          "itemId": 7808,
+          "itemName": "Dragodinde Ébène",
+          "recipes": [
+            [
+              "amande_doree",
+              "doree_rousse"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_rousse",
+          "name": "Ebene-Rousse",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7813,
+          "itemName": "Dragodinde Ébène et Rousse",
+          "recipes": [
+            [
+              "ebene",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "amande_ebene",
+          "name": "Amande-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7824,
+          "itemName": "Dragodinde Amande et Ébène",
+          "recipes": [
+            [
+              "amande",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "amande_indigo",
+          "name": "Amande-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7826,
+          "itemName": "Dragodinde Amande et Indigo",
+          "recipes": [
+            [
+              "amande",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "doree_ebene",
+          "name": "Doree-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7832,
+          "itemName": "Dragodinde Dorée et Ébène",
+          "recipes": [
+            [
+              "doree",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "doree_indigo",
+          "name": "Doree-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7834,
+          "itemName": "Dragodinde Dorée et Indigo",
+          "recipes": [
+            [
+              "doree",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_indigo",
+          "name": "Ebene-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7841,
+          "itemName": "Dragodinde Ébène et Indigo",
+          "recipes": [
+            [
+              "ebene",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_rousse",
+          "name": "Indigo-Rousse",
+          "generation": 4,
+          "source": "site",
+          "itemId": 7852,
+          "itemName": "Dragodinde Indigo et Rousse",
+          "recipes": [
+            [
+              "indigo",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre",
+          "name": "Pourpre",
+          "generation": 5,
+          "source": "site",
+          "itemId": 7818,
+          "itemName": "Dragodinde Pourpre",
+          "recipes": [
+            [
+              "amande_rousse",
+              "ebene_indigo"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee",
+          "name": "Orchidee",
+          "generation": 5,
+          "source": "site",
+          "itemId": 7821,
+          "itemName": "Dragodinde Orchidée",
+          "recipes": [
+            [
+              "doree_rousse",
+              "ebene_indigo"
+            ]
+          ]
+        },
+        {
+          "id": "amande_orchidee",
+          "name": "Amande-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7830,
+          "itemName": "Dragodinde Amande et Orchidée",
+          "recipes": [
+            [
+              "amande",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "amande_pourpre",
+          "name": "Amande-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7831,
+          "itemName": "Dragodinde Amande et Pourpre",
+          "recipes": [
+            [
+              "amande",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "doree_orchidee",
+          "name": "Doree-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7838,
+          "itemName": "Dragodinde Dorée et Orchidée",
+          "recipes": [
+            [
+              "doree",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "doree_pourpre",
+          "name": "Doree-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7839,
+          "itemName": "Dragodinde Dorée et Pourpre",
+          "recipes": [
+            [
+              "doree",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_orchidee",
+          "name": "Ebene-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7843,
+          "itemName": "Dragodinde Ébène et Orchidée",
+          "recipes": [
+            [
+              "ebene",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_pourpre",
+          "name": "Ebene-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7844,
+          "itemName": "Dragodinde Ébène et Pourpre",
+          "recipes": [
+            [
+              "ebene",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_orchidee",
+          "name": "Indigo-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7854,
+          "itemName": "Dragodinde Indigo et Orchidée",
+          "recipes": [
+            [
+              "indigo",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_pourpre",
+          "name": "Indigo-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7855,
+          "itemName": "Dragodinde Indigo et Pourpre",
+          "recipes": [
+            [
+              "indigo",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_rousse",
+          "name": "Orchidee-Rousse",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7860,
+          "itemName": "Dragodinde Orchidée et Rousse",
+          "recipes": [
+            [
+              "orchidee",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_rousse",
+          "name": "Pourpre-Rousse",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7861,
+          "itemName": "Dragodinde Pourpre et Rousse",
+          "recipes": [
+            [
+              "pourpre",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_pourpre",
+          "name": "Orchidee-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 7866,
+          "itemName": "Dragodinde Orchidée et Pourpre",
+          "recipes": [
+            [
+              "orchidee",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise",
+          "name": "Turquoise",
+          "generation": 7,
+          "source": "site",
+          "itemId": 7814,
+          "itemName": "Dragodinde Turquoise",
+          "recipes": [
+            [
+              "ebene_orchidee",
+              "orchidee_pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire",
+          "name": "Ivoire",
+          "generation": 7,
+          "source": "site",
+          "itemId": 7815,
+          "itemName": "Dragodinde Ivoire",
+          "recipes": [
+            [
+              "indigo_pourpre",
+              "orchidee_pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_ivoire",
+          "name": "Ebene-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7810,
+          "itemName": "Dragodinde Ébène et Ivoire",
+          "recipes": [
+            [
+              "ebene",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_rousse",
+          "name": "Ivoire-Rousse",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7812,
+          "itemName": "Dragodinde Ivoire et Rousse",
+          "recipes": [
+            [
+              "ivoire",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "amande_ivoire",
+          "name": "Amande-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7827,
+          "itemName": "Dragodinde Amande et Ivoire",
+          "recipes": [
+            [
+              "amande",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "amande_turquoise",
+          "name": "Amande-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7829,
+          "itemName": "Dragodinde Amande et Turquoise",
+          "recipes": [
+            [
+              "amande",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "doree_ivoire",
+          "name": "Doree-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7835,
+          "itemName": "Dragodinde Dorée et Ivoire",
+          "recipes": [
+            [
+              "doree",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "doree_turquoise",
+          "name": "Doree-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7837,
+          "itemName": "Dragodinde Dorée et Turquoise",
+          "recipes": [
+            [
+              "doree",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_turquoise",
+          "name": "Ebene-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7842,
+          "itemName": "Dragodinde Ébène et Turquoise",
+          "recipes": [
+            [
+              "ebene",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_ivoire",
+          "name": "Indigo-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7851,
+          "itemName": "Dragodinde Indigo et Ivoire",
+          "recipes": [
+            [
+              "indigo",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_turquoise",
+          "name": "Indigo-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7853,
+          "itemName": "Dragodinde Indigo et Turquoise",
+          "recipes": [
+            [
+              "indigo",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_turquoise",
+          "name": "Ivoire-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7856,
+          "itemName": "Dragodinde Ivoire et Turquoise",
+          "recipes": [
+            [
+              "ivoire",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_orchidee",
+          "name": "Ivoire-Orchidee",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7857,
+          "itemName": "Dragodinde Ivoire et Orchidée",
+          "recipes": [
+            [
+              "ivoire",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_pourpre",
+          "name": "Ivoire-Pourpre",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7858,
+          "itemName": "Dragodinde Ivoire et Pourpre",
+          "recipes": [
+            [
+              "ivoire",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_rousse",
+          "name": "Turquoise-Rousse",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7859,
+          "itemName": "Dragodinde Turquoise et Rousse",
+          "recipes": [
+            [
+              "turquoise",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_orchidee",
+          "name": "Turquoise-Orchidee",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7862,
+          "itemName": "Dragodinde Turquoise et Orchidée",
+          "recipes": [
+            [
+              "turquoise",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_pourpre",
+          "name": "Turquoise-Pourpre",
+          "generation": 8,
+          "source": "site",
+          "itemId": 7863,
+          "itemName": "Dragodinde Turquoise et Pourpre",
+          "recipes": [
+            [
+              "turquoise",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude",
+          "name": "Emeraude",
+          "generation": 9,
+          "source": "site",
+          "itemId": 7820,
+          "itemName": "Dragodinde Émeraude",
+          "recipes": [
+            [
+              "ivoire_turquoise",
+              "ivoire_pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "prune",
+          "name": "Prune",
+          "generation": 9,
+          "source": "site",
+          "itemId": 7822,
+          "itemName": "Dragodinde Prune",
+          "recipes": [
+            [
+              "ivoire_turquoise",
+              "turquoise_orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "amande_emeraude",
+          "name": "Amande-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7825,
+          "itemName": "Dragodinde Amande et Émeraude",
+          "recipes": [
+            [
+              "amande",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "doree_emeraude",
+          "name": "Doree-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7833,
+          "itemName": "Dragodinde Dorée et Émeraude",
+          "recipes": [
+            [
+              "doree",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_emeraude",
+          "name": "Ebene-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7840,
+          "itemName": "Dragodinde Ébène et Émeraude",
+          "recipes": [
+            [
+              "ebene",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_indigo",
+          "name": "Emeraude-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7845,
+          "itemName": "Dragodinde Émeraude et Indigo",
+          "recipes": [
+            [
+              "emeraude",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_ivoire",
+          "name": "Emeraude-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7846,
+          "itemName": "Dragodinde Émeraude et Ivoire",
+          "recipes": [
+            [
+              "emeraude",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_rousse",
+          "name": "Emeraude-Rousse",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7847,
+          "itemName": "Dragodinde Émeraude et Rousse",
+          "recipes": [
+            [
+              "emeraude",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_turquoise",
+          "name": "Emeraude-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7848,
+          "itemName": "Dragodinde Émeraude et Turquoise",
+          "recipes": [
+            [
+              "emeraude",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_orchidee",
+          "name": "Emeraude-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7849,
+          "itemName": "Dragodinde Émeraude et Orchidée",
+          "recipes": [
+            [
+              "emeraude",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_pourpre",
+          "name": "Emeraude-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7850,
+          "itemName": "Dragodinde Émeraude et Pourpre",
+          "recipes": [
+            [
+              "emeraude",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "prune_amande",
+          "name": "Prune-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7867,
+          "itemName": "Dragodinde Prune et Amande",
+          "recipes": [
+            [
+              "prune",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "prune_doree",
+          "name": "Prune-Doree",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7868,
+          "itemName": "Dragodinde Prune et Dorée",
+          "recipes": [
+            [
+              "prune",
+              "doree"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ebene",
+          "name": "Prune-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7869,
+          "itemName": "Dragodinde Prune et Ébène",
+          "recipes": [
+            [
+              "prune",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "prune_emeraude",
+          "name": "Prune-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7870,
+          "itemName": "Dragodinde Prune et Émeraude",
+          "recipes": [
+            [
+              "prune",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "prune_indigo",
+          "name": "Prune-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7871,
+          "itemName": "Dragodinde Prune et Indigo",
+          "recipes": [
+            [
+              "prune",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ivoire",
+          "name": "Prune-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7872,
+          "itemName": "Dragodinde Prune et Ivoire",
+          "recipes": [
+            [
+              "prune",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "prune_rousse",
+          "name": "Prune-Rousse",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7873,
+          "itemName": "Dragodinde Prune et Rousse",
+          "recipes": [
+            [
+              "prune",
+              "rousse"
+            ]
+          ]
+        },
+        {
+          "id": "prune_turquoise",
+          "name": "Prune-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7874,
+          "itemName": "Dragodinde Prune et Turquoise",
+          "recipes": [
+            [
+              "prune",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "prune_orchidee",
+          "name": "Prune-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7875,
+          "itemName": "Dragodinde Prune et Orchidée",
+          "recipes": [
+            [
+              "prune",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "prune_pourpre",
+          "name": "Prune-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 7876,
+          "itemName": "Dragodinde Prune et Pourpre",
+          "recipes": [
+            [
+              "prune",
+              "pourpre"
+            ]
+          ]
+        }
+      ],
+      "optimakinaByGeneration": {
+        "2": {
+          "id": 33333,
+          "name": "Optimakina Dragodinde de Génération 2"
+        },
+        "3": {
+          "id": 33354,
+          "name": "Optimakina Dragodinde de Génération 3"
+        },
+        "4": {
+          "id": 33375,
+          "name": "Optimakina Dragodinde de Génération 4"
+        },
+        "5": {
+          "id": 33396,
+          "name": "Optimakina Dragodinde de Génération 5"
+        },
+        "6": {
+          "id": 33417,
+          "name": "Optimakina Dragodinde de Génération 6"
+        },
+        "7": {
+          "id": 33438,
+          "name": "Optimakina Dragodinde de Génération 7"
+        },
+        "8": {
+          "id": 33459,
+          "name": "Optimakina Dragodinde de Génération 8"
+        },
+        "9": {
+          "id": 33478,
+          "name": "Optimakina Dragodinde de Génération 9"
+        },
+        "10": {
+          "id": 33496,
+          "name": "Optimakina Dragodinde de Génération 10"
+        }
+      },
+      "nets": [
+        {
+          "id": 32521,
+          "name": "Filet de capture universel",
+          "level": 1,
+          "captures": 1
+        },
+        {
+          "id": 32525,
+          "name": "Filet multiplicateur de Dragodinde",
+          "level": 100,
+          "captures": 2
+        },
+        {
+          "id": 32522,
+          "name": "Filet à Dragodinde renforcé",
+          "level": 150,
+          "captures": 4
+        },
+        {
+          "id": 32528,
+          "name": "Filet multiplicateur de Dragodinde renforcé",
+          "level": 200,
+          "captures": 8
+        }
+      ]
+    },
+    {
+      "id": "muldo",
+      "familyId": 5,
+      "certificateTypeId": 332,
+      "sacrificeItem": {
+        "id": 17864,
+        "name": "Ambre de muldo"
+      },
+      "sourceUrl": "https://dragodinde.fr/build/assets/muldoTree-IycXt9uu.js",
+      "colors": [
+        {
+          "id": "dore",
+          "name": "Dore",
+          "generation": 1,
+          "source": null,
+          "itemId": 33072,
+          "itemName": "Muldo Doré",
+          "recipes": []
+        },
+        {
+          "id": "ebene",
+          "name": "Ebene",
+          "generation": 1,
+          "source": null,
+          "itemId": 33080,
+          "itemName": "Muldo Ébène",
+          "recipes": []
+        },
+        {
+          "id": "indigo",
+          "name": "Indigo",
+          "generation": 1,
+          "source": null,
+          "itemId": 33088,
+          "itemName": "Muldo Indigo",
+          "recipes": []
+        },
+        {
+          "id": "pourpre",
+          "name": "Pourpre",
+          "generation": 1,
+          "source": null,
+          "itemId": 33101,
+          "itemName": "Muldo Pourpre",
+          "recipes": []
+        },
+        {
+          "id": "orchidee",
+          "name": "Orchidee",
+          "generation": 1,
+          "source": null,
+          "itemId": 33096,
+          "itemName": "Muldo Orchidée",
+          "recipes": []
+        },
+        {
+          "id": "dore_pourpre",
+          "name": "Dore-Pourpre",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33079,
+          "itemName": "Muldo Doré et Pourpre",
+          "recipes": [
+            [
+              "dore",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_pourpre",
+          "name": "Indigo-Pourpre",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33093,
+          "itemName": "Muldo Indigo et Pourpre",
+          "recipes": [
+            [
+              "indigo",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_pourpre",
+          "name": "Ebene-Pourpre",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33086,
+          "itemName": "Muldo Ébène et Pourpre",
+          "recipes": [
+            [
+              "ebene",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_pourpre",
+          "name": "Orchidee-Pourpre",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33100,
+          "itemName": "Muldo Orchidée et Pourpre",
+          "recipes": [
+            [
+              "orchidee",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "dore_orchidee",
+          "name": "Dore-Orchidee",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33078,
+          "itemName": "Muldo Doré et Orchidée",
+          "recipes": [
+            [
+              "dore",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_orchidee",
+          "name": "Indigo-Orchidee",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33092,
+          "itemName": "Muldo Indigo et Orchidée",
+          "recipes": [
+            [
+              "indigo",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_orchidee",
+          "name": "Ebene-Orchidee",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33085,
+          "itemName": "Muldo Ébène et Orchidée",
+          "recipes": [
+            [
+              "ebene",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "dore_ebene",
+          "name": "Dore-Ebene",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33074,
+          "itemName": "Muldo Doré et Ébène",
+          "recipes": [
+            [
+              "dore",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "dore_indigo",
+          "name": "Dore-Indigo",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33076,
+          "itemName": "Muldo Doré et Indigo",
+          "recipes": [
+            [
+              "dore",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_indigo",
+          "name": "Ebene-Indigo",
+          "generation": 2,
+          "source": "site",
+          "itemId": 33083,
+          "itemName": "Muldo Ébène et Indigo",
+          "recipes": [
+            [
+              "ebene",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "roux",
+          "name": "Roux",
+          "generation": 3,
+          "source": "site",
+          "itemId": 33116,
+          "itemName": "Muldo Roux",
+          "recipes": [
+            [
+              "dore_pourpre",
+              "dore_orchidee"
+            ],
+            [
+              "dore_pourpre",
+              "dore_indigo"
+            ],
+            [
+              "dore_pourpre",
+              "dore_ebene"
+            ],
+            [
+              "dore_orchidee",
+              "dore_indigo"
+            ],
+            [
+              "dore_orchidee",
+              "dore_ebene"
+            ],
+            [
+              "dore_indigo",
+              "dore_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "amande",
+          "name": "Amande",
+          "generation": 3,
+          "source": "site",
+          "itemId": 33069,
+          "itemName": "Muldo Amande",
+          "recipes": [
+            [
+              "indigo_pourpre",
+              "ebene_orchidee"
+            ],
+            [
+              "ebene_pourpre",
+              "indigo_orchidee"
+            ],
+            [
+              "orchidee_pourpre",
+              "ebene_indigo"
+            ]
+          ]
+        },
+        {
+          "id": "dore_amande",
+          "name": "Dore-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33073,
+          "itemName": "Muldo Doré et Amande",
+          "recipes": [
+            [
+              "dore",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_amande",
+          "name": "Ebene-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33081,
+          "itemName": "Muldo Ébène et Amande",
+          "recipes": [
+            [
+              "ebene",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_amande",
+          "name": "Indigo-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33089,
+          "itemName": "Muldo Indigo et Amande",
+          "recipes": [
+            [
+              "indigo",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_amande",
+          "name": "Orchidee-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33097,
+          "itemName": "Muldo Orchidée et Amande",
+          "recipes": [
+            [
+              "orchidee",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_amande",
+          "name": "Pourpre-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33102,
+          "itemName": "Muldo Pourpre et Amande",
+          "recipes": [
+            [
+              "pourpre",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "roux_amande",
+          "name": "Roux-Amande",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33117,
+          "itemName": "Muldo Roux et Amande",
+          "recipes": [
+            [
+              "roux",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "roux_dore",
+          "name": "Roux-Dore",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33118,
+          "itemName": "Muldo Roux et Doré",
+          "recipes": [
+            [
+              "roux",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "roux_ebene",
+          "name": "Roux-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33119,
+          "itemName": "Muldo Roux et Ébène",
+          "recipes": [
+            [
+              "roux",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "roux_indigo",
+          "name": "Roux-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33121,
+          "itemName": "Muldo Roux et Indigo",
+          "recipes": [
+            [
+              "roux",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "roux_orchidee",
+          "name": "Roux-Orchidee",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33123,
+          "itemName": "Muldo Roux et Orchidée",
+          "recipes": [
+            [
+              "roux",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "roux_pourpre",
+          "name": "Roux-Pourpre",
+          "generation": 4,
+          "source": "site",
+          "itemId": 33124,
+          "itemName": "Muldo Roux et Pourpre",
+          "recipes": [
+            [
+              "roux",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire",
+          "name": "Ivoire",
+          "generation": 5,
+          "source": "site",
+          "itemId": 33094,
+          "itemName": "Muldo Ivoire",
+          "recipes": [
+            [
+              "roux_dore",
+              "ebene_amande"
+            ],
+            [
+              "roux_dore",
+              "indigo_amande"
+            ],
+            [
+              "roux_dore",
+              "orchidee_amande"
+            ],
+            [
+              "roux_dore",
+              "pourpre_amande"
+            ],
+            [
+              "roux_amande",
+              "ebene_amande"
+            ],
+            [
+              "roux_amande",
+              "pourpre_amande"
+            ],
+            [
+              "roux_amande",
+              "indigo_amande"
+            ],
+            [
+              "roux_amande",
+              "orchidee_amande"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise",
+          "name": "Turquoise",
+          "generation": 5,
+          "source": "site",
+          "itemId": 33125,
+          "itemName": "Muldo Turquoise",
+          "recipes": [
+            [
+              "roux_ebene",
+              "dore_amande"
+            ],
+            [
+              "roux_orchidee",
+              "dore_amande"
+            ],
+            [
+              "roux_pourpre",
+              "dore_amande"
+            ],
+            [
+              "roux_ebene",
+              "roux_amande"
+            ],
+            [
+              "roux_indigo",
+              "dore_amande"
+            ],
+            [
+              "roux_indigo",
+              "roux_amande"
+            ],
+            [
+              "roux_orchidee",
+              "roux_amande"
+            ],
+            [
+              "roux_pourpre",
+              "roux_amande"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_ivoire",
+          "name": "Pourpre-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33104,
+          "itemName": "Muldo Pourpre et Ivoire",
+          "recipes": [
+            [
+              "pourpre",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_ivoire",
+          "name": "Orchidee-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33099,
+          "itemName": "Muldo Orchidée et Ivoire",
+          "recipes": [
+            [
+              "orchidee",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_ivoire",
+          "name": "Indigo-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33091,
+          "itemName": "Muldo Indigo et Ivoire",
+          "recipes": [
+            [
+              "indigo",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_ivoire",
+          "name": "Ebene-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33084,
+          "itemName": "Muldo Ébène et Ivoire",
+          "recipes": [
+            [
+              "ebene",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "dore_ivoire",
+          "name": "Dore-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33077,
+          "itemName": "Muldo Doré et Ivoire",
+          "recipes": [
+            [
+              "dore",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "roux_ivoire",
+          "name": "Roux-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33122,
+          "itemName": "Muldo Roux et Ivoire",
+          "recipes": [
+            [
+              "roux",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "amande_ivoire",
+          "name": "Amande-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33071,
+          "itemName": "Muldo Amande et Ivoire",
+          "recipes": [
+            [
+              "amande",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_ivoire",
+          "name": "Turquoise-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33131,
+          "itemName": "Muldo Turquoise et Ivoire",
+          "recipes": [
+            [
+              "turquoise",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_pourpre",
+          "name": "Turquoise-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33133,
+          "itemName": "Muldo Turquoise et Pourpre",
+          "recipes": [
+            [
+              "turquoise",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_orchidee",
+          "name": "Turquoise-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33132,
+          "itemName": "Muldo Turquoise et Orchidée",
+          "recipes": [
+            [
+              "turquoise",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_indigo",
+          "name": "Turquoise-Indigo",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33130,
+          "itemName": "Muldo Turquoise et Indigo",
+          "recipes": [
+            [
+              "turquoise",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_ebene",
+          "name": "Turquoise-Ebene",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33128,
+          "itemName": "Muldo Turquoise et Ébène",
+          "recipes": [
+            [
+              "turquoise",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_roux",
+          "name": "Turquoise-Roux",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33134,
+          "itemName": "Muldo Turquoise et Roux",
+          "recipes": [
+            [
+              "turquoise",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_amande",
+          "name": "Turquoise-Amande",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33126,
+          "itemName": "Muldo Turquoise et Amande",
+          "recipes": [
+            [
+              "turquoise",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_dore",
+          "name": "Turquoise-Dore",
+          "generation": 6,
+          "source": "site",
+          "itemId": 33127,
+          "itemName": "Muldo Turquoise et Doré",
+          "recipes": [
+            [
+              "turquoise",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "prune",
+          "name": "Prune",
+          "generation": 7,
+          "source": "site",
+          "itemId": 33105,
+          "itemName": "Muldo Prune",
+          "recipes": [
+            [
+              "ebene_ivoire",
+              "turquoise_pourpre"
+            ],
+            [
+              "indigo_ivoire",
+              "turquoise_orchidee"
+            ],
+            [
+              "orchidee_ivoire",
+              "turquoise_indigo"
+            ],
+            [
+              "pourpre_ivoire",
+              "turquoise_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude",
+          "name": "Emeraude",
+          "generation": 7,
+          "source": "site",
+          "itemId": 33087,
+          "itemName": "Muldo Émeraude",
+          "recipes": [
+            [
+              "turquoise_ivoire",
+              "turquoise_dore"
+            ],
+            [
+              "turquoise_ivoire",
+              "turquoise_amande"
+            ],
+            [
+              "turquoise_ivoire",
+              "turquoise_roux"
+            ],
+            [
+              "amande_ivoire",
+              "turquoise_ivoire"
+            ],
+            [
+              "roux_ivoire",
+              "turquoise_amande"
+            ],
+            [
+              "dore_ivoire",
+              "turquoise_amande"
+            ],
+            [
+              "dore_ivoire",
+              "turquoise_roux"
+            ],
+            [
+              "dore_ivoire",
+              "turquoise_ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "prune_pourpre",
+          "name": "Prune-Pourpre",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33113,
+          "itemName": "Muldo Prune et Pourpre",
+          "recipes": [
+            [
+              "prune",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "prune_orchidee",
+          "name": "Prune-Orchidee",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33112,
+          "itemName": "Muldo Prune et Orchidée",
+          "recipes": [
+            [
+              "prune",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "prune_indigo",
+          "name": "Prune-Indigo",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33110,
+          "itemName": "Muldo Prune et Indigo",
+          "recipes": [
+            [
+              "prune",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ebene",
+          "name": "Prune-Ebene",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33108,
+          "itemName": "Muldo Prune et Ébène",
+          "recipes": [
+            [
+              "prune",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "prune_dore",
+          "name": "Prune-Dore",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33107,
+          "itemName": "Muldo Prune et Doré",
+          "recipes": [
+            [
+              "prune",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "prune_roux",
+          "name": "Prune-Roux",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33114,
+          "itemName": "Muldo Prune et Roux",
+          "recipes": [
+            [
+              "prune",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "prune_amande",
+          "name": "Prune-Amande",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33106,
+          "itemName": "Muldo Prune et Amande",
+          "recipes": [
+            [
+              "prune",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ivoire",
+          "name": "Prune-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33111,
+          "itemName": "Muldo Prune et Ivoire",
+          "recipes": [
+            [
+              "prune",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "prune_turquoise",
+          "name": "Prune-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33115,
+          "itemName": "Muldo Prune et Turquoise",
+          "recipes": [
+            [
+              "prune",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "prune_emeraude",
+          "name": "Prune-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33109,
+          "itemName": "Muldo Prune et Émeraude",
+          "recipes": [
+            [
+              "prune",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_emeraude",
+          "name": "Pourpre-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33103,
+          "itemName": "Muldo Pourpre et Émeraude",
+          "recipes": [
+            [
+              "pourpre",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_emeraude",
+          "name": "Orchidee-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33098,
+          "itemName": "Muldo Orchidée et Émeraude",
+          "recipes": [
+            [
+              "orchidee",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_emeraude",
+          "name": "Indigo-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33090,
+          "itemName": "Muldo Indigo et Émeraude",
+          "recipes": [
+            [
+              "indigo",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ebene_emeraude",
+          "name": "Ebene-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33082,
+          "itemName": "Muldo Ébène et Émeraude",
+          "recipes": [
+            [
+              "ebene",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "dore_emeraude",
+          "name": "Dore-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33075,
+          "itemName": "Muldo Doré et Émeraude",
+          "recipes": [
+            [
+              "dore",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "roux_emeraude",
+          "name": "Roux-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33120,
+          "itemName": "Muldo Roux et Émeraude",
+          "recipes": [
+            [
+              "roux",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "amande_emeraude",
+          "name": "Amande-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33070,
+          "itemName": "Muldo Amande et Émeraude",
+          "recipes": [
+            [
+              "amande",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_emeraude",
+          "name": "Ivoire-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33095,
+          "itemName": "Muldo Ivoire et Émeraude",
+          "recipes": [
+            [
+              "ivoire",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_emeraude",
+          "name": "Turquoise-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 33129,
+          "itemName": "Muldo Turquoise et Émeraude",
+          "recipes": [
+            [
+              "turquoise",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ambre",
+          "name": "Ambre",
+          "generation": 9,
+          "source": "game",
+          "itemId": 33255,
+          "itemName": "Muldo Ambre",
+          "recipes": [
+            [
+              "pourpre_emeraude",
+              "roux_emeraude"
+            ],
+            [
+              "orchidee_emeraude",
+              "amande_emeraude"
+            ],
+            [
+              "indigo_emeraude",
+              "ivoire_emeraude"
+            ],
+            [
+              "ebene_emeraude",
+              "turquoise_emeraude"
+            ],
+            [
+              "dore_emeraude",
+              "prune_emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "corail",
+          "name": "Corail",
+          "generation": 9,
+          "source": "game",
+          "itemId": 33256,
+          "itemName": "Muldo Corail",
+          "recipes": [
+            [
+              "prune_pourpre",
+              "prune_roux"
+            ],
+            [
+              "prune_orchidee",
+              "prune_amande"
+            ],
+            [
+              "prune_indigo",
+              "prune_ivoire"
+            ],
+            [
+              "prune_ebene",
+              "prune_turquoise"
+            ],
+            [
+              "prune_dore",
+              "prune_emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "azur",
+          "name": "Azur",
+          "generation": 9,
+          "source": "game",
+          "itemId": 33257,
+          "itemName": "Muldo Azur",
+          "recipes": [
+            [
+              "pourpre_emeraude",
+              "prune_roux"
+            ],
+            [
+              "orchidee_emeraude",
+              "prune_amande"
+            ],
+            [
+              "indigo_emeraude",
+              "prune_ivoire"
+            ],
+            [
+              "ebene_emeraude",
+              "prune_turquoise"
+            ],
+            [
+              "dore_emeraude",
+              "prune_ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine",
+          "name": "Aigue-marine",
+          "generation": 9,
+          "source": "game",
+          "itemId": 33258,
+          "itemName": "Muldo Aigue-marine",
+          "recipes": [
+            [
+              "prune_pourpre",
+              "roux_emeraude"
+            ],
+            [
+              "prune_orchidee",
+              "amande_emeraude"
+            ],
+            [
+              "prune_indigo",
+              "ivoire_emeraude"
+            ],
+            [
+              "prune_ebene",
+              "turquoise_emeraude"
+            ],
+            [
+              "prune_dore",
+              "turquoise_emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_dore",
+          "name": "Ambre-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33259,
+          "itemName": "Muldo Ambre et Doré",
+          "recipes": [
+            [
+              "ambre",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_ebene",
+          "name": "Ambre-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33260,
+          "itemName": "Muldo Ambre et Ébène",
+          "recipes": [
+            [
+              "ambre",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_indigo",
+          "name": "Ambre-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33261,
+          "itemName": "Muldo Ambre et Indigo",
+          "recipes": [
+            [
+              "ambre",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_pourpre",
+          "name": "Ambre-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33262,
+          "itemName": "Muldo Ambre et Pourpre",
+          "recipes": [
+            [
+              "ambre",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_orchidee",
+          "name": "Ambre-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33263,
+          "itemName": "Muldo Ambre et Orchidée",
+          "recipes": [
+            [
+              "ambre",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_amande",
+          "name": "Ambre-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33264,
+          "itemName": "Muldo Ambre et Amande",
+          "recipes": [
+            [
+              "ambre",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_roux",
+          "name": "Ambre-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33265,
+          "itemName": "Muldo Ambre et Roux",
+          "recipes": [
+            [
+              "ambre",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_ivoire",
+          "name": "Ambre-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33266,
+          "itemName": "Muldo Ambre et Ivoire",
+          "recipes": [
+            [
+              "ambre",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_turquoise",
+          "name": "Ambre-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33267,
+          "itemName": "Muldo Ambre et Turquoise",
+          "recipes": [
+            [
+              "ambre",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_emeraude",
+          "name": "Ambre-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33268,
+          "itemName": "Muldo Ambre et Émeraude",
+          "recipes": [
+            [
+              "ambre",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_prune",
+          "name": "Ambre-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33269,
+          "itemName": "Muldo Ambre et Prune",
+          "recipes": [
+            [
+              "ambre",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "corail_dore",
+          "name": "Corail-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33273,
+          "itemName": "Muldo Corail et Doré",
+          "recipes": [
+            [
+              "corail",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "corail_ebene",
+          "name": "Corail-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33274,
+          "itemName": "Muldo Corail et Ébène",
+          "recipes": [
+            [
+              "corail",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "corail_indigo",
+          "name": "Corail-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33275,
+          "itemName": "Muldo Corail et Indigo",
+          "recipes": [
+            [
+              "corail",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "corail_pourpre",
+          "name": "Corail-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33276,
+          "itemName": "Muldo Corail et Pourpre",
+          "recipes": [
+            [
+              "corail",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "corail_orchidee",
+          "name": "Corail-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33277,
+          "itemName": "Muldo Corail et Orchidée",
+          "recipes": [
+            [
+              "corail",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "corail_amande",
+          "name": "Corail-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33278,
+          "itemName": "Muldo Corail et Amande",
+          "recipes": [
+            [
+              "corail",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "corail_roux",
+          "name": "Corail-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33279,
+          "itemName": "Muldo Corail et Roux",
+          "recipes": [
+            [
+              "corail",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "corail_ivoire",
+          "name": "Corail-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33280,
+          "itemName": "Muldo Corail et Ivoire",
+          "recipes": [
+            [
+              "corail",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "corail_turquoise",
+          "name": "Corail-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33281,
+          "itemName": "Muldo Corail et Turquoise",
+          "recipes": [
+            [
+              "corail",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "corail_emeraude",
+          "name": "Corail-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33282,
+          "itemName": "Muldo Corail et Émeraude",
+          "recipes": [
+            [
+              "corail",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "corail_prune",
+          "name": "Corail-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33283,
+          "itemName": "Muldo Corail et Prune",
+          "recipes": [
+            [
+              "corail",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "azur_dore",
+          "name": "Azur-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33286,
+          "itemName": "Muldo Azur et Doré",
+          "recipes": [
+            [
+              "azur",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "azur_ebene",
+          "name": "Azur-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33287,
+          "itemName": "Muldo Azur et Ébène",
+          "recipes": [
+            [
+              "azur",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "azur_indigo",
+          "name": "Azur-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33288,
+          "itemName": "Muldo Azur et Indigo",
+          "recipes": [
+            [
+              "azur",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "azur_pourpre",
+          "name": "Azur-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33289,
+          "itemName": "Muldo Azur et Pourpre",
+          "recipes": [
+            [
+              "azur",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "azur_orchidee",
+          "name": "Azur-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33290,
+          "itemName": "Muldo Azur et Orchidée",
+          "recipes": [
+            [
+              "azur",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "azur_amande",
+          "name": "Azur-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33291,
+          "itemName": "Muldo Azur et Amande",
+          "recipes": [
+            [
+              "azur",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "azur_roux",
+          "name": "Azur-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33292,
+          "itemName": "Muldo Azur et Roux",
+          "recipes": [
+            [
+              "azur",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "azur_ivoire",
+          "name": "Azur-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33293,
+          "itemName": "Muldo Azur et Ivoire",
+          "recipes": [
+            [
+              "azur",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "azur_turquoise",
+          "name": "Azur-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33294,
+          "itemName": "Muldo Azur et Turquoise",
+          "recipes": [
+            [
+              "azur",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "azur_emeraude",
+          "name": "Azur-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33295,
+          "itemName": "Muldo Azur et Émeraude",
+          "recipes": [
+            [
+              "azur",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "azur_prune",
+          "name": "Azur-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33296,
+          "itemName": "Muldo Azur et Prune",
+          "recipes": [
+            [
+              "azur",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_dore",
+          "name": "Aigue-marine-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33298,
+          "itemName": "Muldo Aigue-marine et Doré",
+          "recipes": [
+            [
+              "aigue_marine",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_ebene",
+          "name": "Aigue-marine-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33299,
+          "itemName": "Muldo Aigue-marine et Ébène",
+          "recipes": [
+            [
+              "aigue_marine",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_indigo",
+          "name": "Aigue-marine-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33300,
+          "itemName": "Muldo Aigue-marine et Indigo",
+          "recipes": [
+            [
+              "aigue_marine",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_pourpre",
+          "name": "Aigue-marine-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33301,
+          "itemName": "Muldo Aigue-marine et Pourpre",
+          "recipes": [
+            [
+              "aigue_marine",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_orchidee",
+          "name": "Aigue-marine-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33302,
+          "itemName": "Muldo Aigue-marine et Orchidée",
+          "recipes": [
+            [
+              "aigue_marine",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_amande",
+          "name": "Aigue-marine-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33303,
+          "itemName": "Muldo Aigue-marine et Amande",
+          "recipes": [
+            [
+              "aigue_marine",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_roux",
+          "name": "Aigue-marine-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33304,
+          "itemName": "Muldo Aigue-marine et Roux",
+          "recipes": [
+            [
+              "aigue_marine",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_ivoire",
+          "name": "Aigue-marine-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33305,
+          "itemName": "Muldo Aigue-marine et Ivoire",
+          "recipes": [
+            [
+              "aigue_marine",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_turquoise",
+          "name": "Aigue-marine-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33306,
+          "itemName": "Muldo Aigue-marine et Turquoise",
+          "recipes": [
+            [
+              "aigue_marine",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_emeraude",
+          "name": "Aigue-marine-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33307,
+          "itemName": "Muldo Aigue-marine et Émeraude",
+          "recipes": [
+            [
+              "aigue_marine",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "aigue_marine_prune",
+          "name": "Aigue-marine-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33308,
+          "itemName": "Muldo Aigue-marine et Prune",
+          "recipes": [
+            [
+              "aigue_marine",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_corail",
+          "name": "Ambre-Corail",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33270,
+          "itemName": "Muldo Ambre et Corail",
+          "recipes": [
+            [
+              "ambre",
+              "corail"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_azur",
+          "name": "Ambre-Azur",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33271,
+          "itemName": "Muldo Ambre et Azur",
+          "recipes": [
+            [
+              "ambre",
+              "azur"
+            ]
+          ]
+        },
+        {
+          "id": "ambre_aigue_marine",
+          "name": "Ambre-Aigue-marine",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33272,
+          "itemName": "Muldo Ambre et Aigue-marine",
+          "recipes": [
+            [
+              "ambre",
+              "aigue_marine"
+            ]
+          ]
+        },
+        {
+          "id": "corail_azur",
+          "name": "Corail-Azur",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33284,
+          "itemName": "Muldo Corail et Azur",
+          "recipes": [
+            [
+              "corail",
+              "azur"
+            ]
+          ]
+        },
+        {
+          "id": "corail_aigue_marine",
+          "name": "Corail-Aigue-marine",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33285,
+          "itemName": "Muldo Corail et Aigue-marine",
+          "recipes": [
+            [
+              "corail",
+              "aigue_marine"
+            ]
+          ]
+        },
+        {
+          "id": "azur_aigue_marine",
+          "name": "Azur-Aigue-marine",
+          "generation": 10,
+          "source": "site",
+          "itemId": 33297,
+          "itemName": "Muldo Azur et Aigue-marine",
+          "recipes": [
+            [
+              "azur",
+              "aigue_marine"
+            ]
+          ]
+        }
+      ],
+      "optimakinaByGeneration": {
+        "2": {
+          "id": 33335,
+          "name": "Optimakina Muldo de Génération 2"
+        },
+        "3": {
+          "id": 33356,
+          "name": "Optimakina Muldo de Génération 3"
+        },
+        "4": {
+          "id": 33377,
+          "name": "Optimakina Muldo de Génération 4"
+        },
+        "5": {
+          "id": 33398,
+          "name": "Optimakina Muldo de Génération 5"
+        },
+        "6": {
+          "id": 33419,
+          "name": "Optimakina Muldo de Génération 6"
+        },
+        "7": {
+          "id": 33440,
+          "name": "Optimakina Muldo de Génération 7"
+        },
+        "8": {
+          "id": 33461,
+          "name": "Optimakina Muldo de Génération 8"
+        },
+        "9": {
+          "id": 33538,
+          "name": "Optimakina Muldo de Génération 9"
+        },
+        "10": {
+          "id": 33541,
+          "name": "Optimakina Muldo de Génération 10"
+        }
+      },
+      "nets": [
+        {
+          "id": 32521,
+          "name": "Filet de capture universel",
+          "level": 1,
+          "captures": 1
+        },
+        {
+          "id": 32527,
+          "name": "Filet multiplicateur de Muldo",
+          "level": 100,
+          "captures": 2
+        },
+        {
+          "id": 32524,
+          "name": "Filet à Muldo renforcé",
+          "level": 150,
+          "captures": 4
+        },
+        {
+          "id": 32530,
+          "name": "Filet multiplicateur de Muldo renforcé",
+          "level": 200,
+          "captures": 8
+        }
+      ]
+    },
+    {
+      "id": "volkorne",
+      "familyId": 6,
+      "certificateTypeId": 207,
+      "sacrificeItem": {
+        "id": 19975,
+        "name": "Corne de volkorne"
+      },
+      "sourceUrl": "https://dragodinde.fr/build/assets/volkorneTree-CvLEg3bM.js",
+      "colors": [
+        {
+          "id": "indigo",
+          "name": "Indigo",
+          "generation": 1,
+          "source": null,
+          "itemId": 19781,
+          "itemName": "Volkorne Indigo sauvage",
+          "recipes": []
+        },
+        {
+          "id": "ebene",
+          "name": "Ebene",
+          "generation": 1,
+          "source": null,
+          "itemId": 19783,
+          "itemName": "Volkorne Ébène sauvage",
+          "recipes": []
+        },
+        {
+          "id": "pourpre",
+          "name": "Pourpre",
+          "generation": 1,
+          "source": null,
+          "itemId": 19780,
+          "itemName": "Volkorne Pourpre sauvage",
+          "recipes": []
+        },
+        {
+          "id": "orchidee",
+          "name": "Orchidee",
+          "generation": 1,
+          "source": null,
+          "itemId": 19784,
+          "itemName": "Volkorne Orchidée sauvage",
+          "recipes": []
+        },
+        {
+          "id": "pourpre_orchidee",
+          "name": "Pourpre-Orchidee",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19800,
+          "itemName": "Volkorne Pourpre et Orchidée",
+          "recipes": [
+            [
+              "pourpre",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_indigo",
+          "name": "Pourpre-Indigo",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19801,
+          "itemName": "Volkorne Pourpre et Indigo",
+          "recipes": [
+            [
+              "pourpre",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "pourpre_ebene",
+          "name": "Pourpre-Ebene",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19802,
+          "itemName": "Volkorne Pourpre et Ébène",
+          "recipes": [
+            [
+              "pourpre",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_indigo",
+          "name": "Orchidee-Indigo",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19803,
+          "itemName": "Volkorne Orchidée et Indigo",
+          "recipes": [
+            [
+              "orchidee",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "orchidee_ebene",
+          "name": "Orchidee-Ebene",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19804,
+          "itemName": "Volkorne Orchidée et Ébène",
+          "recipes": [
+            [
+              "orchidee",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "indigo_ebene",
+          "name": "Indigo-Ebene",
+          "generation": 2,
+          "source": "site",
+          "itemId": 19805,
+          "itemName": "Volkorne Indigo et Ébène",
+          "recipes": [
+            [
+              "indigo",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "roux",
+          "name": "Roux",
+          "generation": 3,
+          "source": "site",
+          "itemId": 19789,
+          "itemName": "Volkorne Roux",
+          "recipes": [
+            [
+              "pourpre_orchidee",
+              "pourpre_indigo"
+            ],
+            [
+              "pourpre_orchidee",
+              "pourpre_ebene"
+            ],
+            [
+              "pourpre_indigo",
+              "pourpre_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "amande",
+          "name": "Amande",
+          "generation": 3,
+          "source": "site",
+          "itemId": 19790,
+          "itemName": "Volkorne Amande",
+          "recipes": [
+            [
+              "pourpre_ebene",
+              "orchidee_ebene"
+            ],
+            [
+              "pourpre_ebene",
+              "indigo_ebene"
+            ],
+            [
+              "orchidee_ebene",
+              "indigo_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire",
+          "name": "Ivoire",
+          "generation": 3,
+          "source": "site",
+          "itemId": 19791,
+          "itemName": "Volkorne Ivoire",
+          "recipes": [
+            [
+              "pourpre_indigo",
+              "indigo_ebene"
+            ],
+            [
+              "pourpre_indigo",
+              "orchidee_indigo"
+            ],
+            [
+              "orchidee_indigo",
+              "indigo_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise",
+          "name": "Turquoise",
+          "generation": 3,
+          "source": "site",
+          "itemId": 19792,
+          "itemName": "Volkorne Turquoise",
+          "recipes": [
+            [
+              "pourpre_orchidee",
+              "orchidee_ebene"
+            ],
+            [
+              "orchidee_indigo",
+              "orchidee_ebene"
+            ],
+            [
+              "pourpre_orchidee",
+              "orchidee_indigo"
+            ]
+          ]
+        },
+        {
+          "id": "amande_pourpre",
+          "name": "Amande-Pourpre",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19806,
+          "itemName": "Volkorne Amande et Pourpre",
+          "recipes": [
+            [
+              "amande",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "amande_orchidee",
+          "name": "Amande-Orchidee",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19807,
+          "itemName": "Volkorne Amande et Orchidée",
+          "recipes": [
+            [
+              "amande",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "amande_indigo",
+          "name": "Amande-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19808,
+          "itemName": "Volkorne Amande et Indigo",
+          "recipes": [
+            [
+              "amande",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "amande_ebene",
+          "name": "Amande-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19809,
+          "itemName": "Volkorne Amande et Ébène",
+          "recipes": [
+            [
+              "amande",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "amande_roux",
+          "name": "Amande-Roux",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19810,
+          "itemName": "Volkorne Amande et Roux",
+          "recipes": [
+            [
+              "amande",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "amande_ivoire",
+          "name": "Amande-Ivoire",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19811,
+          "itemName": "Volkorne Amande et Ivoire",
+          "recipes": [
+            [
+              "amande",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "amande_turquoise",
+          "name": "Amande-Turquoise",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19812,
+          "itemName": "Volkorne Amande et Turquoise",
+          "recipes": [
+            [
+              "amande",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "roux_pourpre",
+          "name": "Roux-Pourpre",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19813,
+          "itemName": "Volkorne Roux et Pourpre",
+          "recipes": [
+            [
+              "roux",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "roux_orchidee",
+          "name": "Roux-Orchidee",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19814,
+          "itemName": "Volkorne Roux et Orchidée",
+          "recipes": [
+            [
+              "roux",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "roux_indigo",
+          "name": "Roux-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19815,
+          "itemName": "Volkorne Roux et Indigo",
+          "recipes": [
+            [
+              "roux",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "roux_ebene",
+          "name": "Roux-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19816,
+          "itemName": "Volkorne Roux et Ébène",
+          "recipes": [
+            [
+              "roux",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "roux_ivoire",
+          "name": "Roux-Ivoire",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19817,
+          "itemName": "Volkorne Roux et Ivoire",
+          "recipes": [
+            [
+              "roux",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "roux_turquoise",
+          "name": "Roux-Turquoise",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19818,
+          "itemName": "Volkorne Roux et Turquoise",
+          "recipes": [
+            [
+              "roux",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_pourpre",
+          "name": "Ivoire-Pourpre",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19819,
+          "itemName": "Volkorne Ivoire et Pourpre",
+          "recipes": [
+            [
+              "ivoire",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_orchidee",
+          "name": "Ivoire-Orchidee",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19820,
+          "itemName": "Volkorne Ivoire et Orchidée",
+          "recipes": [
+            [
+              "ivoire",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_indigo",
+          "name": "Ivoire-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19821,
+          "itemName": "Volkorne Ivoire et Indigo",
+          "recipes": [
+            [
+              "ivoire",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_ebene",
+          "name": "Ivoire-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19822,
+          "itemName": "Volkorne Ivoire et Ébène",
+          "recipes": [
+            [
+              "ivoire",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "ivoire_turquoise",
+          "name": "Ivoire-Turquoise",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19823,
+          "itemName": "Volkorne Ivoire et Turquoise",
+          "recipes": [
+            [
+              "ivoire",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_pourpre",
+          "name": "Turquoise-Pourpre",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19824,
+          "itemName": "Volkorne Turquoise et Pourpre",
+          "recipes": [
+            [
+              "turquoise",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_orchidee",
+          "name": "Turquoise-Orchidee",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19825,
+          "itemName": "Volkorne Turquoise et Orchidée",
+          "recipes": [
+            [
+              "turquoise",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_indigo",
+          "name": "Turquoise-Indigo",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19826,
+          "itemName": "Volkorne Turquoise et Indigo",
+          "recipes": [
+            [
+              "turquoise",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "turquoise_ebene",
+          "name": "Turquoise-Ebene",
+          "generation": 4,
+          "source": "site",
+          "itemId": 19827,
+          "itemName": "Volkorne Turquoise et Ébène",
+          "recipes": [
+            [
+              "turquoise",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "prune",
+          "name": "Prune",
+          "generation": 5,
+          "source": "site",
+          "itemId": 19793,
+          "itemName": "Volkorne Prune",
+          "recipes": [
+            [
+              "amande_pourpre",
+              "amande_roux"
+            ],
+            [
+              "amande_orchidee",
+              "amande_roux"
+            ],
+            [
+              "amande_indigo",
+              "amande_roux"
+            ],
+            [
+              "amande_ebene",
+              "amande_roux"
+            ],
+            [
+              "amande_roux",
+              "amande_turquoise"
+            ],
+            [
+              "amande_roux",
+              "amande_ivoire"
+            ],
+            [
+              "amande_roux",
+              "roux_pourpre"
+            ],
+            [
+              "amande_roux",
+              "roux_orchidee"
+            ],
+            [
+              "amande_roux",
+              "roux_indigo"
+            ],
+            [
+              "amande_roux",
+              "roux_ebene"
+            ],
+            [
+              "amande_roux",
+              "roux_ivoire"
+            ],
+            [
+              "amande_roux",
+              "roux_turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude",
+          "name": "Emeraude",
+          "generation": 5,
+          "source": "site",
+          "itemId": 19794,
+          "itemName": "Volkorne Émeraude",
+          "recipes": [
+            [
+              "ivoire_orchidee",
+              "ivoire_turquoise"
+            ],
+            [
+              "ivoire_indigo",
+              "ivoire_turquoise"
+            ],
+            [
+              "ivoire_ebene",
+              "ivoire_turquoise"
+            ],
+            [
+              "ivoire_pourpre",
+              "ivoire_turquoise"
+            ],
+            [
+              "roux_ivoire",
+              "ivoire_turquoise"
+            ],
+            [
+              "roux_turquoise",
+              "ivoire_turquoise"
+            ],
+            [
+              "amande_ivoire",
+              "ivoire_turquoise"
+            ],
+            [
+              "amande_turquoise",
+              "ivoire_turquoise"
+            ],
+            [
+              "ivoire_turquoise",
+              "turquoise_orchidee"
+            ],
+            [
+              "ivoire_turquoise",
+              "turquoise_pourpre"
+            ],
+            [
+              "ivoire_turquoise",
+              "turquoise_indigo"
+            ],
+            [
+              "ivoire_turquoise",
+              "turquoise_ebene"
+            ]
+          ]
+        },
+        {
+          "id": "prune_pourpre",
+          "name": "Prune-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19836,
+          "itemName": "Volkorne Prune et Pourpre",
+          "recipes": [
+            [
+              "prune",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "prune_orchidee",
+          "name": "Prune-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19828,
+          "itemName": "Volkorne Prune et Orchidée",
+          "recipes": [
+            [
+              "prune",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "prune_indigo",
+          "name": "Prune-Indigo",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19829,
+          "itemName": "Volkorne Prune et Indigo",
+          "recipes": [
+            [
+              "prune",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ebene",
+          "name": "Prune-Ebene",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19830,
+          "itemName": "Volkorne Prune et Ébène",
+          "recipes": [
+            [
+              "prune",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "prune_amande",
+          "name": "Prune-Amande",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19831,
+          "itemName": "Volkorne Prune et Amande",
+          "recipes": [
+            [
+              "prune",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "prune_turquoise",
+          "name": "Prune-Turquoise",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19834,
+          "itemName": "Volkorne Prune et Turquoise",
+          "recipes": [
+            [
+              "prune",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "prune_emeraude",
+          "name": "Prune-Emeraude",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19835,
+          "itemName": "Volkorne Prune et Émeraude",
+          "recipes": [
+            [
+              "prune",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "prune_roux",
+          "name": "Prune-Roux",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19832,
+          "itemName": "Volkorne Prune et Roux",
+          "recipes": [
+            [
+              "prune",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "prune_ivoire",
+          "name": "Prune-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19833,
+          "itemName": "Volkorne Prune et Ivoire",
+          "recipes": [
+            [
+              "prune",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_pourpre",
+          "name": "Emeraude-Pourpre",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19837,
+          "itemName": "Volkorne Émeraude et Pourpre",
+          "recipes": [
+            [
+              "emeraude",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_orchidee",
+          "name": "Emeraude-Orchidee",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19838,
+          "itemName": "Volkorne Émeraude et Orchidée",
+          "recipes": [
+            [
+              "emeraude",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_indigo",
+          "name": "Emeraude-Indigo",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19839,
+          "itemName": "Volkorne Émeraude et Indigo",
+          "recipes": [
+            [
+              "emeraude",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_ebene",
+          "name": "Emeraude-Ebene",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19840,
+          "itemName": "Volkorne Émeraude et Ébène",
+          "recipes": [
+            [
+              "emeraude",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_amande",
+          "name": "Emeraude-Amande",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19841,
+          "itemName": "Volkorne Émeraude et Amande",
+          "recipes": [
+            [
+              "emeraude",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_roux",
+          "name": "Emeraude-Roux",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19842,
+          "itemName": "Volkorne Émeraude et Roux",
+          "recipes": [
+            [
+              "emeraude",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_ivoire",
+          "name": "Emeraude-Ivoire",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19843,
+          "itemName": "Volkorne Émeraude et Ivoire",
+          "recipes": [
+            [
+              "emeraude",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "emeraude_turquoise",
+          "name": "Emeraude-Turquoise",
+          "generation": 6,
+          "source": "site",
+          "itemId": 19844,
+          "itemName": "Volkorne Émeraude et Turquoise",
+          "recipes": [
+            [
+              "emeraude",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "dore",
+          "name": "Dore",
+          "generation": 7,
+          "source": "site",
+          "itemId": 19795,
+          "itemName": "Volkorne Doré",
+          "recipes": [
+            [
+              "prune_pourpre",
+              "emeraude_roux"
+            ],
+            [
+              "prune_orchidee",
+              "emeraude_turquoise"
+            ],
+            [
+              "prune_indigo",
+              "emeraude_ivoire"
+            ],
+            [
+              "prune_ebene",
+              "emeraude_amande"
+            ],
+            [
+              "prune_amande",
+              "emeraude_ebene"
+            ],
+            [
+              "prune_turquoise",
+              "emeraude_orchidee"
+            ],
+            [
+              "emeraude_pourpre",
+              "prune_roux"
+            ],
+            [
+              "emeraude_indigo",
+              "prune_ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "dore_pourpre",
+          "name": "Dore-Pourpre",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19845,
+          "itemName": "Volkorne Doré et Pourpre",
+          "recipes": [
+            [
+              "dore",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "dore_orchidee",
+          "name": "Dore-Orchidee",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19846,
+          "itemName": "Volkorne Doré et Orchidée",
+          "recipes": [
+            [
+              "dore",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "dore_indigo",
+          "name": "Dore-Indigo",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19847,
+          "itemName": "Volkorne Doré et Indigo",
+          "recipes": [
+            [
+              "dore",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "dore_ebene",
+          "name": "Dore-Ebene",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19848,
+          "itemName": "Volkorne Doré et Ébène",
+          "recipes": [
+            [
+              "dore",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "dore_roux",
+          "name": "Dore-Roux",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19899,
+          "itemName": "Volkorne Doré et Roux",
+          "recipes": [
+            [
+              "dore",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "dore_amande",
+          "name": "Dore-Amande",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19900,
+          "itemName": "Volkorne Doré et Amande",
+          "recipes": [
+            [
+              "dore",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "dore_ivoire",
+          "name": "Dore-Ivoire",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19901,
+          "itemName": "Volkorne Doré et Ivoire",
+          "recipes": [
+            [
+              "dore",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "dore_turquoise",
+          "name": "Dore-Turquoise",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19902,
+          "itemName": "Volkorne Doré et Turquoise",
+          "recipes": [
+            [
+              "dore",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "dore_prune",
+          "name": "Dore-Prune",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19903,
+          "itemName": "Volkorne Doré et Prune",
+          "recipes": [
+            [
+              "dore",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "dore_emeraude",
+          "name": "Dore-Emeraude",
+          "generation": 8,
+          "source": "site",
+          "itemId": 19904,
+          "itemName": "Volkorne Doré et Émeraude",
+          "recipes": [
+            [
+              "dore",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "jade",
+          "name": "Jade",
+          "generation": 9,
+          "source": "site",
+          "itemId": 19796,
+          "itemName": "Volkorne Jade",
+          "recipes": [
+            [
+              "prune_emeraude",
+              "dore_pourpre"
+            ],
+            [
+              "dore_roux",
+              "dore_prune"
+            ]
+          ]
+        },
+        {
+          "id": "rubis",
+          "name": "Rubis",
+          "generation": 9,
+          "source": "site",
+          "itemId": 19798,
+          "itemName": "Volkorne Rubis",
+          "recipes": [
+            [
+              "prune_emeraude",
+              "dore_orchidee"
+            ],
+            [
+              "dore_amande",
+              "dore_prune"
+            ]
+          ]
+        },
+        {
+          "id": "saphir",
+          "name": "Saphir",
+          "generation": 9,
+          "source": "site",
+          "itemId": 19797,
+          "itemName": "Volkorne Saphir",
+          "recipes": [
+            [
+              "prune_emeraude",
+              "dore_indigo"
+            ],
+            [
+              "dore_turquoise",
+              "dore_emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste",
+          "name": "Amethyste",
+          "generation": 9,
+          "source": "site",
+          "itemId": 19799,
+          "itemName": "Volkorne Améthyste",
+          "recipes": [
+            [
+              "prune_emeraude",
+              "dore_ebene"
+            ],
+            [
+              "dore_ivoire",
+              "dore_emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "jade_pourpre",
+          "name": "Jade-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19849,
+          "itemName": "Volkorne Jade et Pourpre",
+          "recipes": [
+            [
+              "jade",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "jade_orchidee",
+          "name": "Jade-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19850,
+          "itemName": "Volkorne Jade et Orchidée",
+          "recipes": [
+            [
+              "jade",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "jade_indigo",
+          "name": "Jade-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19851,
+          "itemName": "Volkorne Jade et Indigo",
+          "recipes": [
+            [
+              "jade",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "jade_ebene",
+          "name": "Jade-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19852,
+          "itemName": "Volkorne Jade et Ébène",
+          "recipes": [
+            [
+              "jade",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "jade_amande",
+          "name": "Jade-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19853,
+          "itemName": "Volkorne Jade et Amande",
+          "recipes": [
+            [
+              "jade",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "jade_roux",
+          "name": "Jade-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19854,
+          "itemName": "Volkorne Jade et Roux",
+          "recipes": [
+            [
+              "jade",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "jade_ivoire",
+          "name": "Jade-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19855,
+          "itemName": "Volkorne Jade et Ivoire",
+          "recipes": [
+            [
+              "jade",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "jade_turquoise",
+          "name": "Jade-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19856,
+          "itemName": "Volkorne Jade et Turquoise",
+          "recipes": [
+            [
+              "jade",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "jade_prune",
+          "name": "Jade-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19857,
+          "itemName": "Volkorne Jade et Prune",
+          "recipes": [
+            [
+              "jade",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "jade_emeraude",
+          "name": "Jade-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19858,
+          "itemName": "Volkorne Jade et Émeraude",
+          "recipes": [
+            [
+              "jade",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "jade_dore",
+          "name": "Jade-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19859,
+          "itemName": "Volkorne Jade et Doré",
+          "recipes": [
+            [
+              "jade",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "jade_rubis",
+          "name": "Jade-Rubis",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19860,
+          "itemName": "Volkorne Jade et Rubis",
+          "recipes": [
+            [
+              "jade",
+              "rubis"
+            ]
+          ]
+        },
+        {
+          "id": "jade_saphir",
+          "name": "Jade-Saphir",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19861,
+          "itemName": "Volkorne Jade et Saphir",
+          "recipes": [
+            [
+              "jade",
+              "saphir"
+            ]
+          ]
+        },
+        {
+          "id": "jade_amethyste",
+          "name": "Jade-Amethyste",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19862,
+          "itemName": "Volkorne Jade et Améthyste",
+          "recipes": [
+            [
+              "jade",
+              "amethyste"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_pourpre",
+          "name": "Rubis-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19863,
+          "itemName": "Volkorne Rubis et Pourpre",
+          "recipes": [
+            [
+              "rubis",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_orchidee",
+          "name": "Rubis-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19864,
+          "itemName": "Volkorne Rubis et Orchidée",
+          "recipes": [
+            [
+              "rubis",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_indigo",
+          "name": "Rubis-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19865,
+          "itemName": "Volkorne Rubis et Indigo",
+          "recipes": [
+            [
+              "rubis",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_ebene",
+          "name": "Rubis-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19866,
+          "itemName": "Volkorne Rubis et Ébène",
+          "recipes": [
+            [
+              "rubis",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_amande",
+          "name": "Rubis-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19867,
+          "itemName": "Volkorne Rubis et Amande",
+          "recipes": [
+            [
+              "rubis",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_roux",
+          "name": "Rubis-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19868,
+          "itemName": "Volkorne Rubis et Roux",
+          "recipes": [
+            [
+              "rubis",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_ivoire",
+          "name": "Rubis-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19869,
+          "itemName": "Volkorne Rubis et Ivoire",
+          "recipes": [
+            [
+              "rubis",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_turquoise",
+          "name": "Rubis-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19870,
+          "itemName": "Volkorne Rubis et Turquoise",
+          "recipes": [
+            [
+              "rubis",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_prune",
+          "name": "Rubis-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19871,
+          "itemName": "Volkorne Rubis et Prune",
+          "recipes": [
+            [
+              "rubis",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_emeraude",
+          "name": "Rubis-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19872,
+          "itemName": "Volkorne Rubis et Émeraude",
+          "recipes": [
+            [
+              "rubis",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_dore",
+          "name": "Rubis-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19873,
+          "itemName": "Volkorne Rubis et Doré",
+          "recipes": [
+            [
+              "rubis",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_saphir",
+          "name": "Rubis-Saphir",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19874,
+          "itemName": "Volkorne Rubis et Saphir",
+          "recipes": [
+            [
+              "rubis",
+              "saphir"
+            ]
+          ]
+        },
+        {
+          "id": "rubis_amethyste",
+          "name": "Rubis-Amethyste",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19875,
+          "itemName": "Volkorne Rubis et Améthyste",
+          "recipes": [
+            [
+              "rubis",
+              "amethyste"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_pourpre",
+          "name": "Saphir-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19876,
+          "itemName": "Volkorne Saphir et Pourpre",
+          "recipes": [
+            [
+              "saphir",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_orchidee",
+          "name": "Saphir-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19877,
+          "itemName": "Volkorne Saphir et Orchidée",
+          "recipes": [
+            [
+              "saphir",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_indigo",
+          "name": "Saphir-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19878,
+          "itemName": "Volkorne Saphir et Indigo",
+          "recipes": [
+            [
+              "saphir",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_ebene",
+          "name": "Saphir-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19879,
+          "itemName": "Volkorne Saphir et Ébène",
+          "recipes": [
+            [
+              "saphir",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_amande",
+          "name": "Saphir-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19880,
+          "itemName": "Volkorne Saphir et Amande",
+          "recipes": [
+            [
+              "saphir",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_roux",
+          "name": "Saphir-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19881,
+          "itemName": "Volkorne Saphir et Roux",
+          "recipes": [
+            [
+              "saphir",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_ivoire",
+          "name": "Saphir-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19882,
+          "itemName": "Volkorne Saphir et Ivoire",
+          "recipes": [
+            [
+              "saphir",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_turquoise",
+          "name": "Saphir-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19883,
+          "itemName": "Volkorne Saphir et Turquoise",
+          "recipes": [
+            [
+              "saphir",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_prune",
+          "name": "Saphir-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19884,
+          "itemName": "Volkorne Saphir et Prune",
+          "recipes": [
+            [
+              "saphir",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_emeraude",
+          "name": "Saphir-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19885,
+          "itemName": "Volkorne Saphir et Émeraude",
+          "recipes": [
+            [
+              "saphir",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_dore",
+          "name": "Saphir-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19886,
+          "itemName": "Volkorne Saphir et Doré",
+          "recipes": [
+            [
+              "saphir",
+              "dore"
+            ]
+          ]
+        },
+        {
+          "id": "saphir_amethyste",
+          "name": "Saphir-Amethyste",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19887,
+          "itemName": "Volkorne Saphir et Améthyste",
+          "recipes": [
+            [
+              "saphir",
+              "amethyste"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_pourpre",
+          "name": "Amethyste-Pourpre",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19888,
+          "itemName": "Volkorne Améthyste et Pourpre",
+          "recipes": [
+            [
+              "amethyste",
+              "pourpre"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_orchidee",
+          "name": "Amethyste-Orchidee",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19889,
+          "itemName": "Volkorne Améthyste et Orchidée",
+          "recipes": [
+            [
+              "amethyste",
+              "orchidee"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_indigo",
+          "name": "Amethyste-Indigo",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19890,
+          "itemName": "Volkorne Améthyste et Indigo",
+          "recipes": [
+            [
+              "amethyste",
+              "indigo"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_ebene",
+          "name": "Amethyste-Ebene",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19891,
+          "itemName": "Volkorne Améthyste et Ébène",
+          "recipes": [
+            [
+              "amethyste",
+              "ebene"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_amande",
+          "name": "Amethyste-Amande",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19892,
+          "itemName": "Volkorne Améthyste et Amande",
+          "recipes": [
+            [
+              "amethyste",
+              "amande"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_roux",
+          "name": "Amethyste-Roux",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19893,
+          "itemName": "Volkorne Améthyste et Roux",
+          "recipes": [
+            [
+              "amethyste",
+              "roux"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_ivoire",
+          "name": "Amethyste-Ivoire",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19894,
+          "itemName": "Volkorne Améthyste et Ivoire",
+          "recipes": [
+            [
+              "amethyste",
+              "ivoire"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_turquoise",
+          "name": "Amethyste-Turquoise",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19895,
+          "itemName": "Volkorne Améthyste et Turquoise",
+          "recipes": [
+            [
+              "amethyste",
+              "turquoise"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_prune",
+          "name": "Amethyste-Prune",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19896,
+          "itemName": "Volkorne Améthyste et Prune",
+          "recipes": [
+            [
+              "amethyste",
+              "prune"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_emeraude",
+          "name": "Amethyste-Emeraude",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19897,
+          "itemName": "Volkorne Améthyste et Émeraude",
+          "recipes": [
+            [
+              "amethyste",
+              "emeraude"
+            ]
+          ]
+        },
+        {
+          "id": "amethyste_dore",
+          "name": "Amethyste-Dore",
+          "generation": 10,
+          "source": "site",
+          "itemId": 19898,
+          "itemName": "Volkorne Améthyste et Doré",
+          "recipes": [
+            [
+              "amethyste",
+              "dore"
+            ]
+          ]
+        }
+      ],
+      "optimakinaByGeneration": {
+        "2": {
+          "id": 33334,
+          "name": "Optimakina Volkorne de Génération 2"
+        },
+        "3": {
+          "id": 33355,
+          "name": "Optimakina Volkorne de Génération 3"
+        },
+        "4": {
+          "id": 33376,
+          "name": "Optimakina Volkorne de Génération 4"
+        },
+        "5": {
+          "id": 33397,
+          "name": "Optimakina Volkorne de Génération 5"
+        },
+        "6": {
+          "id": 33418,
+          "name": "Optimakina Volkorne de Génération 6"
+        },
+        "7": {
+          "id": 33439,
+          "name": "Optimakina Volkorne de Génération 7"
+        },
+        "8": {
+          "id": 33460,
+          "name": "Optimakina Volkorne de Génération 8"
+        },
+        "9": {
+          "id": 33479,
+          "name": "Optimakina Volkorne de Génération 9"
+        },
+        "10": {
+          "id": 33497,
+          "name": "Optimakina Volkorne de Génération 10"
+        }
+      },
+      "nets": [
+        {
+          "id": 32521,
+          "name": "Filet de capture universel",
+          "level": 1,
+          "captures": 1
+        },
+        {
+          "id": 32526,
+          "name": "Filet multiplicateur de Volkorne",
+          "level": 100,
+          "captures": 2
+        },
+        {
+          "id": 32523,
+          "name": "Filet à Volkorne renforcé",
+          "level": 150,
+          "captures": 4
+        },
+        {
+          "id": 32529,
+          "name": "Filet multiplicateur de Volkorne renforcé",
+          "level": 200,
+          "captures": 8
+        }
+      ]
+    }
+  ]
+}

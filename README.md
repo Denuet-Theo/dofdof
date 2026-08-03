@@ -194,6 +194,111 @@ into `recipe.quantities` **by array index**, so dropping one silently shifts eve
 quantity and corrupts the craft cost. Instead each row carries `super_type_id`, and exclusion
 is an opt-in filter at query time. (There is no cosmetic item type in this dataset at all.)
 
+## Élevage
+
+L'écran `/breeding` classe les 306 couleurs de monture (66 dragodindes, 120 muldos,
+120 volkornes) par marge, en arbitrant pour chacune entre **acheter**, **capturer** et
+**élever**.
+
+### D'où viennent les arbres de croisement
+
+Ils ne sont **pas** dans l'API DofusDB : `breedings`, `crossings` et `mount-crossings`
+répondent tous 404, et `breeds` désigne les classes de personnage. Il n'existe pas de
+source officielle interrogeable.
+
+`scripts/extract-breeding-trees.mjs` les extrait donc de `dragodinde.fr` vers
+`src/lib/dofus/breeding/trees.json`, puis les enrichit depuis DofusDB (certificats,
+Optimakina, filets, ressource d'extraction). Le fichier est **versionné** : la source est
+un asset de build dont le nom porte un hash de contenu, donc aucune URL n'est stable, et le
+script repart de la page de guide pour y lire le nom du jour.
+
+```bash
+node scripts/extract-breeding-trees.mjs
+```
+
+Il refuse d'écrire si un arbre est incohérent : toute recette doit avoir exactement deux
+parents, tout parent doit exister, et aucun parent ne peut être d'une génération ≥ à son
+enfant — sans quoi le graphe aurait un cycle et la récursion de coût ne terminerait pas.
+
+**Chaque recette porte une provenance**, `site` ou `game`. Les générations 9 et 10 sont à la
+fois les plus rentables et les moins fiables : DofusDB ne les couvre pas et le site avait un
+trou avéré (Aigue-marine listée avec une seule recette au lieu de cinq). Les quatre couleurs
+de génération 9 des muldos ont été relues en jeu et corrigées ; le reste est marqué `site` et
+signalé comme tel à l'écran. Conseiller un investissement de plusieurs millions de kamas sans
+distinguer « je sais » de « je crois » serait malhonnête.
+
+**Les certificats existent pour les 306 couleurs**, dans un type d'item par famille : 97
+dragodinde, 207 volkorne, 332 muldo. L'endpoint `mounts` de DofusDB, lui, ignore les
+générations 9–10 des muldos — chercher la monture plutôt que son certificat laisse croire à
+tort que ces couleurs n'existent pas.
+
+Les prix vivent en base plutôt que sur l'item, parce qu'une couleur se cote à **deux
+niveaux** : un bébé naît niveau 1, donc l'élevage produit du niveau 0, et le prix niveau 200
+n'est atteignable qu'en payant la montée.
+
+### Le modèle de coût
+
+`src/lib/dofus/breeding/costs.ts` remonte le DAG par génération croissante :
+
+```
+coût(c) = min( prix niveau 0, capture, meilleure recette )
+```
+
+Quatre points valent d'être connus avant de toucher au calcul :
+
+- **Un croisement consomme ses deux parents**, définitivement stérilisés. L'élevage n'est pas
+  une machine à multiplier des montures mais à transformer deux montures bon marché en une
+  monture chère.
+- **Le clonage recycle**, et pas d'un facteur uniforme. Deux stériles de même génération
+  rendent une fertile, d'où `copiesToObtain(u) = ⌊u/2⌋ + 1` appliqué **par couleur pendant la
+  propagation des multiplicités**. Un facteur ½ global rendrait un muldo Corail-Pourpre 29
+  fois trop bon marché, parce qu'un singleton de haute génération n'a personne à qui
+  s'appairer.
+- **Une tentative ratée consomme ses parents sans rien produire.** Les multiplicités se
+  propagent donc en `1/taux`, sans quoi tout l'amont est sous-compté — d'autant plus qu'on
+  monte en génération.
+- **Les coûts sont bornés à zéro avant d'être réinjectés.** Un croisement dont les génétons
+  dépassent la dépense affiche un coût négatif, ce qui est exact ; le propager casserait
+  l'optimisation, puisque diviser un négatif par le taux de réussite rend un *mauvais* taux
+  préférable et ferait choisir des parents niveau 1.
+
+### Les constantes de jeu, et leur origine
+
+| Mécanique | Formule | Origine |
+| --- | --- | --- |
+| Réussite | `30 % + 0,15 % × (niveau A + niveau B)`, 90 % au plafond | guide, recoupé sur son exemple |
+| XP monture | `3,795 × niveau^2,329` points de Mangeoire | 5 relevés en jeu, écart max 0,0008 % |
+| Transfert de jauge | 10/20/30/40 points par 10 s selon le palier | relevé en jeu, reproduit les 17h49 de vidange |
+| Génétons | 1/2/4/8/15/30/60/120/250 par génération de parent | guide |
+| Extraction | 1 ressource par génération, **rien en génération 1** | guide |
+| Filets | 1/2/4/8 captures, **un filet = un combat** | relevé en jeu |
+| Cycle de fécondité | 10 000 + 20 000 + 5 010 + 2 × 20 000 points | relevé en jeu |
+
+Le taux de réussite dépend du niveau des **montures**, pas de celui de l'Éleveur — lequel ne
+sert qu'à débloquer les enclos.
+
+Une seule hypothèse n'est pas vérifiée, et elle est signalée dans le code : que la progression
+d'une monture soit strictement proportionnelle aux points transférés. Tout le reste vient
+d'un relevé en jeu ou du guide.
+
+### Ce que le palier de jauge change
+
+Les plafonds des carburants (40 000 / 70 000 / 90 000 / 100 000) tombent **exactement** sur
+les paliers de transfert. Tenir une jauge à 4 pt/s exige donc le carburant de dernier palier,
+fait de ressources plus rares.
+
+Il n'y a par conséquent pas de règle générale : le débit rapide va jusqu'à quatre fois plus
+vite mais se paie plus cher au point, et `bestFuelFor` tranche selon `kamas_per_hour`. Le
+transfert n'est pas une perte — les points transférés sont exactement ce qui fait progresser
+les montures — donc tenir une jauge basse ne fait rien économiser, cela ralentit.
+
+### Réglages
+
+`user_breeding_settings` est privée par utilisateur ; `breeding_color_prices` est partagée
+comme `item_prices`, donc une saisie profite à toute l'équipe. `kamas_per_hour` vaut 0 par
+défaut : le temps n'est valorisé que si le joueur le décide, parce que ce qu'il vaut dépend de
+ce qu'il ferait à la place.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

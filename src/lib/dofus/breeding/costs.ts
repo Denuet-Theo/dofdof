@@ -263,7 +263,16 @@ export const optimalParentLevel = (
   fuelCost: number,
   mangeoireCostPerPoint: number,
   /** Prix d'une Optimakina de la génération visée, ou `null` si on s'en passe. */
-  optimakinaPrice: number | null = null
+  optimakinaPrice: number | null = null,
+  /**
+   * Ce que vaut le bébé d'une tentative qui n'a pas donné la génération cible.
+   *
+   * Un accouplement **produit toujours un bébé** — les 30 % de base portent sur
+   * sa couleur, pas sur son existence. Une tentative « ratée » rend donc une
+   * monture d'une autre couleur, qui vaut ce qu'on aurait payé pour l'obtenir.
+   * L'ignorer surfacturait chaque croisement de `(1/taux − 1)` montures.
+   */
+  failureValue = 0
 ): ParentLevelChoice => {
   let best: ParentLevelChoice | null = null;
 
@@ -283,7 +292,13 @@ export const optimalParentLevel = (
         2 * mangeoireCostPerPoint * mountXpForLevel(level) +
         fuelCost +
         (useOptimakina ? optimakinaPrice! : 0);
-      const expectedCost = (parentsCost + overhead) / successRate;
+
+      // `n` tentatives coûtent `n × C` et rendent `n − 1` bébés hors cible, d'où
+      // `n·C − (n−1)·V`, qui se réécrit `(C − V)/taux + V`. Le crédit rend donc
+      // les tentatives ratées moins chères, ce qui réduit mécaniquement
+      // l'intérêt de monter les parents — un effet réel, pas un ajustement.
+      const netAttempt = Math.max(parentsCost + overhead - failureValue, 0);
+      const expectedCost = netAttempt / successRate + failureValue;
 
       if (!best || expectedCost < best.expectedCost) {
         best = {
@@ -306,15 +321,18 @@ const fixedParentLevel = (
   parentsCost: number,
   fuelCost: number,
   mangeoireCostPerPoint: number,
-  optimakinaPrice: number | null
+  optimakinaPrice: number | null,
+  failureValue = 0
 ): ParentLevelChoice => {
   const overhead = 2 * mangeoireCostPerPoint * mountXpForLevel(level) + fuelCost;
+  const net = (extra: number) => Math.max(parentsCost + overhead + extra - failureValue, 0);
+
   const withoutRate = targetGenerationRate(level, level);
   const without: ParentLevelChoice = {
     level,
     useOptimakina: false,
     successRate: withoutRate,
-    expectedCost: (parentsCost + overhead) / withoutRate,
+    expectedCost: net(0) / withoutRate + failureValue,
     overheadCost: overhead / withoutRate,
   };
 
@@ -325,7 +343,7 @@ const fixedParentLevel = (
     level,
     useOptimakina: true,
     successRate: withRate,
-    expectedCost: (parentsCost + overhead + optimakinaPrice) / withRate,
+    expectedCost: net(optimakinaPrice) / withRate + failureValue,
     overheadCost: (overhead + optimakinaPrice) / withRate,
   };
 
@@ -608,6 +626,34 @@ export const computeBreedingCosts = (
 
   const estimates = new Map<string, BreedingEstimate>();
   const byId = new Map(colors.map((color) => [color.id, color]));
+
+  /**
+   * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
+   *
+   * Le bébé raté tire sa couleur dans la généalogie proche : **25 % chaque
+   * parent, 12,5 % chaque grand-parent**. Un parent pèse donc 50 % à lui seul,
+   * moitié pour lui, moitié pour ses deux ascendants — et les deux parents
+   * couvrent l'ensemble.
+   *
+   * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
+   * payer économise exactement cela. Quand un parent est acheté ou capturé, il
+   * n'a pas d'ascendants dans notre plan, et sa part de grands-parents revient
+   * sur lui — ce n'est pas sa vraie généalogie, mais son coût est la meilleure
+   * approximation dont on dispose de ce que sa lignée vaut.
+   */
+  const lineageValue = (parentId: string): number => {
+    const parent = estimates.get(parentId);
+    if (!parent?.cost) return 0;
+
+    const recipe = parent.strategy === 'breed' ? parent.breedRecipe : null;
+    if (!recipe) return 0.5 * parent.cost;
+
+    const grandparents = recipe.reduce(
+      (total, id) => total + Math.max(estimates.get(id)?.cost ?? 0, 0),
+      0
+    );
+    return 0.25 * parent.cost + 0.125 * grandparents;
+  };
   const byGeneration = [...colors].sort((a, b) => a.generation - b.generation);
   /** Un prix nul ou négatif vaut « non renseigné » : la saisie part de 0. */
   const positive = (value: number | null | undefined) =>
@@ -660,15 +706,26 @@ export const computeBreedingCosts = (
       // fécondité avant de servir, en plus de celui du bébé.
       const fuelCost = fuelCostPerBaby * (recycleSteriles ? 2 : 1);
 
+      // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
+      // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
+      const failureValue = lineageValue(recipe[0]) + lineageValue(recipe[1]);
+
       const parents =
         parentLevel === 'auto'
-          ? optimalParentLevel(parentsCost, fuelCost, mangeoireCostPerPoint, optimakinaPrice)
+          ? optimalParentLevel(
+              parentsCost,
+              fuelCost,
+              mangeoireCostPerPoint,
+              optimakinaPrice,
+              failureValue
+            )
           : fixedParentLevel(
               parentLevel,
               parentsCost,
               fuelCost,
               mangeoireCostPerPoint,
-              optimakinaPrice
+              optimakinaPrice,
+              failureValue
             );
 
       // Les génétons ne tombent qu'à la naissance : ils se déduisent une fois,

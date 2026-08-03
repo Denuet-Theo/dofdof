@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ChevronRight, TriangleAlert } from 'lucide-react';
 import KamasDisplay from '@/components/ui/KamasDisplay';
+import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
@@ -20,10 +21,10 @@ const EXIT_LABEL = {
 
 type Props = {
   row: BreedingRow;
-  onEditPrice: (colorId: string, mountLevel: 0 | 200) => void;
+  onSavePrice: (colorId: string, mountLevel: 0 | 200, price: number) => Promise<boolean>;
 };
 
-const ColorRow = ({ row, onEditPrice }: Props) => {
+const ColorRow = ({ row, onSavePrice }: Props) => {
   const [open, setOpen] = useState(false);
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
@@ -97,26 +98,15 @@ const ColorRow = ({ row, onEditPrice }: Props) => {
 
       {open && (
         <div className="px-5 pb-5 pt-1 border-t border-dark-700/40 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-            <div>
-              <p className="text-dark-500 mb-1">Prix niveau 0</p>
-              <button
-                type="button"
-                onClick={() => onEditPrice(row.colorId, 0)}
-                className="text-dark-200 hover:text-kamas transition-colors cursor-pointer"
-              >
-                {estimate.priceLevel0?.toLocaleString('fr-FR') ?? 'à renseigner'}
-              </button>
-            </div>
-            <div>
-              <p className="text-dark-500 mb-1">Prix niveau 200</p>
-              <button
-                type="button"
-                onClick={() => onEditPrice(row.colorId, 200)}
-                className="text-dark-200 hover:text-kamas transition-colors cursor-pointer"
-              >
-                {estimate.priceLevel200?.toLocaleString('fr-FR') ?? 'à renseigner'}
-              </button>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
+            <div className="md:col-span-1">
+              <p className="text-dark-500 mb-2">Prix à l&apos;hôtel de vente</p>
+              <ColorPriceInputs
+                colorId={row.colorId}
+                level0={estimate.priceLevel0}
+                level200={estimate.priceLevel200}
+                onSave={onSavePrice}
+              />
             </div>
             <div>
               <p className="text-dark-500 mb-1">Meilleure sortie</p>

@@ -155,11 +155,20 @@ export type FuelPlan = {
 export const bestFuelFor = (
   points: number,
   fuels: Fuel[],
-  kamasPerHour: number
+  kamasPerHour: number,
+  /**
+   * Plafond imposé, ou `null` pour laisser l'arbitrage décider.
+   *
+   * Convertir son temps en kamas ne parle pas à tout le monde : on peut vouloir
+   * aller vite parce qu'on a peu de sessions, ou lentement parce qu'on laisse
+   * tourner. Fixer le palier court-circuite alors `kamasPerHour`.
+   */
+  forcedCap: number | null = null
 ): FuelPlan | null => {
   let best: FuelPlan | null = null;
+  const eligible = forcedCap === null ? fuels : fuels.filter((fuel) => fuel.cap === forcedCap);
 
-  for (const fuel of fuels) {
+  for (const fuel of eligible) {
     if (fuel.rechargeAmount <= 0 || fuel.price < 0) continue;
 
     const costPerPoint = fuel.price / fuel.rechargeAmount;

@@ -42,6 +42,7 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   net_recovery_rate: 0.8,
   recycle_steriles: true,
   never_sell_mounts: false,
+  gauge_cap: null,
 };
 
 export type BreedingRow = {
@@ -141,6 +142,7 @@ export const useBreeding = (family: FamilyId) => {
             // Un enclos plein amortit le cycle sur dix montures ; c'est le
             // régime visé, et le seul qui ne gaspille pas de transfert.
             mountsInEnclos: 10,
+            gaugeCap: settings.gauge_cap,
           })
         : null,
     [tree, fuelItems, itemPrices, settings]

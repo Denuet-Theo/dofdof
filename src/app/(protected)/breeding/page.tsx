@@ -17,6 +17,18 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
 
 type SortBy = 'margin' | 'cost' | 'generation';
 
+/**
+ * Une durée d'enclos, en jours au-delà de 48 h.
+ *
+ * Les cycles se comptent en heures, mais monter une monture au niveau 200 en
+ * demande des centaines : « 289h » ne se lit pas, « 12 j » si.
+ */
+const formatHours = (hours: number) => {
+  if (hours >= 48) return `${Math.round(hours / 24)} j`;
+  const whole = Math.floor(hours);
+  return `${whole}h${String(Math.round((hours - whole) * 60)).padStart(2, '0')}`;
+};
+
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
   const [sortBy, setSortBy] = useState<SortBy>('margin');
@@ -116,8 +128,18 @@ const BreedingPage = () => {
             {supplies?.fuelCostPerBaby != null
               ? `${Math.round(supplies.fuelCostPerBaby).toLocaleString('fr-FR')} kamas / monture`
               : 'carburants non tarifés'}
+            {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
           </strong>
         </span>
+        {supplies?.levelUpHours != null && (
+          <span className="text-dark-400">
+            Montée au niveau 200 :{' '}
+            <strong className="text-dark-200">
+              {formatHours(supplies.levelUpHours)}
+              {supplies.mangeoireFuel && ` · ${supplies.mangeoireFuel}`}
+            </strong>
+          </span>
+        )}
         <span className="text-dark-400">
           Capture :{' '}
           <strong className="text-dark-200">

@@ -15,6 +15,18 @@ type Props = {
 /** Niveaux d'Éleveur qui débloquent un enclos supplémentaire. */
 const ENCLOS_UNLOCKS = [1, 40, 80, 120, 160, 200];
 
+/**
+ * Les plafonds de carburant, qui sont aussi les paliers de transfert : tenir
+ * une jauge au-dessus de 90 000 débite 4 pt/s, sous 40 000 seulement 1 pt/s.
+ * L'Élixir est le seul sans plafond, donc le seul à atteindre le débit maximal.
+ */
+const GAUGE_TIERS = [
+  { cap: 40_000, label: 'Extrait — jusqu’à 40 000', rate: 1 },
+  { cap: 70_000, label: 'Philtre — jusqu’à 70 000', rate: 2 },
+  { cap: 90_000, label: 'Potion — jusqu’à 90 000', rate: 3 },
+  { cap: 100_000, label: 'Élixir — sans plafond', rate: 4 },
+];
+
 const enclosAllowedBy = (breederLevel: number) =>
   ENCLOS_UNLOCKS.filter((level) => breederLevel >= level).length;
 
@@ -94,6 +106,37 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
             {field('Minutes par combat', 'minutes_per_fight', 'capture : trajet compris', {
               min: 1,
             })}
+          </div>
+
+          {/* Le palier décide du débit, donc de la durée de chaque cycle. Les
+              plafonds des carburants tombent sur les paliers de transfert. */}
+          <div>
+            <label className="text-xs text-dark-400 mb-1 block">
+              Remplissage des jauges
+            </label>
+            <select
+              value={draft.gauge_cap === null ? 'auto' : String(draft.gauge_cap)}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  gauge_cap: event.target.value === 'auto' ? null : Number(event.target.value),
+                }))
+              }
+              className="px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                text-dark-100 text-sm transition-all hover:border-dark-500
+                focus:border-kamas/50 cursor-pointer"
+            >
+              <option value="auto">Au meilleur rapport (selon kamas/heure)</option>
+              {GAUGE_TIERS.map(({ cap, label, rate }) => (
+                <option key={cap} value={cap}>
+                  {label} — {rate} pt/s
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-dark-600 mt-1">
+              Un palier haut transfère jusqu&apos;à 4× plus vite, mais son carburant coûte
+              plus cher au point.
+            </p>
           </div>
 
           <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">

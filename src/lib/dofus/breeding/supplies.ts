@@ -66,18 +66,31 @@ export const fuelsByGauge = (
   return byGauge;
 };
 
-/** Le coût d'un point sur une jauge, au meilleur carburant compte tenu du temps. */
-const costPerPointOf = (fuels: Fuel[] | undefined, points: number, kamasPerHour: number) => {
-  if (!fuels || fuels.length === 0) return null;
-  const plan = bestFuelFor(points, fuels, kamasPerHour);
-  return plan ? plan.totalCost / points : null;
-};
+/** Le plan de carburant d'une jauge : coût **et** durée. */
+const planFor = (
+  fuels: Fuel[] | undefined,
+  points: number,
+  kamasPerHour: number,
+  forcedCap: number | null
+) => (fuels && fuels.length > 0 ? bestFuelFor(points, fuels, kamasPerHour, forcedCap) : null);
 
 export type SupplyCosts = {
   /** Coût du cycle de fécondité, ramené à une monture de l'enclos. */
   fuelCostPerBaby: number | null;
   /** Coût d'un point de Mangeoire, qui chiffre la montée en niveau. */
   mangeoireCostPerPoint: number | null;
+  /**
+   * Heures d'enclos pour amener **une fournée** de montures à la fécondité.
+   *
+   * C'est un temps par enclos et non par monture : le transfert profite aux dix
+   * places à la fois, donc dix montures deviennent fécondes en même temps
+   * qu'une seule.
+   */
+  cycleHours: number | null;
+  /** Heures de Mangeoire pour monter une monture au niveau 200. */
+  levelUpHours: number | null;
+  /** Le carburant de Mangeoire retenu, pour dire lequel acheter. */
+  mangeoireFuel: string | null;
   /** Coût complet d'une monture sauvage capturée, filet et combat compris. */
   capture: CaptureChoice | null;
   /** Les jauges dont aucun carburant n'est tarifé — donc le calcul incomplet. */
@@ -110,48 +123,57 @@ export const computeSupplyCosts = (
     minutesPerFight,
     netRecoveryRate,
     mountsInEnclos,
+    gaugeCap,
   }: {
     kamasPerHour: number;
     minutesPerFight: number;
     netRecoveryRate: number;
     mountsInEnclos: number;
+    gaugeCap: number | null;
   }
 ): SupplyCosts => {
   const byGauge = fuelsByGauge(fuelItems, prices);
   const missingGauges: string[] = [];
 
   let cycleCost = 0;
+  let cycleHours = 0;
   let complete = true;
 
   for (const { points, candidates } of CYCLE_GAUGES) {
-    const costs = candidates
-      .map((gauge) => costPerPointOf(byGauge.get(gauge), points, kamasPerHour))
-      .filter((cost): cost is number => cost !== null);
+    const plans = candidates
+      .map((gauge) => planFor(byGauge.get(gauge), points, kamasPerHour, gaugeCap))
+      .filter((plan): plan is NonNullable<typeof plan> => plan !== null);
 
-    if (costs.length === 0) {
+    if (plans.length === 0) {
       complete = false;
       for (const gauge of candidates) {
         if (!byGauge.has(gauge) && !missingGauges.includes(gauge)) missingGauges.push(gauge);
       }
       continue;
     }
-    cycleCost += points * Math.min(...costs);
+
+    const cheapest = plans.reduce((best, plan) =>
+      plan.totalCost < best.totalCost ? plan : best
+    );
+    cycleCost += cheapest.fuelCost;
+    // Les étapes s'enchaînent — deux jauges actives ne suffisent pas à mener
+    // les trois stats de front — donc les durées s'additionnent.
+    cycleHours += cheapest.hours;
   }
 
   const mangeoirePoints = mountXpForLevel(MAX_MOUNT_LEVEL);
-  const mangeoireCostPerPoint = costPerPointOf(
-    byGauge.get('Mangeoire'),
-    mangeoirePoints,
-    kamasPerHour
-  );
-  if (mangeoireCostPerPoint === null && !missingGauges.includes('Mangeoire')) {
+  const mangeoirePlan = planFor(byGauge.get('Mangeoire'), mangeoirePoints, kamasPerHour, gaugeCap);
+  if (mangeoirePlan === null && !missingGauges.includes('Mangeoire')) {
     missingGauges.push('Mangeoire');
   }
 
   return {
     // Un enclos transfère à ses dix places d'un coup : le cycle se partage.
     fuelCostPerBaby: complete && mountsInEnclos > 0 ? cycleCost / mountsInEnclos : null,
-    mangeoireCostPerPoint,
+    mangeoireCostPerPoint: mangeoirePlan ? mangeoirePlan.fuelCost / mangeoirePoints : null,
+    cycleHours: complete ? cycleHours : null,
+    levelUpHours: mangeoirePlan?.hours ?? null,
+    mangeoireFuel: mangeoirePlan?.fuel.name ?? null,
     capture: bestCaptureNet(netItems, {
       netCosts: new Map(
         netItems.map((net) => [net.id, prices.get(net.id)?.price ?? -1] as const)

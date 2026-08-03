@@ -277,6 +277,8 @@ export type UserBreedingSettings = {
   net_recovery_rate: number;
   recycle_steriles: boolean;
   never_sell_mounts: boolean;
+  /** Plafond de jauge imposé, ou null pour laisser l'arbitrage temps/kamas décider. */
+  gauge_cap: number | null;
   updated_at: string;
 };
 
@@ -314,6 +316,7 @@ export interface Database {
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
+          gauge_cap?: number | null;
           updated_at?: string;
         };
         Update: {
@@ -324,6 +327,7 @@ export interface Database {
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
+          gauge_cap?: number | null;
           updated_at?: string;
         };
         Relationships: [];

@@ -1,6 +1,6 @@
 import type { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
-import { bestFuelFor, CYCLE_STEPS, type Fuel } from './enclos';
+import { bestFuelFor, CYCLE_STEPS, GAUGE_MAX, type Fuel } from './enclos';
 import {
   bestCaptureNet,
   mountXpForLevel,
@@ -48,7 +48,12 @@ export const fuelsByGauge = (
     const fuel: Fuel = {
       itemId: item.id,
       name: item.name?.fr ?? String(item.id),
-      cap: info.capAmount,
+      // Les Élixirs n'ont pas de clause « sans dépasser » : `parseGaugeInfo`
+      // retombe alors sur la quantité rechargée, ce qui les ferait passer pour
+      // le palier le plus lent alors qu'ils sont les seuls **sans plafond**.
+      // Un carburant qui ne remplirait que jusqu'à ce qu'il verse n'aurait
+      // d'ailleurs aucun sens.
+      cap: info.capAmount === info.rechargeAmount ? GAUGE_MAX : info.capAmount,
       rechargeAmount: info.rechargeAmount,
       price,
     };

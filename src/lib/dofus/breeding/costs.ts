@@ -558,9 +558,16 @@ export type BreedingEstimate = {
   bestExit: 'sell0' | 'sell200' | 'sacrifice';
   bestExitValue: number;
   /**
-   * Gain net de la meilleure sortie, coût d'élevage déduit. C'est le seul
-   * classement valable dans les deux régimes : avec revente il suit la marge de
-   * vente, sans revente il suit celle de l'extraction.
+   * Gain net de la meilleure sortie, **coût d'acquisition** déduit — celui de
+   * `cost`, donc le moins cher entre acheter, capturer et élever.
+   *
+   * Se déduire de `breedCost` serait une erreur : la question « que rapporte
+   * cette couleur » ne dépend pas de la façon dont on se l'est procurée. Le
+   * faire priverait de marge toute couleur qu'il vaut mieux acheter, et toutes
+   * les couleurs sauvages, qui n'ont aucune recette.
+   *
+   * C'est le seul classement valable dans les deux régimes : avec revente il
+   * suit la vente, sans revente il suit l'extraction.
    */
   bestMargin: number | null;
 };
@@ -751,7 +758,9 @@ export const computeBreedingCosts = (
       sacrificeValue,
       bestExit: best.exit,
       bestExitValue: best.value ?? 0,
-      bestMargin: marginOf(best.value),
+      // Contre `cost` et non `breedCost` : ce que rapporte une couleur ne dépend
+      // pas de la voie par laquelle on l'a obtenue.
+      bestMargin: best.value === null || cost === null ? null : best.value - cost,
     });
   }
 

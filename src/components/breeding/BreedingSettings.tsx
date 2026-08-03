@@ -71,6 +71,7 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
           {settings.kamas_per_hour > 0
             ? `${settings.kamas_per_hour.toLocaleString('fr-FR')} k/h`
             : 'temps non valorisé'}
+          {settings.never_sell_mounts && ' · sans revente'}
         </span>
         <span className="ml-auto text-xs text-dark-500">{open ? 'Fermer' : 'Modifier'}</span>
       </button>
@@ -107,6 +108,25 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
             Recycler les parents stériles par clonage — deux stériles de même génération
             rendent une monture fertile
           </label>
+
+          <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={draft.never_sell_mounts}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, never_sell_mounts: event.target.checked }))
+              }
+              className="accent-kamas cursor-pointer"
+            />
+            Ne jamais vendre les montures — ne valoriser que l&apos;extraction et les génétons
+          </label>
+          {draft.never_sell_mounts && (
+            <p className="text-[10px] text-dark-600 -mt-2 ml-6">
+              Le marché des certificats est peu liquide : un prix saisi ne garantit pas un
+              acheteur. Les prix restent utilisés pour <em>acheter</em> une couleur plutôt que
+              l&apos;élever, mais plus pour la revendre.
+            </p>
+          )}
 
           {/* Le niveau peut avoir baissé sous le nombre d'enclos déjà saisi ;
               le dire vaut mieux que de corriger en silence. */}

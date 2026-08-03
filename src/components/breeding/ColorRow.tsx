@@ -13,6 +13,13 @@ const STRATEGY_LABEL = {
   breed: { label: 'Élever', className: 'bg-kamas/15 text-kamas' },
 } as const;
 
+/** Étiquette courte, pour l'en-tête de colonne. */
+const EXIT_SHORT = {
+  sell0: 'vente niv 0',
+  sell200: 'vente niv 200',
+  sacrifice: 'extraction',
+} as const;
+
 const EXIT_LABEL = {
   sell0: 'revendre le poulain',
   sell200: 'monter au 200 puis revendre',
@@ -78,7 +85,7 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
         </div>
 
         <div className="text-right shrink-0 w-32">
-          <p className="text-[10px] text-dark-500">Marge (niv 0)</p>
+          <p className="text-[10px] text-dark-500">Marge ({EXIT_SHORT[estimate.bestExit]})</p>
           {margin === null ? (
             <p className="text-sm text-dark-600">prix manquant</p>
           ) : (

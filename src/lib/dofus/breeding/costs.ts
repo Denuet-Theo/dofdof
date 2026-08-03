@@ -467,6 +467,17 @@ export type BreedingOptions = {
    * `null` si on ne capture pas : les couleurs sauvages s'achètent alors.
    */
   captureCost?: number | null;
+  /**
+   * Écarter la revente des montures et ne valoriser que l'extraction.
+   *
+   * Le marché des certificats est peu liquide : un prix saisi ne garantit pas
+   * un acheteur. Classer sur une revente qui n'aura pas lieu donne un palmarès
+   * flatteur mais faux. L'extraction, elle, ne dépend de personne.
+   *
+   * Les prix restent lus et affichés — ils servent toujours à **acheter** une
+   * couleur plutôt que l'élever. Seule la sortie change.
+   */
+  neverSell?: boolean;
 };
 
 /**
@@ -546,6 +557,12 @@ export type BreedingEstimate = {
    */
   bestExit: 'sell0' | 'sell200' | 'sacrifice';
   bestExitValue: number;
+  /**
+   * Gain net de la meilleure sortie, coût d'élevage déduit. C'est le seul
+   * classement valable dans les deux régimes : avec revente il suit la marge de
+   * vente, sans revente il suit celle de l'extraction.
+   */
+  bestMargin: number | null;
 };
 
 /** Taxe prélevée à la vente en hôtel de vente. */
@@ -571,6 +588,7 @@ export const computeBreedingCosts = (
     optimakinaPrices,
     recycleSteriles,
     captureCost,
+    neverSell = false,
   }: BreedingOptions
 ): Map<string, BreedingEstimate> => {
   if (parentLevel !== 'auto' && (parentLevel < 1 || parentLevel > MAX_MOUNT_LEVEL)) {
@@ -695,13 +713,17 @@ export const computeBreedingCosts = (
     // dépend d'aucun prix saisi, donc il reste disponible pour les couleurs que
     // personne n'a cotées — souvent les plus rares, faute d'un marché liquide.
     const net200 = netSale(priceLevel200);
-    const exits = [
-      { exit: 'sell0' as const, value: netSale(priceLevel0) },
-      // La montée se paie avant la vente : ce qu'elle coûte sort d'ici, sinon
-      // le niveau 200 gagnerait toujours par construction.
-      { exit: 'sell200' as const, value: net200 === null ? null : net200 - levelUpCost },
-      { exit: 'sacrifice' as const, value: sacrificeValue },
-    ];
+    // Sans revente il ne reste que l'extraction — elle ne dépend d'aucun
+    // acheteur, ce qui est précisément l'intérêt de l'option.
+    const exits = neverSell
+      ? [{ exit: 'sacrifice' as const, value: sacrificeValue }]
+      : [
+          { exit: 'sell0' as const, value: netSale(priceLevel0) },
+          // La montée se paie avant la vente : ce qu'elle coûte sort d'ici,
+          // sinon le niveau 200 gagnerait toujours par construction.
+          { exit: 'sell200' as const, value: net200 === null ? null : net200 - levelUpCost },
+          { exit: 'sacrifice' as const, value: sacrificeValue },
+        ];
     const best = exits.reduce((chosen, candidate) =>
       (candidate.value ?? -Infinity) > (chosen.value ?? -Infinity) ? candidate : chosen
     );
@@ -729,6 +751,7 @@ export const computeBreedingCosts = (
       sacrificeValue,
       bestExit: best.exit,
       bestExitValue: best.value ?? 0,
+      bestMargin: marginOf(best.value),
     });
   }
 

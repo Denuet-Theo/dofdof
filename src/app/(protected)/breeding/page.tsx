@@ -46,7 +46,7 @@ const BreedingPage = () => {
         // traitées comme gratuites.
         return (a.estimate.cost ?? Infinity) - (b.estimate.cost ?? Infinity);
       }
-      return (b.estimate.marginLevel0 ?? -Infinity) - (a.estimate.marginLevel0 ?? -Infinity);
+      return (b.estimate.bestMargin ?? -Infinity) - (a.estimate.bestMargin ?? -Infinity);
     });
   }, [rows, sortBy, pricedOnly]);
 

@@ -360,7 +360,11 @@ Deux effets rendent le calcul non trivial, et les ignorer fausse tout dans le m�
 
 - **Les dix places d'un enclos se préparent ensemble.** Vingt parents coûtent deux fournées,
   pas dix fois deux parents. C'est ce qui rend les grosses séries proportionnellement plus
-  rapides.
+  rapides. Vrai pour **toutes** les jauges, Mangeoire comprise : monter dix montures d'un
+  niveau coûte ce que coûte d'en monter une, d'où `mangeoireCostPerMountPoint`, qui est le prix
+  d'un point d'XP *sur une monture* et vaut le dixième du prix d'un point de jauge. Confondre
+  les deux surfacturait la montée d'un facteur dix et poussait l'optimiseur vers des parents
+  niveau 5 là où le 26 était moins cher.
 - **Montée et cycle ne s'additionnent pas.** Trois des quatre étapes du cycle n'occupent qu'un
   des deux emplacements de jauge, et la Mangeoire s'y glisse gratuitement. Elle ne rallonge la
   fournée que par ce qui dépasse — d'où `cycleFreeSlotHours`.

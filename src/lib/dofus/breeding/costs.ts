@@ -279,7 +279,7 @@ export type ParentLevelChoice = {
 export const optimalParentLevel = (
   parentsCost: number,
   fuelCost: number,
-  mangeoireCostPerPoint: number,
+  mangeoireCostPerMountPoint: number,
   /** Prix d'une Optimakina de la génération visée, ou `null` si on s'en passe. */
   optimakinaPrice: number | null = null,
   /**
@@ -319,7 +319,7 @@ export const optimalParentLevel = (
         targetGenerationRate(level, level) + (useOptimakina ? OPTIMAKINA_BONUS : 0)
       );
       const overhead =
-        2 * mangeoireCostPerPoint * mountXpForLevel(level) +
+        2 * mangeoireCostPerMountPoint * mountXpForLevel(level) +
         fuelCost +
         (useOptimakina ? optimakinaPrice! : 0);
 
@@ -360,11 +360,11 @@ const fixedParentLevel = (
   level: number,
   parentsCost: number,
   fuelCost: number,
-  mangeoireCostPerPoint: number,
+  mangeoireCostPerMountPoint: number,
   optimakinaPrice: number | null,
   failureValue = 0
 ): ParentLevelChoice => {
-  const overhead = 2 * mangeoireCostPerPoint * mountXpForLevel(level) + fuelCost;
+  const overhead = 2 * mangeoireCostPerMountPoint * mountXpForLevel(level) + fuelCost;
   const net = (extra: number) => Math.max(parentsCost + overhead + extra - failureValue, 0);
 
   const withoutRate = targetGenerationRate(level, level);
@@ -476,14 +476,18 @@ export type BreedingOptions = {
    */
   sacrificeUnitValue: number;
   /**
-   * Coût en kamas d'un point de la jauge de Mangeoire, celle qui fait monter les
-   * montures en niveau. Se déduit du meilleur carburant de Mangeoire connu :
-   * son prix divisé par ce qu'il recharge.
+   * Coût en kamas d'un point d'expérience **sur une monture** — pas d'un point
+   * de jauge, et l'écart est d'un facteur dix.
+   *
+   * La Mangeoire alimente les dix places de l'enclos d'un coup, exactement comme
+   * les jauges de stat : monter dix montures coûte ce que coûte d'en monter une.
+   * L'appelant fait donc la division par l'effectif avant d'arriver ici, comme il
+   * la fait déjà pour `fuelCostPerBaby`.
    *
    * À 0, la montée est réputée gratuite et la marge niveau 200 redevient une
    * borne haute plutôt qu'un net.
    */
-  mangeoireCostPerPoint: number;
+  mangeoireCostPerMountPoint: number;
   /**
    * Prix des Optimakina, indexés par **génération visée** (2 à 10). Une
    * Optimakina ajoute 10 points de probabilité ; le calcul ne la retient que
@@ -668,7 +672,7 @@ export const computeBreedingCosts = (
     fuelCostPerBaby,
     genetonValue,
     sacrificeUnitValue,
-    mangeoireCostPerPoint,
+    mangeoireCostPerMountPoint,
     optimakinaPrices,
     recycleSteriles,
     freeXpPoints = 0,
@@ -682,7 +686,7 @@ export const computeBreedingCosts = (
 
   // Identique pour toutes les couleurs : la courbe d'expérience ne dépend que du
   // niveau visé, pas de la rareté de la monture.
-  const levelUpCost = mountXpForLevel(MAX_MOUNT_LEVEL) * mangeoireCostPerPoint;
+  const levelUpCost = mountXpForLevel(MAX_MOUNT_LEVEL) * mangeoireCostPerMountPoint;
 
   // Le niveau que l'expérience gratuite du cycle permet d'atteindre. Constant
   // sur tout l'arbre : il ne dépend que du cycle, pas de la couleur.
@@ -801,7 +805,7 @@ export const computeBreedingCosts = (
           ? optimalParentLevel(
               parentsCost,
               fuelCost,
-              mangeoireCostPerPoint,
+              mangeoireCostPerMountPoint,
               optimakinaPrice,
               failureValue,
               parentLevelFloor
@@ -810,7 +814,7 @@ export const computeBreedingCosts = (
               parentLevel,
               parentsCost,
               fuelCost,
-              mangeoireCostPerPoint,
+              mangeoireCostPerMountPoint,
               optimakinaPrice,
               failureValue
             );

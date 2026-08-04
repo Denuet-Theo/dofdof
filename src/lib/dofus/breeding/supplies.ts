@@ -77,8 +77,21 @@ const planFor = (
 export type SupplyCosts = {
   /** Coût du cycle de fécondité, ramené à une monture de l'enclos. */
   fuelCostPerBaby: number | null;
-  /** Coût d'un point de Mangeoire, qui chiffre la montée en niveau. */
-  mangeoireCostPerPoint: number | null;
+  /**
+   * Ce que coûte **un point d'expérience sur une monture**, et non un point de
+   * jauge : le rapport est de un à dix.
+   *
+   * La Mangeoire se comporte comme les autres jauges — elle alimente les dix
+   * places de l'enclos d'un coup. Monter dix montures d'un niveau coûte donc
+   * autant qu'en monter une, et la dépense se partage.
+   *
+   * Le nom porte la distinction parce que la confondre avec le prix du point de
+   * jauge surfacturait la montée d'un facteur dix, ce qui poussait l'optimiseur
+   * vers des parents de niveau 5 là où le 26 était moins cher. Le prix du point
+   * de jauge, lui, vit sur `mangeoire.costPerPoint` — c'est celui qu'on paie en
+   * carburant.
+   */
+  mangeoireCostPerMountPoint: number | null;
   /**
    * Heures d'enclos pour amener **une fournée** de montures à la fécondité.
    *
@@ -252,7 +265,13 @@ export const computeSupplyCosts = (
   return {
     // Un enclos transfère à ses dix places d'un coup : le cycle se partage.
     fuelCostPerBaby: complete && mountsInEnclos > 0 ? cycleCost / mountsInEnclos : null,
-    mangeoireCostPerPoint: mangeoirePlan ? mangeoirePlan.fuelCost / mangeoirePoints : null,
+    // Divisé par l'effectif, comme le cycle juste au-dessus : la Mangeoire monte
+    // les dix places ensemble. Sans cette division, la montée revenait dix fois
+    // son prix — et c'est elle qui décide du niveau des parents.
+    mangeoireCostPerMountPoint:
+      mangeoirePlan && mountsInEnclos > 0
+        ? mangeoirePlan.fuelCost / mangeoirePoints / mountsInEnclos
+        : null,
     cycleHours: complete ? cycleHours : null,
     cycleFreeSlotHours: complete ? cycleFreeSlotHours : null,
     levelUpHours: mangeoirePlan?.hours ?? null,

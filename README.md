@@ -335,20 +335,60 @@ Attention en revanche : `optimalParentLevel` minimise les **kamas** et ne conna�
 via `kamas_per_hour`. À 0, monter les parents paraît presque gratuit et l'optimiseur préfère
 multiplier les tentatives — ce qui allonge beaucoup les plans sans que le coût le dise.
 
+### Combien on en veut change lequel on élève
+
+L'objectif — un exemplaire pour un succès, trente pour rentabiliser — pilote **tout le
+classement**, pas seulement le plan qu'on ouvre. Ce n'est pas un confort d'affichage : les dix
+places d'un enclos se préparent ensemble et le clonage exige deux stériles de même génération,
+si bien qu'à trente exemplaires le coût par monture s'effondre. Sur les données de test, un
+muldo gen 4 passe de 1 229 à 11 944 kamas par heure d'enclos entre 1 et 30. Figer le calcul à
+un seul exemplaire rendait invisible tout l'intérêt des séries.
+
 ### Suivre un plan
 
 `breedingPlan` liste les montures de base à se procurer puis les croisements dans l'ordre.
-`breeding_projects` / `breeding_project_stock` gardent l'avancement, mais **ne stockent ni les
-étapes ni leur état** : le reste à faire se recalcule de la cible moins le stock.
+`breeding_projects` retient la couleur visée et la quantité, et **rien d'autre** — ni les
+étapes, ni leur état. Le reste à faire se recalcule de la cible moins l'écurie.
 
 C'est la seule façon de tenir compte de l'aléa. Un croisement échoue deux fois sur trois en
 début de partie, donc une liste d'étapes cochées une à une serait fausse dès le premier échec.
-En déduisant le stock **avant** de remonter aux parents, une fournée chanceuse allège toute
+En déduisant l'écurie **avant** de remonter aux parents, une fournée chanceuse allège toute
 l'ascendance et une fournée malchanceuse la remet au programme, sans rien de plus.
 
 Le coût d'un plan est un **majorant** : il crédite les génétons, qui sont certains, mais pas
 les bébés hors cible, dont la valeur dépend de l'hypothèse provisoire ci-dessus. Leur nombre
 est affiché pour dire de combien le coût pourrait baisser.
+
+### Les stocks
+
+Trois réserves, qui servent la même chose — savoir ce qu'un plan demande **en plus** — par
+trois chemins différents :
+
+| Stock | Table | Ce qu'il change |
+| --- | --- | --- |
+| Montures | `user_breeding_mounts` | le plan lui-même : une couleur possédée n'est plus à produire, et toute son ascendance disparaît avec elle |
+| Carburants | `user_item_stock` | ce qu'il faut débourser : les points sont déjà payés |
+| Kamas | `user_breeding_settings.kamas_available` | rien au plan, mais décide de ce qui est réalisable |
+
+Les montures sont rattachées **au joueur et non au projet** : un muldo Roux sert à des dizaines
+de couleurs, et le posséder allège tous les plans qui en demandent. Les rattacher à un projet
+obligeait à les ressaisir à chaque changement d'objectif, et deux projets concurrents auraient
+compté deux fois les mêmes bêtes.
+
+Les carburants se comptent en **points** et non en unités : une unité d'Élixir en vaut huit
+d'Extrait, et un plan ne demande ni l'un ni l'autre mais des points à transférer. La réserve
+est plafonnée à ce que le plan consomme — dix mille points d'Abreuvoir ne financent rien si le
+plan n'en demande mille.
+
+Le budget est une **contrainte**, pas un arbitrage : `planFunding` suit la dépense dans l'ordre
+d'exécution, génétons déduits au passage, et signale la première étape que l'argent ne couvre
+plus. Ce n'est pas le total qui bloque mais le point le plus tendu — et c'est là qu'il faut
+vendre ou réduire l'objectif. À 0, aucune contrainte : un budget non renseigné ne veut pas dire
+qu'on n'a rien.
+
+Le bouton **« Optimiser »** choisit la couleur la plus rentable à l'heure d'enclos *parmi
+celles qu'on peut financer*. Proposer un plan en sachant qu'il bloquera ne serait pas une
+recommandation.
 
 ### Ce que le palier de jauge change
 

@@ -1,13 +1,16 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Egg, AlertTriangle, Info, PenLine } from 'lucide-react';
+import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
 import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
+import BreedingStocks from '@/components/breeding/BreedingStocks';
 import PriceEntry from '@/components/breeding/PriceEntry';
+import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
+import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { formatHours } from '@/lib/utils/date';
 
 const FAMILIES: { id: FamilyId; label: string }[] = [
@@ -43,6 +46,28 @@ const BreedingPage = () => {
   const [sortBy, setSortBy] = useState<SortBy>('hourly');
   const [pricedOnly, setPricedOnly] = useState(false);
   const [entryMode, setEntryMode] = useState(false);
+  const [goalsOpen, setGoalsOpen] = useState(true);
+  /**
+   * Combien d'exemplaires viser, tant qu'aucun plan n'est sélectionné.
+   *
+   * Un pour un succès ou une quête, trente pour rentabiliser : ce n'est pas le
+   * même élevage, et ce n'est pas le même classement. À trente, les fournées
+   * d'enclos se remplissent et le clonage a de quoi s'appairer, si bien que le
+   * coût par monture s'effondre. D'où un réglage global, en tête des objectifs,
+   * et non un champ enfoui dans un plan.
+   */
+  const [draftCount, setDraftCount] = useState(1);
+
+  const project = useBreedingProject(family);
+
+  // Le plan sélectionné fait foi : c'est la quantité retenue en le choisissant,
+  // et le classement doit se relire dans les mêmes termes. Dérivé plutôt que
+  // recopié dans un effet, qui écraserait une saisie en cours.
+  const targetCount = project.current?.target_count ?? draftCount;
+  const setTargetCount = (count: number) => {
+    if (project.current) project.setTargetCount(count);
+    else setDraftCount(count);
+  };
 
   const {
     tree,
@@ -51,12 +76,17 @@ const BreedingPage = () => {
     genetonValuation,
     sacrificePrice,
     supplies,
-    makePlan,
+    fuelItems,
+    mountStock,
+    itemStock,
+    ownedGaugePoints,
     loading,
     error,
     savePrice,
     saveSettings,
-  } = useBreeding(family);
+    saveMountStock,
+    saveItemStock,
+  } = useBreeding(family, targetCount);
 
   /** Le plan ne porte que des identifiants ; les lignes ont les noms. */
   const nameOf = useMemo(() => {
@@ -84,6 +114,25 @@ const BreedingPage = () => {
   }, [rows, sortBy, pricedOnly]);
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
+
+  /**
+   * La couleur la plus rentable à l'heure d'enclos, **parmi celles qu'on peut
+   * financer**.
+   *
+   * Un plan hors budget n'est pas une recommandation, c'est une frustration :
+   * l'écarter vaut mieux que de le proposer en sachant qu'il bloquera. Et
+   * seules les couleurs qu'on élève concourent — celles qu'on achète ne
+   * mobilisent aucun enclos, donc rien à optimiser.
+   */
+  const bestAffordable = useMemo(
+    () =>
+      rows.reduce<BreedingRow | null>((best, row) => {
+        if (row.marginPerHour === null || row.marginPerHour <= 0) return best;
+        if (row.planned?.funding && !row.planned.funding.affordable) return best;
+        return best === null || row.marginPerHour > best.marginPerHour! ? row : best;
+      }, null),
+    [rows]
+  );
 
   return (
     <div className="space-y-6">
@@ -117,6 +166,18 @@ const BreedingPage = () => {
       </div>
 
       <BreedingSettings settings={settings} onSave={saveSettings} />
+
+      <BreedingStocks
+        rows={rows}
+        fuelItems={fuelItems}
+        mountStock={mountStock}
+        itemStock={itemStock}
+        ownedGaugePoints={ownedGaugePoints}
+        settings={settings}
+        onSaveMount={saveMountStock}
+        onSaveItem={saveItemStock}
+        onSaveSettings={saveSettings}
+      />
 
       {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
           pans entiers du résultat valent zéro et il vaut mieux le voir. */}
@@ -179,75 +240,167 @@ const BreedingPage = () => {
         </p>
       )}
 
-      {/* Tri */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-        <span>Trier par</span>
-        <select
-          value={sortBy}
-          onChange={(event) => setSortBy(event.target.value as SortBy)}
-          className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
-            text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
-        >
-          <option value="hourly">Marge par heure d&apos;enclos</option>
-          <option value="margin">Marge par monture</option>
-          <option value="cost">Coût de revient</option>
-          <option value="generation">Génération</option>
-        </select>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={pricedOnly}
-            onChange={(event) => setPricedOnly(event.target.checked)}
-            className="accent-kamas cursor-pointer"
-          />
-          Seulement les couleurs tarifées
-        </label>
-
+      {/* Objectifs : le classement, replié derrière ce qu'on vise. La question
+          « combien j'en veux » vient avant « laquelle », puisqu'elle change la
+          réponse — à trente exemplaires les fournées se remplissent et le
+          palmarès n'est plus le même. */}
+      <div className="glass rounded-2xl">
         <button
           type="button"
-          onClick={() => setEntryMode((value) => !value)}
-          className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all
-            cursor-pointer ${
-              entryMode
-                ? 'bg-kamas/15 text-kamas border-kamas/40'
-                : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
-            }`}
+          onClick={() => setGoalsOpen((value) => !value)}
+          className="w-full flex items-center gap-2 px-5 py-4 cursor-pointer text-left"
         >
-          <PenLine size={13} />
-          {entryMode ? 'Fermer la saisie' : 'Saisir les prix'}
+          <Target size={16} className="text-kamas" />
+          <span className="text-sm font-semibold text-dark-200">Objectifs</span>
+          <span className="text-xs text-dark-500 ml-2 truncate">
+            {project.current
+              ? `${project.current.target_count} × ${nameOf(project.current.target_color_id)}`
+              : 'aucun plan sélectionné'}
+          </span>
+          <span className="ml-auto text-xs text-dark-500 shrink-0">
+            {goalsOpen ? 'Fermer' : 'Ouvrir'}
+          </span>
         </button>
+
+        {goalsOpen && (
+          <div className="px-5 pb-5 pt-4 border-t border-dark-700/40 space-y-4">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
+              <label className="flex items-center gap-2">
+                Je veux
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={String(targetCount)}
+                  onChange={(event) =>
+                    setTargetCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))
+                  }
+                  className="w-20 px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-xs text-right transition-all hover:border-dark-500
+                    focus:border-kamas/50"
+                />
+                monture{targetCount > 1 ? 's' : ''} de la couleur visée
+              </label>
+
+              {project.current ? (
+                <span className="flex flex-wrap items-center gap-3 ml-auto">
+                  <span className="text-dark-300">
+                    Plan suivi :{' '}
+                    <strong className="text-kamas">
+                      {nameOf(project.current.target_color_id)}
+                    </strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={project.abandon}
+                    className="text-dark-500 hover:text-loss transition-colors cursor-pointer"
+                  >
+                    abandonner
+                  </button>
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  className="ml-auto"
+                  disabled={!bestAffordable}
+                  onClick={() =>
+                    bestAffordable && project.select(bestAffordable.colorId, targetCount)
+                  }
+                >
+                  <Wand2 size={13} />
+                  {bestAffordable
+                    ? `Optimiser : ${bestAffordable.name}`
+                    : 'Rien de rentable à ce budget'}
+                </Button>
+              )}
+            </div>
+
+            {!project.current && settings.kamas_available > 0 && !bestAffordable && (
+              <p className="text-[11px] text-amber-400/80">
+                Aucune couleur n&apos;est à la fois rentable et finançable avec{' '}
+                {settings.kamas_available.toLocaleString('fr-FR')} kamas. Baisse
+                l&apos;objectif, ou relève le budget dans « Mes stocks ».
+              </p>
+            )}
+
+            {/* Tri */}
+            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
+              <span>Trier par</span>
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value as SortBy)}
+                className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
+                  text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
+              >
+                <option value="hourly">Marge par heure d&apos;enclos</option>
+                <option value="margin">Marge par monture</option>
+                <option value="cost">Coût de revient</option>
+                <option value="generation">Génération</option>
+              </select>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pricedOnly}
+                  onChange={(event) => setPricedOnly(event.target.checked)}
+                  className="accent-kamas cursor-pointer"
+                />
+                Seulement les couleurs tarifées
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setEntryMode((value) => !value)}
+                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border
+                  transition-all cursor-pointer ${
+                    entryMode
+                      ? 'bg-kamas/15 text-kamas border-kamas/40'
+                      : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+                  }`}
+              >
+                <PenLine size={13} />
+                {entryMode ? 'Fermer la saisie' : 'Saisir les prix'}
+              </button>
+            </div>
+
+            {entryMode && !loading && <PriceEntry rows={rows} onSavePrice={savePrice} />}
+
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-20 w-full" count={6} />
+              </div>
+            ) : error ? (
+              <EmptyState
+                icon={AlertTriangle}
+                title="Classement indisponible"
+                description={error}
+              />
+            ) : sorted.length === 0 ? (
+              <EmptyState
+                icon={Egg}
+                title="Aucune couleur à afficher"
+                description="Décoche le filtre, ou renseigne un premier prix pour amorcer le calcul."
+              />
+            ) : (
+              <div className="space-y-2">
+                {sorted.map((row) => (
+                  <ColorRow
+                    key={row.colorId}
+                    row={row}
+                    nameOf={nameOf}
+                    mountStock={mountStock}
+                    onSaveMount={saveMountStock}
+                    enclosCount={settings.enclos_count}
+                    selected={project.current?.target_color_id === row.colorId}
+                    onSelect={() => project.select(row.colorId, targetCount)}
+                    onAbandon={project.abandon}
+                    onSavePrice={savePrice}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      {entryMode && !loading && <PriceEntry rows={rows} onSavePrice={savePrice} />}
-
-      {loading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-20 w-full" count={6} />
-        </div>
-      ) : error ? (
-        <EmptyState icon={AlertTriangle} title="Classement indisponible" description={error} />
-      ) : sorted.length === 0 ? (
-        <EmptyState
-          icon={Egg}
-          title="Aucune couleur à afficher"
-          description="Décoche le filtre, ou renseigne un premier prix pour amorcer le calcul."
-        />
-      ) : (
-        <div className="space-y-2">
-          {sorted.map((row) => (
-            <ColorRow
-              key={row.colorId}
-              row={row}
-              family={family}
-              nameOf={nameOf}
-              makePlan={makePlan}
-              enclosCount={settings.enclos_count}
-              onSavePrice={savePrice}
-            />
-          ))}
-        </div>
-      )}
-
     </div>
   );
 };

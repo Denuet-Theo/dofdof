@@ -2,165 +2,115 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { BreedingProject, BreedingProjectStock } from '@/lib/supabase/types';
+import type { BreedingProject } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
 
 /**
- * Le suivi d'un plan d'élevage : ce qu'on vise, et ce qu'on a déjà.
+ * Le plan que l'éleveur suit en ce moment : une couleur et une quantité.
  *
- * Rien du plan lui-même n'est stocké — ni les étapes, ni leur avancement. Il se
- * recalcule de la cible moins le stock, ce qui est la seule façon de rattraper
- * l'aléa : un croisement rate deux fois sur trois en début de partie, et une
- * liste d'étapes figée serait fausse dès le premier échec. Le stock, lui, dit
- * toujours la vérité.
+ * Rien de plus. Ni les étapes, ni leur avancement, ni ce qu'il possède — les
+ * montures en écurie vivent dans `user_breeding_mounts`, parce qu'un muldo Roux
+ * allège **tous** les plans qui en demandent et pas seulement celui qu'on suit.
+ * Le reste à faire se recalcule de la cible moins l'écurie.
  *
- * Chargé à la demande, quand une couleur s'ouvre : ramener les projets de 306
- * couleurs à l'affichage du classement coûterait une requête pour rien.
+ * C'est la seule forme qui tienne face à l'aléa : un croisement rate deux fois
+ * sur trois en début de partie, donc une liste d'étapes cochées une à une serait
+ * fausse dès le premier échec.
  */
 
 export type BreedingProjectState = {
-  project: BreedingProject | null;
-  /** Montures fertiles possédées, par couleur. Absent = zéro. */
-  stock: Map<string, number>;
+  /** Le plan en cours, ou `null` si aucun n'est sélectionné. */
+  current: BreedingProject | null;
   loading: boolean;
-  start: (targetCount: number) => Promise<void>;
+  select: (colorId: string, targetCount: number) => Promise<void>;
   setTargetCount: (count: number) => Promise<void>;
-  setStock: (colorId: string, count: number) => Promise<void>;
   abandon: () => Promise<void>;
 };
 
-export const useBreedingProject = (
-  family: FamilyId,
-  targetColorId: string,
-  /** Ne rien charger tant que le panneau est replié. */
-  enabled: boolean
-): BreedingProjectState => {
-  const [project, setProject] = useState<BreedingProject | null>(null);
-  const [stock, setStockMap] = useState<Map<string, number>>(new Map());
+export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
+  const [current, setCurrent] = useState<BreedingProject | null>(null);
   const [loading, startLoading] = useTransition();
 
   const load = useCallback(() => {
-    if (!enabled) return;
     const supabase = createClient();
 
     startLoading(async () => {
-      try {
-        const { data: projects, error } = await supabase
-          .from('breeding_projects')
-          .select('*')
-          .eq('family', family)
-          .eq('target_color_id', targetColorId)
-          .limit(1);
+      const { data, error } = await supabase
+        .from('breeding_projects')
+        .select('*')
+        .eq('family', family)
+        // Le plus récemment touché fait foi : c'est celui qu'on suit.
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-        if (error) throw error;
-
-        const found = (projects?.[0] as BreedingProject | undefined) ?? null;
-        setProject(found);
-
-        if (!found) {
-          setStockMap(new Map());
-          return;
-        }
-
-        const { data: rows } = await supabase
-          .from('breeding_project_stock')
-          .select('*')
-          .eq('project_id', found.id);
-
-        setStockMap(
-          new Map(
-            ((rows ?? []) as BreedingProjectStock[])
-              .filter((row) => row.count > 0)
-              .map((row) => [row.color_id, row.count])
-          )
-        );
-      } catch (err) {
-        console.error('[breeding] projet illisible:', err);
+      if (error) {
+        console.error('[breeding] projet illisible:', error);
+        return;
       }
+      setCurrent((data?.[0] as BreedingProject | undefined) ?? null);
     });
-  }, [enabled, family, targetColorId]);
+  }, [family]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const start = useCallback(
-    async (targetCount: number) => {
+  const select = useCallback(
+    async (colorId: string, targetCount: number) => {
       const supabase = createClient();
+      // `upsert` plutôt qu'`insert` : reprendre une couleur déjà visée puis
+      // abandonnée doit rouvrir la même ligne, pas buter sur la contrainte
+      // d'unicité.
       const { data, error } = await supabase
         .from('breeding_projects')
-        .insert({ family, target_color_id: targetColorId, target_count: targetCount })
+        .upsert(
+          {
+            family,
+            target_color_id: colorId,
+            target_count: targetCount,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id,family,target_color_id' }
+        )
         .select()
         .single();
 
       if (error) {
-        console.error('[breeding] création du projet impossible:', error);
+        console.error('[breeding] plan non sélectionné:', error);
         return;
       }
-      setProject(data as BreedingProject);
-      setStockMap(new Map());
+      setCurrent(data as BreedingProject);
     },
-    [family, targetColorId]
+    [family]
   );
 
   const setTargetCount = useCallback(
     async (count: number) => {
-      if (!project) return;
-      // L'état local part devant : la saisie doit rester fluide, et un échec
-      // d'écriture se voit au rechargement.
-      setProject({ ...project, target_count: count });
+      if (!current) return;
+      setCurrent({ ...current, target_count: count });
 
       const supabase = createClient();
       const { error } = await supabase
         .from('breeding_projects')
         .update({ target_count: count, updated_at: new Date().toISOString() })
-        .eq('id', project.id);
+        .eq('id', current.id);
 
-      if (error) console.error('[breeding] cible non enregistrée:', error);
+      if (error) console.error('[breeding] objectif non enregistré:', error);
     },
-    [project]
-  );
-
-  const setStock = useCallback(
-    async (colorId: string, count: number) => {
-      if (!project) return;
-
-      setStockMap((current) => {
-        const next = new Map(current);
-        if (count > 0) next.set(colorId, count);
-        else next.delete(colorId);
-        return next;
-      });
-
-      const supabase = createClient();
-      const { error } = await supabase.from('breeding_project_stock').upsert(
-        {
-          project_id: project.id,
-          color_id: colorId,
-          count,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'project_id,color_id' }
-      );
-
-      if (error) console.error('[breeding] stock non enregistré:', error);
-    },
-    [project]
+    [current]
   );
 
   const abandon = useCallback(async () => {
-    if (!project) return;
+    if (!current) return;
     const supabase = createClient();
-    // Le stock part avec, par la cascade de la clé étrangère.
-    const { error } = await supabase.from('breeding_projects').delete().eq('id', project.id);
+    const { error } = await supabase.from('breeding_projects').delete().eq('id', current.id);
 
     if (error) {
-      console.error('[breeding] projet non supprimé:', error);
+      console.error('[breeding] plan non abandonné:', error);
       return;
     }
-    setProject(null);
-    setStockMap(new Map());
-  }, [project]);
+    setCurrent(null);
+  }, [current]);
 
-  return { project, stock, loading, start, setTargetCount, setStock, abandon };
+  return { current, loading, select, setTargetCount, abandon };
 };

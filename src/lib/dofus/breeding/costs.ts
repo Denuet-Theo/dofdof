@@ -1219,3 +1219,154 @@ export const planDuration = (
     batches,
   };
 };
+
+/** Ce qu'une jauge demande à un plan, et ce que le stock en couvre. */
+export type GaugeRequirement = {
+  gauge: string;
+  /** Points à transférer sur l'ensemble du plan. */
+  points: number;
+  /** Points déjà en réserve, plafonnés à ce que le plan consomme. */
+  covered: number;
+  costPerPoint: number;
+  /** Ce que coûtent les points restants. */
+  cost: number;
+  /** Ce que la réserve dispense de racheter. */
+  credit: number;
+  /** Le carburant retenu, pour dire lequel racheter. */
+  fuel: string;
+};
+
+/**
+ * Ce qu'un plan demande à chaque jauge, une fois le stock déduit.
+ *
+ * Compté en **points** et non en unités : une unité d'Élixir en vaut huit
+ * d'Extrait, donc un stock ne se compare à un besoin que dans cette monnaie-là.
+ *
+ * Les fournées portent le calcul, pas les montures : l'enclos transfère à ses
+ * dix places d'un coup, donc préparer dix parents coûte le même carburant qu'en
+ * préparer un. C'est ce qui rend les objectifs élevés proportionnellement moins
+ * chers, et ce qu'un compte par monture raterait.
+ */
+export const planGaugeNeeds = (
+  plan: BreedingPlan,
+  timing: Pick<EnclosTiming, 'slots'>,
+  cycleGauges: { gauge: string; pointsPerBatch: number; costPerPoint: number; fuel: string }[],
+  mangeoire: { gauge: string; costPerPoint: number; fuel: string } | null,
+  /** Points déjà en réserve, par jauge. */
+  ownedPoints: Map<string, number> = new Map()
+): GaugeRequirement[] => {
+  const slots = timing.slots ?? 10;
+  const needs = new Map<string, { points: number; costPerPoint: number; fuel: string }>();
+
+  const add = (gauge: string, points: number, costPerPoint: number, fuel: string) => {
+    const current = needs.get(gauge);
+    needs.set(gauge, { points: (current?.points ?? 0) + points, costPerPoint, fuel });
+  };
+
+  for (const step of plan.steps) {
+    const batches = Math.ceil((2 * step.attempts) / slots);
+
+    for (const gauge of cycleGauges) {
+      add(gauge.gauge, batches * gauge.pointsPerBatch, gauge.costPerPoint, gauge.fuel);
+    }
+    // La Mangeoire dépend du niveau visé, qui change d'un croisement à l'autre.
+    if (mangeoire) {
+      add(
+        mangeoire.gauge,
+        batches * mountXpForLevel(step.parentLevel),
+        mangeoire.costPerPoint,
+        mangeoire.fuel
+      );
+    }
+  }
+
+  return [...needs].map(([gauge, { points, costPerPoint, fuel }]) => {
+    // Le stock ne vaut que ce que le plan en consomme : dix mille points
+    // d'Abreuvoir en réserve ne financent rien si le plan n'en demande mille.
+    const covered = Math.min(ownedPoints.get(gauge) ?? 0, points);
+    return {
+      gauge,
+      points,
+      covered,
+      costPerPoint,
+      cost: (points - covered) * costPerPoint,
+      credit: covered * costPerPoint,
+      fuel,
+    };
+  });
+};
+
+export type PlanFunding = {
+  budget: number;
+  /**
+   * Ce qu'il faut sortir en kamas, réserves déduites.
+   *
+   * Le carburant déjà en réserve n'est pas une dépense : il a été payé. Les
+   * montures possédées, elles, ne comptent déjà plus — le plan ne les demande
+   * plus du tout.
+   */
+  cashNeeded: number;
+  affordable: boolean;
+  /** Ce qui manque au pire moment, ou 0 si le budget tient. */
+  shortfall: number;
+  /**
+   * La première étape que le budget ne couvre plus.
+   *
+   * Un plan se paie dans l'ordre, et les génétons rentrent en cours de route :
+   * ce n'est donc pas le total qui bloque mais le point le plus tendu. Dire
+   * *où* ça coince vaut mieux que dire que ça coince — c'est là qu'il faut
+   * vendre, ou réduire l'objectif.
+   */
+  blockedAt: { kind: 'purchase' | 'crossing'; colorId: string } | null;
+};
+
+/**
+ * Si le budget tient le plan, et où il lâche sinon.
+ *
+ * Les dépenses se suivent dans l'ordre d'exécution : d'abord les montures de
+ * base, puis les croisements par génération. Les génétons se déduisent au
+ * passage, puisqu'ils tombent à chaque naissance et se revendent aussitôt.
+ *
+ * Un budget de 0 vaut « pas de contrainte » plutôt que « rien n'est possible » :
+ * c'est la valeur par défaut, et refuser tous les plans à un éleveur qui n'a
+ * simplement pas renseigné son budget serait absurde.
+ */
+export const planFunding = (
+  plan: BreedingPlan,
+  estimates: Map<string, BreedingEstimate>,
+  budget: number,
+  { genetonValue = 0, gaugeCredit = 0 }: { genetonValue?: number; gaugeCredit?: number } = {}
+): PlanFunding => {
+  const cashNeeded = Math.max(plan.totalCost - gaugeCredit, 0);
+  if (budget <= 0) {
+    return { budget, cashNeeded, affordable: true, shortfall: 0, blockedAt: null };
+  }
+
+  // Le carburant en réserve dispense d'autant de dépense : pour le suivi de
+  // trésorerie, c'est équivalent à disposer de ces kamas-là en plus.
+  let remaining = budget + gaugeCredit;
+  let worst = 0;
+  let blockedAt: PlanFunding['blockedAt'] = null;
+
+  const spend = (amount: number, at: NonNullable<PlanFunding['blockedAt']>) => {
+    remaining -= amount;
+    if (remaining < 0 && -remaining > worst) {
+      worst = -remaining;
+      blockedAt = at;
+    }
+  };
+
+  for (const purchase of plan.purchases) {
+    spend(purchase.count * purchase.unitCost, { kind: 'purchase', colorId: purchase.colorId });
+  }
+
+  for (const step of plan.steps) {
+    const overhead = (estimates.get(step.colorId)?.parents?.overheadCost ?? 0) * step.count;
+    spend(overhead - step.genetons * step.count * genetonValue, {
+      kind: 'crossing',
+      colorId: step.colorId,
+    });
+  }
+
+  return { budget, cashNeeded, affordable: worst === 0, shortfall: worst, blockedAt };
+};

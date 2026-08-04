@@ -110,6 +110,20 @@ export type SupplyCosts = {
   mangeoirePointsPerHour: number | null;
   /** Le carburant de Mangeoire retenu, pour dire lequel acheter. */
   mangeoireFuel: string | null;
+  /**
+   * Ce qu'un cycle de fécondité demande à chaque jauge, et à quel prix au point.
+   *
+   * Les points, et non les kamas : c'est en points qu'un stock de carburant se
+   * convertit, et une unité d'Élixir vaut huit unités d'Extrait. Compter en
+   * kamas obligerait à supposer que l'éleveur rachètera le même carburant que
+   * celui qu'il a en réserve.
+   *
+   * Par fournée d'enclos, pas par monture : le transfert profite aux dix places
+   * à la fois.
+   */
+  cycleGauges: { gauge: string; pointsPerBatch: number; costPerPoint: number; fuel: string }[];
+  /** Le carburant de Mangeoire, sous la même forme que les jauges de cycle. */
+  mangeoire: { gauge: string; costPerPoint: number; fuel: string } | null;
   /** Coût complet d'une monture sauvage capturée, filet et combat compris. */
   capture: CaptureChoice | null;
   /** Les jauges dont aucun carburant n'est tarifé — donc le calcul incomplet. */
@@ -169,14 +183,21 @@ export const computeSupplyCosts = (
   let cycleHours = 0;
   let cycleFreeSlotHours = 0;
   let complete = true;
+  /** Points demandés à chaque jauge sur un cycle, cumulés phase par phase. */
+  const cycleGauges = new Map<string, { pointsPerBatch: number; costPerPoint: number; fuel: string }>();
 
   for (const phase of CYCLE_PHASES) {
     let phaseHours = 0;
 
     for (const { points, candidates } of phase) {
       const plans = candidates
-        .map((gauge) => planFor(byGauge.get(gauge), points, kamasPerHour, gaugeCap))
-        .filter((plan): plan is NonNullable<typeof plan> => plan !== null);
+        .map((gauge) => {
+          const plan = planFor(byGauge.get(gauge), points, kamasPerHour, gaugeCap);
+          return plan ? { gauge, plan } : null;
+        })
+        .filter((entry): entry is { gauge: string; plan: NonNullable<ReturnType<typeof planFor>> } =>
+          entry !== null
+        );
 
       if (plans.length === 0) {
         complete = false;
@@ -186,13 +207,23 @@ export const computeSupplyCosts = (
         continue;
       }
 
-      const cheapest = plans.reduce((best, plan) =>
-        plan.totalCost < best.totalCost ? plan : best
+      const cheapest = plans.reduce((best, entry) =>
+        entry.plan.totalCost < best.plan.totalCost ? entry : best
       );
-      cycleCost += cheapest.fuelCost;
+      cycleCost += cheapest.plan.fuelCost;
+
+      // Une jauge peut servir à plusieurs phases (la sérénité monte puis
+      // redescend) : les points s'y cumulent.
+      const current = cycleGauges.get(cheapest.gauge);
+      cycleGauges.set(cheapest.gauge, {
+        pointsPerBatch: (current?.pointsPerBatch ?? 0) + points,
+        costPerPoint: cheapest.plan.costPerPoint,
+        fuel: cheapest.plan.fuel.name,
+      });
+
       // Les jauges d'une même phase tournent ensemble : la phase dure ce que
       // dure la plus lente, pas la somme des deux.
-      phaseHours = Math.max(phaseHours, cheapest.hours);
+      phaseHours = Math.max(phaseHours, cheapest.plan.hours);
     }
 
     // Les phases, elles, s'enchaînent : deux emplacements ne suffisent pas à
@@ -217,6 +248,14 @@ export const computeSupplyCosts = (
     levelUpHours: mangeoirePlan?.hours ?? null,
     mangeoirePointsPerHour: mangeoirePlan?.pointsPerHour ?? null,
     mangeoireFuel: mangeoirePlan?.fuel.name ?? null,
+    cycleGauges: [...cycleGauges].map(([gauge, usage]) => ({ gauge, ...usage })),
+    mangeoire: mangeoirePlan
+      ? {
+          gauge: 'Mangeoire',
+          costPerPoint: mangeoirePlan.costPerPoint,
+          fuel: mangeoirePlan.fuel.name,
+        }
+      : null,
     capture: bestCaptureNet(netItems, {
       netCosts: new Map(
         netItems.map((net) => [net.id, prices.get(net.id)?.price ?? -1] as const)

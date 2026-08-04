@@ -7,8 +7,11 @@ import type {
   DofusDBItem,
   DofusDBResponse,
   ItemPrice,
+  UserBreedingMount,
   UserBreedingSettings,
+  UserItemStock,
 } from '@/lib/supabase/types';
+import { parseGaugeInfo } from '@/lib/utils/gauges';
 import { computeSupplyCosts, FUEL_TYPE_ID } from '@/lib/dofus/breeding/supplies';
 import {
   BREEDING_FAMILIES,
@@ -21,12 +24,16 @@ import {
   bestGenetonValue,
   breedingPlan,
   planDuration,
+  planGaugeNeeds,
+  planFunding,
   MAX_MOUNT_LEVEL,
   type BreedingEstimate,
   type BreedingPlan,
   type ColorPrice,
   type EnclosTiming,
+  type GaugeRequirement,
   type PlanDuration,
+  type PlanFunding,
 } from '@/lib/dofus/breeding/costs';
 
 /**
@@ -44,6 +51,9 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   breeder_level: 200,
   enclos_count: 6,
   kamas_per_hour: 0,
+  // 0 = pas de contrainte. Refuser tous les plans à qui n'a pas renseigné son
+  // budget serait la pire lecture possible d'un champ vide.
+  kamas_available: 0,
   minutes_per_fight: 12,
   net_recovery_rate: 0.8,
   recycle_steriles: true,
@@ -59,12 +69,11 @@ export type BreedingRow = {
   source: 'game' | 'site' | null;
   estimate: BreedingEstimate;
   /**
-   * Le plan complet, multiplicités et recyclage compris. `null` pour les
+   * Le plan complet — étapes, durée, jauges, financement. `null` pour les
    * couleurs qu'il vaut mieux acheter ou capturer : il n'y a alors rien à
    * élever, donc pas de plan.
    */
-  plan: BreedingPlan | null;
-  duration: PlanDuration | null;
+  planned: PlannedColor | null;
   /**
    * Gain net du plan : ce que la sortie retenue rapporte, moins ce que le plan
    * a réellement coûté.
@@ -90,18 +99,34 @@ export type BreedingRow = {
   marginPerHour: number | null;
 };
 
-/** Le plan d'une couleur, recalculé à la demande avec un stock donné. */
-export type MakePlan = (
-  colorId: string,
-  targetCount?: number,
-  stock?: Map<string, number>
-) => { plan: BreedingPlan; duration: PlanDuration | null } | null;
+export type PlannedColor = {
+  plan: BreedingPlan;
+  duration: PlanDuration | null;
+  gaugeNeeds: GaugeRequirement[];
+  funding: PlanFunding | null;
+};
 
-export const useBreeding = (family: FamilyId) => {
+/** Le plan d'une couleur, recalculé à la demande pour un objectif donné. */
+export type MakePlan = (colorId: string, targetCount?: number) => PlannedColor | null;
+
+export const useBreeding = (
+  family: FamilyId,
+  /**
+   * Combien d'exemplaires de la couleur visée produire.
+   *
+   * Pilote **tout le classement** et pas seulement le plan qu'on ouvre : à
+   * trente exemplaires les fournées d'enclos se remplissent et le clonage a de
+   * quoi s'appairer, si bien que le coût par monture s'effondre et que le
+   * palmarès change. Le figer à 1 rendrait invisible tout l'intérêt des séries.
+   */
+  targetCount = 1
+) => {
   const [prices, setPrices] = useState<Map<string, ColorPrice>>(new Map());
   const [itemPrices, setItemPrices] = useState<Map<number, ItemPrice>>(new Map());
   const [fuelItems, setFuelItems] = useState<DofusDBItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [mountStock, setMountStock] = useState<Map<string, number>>(new Map());
+  const [itemStock, setItemStock] = useState<Map<number, number>>(new Map());
   // Même patron que la page Farm : la transition porte l'état de chargement,
   // ce qui évite un `setState` synchrone dans l'effet.
   const [loading, startLoading] = useTransition();
@@ -115,16 +140,19 @@ export const useBreeding = (family: FamilyId) => {
       try {
         // Les prix de couleurs sont partagés, les réglages sont privés : deux
         // requêtes distinctes, mais rien ne les sérialise.
-        const [colorRows, settingRows, itemRows, fuelResponse] = await Promise.all([
-          supabase.from('breeding_color_prices').select('*').eq('family', family),
-          supabase.from('user_breeding_settings').select('*').maybeSingle(),
-          supabase.from('item_prices').select('*'),
-          // Les 120 carburants d'enclos tiennent en une page du miroir local :
-          // c'est ce qui chiffre le cycle de fécondité et la montée en niveau.
-          fetch(`/api/dofusdb/items?typeId=${FUEL_TYPE_ID}&limit=200`).then((response) =>
-            response.ok ? response.json() : { data: [] }
-          ),
-        ]);
+        const [colorRows, settingRows, itemRows, mountRows, stockRows, fuelResponse] =
+          await Promise.all([
+            supabase.from('breeding_color_prices').select('*').eq('family', family),
+            supabase.from('user_breeding_settings').select('*').maybeSingle(),
+            supabase.from('item_prices').select('*'),
+            supabase.from('user_breeding_mounts').select('*').eq('family', family),
+            supabase.from('user_item_stock').select('*'),
+            // Les 120 carburants d'enclos tiennent en une page du miroir local :
+            // c'est ce qui chiffre le cycle de fécondité et la montée en niveau.
+            fetch(`/api/dofusdb/items?typeId=${FUEL_TYPE_ID}&limit=200`).then((response) =>
+              response.ok ? response.json() : { data: [] }
+            ),
+          ]);
 
         if (colorRows.error) throw colorRows.error;
 
@@ -142,6 +170,21 @@ export const useBreeding = (family: FamilyId) => {
           new Map(((itemRows.data ?? []) as ItemPrice[]).map((row) => [row.item_id, row]))
         );
         setFuelItems((fuelResponse as DofusDBResponse<DofusDBItem>).data ?? []);
+
+        setMountStock(
+          new Map(
+            ((mountRows.data ?? []) as UserBreedingMount[])
+              .filter((row) => row.count > 0)
+              .map((row) => [row.color_id, row.count])
+          )
+        );
+        setItemStock(
+          new Map(
+            ((stockRows.data ?? []) as UserItemStock[])
+              .filter((row) => row.quantity > 0)
+              .map((row) => [row.item_id, row.quantity])
+          )
+        );
 
         // Absence de ligne = utilisateur qui n'a jamais réglé : les défauts
         // s'appliquent sans qu'il faille créer la ligne à l'avance.
@@ -212,6 +255,29 @@ export const useBreeding = (family: FamilyId) => {
     };
   }, [supplies, settings.enclos_count]);
 
+  /**
+   * Ce que la réserve de carburants représente, jauge par jauge, en **points**.
+   *
+   * C'est la seule monnaie où un stock se compare à un besoin : une unité
+   * d'Élixir en vaut huit d'Extrait, et un plan ne demande ni l'un ni l'autre
+   * mais des points à transférer.
+   */
+  const ownedGaugePoints = useMemo(() => {
+    const points = new Map<string, number>();
+
+    for (const item of fuelItems) {
+      const quantity = itemStock.get(item.id) ?? 0;
+      if (quantity <= 0) continue;
+
+      const info = parseGaugeInfo(item);
+      if (!info || info.rechargeAmount <= 0) continue;
+
+      points.set(info.gaugeName, (points.get(info.gaugeName) ?? 0) + quantity * info.rechargeAmount);
+    }
+
+    return points;
+  }, [fuelItems, itemStock]);
+
   const estimates = useMemo(() => {
     if (!tree) return new Map<string, BreedingEstimate>();
 
@@ -237,23 +303,26 @@ export const useBreeding = (family: FamilyId) => {
   }, [tree, prices, supplies, genetonValuation, priceOf, settings]);
 
   /**
-   * Le plan d'une couleur et sa durée, stock déduit.
+   * Le plan d'une couleur : étapes, durée, jauges à remplir et financement.
    *
-   * Exposé plutôt que gardé pour soi : l'écran de suivi le rappelle à chaque
-   * saisie, avec le stock du moment, et c'est ce recalcul qui fait le
-   * rattrapage. Le stock n'entre donc jamais dans le classement, qui doit rester
-   * comparable d'une couleur à l'autre.
+   * Le stock de montures y entre toujours, y compris pour le classement. Ce
+   * n'est pas une entorse à la comparabilité mais ce qui la rend juste : la
+   * question n'est pas « que coûterait cette couleur en partant de rien » mais
+   * « que me coûte-t-elle, à moi, avec l'écurie que j'ai ». Deux plans se
+   * comparent depuis le même point de départ — le mien.
    */
-  const makePlan = useCallback(
-    (colorId: string, targetCount = 1, stock?: Map<string, number>) => {
+  const makePlan = useCallback<MakePlan>(
+    (colorId, count = 1) => {
       if (!tree) return null;
 
       const estimate = estimates.get(colorId);
+      const genetonValue = genetonValuation?.valuePerGeneton ?? 0;
+
       const plan = breedingPlan(colorId, tree.colors, estimates, {
-        targetCount,
+        targetCount: count,
         recycleSteriles: settings.recycle_steriles,
-        genetonValue: genetonValuation?.valuePerGeneton ?? 0,
-        stock,
+        genetonValue,
+        stock: mountStock,
       });
       const duration = timing
         ? planDuration(
@@ -261,15 +330,45 @@ export const useBreeding = (family: FamilyId) => {
             timing,
             // La montée au 200 ne se paie qu'à la revente à ce niveau ; ailleurs
             // le poulain part tel quel.
-            estimate?.bestExit === 'sell200'
-              ? { count: targetCount, level: MAX_MOUNT_LEVEL }
-              : null
+            estimate?.bestExit === 'sell200' ? { count, level: MAX_MOUNT_LEVEL } : null
           )
         : null;
 
-      return { plan, duration };
+      const gaugeNeeds = supplies
+        ? planGaugeNeeds(
+            plan,
+            { slots: timing?.slots },
+            supplies.cycleGauges,
+            supplies.mangeoire,
+            ownedGaugePoints
+          )
+        : [];
+
+      // Ce que la réserve de carburant dispense de racheter. Plafonné par
+      // `planGaugeNeeds` à ce que le plan consomme réellement.
+      const gaugeCredit = gaugeNeeds.reduce((total, need) => total + need.credit, 0);
+
+      return {
+        plan,
+        duration,
+        gaugeNeeds,
+        funding: planFunding(plan, estimates, settings.kamas_available, {
+          genetonValue,
+          gaugeCredit,
+        }),
+      };
     },
-    [tree, estimates, settings.recycle_steriles, genetonValuation, timing]
+    [
+      tree,
+      estimates,
+      settings.recycle_steriles,
+      settings.kamas_available,
+      genetonValuation,
+      timing,
+      supplies,
+      ownedGaugePoints,
+      mountStock,
+    ]
   );
 
   const rows = useMemo<BreedingRow[]>(() => {
@@ -281,8 +380,11 @@ export const useBreeding = (family: FamilyId) => {
 
       // Rien à planifier pour une couleur qu'il vaut mieux acheter : elle
       // n'occupe aucun enclos, donc aucune heure à rapporter.
-      const planned = estimate.strategy === 'breed' ? makePlan(color.id) : null;
-      const planMargin = planned ? estimate.bestExitValue - planned.plan.totalCost : null;
+      const planned = estimate.strategy === 'breed' ? makePlan(color.id, targetCount) : null;
+      // La sortie rapporte par monture ; le plan en produit `targetCount`.
+      const planMargin = planned
+        ? estimate.bestExitValue * targetCount - planned.plan.totalCost
+        : null;
       const hours = planned?.duration?.enclosHours ?? 0;
 
       return [
@@ -293,14 +395,13 @@ export const useBreeding = (family: FamilyId) => {
           itemId: color.itemId,
           source: color.source,
           estimate,
-          plan: planned?.plan ?? null,
-          duration: planned?.duration ?? null,
+          planned,
           planMargin,
           marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
         },
       ];
     });
-  }, [tree, estimates, makePlan]);
+  }, [tree, estimates, makePlan, targetCount]);
 
   /** Enregistre un prix et le reflète localement sans recharger toute la page. */
   const savePrice = useCallback(
@@ -336,6 +437,54 @@ export const useBreeding = (family: FamilyId) => {
     [family]
   );
 
+  /**
+   * Enregistre le nombre de montures d'une couleur en écurie.
+   *
+   * L'état local part devant : le classement entier se recalcule à chaque
+   * saisie, et l'attendre du réseau rendrait la frappe poussive.
+   */
+  const saveMountStock = useCallback(
+    async (colorId: string, count: number) => {
+      setMountStock((current) => {
+        const next = new Map(current);
+        if (count > 0) next.set(colorId, count);
+        else next.delete(colorId);
+        return next;
+      });
+
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from('user_breeding_mounts')
+        .upsert(
+          { family, color_id: colorId, count, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id,family,color_id' }
+        );
+
+      if (saveError) console.error('[breeding] monture non enregistrée:', saveError);
+    },
+    [family]
+  );
+
+  /** Idem pour un carburant en réserve. */
+  const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
+    setItemStock((current) => {
+      const next = new Map(current);
+      if (quantity > 0) next.set(itemId, quantity);
+      else next.delete(itemId);
+      return next;
+    });
+
+    const supabase = createClient();
+    const { error: saveError } = await supabase
+      .from('user_item_stock')
+      .upsert(
+        { item_id: itemId, quantity, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,item_id' }
+      );
+
+    if (saveError) console.error('[breeding] réserve non enregistrée:', saveError);
+  }, []);
+
   const saveSettings = useCallback(async (next: typeof DEFAULT_SETTINGS) => {
     const supabase = createClient();
     const { error: saveError } = await supabase
@@ -357,7 +506,12 @@ export const useBreeding = (family: FamilyId) => {
     settings,
     genetonValuation,
     supplies,
-    makePlan,
+    fuelItems,
+    mountStock,
+    itemStock,
+    ownedGaugePoints,
+    saveMountStock,
+    saveItemStock,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,
     // `loaded` couvre le tout premier rendu, avant que la transition démarre :
     // sans lui la page clignoterait sur un « aucun résultat » vide.

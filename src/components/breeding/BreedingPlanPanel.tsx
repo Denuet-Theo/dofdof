@@ -1,12 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { ListOrdered, Trash2 } from 'lucide-react';
+import { ListOrdered, TriangleAlert } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import KamasDisplay from '@/components/ui/KamasDisplay';
-import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { formatHours } from '@/lib/utils/date';
-import type { FamilyId, MakePlan } from '@/lib/hooks/useBreeding';
+import type { PlannedColor } from '@/lib/hooks/useBreeding';
 
 /**
  * La marche à suivre pour produire une couleur, étape par étape.
@@ -16,7 +14,7 @@ import type { FamilyId, MakePlan } from '@/lib/hooks/useBreeding';
  * centaine d'exemplaires répartis sur une vingtaine de couleurs, ce qui ne tient
  * pas dans une ligne de tableau.
  *
- * Le plan affiché n'est jamais figé. Il se recalcule à chaque saisie de stock,
+ * Le plan affiché n'est jamais figé. Il se recalcule à chaque saisie d'écurie,
  * ce qui est la seule façon honnête de tenir compte de l'aléa : un croisement
  * échoue souvent, et une liste d'étapes cochées une à une mentirait dès le
  * premier échec. Ici, ce qui reste à faire est toujours « ce que je vise, moins
@@ -24,52 +22,44 @@ import type { FamilyId, MakePlan } from '@/lib/hooks/useBreeding';
  */
 
 type Props = {
-  family: FamilyId;
-  colorId: string;
+  planned: PlannedColor;
   colorName: string;
   /** Nom lisible d'une couleur, le plan ne portant que des identifiants. */
   nameOf: (colorId: string) => string;
-  makePlan: MakePlan;
+  mountStock: Map<string, number>;
+  onSaveMount: (colorId: string, count: number) => Promise<void>;
   /** Enclos possédés, pour traduire les heures d'enclos en délai réel. */
   enclosCount: number;
-  /** Panneau replié : rien à charger. */
-  open: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onAbandon: () => void;
 };
 
 const STRATEGY_LABEL = { buy: 'acheter', capture: 'capturer' } as const;
 
 const BreedingPlanPanel = ({
-  family,
-  colorId,
+  planned,
   colorName,
   nameOf,
-  makePlan,
+  mountStock,
+  onSaveMount,
   enclosCount,
-  open,
+  selected,
+  onSelect,
+  onAbandon,
 }: Props) => {
-  const { project, stock, loading, start, setTargetCount, setStock, abandon } =
-    useBreedingProject(family, colorId, open);
+  const { plan, duration, gaugeNeeds, funding } = planned;
 
-  // Sans projet, on montre quand même le plan : c'est ce qui permet de décider
-  // s'il vaut la peine d'être lancé.
-  const [draftCount, setDraftCount] = useState(1);
-  const targetCount = project?.target_count ?? draftCount;
-
-  const planned = useMemo(
-    () => makePlan(colorId, targetCount, project ? stock : undefined),
-    [makePlan, colorId, targetCount, project, stock]
-  );
-
-  if (!planned) return null;
-  const { plan, duration } = planned;
-
-  const countField = (value: number, onChange: (next: number) => void, max = 999) => (
+  const countField = (colorId: string) => (
     <input
       type="number"
       min={0}
-      max={max}
-      value={String(value)}
-      onChange={(event) => onChange(Math.max(0, Math.min(max, Number(event.target.value) || 0)))}
+      max={999}
+      value={String(mountStock.get(colorId) ?? 0)}
+      onChange={(event) =>
+        onSaveMount(colorId, Math.max(0, Math.min(999, Number(event.target.value) || 0)))
+      }
+      title="Combien j'en ai déjà en écurie"
       className="w-16 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
         text-dark-100 text-xs text-right transition-all hover:border-dark-500
         focus:border-kamas/50"
@@ -77,64 +67,60 @@ const BreedingPlanPanel = ({
   );
 
   const done = plan.steps.length === 0 && plan.purchases.length === 0;
+  const missingFuel = gaugeNeeds.filter((need) => need.cost > 0);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <ListOrdered size={14} className="text-kamas" />
-        <span className="text-xs font-semibold text-dark-200">Plan d&apos;élevage</span>
+        <span className="text-xs font-semibold text-dark-200">
+          Plan pour {colorName}
+        </span>
 
-        <label className="flex items-center gap-2 text-[11px] text-dark-500">
-          Objectif
-          {countField(
-            targetCount,
-            (next) => {
-              const count = Math.max(1, next);
-              if (project) setTargetCount(count);
-              else setDraftCount(count);
-            },
-            100
-          )}
-          {colorName}
-        </label>
-
-        {project ? (
+        {selected ? (
           <button
             type="button"
-            onClick={abandon}
-            className="ml-auto flex items-center gap-1.5 text-[11px] text-dark-500
-              hover:text-loss transition-colors cursor-pointer"
+            onClick={onAbandon}
+            className="ml-auto text-[11px] text-dark-500 hover:text-loss transition-colors
+              cursor-pointer"
           >
-            <Trash2 size={12} /> Abandonner le suivi
+            Ce plan est sélectionné — l&apos;abandonner
           </button>
         ) : (
-          <Button size="sm" className="ml-auto" onClick={() => start(targetCount)}>
+          <Button size="sm" className="ml-auto" onClick={onSelect}>
             Suivre ce plan
           </Button>
         )}
       </div>
 
-      {loading && <p className="text-[11px] text-dark-600">Chargement du suivi…</p>}
+      <p className="text-[11px] text-dark-600">
+        Saisis dans la colonne de droite ce que tu possèdes déjà : le plan se recalcule et ne
+        demande que ce qui manque. Ne compte que les montures <strong>fertiles</strong>.
+      </p>
 
-      {project && (
-        <p className="text-[11px] text-dark-600">
-          Saisis ce que tu possèdes déjà : le plan se recalcule et ne demande que ce qui
-          manque. Ne compte que les montures <strong>fertiles</strong> — une monture déjà
-          accouplée est stérile, et son recyclage est déjà pris en compte.
+      {funding && !funding.affordable && (
+        <p className="flex items-start gap-2 text-[11px] text-amber-400/90">
+          <TriangleAlert size={13} className="shrink-0 mt-px" />
+          <span>
+            Budget dépassé de {Math.round(funding.shortfall).toLocaleString('fr-FR')} kamas
+            {funding.blockedAt &&
+              ` — ça coince ${
+                funding.blockedAt.kind === 'purchase' ? "à l'achat de" : 'au croisement de'
+              } ${nameOf(funding.blockedAt.colorId)}`}
+            . Réduis l&apos;objectif, ou vends avant d&apos;en arriver là.
+          </span>
         </p>
       )}
 
       {done ? (
         <p className="text-xs text-profit">
-          Plus rien à produire : le stock couvre l&apos;objectif.
+          Plus rien à produire : l&apos;écurie couvre l&apos;objectif.
         </p>
       ) : (
         <>
           {plan.purchases.length > 0 && (
             <div>
-              <p className="text-[11px] text-dark-500 mb-1.5">
-                Montures de base à se procurer
-              </p>
+              <p className="text-[11px] text-dark-500 mb-1.5">Montures de base à se procurer</p>
               <div className="space-y-1">
                 {plan.purchases.map((purchase) => (
                   <div
@@ -156,10 +142,7 @@ const BreedingPlanPanel = ({
                         size="sm"
                       />
                     </span>
-                    {project &&
-                      countField(stock.get(purchase.colorId) ?? 0, (next) =>
-                        setStock(purchase.colorId, next)
-                      )}
+                    {countField(purchase.colorId)}
                   </div>
                 ))}
               </div>
@@ -168,9 +151,7 @@ const BreedingPlanPanel = ({
 
           {plan.steps.length > 0 && (
             <div>
-              <p className="text-[11px] text-dark-500 mb-1.5">
-                Croisements, dans l&apos;ordre
-              </p>
+              <p className="text-[11px] text-dark-500 mb-1.5">Croisements, dans l&apos;ordre</p>
               <div className="space-y-1">
                 {plan.steps.map((step, index) => (
                   <div
@@ -182,15 +163,13 @@ const BreedingPlanPanel = ({
                       <p className="text-dark-200 truncate">
                         {step.recipe.map(nameOf).join('  +  ')}
                         <span className="text-dark-500"> → </span>
-                        <span className="text-dark-100 font-medium">
-                          {nameOf(step.colorId)}
-                        </span>
+                        <span className="text-dark-100 font-medium">{nameOf(step.colorId)}</span>
                       </p>
                       <p className="text-[10px] text-dark-500 mt-0.5">
                         gen {step.generation} · parents niveau {step.parentLevel} ·{' '}
                         {Math.round(step.successRate * 100)} % de réussite
                         {step.useOptimakina && ' · Optimakina'}
-                        {step.owned > 0 && ` · ${step.owned} déjà en stock`}
+                        {step.owned > 0 && ` · ${step.owned} déjà en écurie`}
                       </p>
                     </div>
                     <div className="text-right shrink-0">
@@ -201,11 +180,27 @@ const BreedingPlanPanel = ({
                         {step.attempts} accouplement{step.attempts > 1 ? 's' : ''}
                       </p>
                     </div>
-                    {project &&
-                      countField(stock.get(step.colorId) ?? 0, (next) =>
-                        setStock(step.colorId, next)
-                      )}
+                    {countField(step.colorId)}
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {missingFuel.length > 0 && (
+            <div>
+              <p className="text-[11px] text-dark-500 mb-1.5">
+                Carburant à prévoir, réserve déduite
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-dark-500">
+                {missingFuel.map((need) => (
+                  <span key={need.gauge}>
+                    {need.gauge} :{' '}
+                    <strong className="text-dark-200">
+                      {Math.round(need.points - need.covered).toLocaleString('fr-FR')} pts
+                    </strong>{' '}
+                    ({Math.round(need.cost).toLocaleString('fr-FR')} kamas, {need.fuel})
+                  </span>
                 ))}
               </div>
             </div>
@@ -215,13 +210,12 @@ const BreedingPlanPanel = ({
 
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-dark-500 pt-1">
         <span>
-          Total :{' '}
-          <strong className="text-dark-200">{plan.crossings} accouplements</strong>
+          Total : <strong className="text-dark-200">{plan.crossings} accouplements</strong>
         </span>
         <span>
-          Coût :{' '}
+          À débourser :{' '}
           <strong className="text-dark-200">
-            {Math.round(plan.totalCost).toLocaleString('fr-FR')} kamas
+            {Math.round(funding?.cashNeeded ?? plan.totalCost).toLocaleString('fr-FR')} kamas
           </strong>
         </span>
         {plan.genetons > 0 && (
@@ -235,12 +229,11 @@ const BreedingPlanPanel = ({
         )}
         {/* Ces bébés-là existent mais ne sont pas déduits : leur valeur dépend
             de la répartition des couleurs à l'échec, qui reste à confirmer en
-            jeu. Le coût affiché est donc un majorant, et ce nombre dit de
-            combien il pourrait baisser. */}
+            jeu. Le coût affiché est donc un majorant. */}
         {plan.offTargetBabies > 0 && (
           <span>
-            Bébés hors cible :{' '}
-            <strong className="text-dark-200">{plan.offTargetBabies}</strong>, non déduits
+            Bébés hors cible : <strong className="text-dark-200">{plan.offTargetBabies}</strong>,
+            non déduits
           </span>
         )}
         {duration ? (
@@ -253,9 +246,7 @@ const BreedingPlanPanel = ({
             </span>
             <span>
               Délai sur {enclosCount} enclos :{' '}
-              <strong className="text-dark-200">
-                {formatHours(duration.wallClockHours)}
-              </strong>
+              <strong className="text-dark-200">{formatHours(duration.wallClockHours)}</strong>
             </span>
           </>
         ) : (

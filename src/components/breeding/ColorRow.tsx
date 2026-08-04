@@ -6,7 +6,7 @@ import KamasDisplay from '@/components/ui/KamasDisplay';
 import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
 import BreedingPlanPanel from '@/components/breeding/BreedingPlanPanel';
 import { formatHours } from '@/lib/utils/date';
-import type { BreedingRow, FamilyId, MakePlan } from '@/lib/hooks/useBreeding';
+import type { BreedingRow } from '@/lib/hooks/useBreeding';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
 const STRATEGY_LABEL = {
@@ -30,15 +30,30 @@ const EXIT_LABEL = {
 
 type Props = {
   row: BreedingRow;
-  family: FamilyId;
   nameOf: (colorId: string) => string;
-  makePlan: MakePlan;
+  mountStock: Map<string, number>;
+  onSaveMount: (colorId: string, count: number) => Promise<void>;
   enclosCount: number;
+  /** Le plan sélectionné, s'il porte sur cette couleur. */
+  selected: boolean;
+  onSelect: () => void;
+  onAbandon: () => void;
   onSavePrice: (colorId: string, mountLevel: 0 | 200, price: number) => Promise<boolean>;
 };
 
-const ColorRow = ({ row, family, nameOf, makePlan, enclosCount, onSavePrice }: Props) => {
-  const [open, setOpen] = useState(false);
+const ColorRow = ({
+  row,
+  nameOf,
+  mountStock,
+  onSaveMount,
+  enclosCount,
+  selected,
+  onSelect,
+  onAbandon,
+  onSavePrice,
+}: Props) => {
+  // Le plan sélectionné s'ouvre d'emblée : c'est celui qu'on vient consulter.
+  const [open, setOpen] = useState(selected);
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
 
@@ -84,8 +99,12 @@ const ColorRow = ({ row, family, nameOf, makePlan, enclosCount, onSavePrice }: P
               parents niveau {estimate.parents.level} ·{' '}
               {Math.round(estimate.parents.successRate * 100)} % de réussite
               {estimate.parents.useOptimakina && ' · Optimakina'}
-              {row.plan && ` · ${row.plan.crossings} accouplements`}
-              {row.duration && ` · ${formatHours(row.duration.wallClockHours)}`}
+              {row.planned && ` · ${row.planned.plan.crossings} accouplements`}
+              {row.planned?.duration &&
+                ` · ${formatHours(row.planned.duration.wallClockHours)}`}
+              {row.planned?.funding && !row.planned.funding.affordable && (
+                <span className="text-amber-400/80"> · hors budget</span>
+              )}
             </p>
           )}
         </div>
@@ -187,16 +206,18 @@ const ColorRow = ({ row, family, nameOf, makePlan, enclosCount, onSavePrice }: P
 
           {/* Le plan complet ne s'ouvre que pour les couleurs qu'on élève :
               acheter une couleur n'a pas d'étapes. */}
-          {estimate.strategy === 'breed' && (
+          {row.planned && (
             <div className="pt-3 border-t border-dark-700/40">
               <BreedingPlanPanel
-                family={family}
-                colorId={row.colorId}
+                planned={row.planned}
                 colorName={row.name}
                 nameOf={nameOf}
-                makePlan={makePlan}
+                mountStock={mountStock}
+                onSaveMount={onSaveMount}
                 enclosCount={enclosCount}
-                open={open}
+                selected={selected}
+                onSelect={onSelect}
+                onAbandon={onAbandon}
               />
             </div>
           )}

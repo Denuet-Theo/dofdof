@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useTransition } from 'react';
 import { Swords, AlertTriangle } from 'lucide-react';
 import FarmFilters, { DEFAULT_FILTERS, type FarmFilterState } from '@/components/farm/FarmFilters';
 import MonsterCard from '@/components/farm/MonsterCard';
+import { useFarmFilters } from '@/lib/hooks/useFarmFilters';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import type { DofusDBResponse, FarmTarget } from '@/lib/supabase/types';
@@ -67,8 +68,12 @@ const buildParams = (filters: FarmFilterState): URLSearchParams => {
 };
 
 const FarmPage = () => {
-  const [filters, setFilters] = useState<FarmFilterState>(DEFAULT_FILTERS);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const { filters, setFilters, restored, restoredAdvanced } = useFarmFilters();
+  // `null` tant que le bouton n'a pas servi : le panneau suit alors ce qu'on a
+  // restauré, pour que des réglages avancés hérités de la dernière visite ne
+  // filtrent pas le classement depuis un tiroir fermé.
+  const [advancedToggled, setAdvancedToggled] = useState<boolean | null>(null);
+  const advancedOpen = advancedToggled ?? restoredAdvanced;
   const [targets, setTargets] = useState<FarmTarget[] | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +90,10 @@ const FarmPage = () => {
   const query = useMemo(() => buildParams(filters).toString(), [filters]);
 
   useEffect(() => {
+    // Attendre les filtres du compte : les lancer sur les défauts afficherait
+    // d'abord un classement que personne n'a demandé.
+    if (!restored) return;
+
     const controller = new AbortController();
 
     startLoading(async () => {
@@ -112,7 +121,7 @@ const FarmPage = () => {
     });
 
     return () => controller.abort();
-  }, [query]);
+  }, [query, restored]);
 
   return (
     <div className="space-y-6">
@@ -129,10 +138,12 @@ const FarmPage = () => {
         onChange={setFilters}
         areas={areas}
         open={advancedOpen}
-        onToggle={() => setAdvancedOpen((open) => !open)}
+        onToggle={() => setAdvancedToggled(!advancedOpen)}
       />
 
-      {loading && targets === null ? (
+      {/* `!restored` couvre le temps de relire les filtres du compte, avant que
+          la moindre requête de classement soit partie. */}
+      {!restored || (loading && targets === null) ? (
         <div className="space-y-3">
           <Skeleton className="h-24 w-full" count={6} />
         </div>

@@ -321,9 +321,35 @@ export type UserItemStock = {
   updated_at: string;
 };
 
+/**
+ * Le dernier réglage de la page Farm (migration 20260804230000).
+ *
+ * `filters` est volontairement non typé côté base : c'est un instantané de
+ * `FarmFilterState`, relu à travers le recollage de `useFarmFilters`, qui est le
+ * seul endroit à en connaître la forme.
+ */
+export type UserFarmFilters = {
+  user_id: string;
+  filters: unknown;
+  updated_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
+      user_farm_filters: {
+        Row: UserFarmFilters;
+        Insert: {
+          user_id?: string;
+          filters: unknown;
+          updated_at?: string;
+        };
+        Update: {
+          filters?: unknown;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       breeding_projects: {
         Row: BreedingProject;
         Insert: {

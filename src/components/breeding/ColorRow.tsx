@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { ChevronRight, TriangleAlert } from 'lucide-react';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
+import BreedingPlanPanel from '@/components/breeding/BreedingPlanPanel';
+import { formatHours } from '@/lib/utils/date';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
@@ -28,18 +30,43 @@ const EXIT_LABEL = {
 
 type Props = {
   row: BreedingRow;
+  nameOf: (colorId: string) => string;
+  mountStock: Map<string, number>;
+  onSaveMount: (colorId: string, count: number) => Promise<void>;
+  enclosCount: number;
+  /** Le plan sélectionné, s'il porte sur cette couleur. */
+  selected: boolean;
+  onSelect: () => void;
+  onAbandon: () => void;
   onSavePrice: (colorId: string, mountLevel: 0 | 200, price: number) => Promise<boolean>;
 };
 
-const ColorRow = ({ row, onSavePrice }: Props) => {
-  const [open, setOpen] = useState(false);
+const ColorRow = ({
+  row,
+  nameOf,
+  mountStock,
+  onSaveMount,
+  enclosCount,
+  selected,
+  onSelect,
+  onAbandon,
+  onSavePrice,
+}: Props) => {
+  // Le plan sélectionné s'ouvre d'emblée : c'est celui qu'on vient consulter.
+  const [open, setOpen] = useState(selected);
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
 
   // La marge suit la sortie retenue — vente ou extraction — et non la seule
   // vente niveau 0 : sans revente, celle-ci est nulle par construction et
   // afficherait « prix manquant » sur toute la liste.
-  const margin = estimate.bestMargin;
+  //
+  // Sur une couleur qu'on élève, elle se compte contre le coût **du plan** et
+  // non contre celui d'un exemplaire isolé. Les deux diffèrent d'un ordre de
+  // grandeur en haute génération, où produire une monture en demande une
+  // centaine : afficher l'un à côté du rendement horaire, qui dérive de
+  // l'autre, donnerait deux chiffres de signes contraires sur la même ligne.
+  const margin = row.planMargin ?? estimate.bestMargin;
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -72,6 +99,12 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
               parents niveau {estimate.parents.level} ·{' '}
               {Math.round(estimate.parents.successRate * 100)} % de réussite
               {estimate.parents.useOptimakina && ' · Optimakina'}
+              {row.planned && ` · ${row.planned.plan.crossings} accouplements`}
+              {row.planned?.duration &&
+                ` · ${formatHours(row.planned.duration.wallClockHours)}`}
+              {row.planned?.funding && !row.planned.funding.affordable && (
+                <span className="text-amber-400/80"> · hors budget</span>
+              )}
             </p>
           )}
         </div>
@@ -96,6 +129,26 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
             <p className={`text-sm font-semibold ${margin > 0 ? 'text-profit' : 'text-loss'}`}>
               {margin > 0 ? '+' : ''}
               {Math.round(margin).toLocaleString('fr-FR')}
+            </p>
+          )}
+        </div>
+
+        {/* La marge horaire, qui est le vrai classement : une gen 10 rapporte
+            plus qu'une gen 6 parce qu'elle demande plus de travail, pas parce
+            qu'elle est meilleure. Seul le rapport au temps d'enclos les
+            départage. */}
+        <div className="text-right shrink-0 w-28 hidden sm:block">
+          <p className="text-[10px] text-dark-500">Par heure d&apos;enclos</p>
+          {row.marginPerHour === null ? (
+            <p className="text-sm text-dark-600">{estimate.strategy === 'breed' ? '—' : 'immédiat'}</p>
+          ) : (
+            <p
+              className={`text-sm font-semibold ${
+                row.marginPerHour > 0 ? 'text-profit' : 'text-loss'
+              }`}
+            >
+              {row.marginPerHour > 0 ? '+' : ''}
+              {Math.round(row.marginPerHour).toLocaleString('fr-FR')}
             </p>
           )}
         </div>
@@ -137,7 +190,7 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
             <div className="text-xs">
               <p className="text-dark-500 mb-1">Recette retenue</p>
               <p className="text-dark-200">
-                {estimate.breedRecipe.join('  +  ')}
+                {estimate.breedRecipe.map(nameOf).join('  +  ')}
                 {estimate.genetons > 0 && (
                   <span className="text-dark-500"> · {estimate.genetons} génétons</span>
                 )}
@@ -149,6 +202,24 @@ const ColorRow = ({ row, onSavePrice }: Props) => {
             <p className="text-[11px] text-amber-400/80">
               Recette extraite d&apos;un site tiers, non recoupée en jeu.
             </p>
+          )}
+
+          {/* Le plan complet ne s'ouvre que pour les couleurs qu'on élève :
+              acheter une couleur n'a pas d'étapes. */}
+          {row.planned && (
+            <div className="pt-3 border-t border-dark-700/40">
+              <BreedingPlanPanel
+                planned={row.planned}
+                colorName={row.name}
+                nameOf={nameOf}
+                mountStock={mountStock}
+                onSaveMount={onSaveMount}
+                enclosCount={enclosCount}
+                selected={selected}
+                onSelect={onSelect}
+                onAbandon={onAbandon}
+              />
+            </div>
           )}
         </div>
       )}

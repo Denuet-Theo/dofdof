@@ -213,8 +213,9 @@ is an opt-in filter at query time. (There is no cosmetic item type in this datas
 ## Élevage
 
 L'écran `/breeding` classe les 306 couleurs de monture (66 dragodindes, 120 muldos,
-120 volkornes) par marge, en arbitrant pour chacune entre **acheter**, **capturer** et
-**élever**.
+120 volkornes) par **marge horaire**, en arbitrant pour chacune entre **acheter**,
+**capturer** et **élever**. Chaque couleur qu'on élève ouvre son plan complet, étape par
+étape, avec un suivi de la progression.
 
 ### D'où viennent les arbres de croisement
 
@@ -282,7 +283,7 @@ Quatre points valent d'être connus avant de toucher au calcul :
 
 | Mécanique | Formule | Origine |
 | --- | --- | --- |
-| Réussite | `30 % + 0,15 % × (niveau A + niveau B)`, 90 % au plafond | guide, recoupé sur son exemple |
+| Réussite (génération) | `30 % + 0,15 % × (niveau A + niveau B)`, 90 % au plafond | guide, **vérifié au point près en jeu** |
 | XP monture | `3,795 × niveau^2,329` points de Mangeoire | 5 relevés en jeu, écart max 0,0008 % |
 | Transfert de jauge | 10/20/30/40 points par 10 s selon le palier | relevé en jeu, reproduit les 17h49 de vidange |
 | Génétons | 1/2/4/8/15/30/60/120/250 par génération de parent | guide |
@@ -293,9 +294,168 @@ Quatre points valent d'être connus avant de toucher au calcul :
 Le taux de réussite dépend du niveau des **montures**, pas de celui de l'Éleveur — lequel ne
 sert qu'à débloquer les enclos.
 
-Une seule hypothèse n'est pas vérifiée, et elle est signalée dans le code : que la progression
-d'une monture soit strictement proportionnelle aux points transférés. Tout le reste vient
-d'un relevé en jeu ou du guide.
+Ce taux porte sur la **génération**, pas sur la couleur, et la nuance n'est pas académique.
+Relevé en jeu, deux parents niveau 69 croisant Doré (pur) × Pourpre (issu d'Ébène-Orchidée et
+Indigo-Pourpre) :
+
+| Issue | Génération | Probabilité |
+| --- | --- | --- |
+| Doré-Pourpre — la combinaison visée | 2 | 40,02 % |
+| Indigo-Pourpre — grand-parent | 2 | 5,34 % |
+| Ébène-Orchidée — grand-parent | 2 | 5,34 % |
+| Doré — parent | 1 | 27,55 % |
+| Pourpre — parent | 1 | 21,75 % |
+
+Les trois couleurs de génération 2 totalisent **50,70 %**, soit exactement
+`30 % + 0,15 % × 138`. La formule est juste au point près ; ce qu'elle ne dit pas, c'est que la
+génération cible peut se présenter sous **plusieurs couleurs** quand un grand-parent s'y
+trouve déjà.
+
+Le calcul n'en souffre pas, mais pour une raison qu'il faut connaître : dans un plan propre,
+chaque monture est élevée selon sa recette, donc les générations décroissent strictement en
+remontant l'arbre et aucun grand-parent ne peut être de la génération visée. La situation
+ci-dessus vient de ce que le Pourpre est lui-même un bébé hors cible, réutilisé comme parent —
+il traîne une ascendance de génération **supérieure** à la sienne. Réemployer ses ratés, c'est
+donc sortir du régime que `successRate` modélise.
+
+Trois hypothèses ne sont pas vérifiées, et toutes trois sont signalées dans le code :
+
+- **la progression est proportionnelle aux points transférés** — tout le modèle de durée en
+  dépend ;
+- **les deux dernières stats montent vraiment en parallèle**, ce qui raccourcit le cycle de
+  20 000 points (5 h 33 au palier Extrait). Mesurable : un cycle complet doit prendre 15 h 17
+  à ce palier, pas 20 h 50 ;
+- **les poids de la répartition d'un bébé hors cible** (25 % chaque parent, 12,5 % chaque
+  grand-parent) — mesurés faux, voir ci-dessous, mais pas encore remplacés.
+
+### La couleur d'un bébé hors cible
+
+Un accouplement produit toujours un bébé ; le taux ci-dessus porte sur sa génération. Sa
+**portée** est établie : le jeu ne retient qu'un niveau d'ascendance par monture, même en
+génération 3, donc un croisement ne peut rendre que les parents et les grands-parents. Le
+parcours de `lineageValue` s'arrête au bon endroit.
+
+Les **poids** (25 % chaque parent, 12,5 % chaque grand-parent) restent une hypothèse. Le relevé
+ci-dessus ne les contraint pas : ses parents étaient de génération 1, si bien que les
+grands-parents, de génération 2, tombaient du côté de la réussite. Sa masse d'échec ne
+contenait que les deux parents, à 55,9 % et 44,1 %.
+
+Pour trancher il faut un croisement dont les grands-parents sont d'une génération
+**inférieure** à la cible, donc du côté de l'échec — le cas courant dans un plan propre, et
+celui que le modèle décrit.
+
+Limite de fond mise au jour par cette mesure : la répartition dépend de la généalogie de
+l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont pas la même distribution selon
+d'où ils viennent. Le calcul raisonne sur des couleurs et approxime la lignée d'un parent par
+sa recette ; il ne collera jamais exactement.
+
+### Le temps, et pourquoi il classe mieux que la marge
+
+Ce qui coûte du temps n'est pas le croisement — il est instantané — mais la **préparation de
+ses deux parents** : les monter au niveau retenu, puis leur faire faire un cycle de fécondité.
+Un accouplement raté ayant consommé ses parents autant qu'un réussi, le temps se compte sur
+les *tentatives*, pas sur les bébés obtenus.
+
+Deux effets rendent le calcul non trivial, et les ignorer fausse tout dans le même sens :
+
+- **Les dix places d'un enclos se préparent ensemble.** Vingt parents coûtent deux fournées,
+  pas dix fois deux parents. C'est ce qui rend les grosses séries proportionnellement plus
+  rapides. Vrai pour **toutes** les jauges, Mangeoire comprise : monter dix montures d'un
+  niveau coûte ce que coûte d'en monter une, d'où `mangeoireCostPerMountPoint`, qui est le prix
+  d'un point d'XP *sur une monture* et vaut le dixième du prix d'un point de jauge. Confondre
+  les deux surfacturait la montée d'un facteur dix et poussait l'optimiseur vers des parents
+  niveau 5 là où le 26 était moins cher.
+- **Montée et cycle ne s'additionnent pas.** Trois des quatre étapes du cycle n'occupent qu'un
+  des deux emplacements de jauge, et la Mangeoire s'y glisse gratuitement. Elle ne rallonge la
+  fournée que par ce qui dépasse — d'où `cycleFreeSlotHours`.
+
+`planDuration` en tire `enclosHours` (le total, indépendant du parc) et `wallClockHours`
+(le délai réel, jamais inférieur à la chaîne des générations : la gen 5 attend la gen 4).
+
+Le classement par défaut est **la marge par heure d'enclos**, parce que c'est l'heure d'enclos
+qui est rare. Trier sur la marge brute met les hautes générations en tête par construction :
+elles rapportent plus parce qu'elles demandent plus de travail, pas parce qu'elles sont
+meilleures. Une couleur qu'on achète ou capture ne mobilise aucun enclos et ne concourt donc
+pas pour cette ressource — à marge positive elle passe devant tout le reste.
+
+### Le niveau des parents dépend de l'objectif
+
+`optimalParentLevel` minimise les **kamas** et ne voit pas les heures d'enclos. Ce n'est pas un
+oubli qu'on puisse corriger par un plancher : le bon niveau change avec l'objectif.
+
+Trois des quatre étapes du cycle ne mobilisent qu'un des deux emplacements de jauge, et la
+Mangeoire tient dans l'autre. Leurs 35 010 points sont donc de l'XP **gratuite en durée** —
+environ le niveau 50. Monter jusque-là ne rallonge aucune fournée et augmente le taux de
+réussite, donc réduit les tentatives.
+
+Mais ça reste payant en carburant, et les tentatives ne se convertissent en heures que par
+fournées de dix : `ceil(2 × tentatives / 10)`. À un exemplaire on arrondit à la même fournée
+dans les deux cas, et la montée est payée pour rien. Mesuré sur un muldo gen 4 :
+
+| Objectif | Niveau bas | Seuil (niv 50) |
+| --- | --- | --- |
+| 1 | **+1 229 /h** | +484 /h |
+| 30 | +11 944 /h | **+14 789 /h** |
+
+D'où deux jeux d'estimations calculés en parallèle — l'un au moins cher en kamas, l'autre
+planché au seuil — que `makePlan` départage sur la marge horaire, la même mesure que le
+classement. Le régime gagnant se lit sur la ligne : le niveau des parents change avec
+l'objectif, et c'est voulu.
+
+### Combien on en veut change lequel on élève
+
+L'objectif — un exemplaire pour un succès, trente pour rentabiliser — pilote **tout le
+classement**, pas seulement le plan qu'on ouvre. Ce n'est pas un confort d'affichage : les dix
+places d'un enclos se préparent ensemble et le clonage exige deux stériles de même génération,
+si bien qu'à trente exemplaires le coût par monture s'effondre. Sur les données de test, un
+muldo gen 4 passe de 1 229 à 11 944 kamas par heure d'enclos entre 1 et 30. Figer le calcul à
+un seul exemplaire rendait invisible tout l'intérêt des séries.
+
+### Suivre un plan
+
+`breedingPlan` liste les montures de base à se procurer puis les croisements dans l'ordre.
+`breeding_projects` retient la couleur visée et la quantité, et **rien d'autre** — ni les
+étapes, ni leur état. Le reste à faire se recalcule de la cible moins l'écurie.
+
+C'est la seule façon de tenir compte de l'aléa. Un croisement échoue deux fois sur trois en
+début de partie, donc une liste d'étapes cochées une à une serait fausse dès le premier échec.
+En déduisant l'écurie **avant** de remonter aux parents, une fournée chanceuse allège toute
+l'ascendance et une fournée malchanceuse la remet au programme, sans rien de plus.
+
+Le coût d'un plan est un **majorant** : il crédite les génétons, qui sont certains, mais pas
+les bébés hors cible, dont la valeur dépend de l'hypothèse provisoire ci-dessus. Leur nombre
+est affiché pour dire de combien le coût pourrait baisser.
+
+### Les stocks
+
+Trois réserves, qui servent la même chose — savoir ce qu'un plan demande **en plus** — par
+trois chemins différents :
+
+| Stock | Table | Ce qu'il change |
+| --- | --- | --- |
+| Montures | `user_breeding_mounts` | le plan lui-même : une couleur possédée n'est plus à produire, et toute son ascendance disparaît avec elle |
+| Carburants | `user_item_stock` | ce qu'il faut débourser : les points sont déjà payés |
+| Kamas | `user_breeding_settings.kamas_available` | rien au plan, mais décide de ce qui est réalisable |
+
+Les montures sont rattachées **au joueur et non au projet** : un muldo Roux sert à des dizaines
+de couleurs, et le posséder allège tous les plans qui en demandent. Les rattacher à un projet
+obligeait à les ressaisir à chaque changement d'objectif, et deux projets concurrents auraient
+compté deux fois les mêmes bêtes.
+
+Les carburants se comptent en **points** et non en unités : une unité d'Élixir en vaut huit
+d'Extrait, et un plan ne demande ni l'un ni l'autre mais des points à transférer. La réserve
+est plafonnée à ce que le plan consomme — dix mille points d'Abreuvoir ne financent rien si le
+plan n'en demande mille.
+
+Le budget est une **contrainte**, pas un arbitrage : `planFunding` suit la dépense dans l'ordre
+d'exécution, génétons déduits au passage, et signale la première étape que l'argent ne couvre
+plus. Ce n'est pas le total qui bloque mais le point le plus tendu — et c'est là qu'il faut
+vendre ou réduire l'objectif. À 0, aucune contrainte : un budget non renseigné ne veut pas dire
+qu'on n'a rien.
+
+Le bouton **« Optimiser »** choisit la couleur la plus rentable à l'heure d'enclos *parmi
+celles qu'on peut financer*. Proposer un plan en sachant qu'il bloquera ne serait pas une
+recommandation.
 
 ### Ce que le palier de jauge change
 

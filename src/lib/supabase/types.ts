@@ -273,6 +273,12 @@ export type UserBreedingSettings = {
   breeder_level: number;
   enclos_count: number;
   kamas_per_hour: number;
+  /**
+   * Kamas engageables. Distinct de `kamas_per_hour`, qui dit ce que vaut une
+   * heure : celui-ci **contraint** le plan au lieu d'arbitrer. À 0, pas de
+   * contrainte — un budget nul voudrait dire « je ne peux rien faire ».
+   */
+  kamas_available: number;
   minutes_per_fight: number;
   net_recovery_rate: number;
   recycle_steriles: boolean;
@@ -282,9 +288,88 @@ export type UserBreedingSettings = {
   updated_at: string;
 };
 
+/** Un plan d'élevage suivi (migration 20260804160000), privé à son éleveur. */
+export type BreedingProject = {
+  id: string;
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  target_color_id: string;
+  target_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Une monture en écurie (migration 20260804210000). Ligne absente = zéro.
+ *
+ * Rattachée au joueur et non à un projet : posséder un muldo Roux allège tous
+ * les plans qui en demandent, pas seulement celui qu'on suit.
+ */
+export type UserBreedingMount = {
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  color_id: string;
+  count: number;
+  updated_at: string;
+};
+
+/** Un item en réserve — carburants d'enclos en pratique. */
+export type UserItemStock = {
+  user_id: string;
+  item_id: number;
+  quantity: number;
+  updated_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
+      breeding_projects: {
+        Row: BreedingProject;
+        Insert: {
+          id?: string;
+          user_id?: string;
+          family: BreedingProject['family'];
+          target_color_id: string;
+          target_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          target_count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_breeding_mounts: {
+        Row: UserBreedingMount;
+        Insert: {
+          user_id?: string;
+          family: UserBreedingMount['family'];
+          color_id: string;
+          count?: number;
+          updated_at?: string;
+        };
+        Update: {
+          count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_item_stock: {
+        Row: UserItemStock;
+        Insert: {
+          user_id?: string;
+          item_id: number;
+          quantity?: number;
+          updated_at?: string;
+        };
+        Update: {
+          quantity?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       breeding_color_prices: {
         Row: BreedingColorPrice;
         Insert: {
@@ -312,6 +397,7 @@ export interface Database {
           breeder_level?: number;
           enclos_count?: number;
           kamas_per_hour?: number;
+          kamas_available?: number;
           minutes_per_fight?: number;
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
@@ -323,6 +409,7 @@ export interface Database {
           breeder_level?: number;
           enclos_count?: number;
           kamas_per_hour?: number;
+          kamas_available?: number;
           minutes_per_fight?: number;
           net_recovery_rate?: number;
           recycle_steriles?: boolean;

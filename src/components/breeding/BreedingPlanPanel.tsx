@@ -1,0 +1,262 @@
+'use client';
+
+import { ListOrdered, TriangleAlert } from 'lucide-react';
+import Button from '@/components/ui/Button';
+import KamasDisplay from '@/components/ui/KamasDisplay';
+import { formatHours } from '@/lib/utils/date';
+import type { PlannedColor } from '@/lib/hooks/useBreeding';
+
+/**
+ * La marche à suivre pour produire une couleur, étape par étape.
+ *
+ * Le classement dit *quoi* élever ; ce panneau dit *comment*. Les deux ne
+ * peuvent pas être le même écran : un muldo de génération 10 demande une
+ * centaine d'exemplaires répartis sur une vingtaine de couleurs, ce qui ne tient
+ * pas dans une ligne de tableau.
+ *
+ * Le plan affiché n'est jamais figé. Il se recalcule à chaque saisie d'écurie,
+ * ce qui est la seule façon honnête de tenir compte de l'aléa : un croisement
+ * échoue souvent, et une liste d'étapes cochées une à une mentirait dès le
+ * premier échec. Ici, ce qui reste à faire est toujours « ce que je vise, moins
+ * ce que j'ai ».
+ */
+
+type Props = {
+  planned: PlannedColor;
+  colorName: string;
+  /** Nom lisible d'une couleur, le plan ne portant que des identifiants. */
+  nameOf: (colorId: string) => string;
+  mountStock: Map<string, number>;
+  onSaveMount: (colorId: string, count: number) => Promise<void>;
+  /** Enclos possédés, pour traduire les heures d'enclos en délai réel. */
+  enclosCount: number;
+  selected: boolean;
+  onSelect: () => void;
+  onAbandon: () => void;
+};
+
+const STRATEGY_LABEL = { buy: 'acheter', capture: 'capturer' } as const;
+
+const BreedingPlanPanel = ({
+  planned,
+  colorName,
+  nameOf,
+  mountStock,
+  onSaveMount,
+  enclosCount,
+  selected,
+  onSelect,
+  onAbandon,
+}: Props) => {
+  const { plan, duration, gaugeNeeds, funding } = planned;
+
+  const countField = (colorId: string) => (
+    <input
+      type="number"
+      min={0}
+      max={999}
+      value={String(mountStock.get(colorId) ?? 0)}
+      onChange={(event) =>
+        onSaveMount(colorId, Math.max(0, Math.min(999, Number(event.target.value) || 0)))
+      }
+      title="Combien j'en ai déjà en écurie"
+      className="w-16 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
+        text-dark-100 text-xs text-right transition-all hover:border-dark-500
+        focus:border-kamas/50"
+    />
+  );
+
+  const done = plan.steps.length === 0 && plan.purchases.length === 0;
+  const missingFuel = gaugeNeeds.filter((need) => need.cost > 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <ListOrdered size={14} className="text-kamas" />
+        <span className="text-xs font-semibold text-dark-200">
+          Plan pour {colorName}
+        </span>
+
+        {selected ? (
+          <button
+            type="button"
+            onClick={onAbandon}
+            className="ml-auto text-[11px] text-dark-500 hover:text-loss transition-colors
+              cursor-pointer"
+          >
+            Ce plan est sélectionné — l&apos;abandonner
+          </button>
+        ) : (
+          <Button size="sm" className="ml-auto" onClick={onSelect}>
+            Suivre ce plan
+          </Button>
+        )}
+      </div>
+
+      <p className="text-[11px] text-dark-600">
+        Saisis dans la colonne de droite ce que tu possèdes déjà : le plan se recalcule et ne
+        demande que ce qui manque. Ne compte que les montures <strong>fertiles</strong>.
+      </p>
+
+      {funding && !funding.affordable && (
+        <p className="flex items-start gap-2 text-[11px] text-amber-400/90">
+          <TriangleAlert size={13} className="shrink-0 mt-px" />
+          <span>
+            Budget dépassé de {Math.round(funding.shortfall).toLocaleString('fr-FR')} kamas
+            {funding.blockedAt &&
+              ` — ça coince ${
+                funding.blockedAt.kind === 'purchase' ? "à l'achat de" : 'au croisement de'
+              } ${nameOf(funding.blockedAt.colorId)}`}
+            . Réduis l&apos;objectif, ou vends avant d&apos;en arriver là.
+          </span>
+        </p>
+      )}
+
+      {done ? (
+        <p className="text-xs text-profit">
+          Plus rien à produire : l&apos;écurie couvre l&apos;objectif.
+        </p>
+      ) : (
+        <>
+          {plan.purchases.length > 0 && (
+            <div>
+              <p className="text-[11px] text-dark-500 mb-1.5">Montures de base à se procurer</p>
+              <div className="space-y-1">
+                {plan.purchases.map((purchase) => (
+                  <div
+                    key={purchase.colorId}
+                    className="flex items-center gap-3 text-xs px-3 py-2 rounded-xl bg-dark-800/40"
+                  >
+                    <span className="text-dark-200 flex-1 truncate">
+                      {nameOf(purchase.colorId)}
+                    </span>
+                    <span className="text-dark-500 shrink-0">
+                      gen {purchase.generation} · {STRATEGY_LABEL[purchase.strategy]}
+                    </span>
+                    <span className="text-dark-100 font-medium shrink-0 w-12 text-right">
+                      ×{purchase.count}
+                    </span>
+                    <span className="shrink-0 w-24 text-right">
+                      <KamasDisplay
+                        amount={Math.round(purchase.count * purchase.unitCost)}
+                        size="sm"
+                      />
+                    </span>
+                    {countField(purchase.colorId)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {plan.steps.length > 0 && (
+            <div>
+              <p className="text-[11px] text-dark-500 mb-1.5">Croisements, dans l&apos;ordre</p>
+              <div className="space-y-1">
+                {plan.steps.map((step, index) => (
+                  <div
+                    key={step.colorId}
+                    className="flex items-start gap-3 text-xs px-3 py-2 rounded-xl bg-dark-800/40"
+                  >
+                    <span className="text-dark-600 shrink-0 w-5">{index + 1}.</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-dark-200 truncate">
+                        {step.recipe.map(nameOf).join('  +  ')}
+                        <span className="text-dark-500"> → </span>
+                        <span className="text-dark-100 font-medium">{nameOf(step.colorId)}</span>
+                      </p>
+                      <p className="text-[10px] text-dark-500 mt-0.5">
+                        gen {step.generation} · parents niveau {step.parentLevel} ·{' '}
+                        {Math.round(step.successRate * 100)} % de réussite
+                        {step.useOptimakina && ' · Optimakina'}
+                        {step.owned > 0 && ` · ${step.owned} déjà en écurie`}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-dark-100 font-medium">×{step.count}</p>
+                      {/* Les tentatives, pas les bébés : c'est le nombre de fois
+                          qu'il faut réellement accoupler, ratés compris. */}
+                      <p className="text-[10px] text-dark-500">
+                        {step.attempts} accouplement{step.attempts > 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    {countField(step.colorId)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {missingFuel.length > 0 && (
+            <div>
+              <p className="text-[11px] text-dark-500 mb-1.5">
+                Carburant à prévoir, réserve déduite
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-dark-500">
+                {missingFuel.map((need) => (
+                  <span key={need.gauge}>
+                    {need.gauge} :{' '}
+                    <strong className="text-dark-200">
+                      {Math.round(need.points - need.covered).toLocaleString('fr-FR')} pts
+                    </strong>{' '}
+                    ({Math.round(need.cost).toLocaleString('fr-FR')} kamas, {need.fuel})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-dark-500 pt-1">
+        <span>
+          Total : <strong className="text-dark-200">{plan.crossings} accouplements</strong>
+        </span>
+        <span>
+          À débourser :{' '}
+          <strong className="text-dark-200">
+            {Math.round(funding?.cashNeeded ?? plan.totalCost).toLocaleString('fr-FR')} kamas
+          </strong>
+        </span>
+        {plan.genetons > 0 && (
+          <span>
+            Génétons rendus :{' '}
+            <strong className="text-dark-200">
+              {plan.genetons} ({Math.round(plan.genetonCredit).toLocaleString('fr-FR')} kamas,
+              déduits)
+            </strong>
+          </span>
+        )}
+        {/* Ces bébés-là existent mais ne sont pas déduits : leur valeur dépend
+            de la répartition des couleurs à l'échec, qui reste à confirmer en
+            jeu. Le coût affiché est donc un majorant. */}
+        {plan.offTargetBabies > 0 && (
+          <span>
+            Bébés hors cible : <strong className="text-dark-200">{plan.offTargetBabies}</strong>,
+            non déduits
+          </span>
+        )}
+        {duration ? (
+          <>
+            <span>
+              Enclos mobilisés :{' '}
+              <strong className="text-dark-200">
+                {formatHours(duration.enclosHours)} · {duration.batches} fournées
+              </strong>
+            </span>
+            <span>
+              Délai sur {enclosCount} enclos :{' '}
+              <strong className="text-dark-200">{formatHours(duration.wallClockHours)}</strong>
+            </span>
+          </>
+        ) : (
+          <span className="text-amber-400/80">
+            Durées indisponibles — il manque le prix d&apos;un carburant.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BreedingPlanPanel;

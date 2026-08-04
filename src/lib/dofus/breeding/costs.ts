@@ -211,8 +211,26 @@ export const mountXpForLevel = (level: number) =>
 export const MAX_MOUNT_LEVEL = 200;
 
 /**
- * Probabilité d'obtenir la génération cible : 30 % de base, plus 0,15 % par
+ * Le niveau qu'on atteint avec `points` de Mangeoire — l'inverse de
+ * `mountXpForLevel`, arrondi vers le bas.
+ */
+export const levelForMountXp = (points: number) => {
+  if (points <= 0) return 1;
+  const level = Math.pow(points / MOUNT_XP_COEFFICIENT, 1 / MOUNT_XP_EXPONENT);
+  return Math.min(MAX_MOUNT_LEVEL, Math.max(1, Math.floor(level)));
+};
+
+/**
+ * Probabilité d'obtenir la **génération** cible : 30 % de base, plus 0,15 % par
  * niveau, les niveaux des deux parents s'additionnant.
+ *
+ * Vérifié au point près en jeu. Deux parents niveau 69 donnent 50,70 %, et le
+ * jeu affiche bien 40,02 % + 5,34 % + 5,34 % pour les trois couleurs de la
+ * génération visée, soit 50,70 %. Le complément, 27,55 % + 21,75 % = 49,30 %,
+ * couvre les deux couleurs de génération inférieure.
+ *
+ * La génération, donc, et **pas la couleur** : c'est le piège de cette formule.
+ * Voir `lineageValue` pour ce que ça implique.
  *
  * Deux parents niveau 200 plafonnent à 90 % — la certitude n'est pas atteignable
  * par le niveau seul (il y faudrait 233 niveaux par parent). Les Optimakina
@@ -261,7 +279,7 @@ export type ParentLevelChoice = {
 export const optimalParentLevel = (
   parentsCost: number,
   fuelCost: number,
-  mangeoireCostPerPoint: number,
+  mangeoireCostPerMountPoint: number,
   /** Prix d'une Optimakina de la génération visée, ou `null` si on s'en passe. */
   optimakinaPrice: number | null = null,
   /**
@@ -272,7 +290,17 @@ export const optimalParentLevel = (
    * monture d'une autre couleur, qui vaut ce qu'on aurait payé pour l'obtenir.
    * L'ignorer surfacturait chaque croisement de `(1/taux − 1)` montures.
    */
-  failureValue = 0
+  failureValue = 0,
+  /**
+   * Niveau en dessous duquel il ne sert à rien de descendre.
+   *
+   * Voir `freeXpPoints` : sous ce niveau, monter les parents **ne coûte aucune
+   * heure d'enclos** et augmente le taux de réussite, donc réduit le nombre de
+   * fournées. Ce calcul-ci ne compte que des kamas et ne peut pas le voir : il
+   * choisirait le niveau 1, en payant 38 % de temps d'enclos en trop pour
+   * économiser un peu de carburant.
+   */
+  minLevel = 1
 ): ParentLevelChoice => {
   let best: ParentLevelChoice | null = null;
 
@@ -282,14 +310,16 @@ export const optimalParentLevel = (
   const optimakinaChoices =
     optimakinaPrice !== null && optimakinaPrice > 0 ? [false, true] : [false];
 
-  for (let level = 1; level <= MAX_MOUNT_LEVEL; level++) {
+  const floor = Math.min(Math.max(minLevel, 1), MAX_MOUNT_LEVEL);
+
+  for (let level = floor; level <= MAX_MOUNT_LEVEL; level++) {
     for (const useOptimakina of optimakinaChoices) {
       const successRate = Math.min(
         1,
         targetGenerationRate(level, level) + (useOptimakina ? OPTIMAKINA_BONUS : 0)
       );
       const overhead =
-        2 * mangeoireCostPerPoint * mountXpForLevel(level) +
+        2 * mangeoireCostPerMountPoint * mountXpForLevel(level) +
         fuelCost +
         (useOptimakina ? optimakinaPrice! : 0);
 
@@ -300,7 +330,17 @@ export const optimalParentLevel = (
       const netAttempt = Math.max(parentsCost + overhead - failureValue, 0);
       const expectedCost = netAttempt / successRate + failureValue;
 
-      if (!best || expectedCost < best.expectedCost) {
+      // À coût égal, le meilleur taux gagne. Le cas se présente vraiment : quand
+      // le crédit d'échec couvre toute la dépense, `netAttempt` bute sur zéro et
+      // tous les niveaux reviennent au même prix. Sans départage, le niveau 1
+      // l'emporterait par simple ordre de parcours — et il faudrait trois fois
+      // plus d'accouplements, donc trois fois plus d'heures d'enclos, pour le
+      // même résultat. Le kamas ne les distingue pas ; le temps, si.
+      if (
+        !best ||
+        expectedCost < best.expectedCost ||
+        (expectedCost === best.expectedCost && successRate > best.successRate)
+      ) {
         best = {
           level,
           useOptimakina,
@@ -320,11 +360,11 @@ const fixedParentLevel = (
   level: number,
   parentsCost: number,
   fuelCost: number,
-  mangeoireCostPerPoint: number,
+  mangeoireCostPerMountPoint: number,
   optimakinaPrice: number | null,
   failureValue = 0
 ): ParentLevelChoice => {
-  const overhead = 2 * mangeoireCostPerPoint * mountXpForLevel(level) + fuelCost;
+  const overhead = 2 * mangeoireCostPerMountPoint * mountXpForLevel(level) + fuelCost;
   const net = (extra: number) => Math.max(parentsCost + overhead + extra - failureValue, 0);
 
   const withoutRate = targetGenerationRate(level, level);
@@ -436,14 +476,18 @@ export type BreedingOptions = {
    */
   sacrificeUnitValue: number;
   /**
-   * Coût en kamas d'un point de la jauge de Mangeoire, celle qui fait monter les
-   * montures en niveau. Se déduit du meilleur carburant de Mangeoire connu :
-   * son prix divisé par ce qu'il recharge.
+   * Coût en kamas d'un point d'expérience **sur une monture** — pas d'un point
+   * de jauge, et l'écart est d'un facteur dix.
+   *
+   * La Mangeoire alimente les dix places de l'enclos d'un coup, exactement comme
+   * les jauges de stat : monter dix montures coûte ce que coûte d'en monter une.
+   * L'appelant fait donc la division par l'effectif avant d'arriver ici, comme il
+   * la fait déjà pour `fuelCostPerBaby`.
    *
    * À 0, la montée est réputée gratuite et la marge niveau 200 redevient une
    * borne haute plutôt qu'un net.
    */
-  mangeoireCostPerPoint: number;
+  mangeoireCostPerMountPoint: number;
   /**
    * Prix des Optimakina, indexés par **génération visée** (2 à 10). Une
    * Optimakina ajoute 10 points de probabilité ; le calcul ne la retient que
@@ -472,6 +516,25 @@ export type BreedingOptions = {
    * croisement isolé, non — d'où l'option.
    */
   recycleSteriles: boolean;
+  /**
+   * Points de Mangeoire qu'un cycle de fécondité absorbe **sans rien
+   * rallonger**.
+   *
+   * Trois des quatre étapes du cycle ne mobilisent qu'un des deux emplacements
+   * de jauge ; la Mangeoire occupe l'autre pendant ce temps-là. Les 35 010
+   * points de ces trois étapes sont donc de l'expérience gratuite en temps
+   * d'enclos — soit le niveau 50 environ.
+   *
+   * Ça pose un plancher au niveau des parents. En dessous, monter est gratuit en
+   * durée et augmente le taux de réussite, donc réduit le nombre de fournées :
+   * il n'y a aucune raison de s'en priver. `optimalParentLevel` ne peut pas le
+   * voir seul — il ne compte que des kamas, et la montée coûte du carburant —
+   * si bien qu'il choisissait le niveau 9 là où le 50 rend le même bébé pour
+   * 38 % d'heures d'enclos en moins.
+   *
+   * À 0, aucun plancher : le comportement d'avant, purement kamas.
+   */
+  freeXpPoints?: number;
   /**
    * Coût de capture d'**une** monture sauvage, filet compris.
    *
@@ -609,9 +672,10 @@ export const computeBreedingCosts = (
     fuelCostPerBaby,
     genetonValue,
     sacrificeUnitValue,
-    mangeoireCostPerPoint,
+    mangeoireCostPerMountPoint,
     optimakinaPrices,
     recycleSteriles,
+    freeXpPoints = 0,
     captureCost,
     neverSell = false,
   }: BreedingOptions
@@ -622,7 +686,11 @@ export const computeBreedingCosts = (
 
   // Identique pour toutes les couleurs : la courbe d'expérience ne dépend que du
   // niveau visé, pas de la rareté de la monture.
-  const levelUpCost = mountXpForLevel(MAX_MOUNT_LEVEL) * mangeoireCostPerPoint;
+  const levelUpCost = mountXpForLevel(MAX_MOUNT_LEVEL) * mangeoireCostPerMountPoint;
+
+  // Le niveau que l'expérience gratuite du cycle permet d'atteindre. Constant
+  // sur tout l'arbre : il ne dépend que du cycle, pas de la couleur.
+  const parentLevelFloor = levelForMountXp(freeXpPoints);
 
   const estimates = new Map<string, BreedingEstimate>();
   const byId = new Map(colors.map((color) => [color.id, color]));
@@ -630,16 +698,38 @@ export const computeBreedingCosts = (
   /**
    * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
    *
-   * Le bébé raté tire sa couleur dans la généalogie proche : **25 % chaque
-   * parent, 12,5 % chaque grand-parent**. Un parent pèse donc 50 % à lui seul,
-   * moitié pour lui, moitié pour ses deux ascendants — et les deux parents
-   * couvrent l'ensemble.
+   * Le bébé raté tire sa couleur dans la généalogie proche. Le modèle applique
+   * **25 % chaque parent, 12,5 % chaque grand-parent** : un parent pèse 50 % à
+   * lui seul, moitié pour lui, moitié pour ses deux ascendants.
+   *
+   * La **portée** est confirmée : le jeu ne retient qu'un niveau d'ascendance
+   * par monture, même en génération 3, donc un croisement ne peut rendre que
+   * les parents et les grands-parents. Rien de plus profond n'existe, et il n'y
+   * a rien à ajouter à ce parcours.
+   *
+   * Les **poids** restent une hypothèse. Le seul relevé dont on dispose ne les
+   * contraint pas : il portait sur des parents de génération 1, si bien que les
+   * grands-parents, de génération 2, tombaient du côté de la **réussite** et non
+   * de l'échec. Sa masse d'échec ne contenait donc que les deux parents, à
+   * 55,9 % et 44,1 % — proche d'un partage égal, le parent sans ascendance
+   * l'emportant de peu.
+   *
+   * Ce qu'il faudrait pour trancher : un croisement dont les grands-parents sont
+   * d'une génération **inférieure** à la cible, donc du côté de l'échec. C'est le
+   * cas courant dans un plan propre, et c'est justement celui que le modèle
+   * décrit.
    *
    * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
    * payer économise exactement cela. Quand un parent est acheté ou capturé, il
    * n'a pas d'ascendants dans notre plan, et sa part de grands-parents revient
-   * sur lui — ce n'est pas sa vraie généalogie, mais son coût est la meilleure
-   * approximation dont on dispose de ce que sa lignée vaut.
+   * sur lui.
+   *
+   * Limite de fond, que ce relevé met au jour : la répartition dépend de la
+   * généalogie de l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont
+   * pas la même distribution selon d'où ils viennent — celui du relevé traînait
+   * une ascendance de génération supérieure à la sienne, faute d'être issu de sa
+   * propre recette. Ce calcul-ci raisonne sur des couleurs et approxime la
+   * lignée d'un parent par sa recette ; il ne pourra jamais coller exactement.
    */
   const lineageValue = (parentId: string): number => {
     const parent = estimates.get(parentId);
@@ -715,15 +805,16 @@ export const computeBreedingCosts = (
           ? optimalParentLevel(
               parentsCost,
               fuelCost,
-              mangeoireCostPerPoint,
+              mangeoireCostPerMountPoint,
               optimakinaPrice,
-              failureValue
+              failureValue,
+              parentLevelFloor
             )
           : fixedParentLevel(
               parentLevel,
               parentsCost,
               fuelCost,
-              mangeoireCostPerPoint,
+              mangeoireCostPerMountPoint,
               optimakinaPrice,
               failureValue
             );
@@ -826,42 +917,94 @@ export const computeBreedingCosts = (
 
 export type BreedingStep = {
   colorId: string;
+  generation: number;
   recipe: BreedingRecipe;
   /** Coût d'un exemplaire. Multiplier par `count` pour le coût de l'étape. */
   cost: number;
   /** Génétons rendus par un croisement, à multiplier par `count` de même. */
   genetons: number;
   /**
-   * Combien de fois refaire ce croisement. Rarement 1 : chaque croisement
+   * Combien de bébés de cette couleur produire. Rarement 1 : chaque croisement
    * consomme deux parents, donc une couleur qui sert de parent à deux recettes
    * différentes doit être produite deux fois.
    */
   count: number;
+  /**
+   * Accouplements à tenter pour obtenir ces `count` bébés — donc plus que
+   * `count`, puisque la génération cible n'est pas garantie. C'est ce nombre-là
+   * qu'on prépare en enclos, et donc lui qui coûte du temps.
+   */
+  attempts: number;
+  /** Niveau auquel monter les deux parents, et probabilité qui en découle. */
+  parentLevel: number;
+  successRate: number;
+  useOptimakina: boolean;
+  /** Exemplaires déjà en stock, déduits de `count`. */
+  owned: number;
+};
+
+export type BreedingPurchase = {
+  colorId: string;
+  generation: number;
+  count: number;
+  unitCost: number;
+  strategy: 'buy' | 'capture';
+  owned: number;
 };
 
 export type BreedingPlan = {
   /** Les croisements à réaliser, parents avant enfants. */
   steps: BreedingStep[];
   /** Les couleurs à se procurer sans les élever, et en combien d'exemplaires. */
-  purchases: {
-    colorId: string;
-    count: number;
-    unitCost: number;
-    strategy: 'buy' | 'capture';
-  }[];
+  purchases: BreedingPurchase[];
   /** Nombre total de croisements, multiplicités comprises. */
   crossings: number;
   genetons: number;
+  /**
+   * Bébés produits hors génération cible, sur l'ensemble du plan.
+   *
+   * Ils existent bel et bien — les 30 à 90 % portent sur la couleur du bébé, pas
+   * sur sa venue au monde — mais ils ne sont **pas** déduits de `totalCost`. Leur
+   * valeur dépend de la répartition des couleurs à l'échec, qui reste
+   * provisoire ; la déduire ici propagerait cette incertitude au classement.
+   * Le coût du plan est donc un majorant, et ce nombre dit de combien.
+   */
+  offTargetBabies: number;
   /** Ce que coûtent les montures à acheter ou capturer. */
   purchasesCost: number;
   /** Montée en niveau, carburant et Optimakina de tous les croisements. */
   crossingsCost: number;
+  /** Ce que valent les génétons rendus par l'ensemble des croisements. */
+  genetonCredit: number;
   /**
    * Le coût réel du plan. À préférer au `breedCost` de la couleur cible, qui
    * ignore les multiplicités et le recyclage — il surestime dès qu'une couleur
    * sert à plusieurs recettes.
    */
   totalCost: number;
+};
+
+export type BreedingPlanOptions = {
+  /** Combien d'exemplaires de la cible produire. */
+  targetCount?: number;
+  recycleSteriles?: boolean;
+  /**
+   * Valeur d'un généton, pour créditer le plan de ceux qu'il rend.
+   *
+   * Contrairement aux bébés hors cible, ce co-produit-là est certain : il tombe
+   * à chaque naissance de la génération visée, en quantité fixée par la
+   * génération des parents. Rien d'incertain à en déduire la valeur.
+   */
+  genetonValue?: number;
+  /**
+   * Ce que l'éleveur possède déjà, par couleur.
+   *
+   * C'est ce qui rend le plan reprenable : les besoins se déduisent du stock
+   * avant de remonter aux parents, donc une fournée chanceuse allège tout
+   * l'amont et une fournée malchanceuse le laisse à refaire. Sans cela, un plan
+   * ne servirait qu'une fois, au premier croisement.
+   */
+  stock?: Map<string, number>;
 };
 
 /**
@@ -897,12 +1040,14 @@ export const breedingPlan = (
   colorId: string,
   colors: BreedingColor[],
   estimates: Map<string, BreedingEstimate>,
-  recycleSteriles = false
+  { targetCount = 1, recycleSteriles = false, genetonValue = 0, stock }: BreedingPlanOptions = {}
 ): BreedingPlan => {
   const generationOf = new Map(colors.map((color) => [color.id, color.generation]));
-  const counts = new Map<string, number>([[colorId, 1]]);
-  /** Ce qu'il faut produire, une fois le recyclage déduit du besoin brut. */
+  const counts = new Map<string, number>([[colorId, targetCount]]);
+  /** Ce qu'il faut produire, une fois le recyclage et le stock déduits. */
   const produced = new Map<string, number>();
+  /** Exemplaires pris sur le stock, gardés pour l'affichage. */
+  const fromStock = new Map<string, number>();
   /** Accouplements à réaliser, tentatives ratées comprises. */
   const attemptsBy = new Map<string, number>();
 
@@ -923,8 +1068,17 @@ export const breedingPlan = (
     // Le recyclage s'applique ici, sur le besoin de **cette** couleur, et pas
     // en facteur global : il dépend du nombre d'exemplaires, qui varie d'une
     // couleur à l'autre dans un même plan.
-    const toProduce = copiesToObtain(needed, recycleSteriles);
+    const copies = copiesToObtain(needed, recycleSteriles);
+
+    // Le stock se déduit **avant** de remonter aux parents : ce qu'on possède
+    // déjà n'a plus à être élevé, donc plus rien de son ascendance non plus.
+    // C'est tout le mécanisme de rattrapage — un plan repris après une fournée
+    // ne redemande que ce qui manque encore.
+    const owned = Math.min(stock?.get(color.id) ?? 0, copies);
+    const toProduce = copies - owned;
+    fromStock.set(color.id, owned);
     produced.set(color.id, toProduce);
+    if (toProduce === 0) continue;
 
     const estimate = estimates.get(color.id);
     if (estimate?.strategy !== 'breed' || !estimate.breedRecipe) continue;
@@ -946,28 +1100,39 @@ export const breedingPlan = (
 
   for (const [id, count] of produced) {
     const estimate = estimates.get(id);
-    if (!estimate) continue;
+    if (!estimate || count === 0) continue;
+
+    const generation = generationOf.get(id) ?? 0;
+    const owned = fromStock.get(id) ?? 0;
 
     if (estimate.strategy === 'breed' && estimate.breedRecipe) {
       steps.push({
         colorId: id,
+        generation,
         recipe: estimate.breedRecipe,
         cost: estimate.cost ?? 0,
         genetons: estimate.genetons,
         count,
+        attempts: Math.ceil(attemptsBy.get(id) ?? count),
+        parentLevel: estimate.parents?.level ?? 1,
+        successRate: estimate.parents?.successRate ?? 1,
+        useOptimakina: estimate.parents?.useOptimakina ?? false,
+        owned,
       });
     } else if (estimate.strategy === 'buy' || estimate.strategy === 'capture') {
       purchases.push({
         colorId: id,
+        generation,
         count,
         unitCost: estimate.cost ?? 0,
         strategy: estimate.strategy,
+        owned,
       });
     }
   }
 
   // Parents avant enfants : l'ordre d'exécution réel.
-  steps.sort((a, b) => (generationOf.get(a.colorId) ?? 0) - (generationOf.get(b.colorId) ?? 0));
+  steps.sort((a, b) => a.generation - b.generation || a.colorId.localeCompare(b.colorId));
   purchases.sort((a, b) => b.count * b.unitCost - a.count * a.unitCost);
 
   // Le coût du plan se recompose ici plutôt que de reprendre `breedCost` de la
@@ -983,18 +1148,306 @@ export const breedingPlan = (
     return total + step.count * (parents?.overheadCost ?? 0);
   }, 0);
 
+  // Les génétons ne tombent qu'aux naissances de la génération visée : un bébé
+  // hors cible est d'une génération que ses parents atteignent déjà, et n'en
+  // rend aucun. On compte donc sur `count`, pas sur `attempts`.
+  const genetons = steps.reduce((total, step) => total + step.genetons * step.count, 0);
+  const genetonCredit = genetons * genetonValue;
+
   return {
     steps,
     purchases,
     // Les accouplements réellement à faire, ratés compris — donc plus nombreux
     // que les bébés obtenus. `overheadCost` porte déjà la division par le taux
     // de réussite, d'où un coût calculé sur `count` et non sur les tentatives.
-    crossings: Math.ceil(
-      steps.reduce((total, step) => total + (attemptsBy.get(step.colorId) ?? step.count), 0)
-    ),
-    genetons: steps.reduce((total, step) => total + step.genetons * step.count, 0),
+    crossings: steps.reduce((total, step) => total + step.attempts, 0),
+    genetons,
+    offTargetBabies: steps.reduce((total, step) => total + (step.attempts - step.count), 0),
     purchasesCost,
     crossingsCost,
-    totalCost: purchasesCost + crossingsCost,
+    genetonCredit,
+    totalCost: purchasesCost + crossingsCost - genetonCredit,
   };
+};
+
+/**
+ * Ce que l'enclos sait faire, réduit à ce dont la durée d'un plan dépend.
+ *
+ * Vient de `computeSupplyCosts`, qui l'a lu sur les carburants tarifés.
+ */
+export type EnclosTiming = {
+  /** Heures d'un cycle de fécondité, pour une fournée entière d'enclos. */
+  cycleHours: number;
+  /** Heures du cycle où le second emplacement reste libre pour la Mangeoire. */
+  freeSlotHours: number;
+  /** Débit de la Mangeoire une fois son carburant choisi. */
+  mangeoirePointsPerHour: number;
+  /** Places par enclos — dix en jeu, et c'est ce qui fait l'intérêt des fournées. */
+  slots?: number;
+  /** Enclos menés de front. Ne change pas le total, seulement le délai. */
+  enclosCount: number;
+};
+
+export type PlanDuration = {
+  /**
+   * Heures d'enclos consommées par le plan, tous enclos confondus.
+   *
+   * C'est **la** ressource rare de l'élevage : elle ne dépend pas du nombre
+   * d'enclos possédés, seulement de ce qu'il y a à faire. D'où son rôle de
+   * dénominateur pour la rentabilité horaire.
+   */
+  enclosHours: number;
+  /**
+   * Le délai incompressible, même avec une infinité d'enclos : une génération
+   * ne peut commencer qu'une fois la précédente sortie.
+   */
+  criticalPathHours: number;
+  /** Le délai réel, avec le nombre d'enclos de l'éleveur. */
+  wallClockHours: number;
+  /** Fournées d'enclos à mener, toutes générations confondues. */
+  batches: number;
+};
+
+/**
+ * Heures d'enclos pour amener une fournée de montures au niveau `level` **et** à
+ * la fécondité.
+ *
+ * Les deux ne s'additionnent pas : trois des quatre étapes du cycle
+ * n'occupent qu'un emplacement de jauge, et la Mangeoire s'y glisse
+ * gratuitement. Elle ne rallonge la fournée que par ce qui dépasse.
+ */
+export const batchHoursForLevel = (
+  level: number,
+  { cycleHours, freeSlotHours, mangeoirePointsPerHour }: EnclosTiming
+): number => {
+  if (mangeoirePointsPerHour <= 0) return Infinity;
+  const xpHours = mountXpForLevel(level) / mangeoirePointsPerHour;
+  return cycleHours + Math.max(0, xpHours - freeSlotHours);
+};
+
+/**
+ * Le temps qu'un plan demande, en heures d'enclos et en délai.
+ *
+ * Ce qui coûte du temps n'est pas le croisement lui-même — il est instantané —
+ * mais la **préparation de ses deux parents** : les monter au niveau retenu,
+ * puis leur faire faire un cycle de fécondité. Un accouplement raté ayant
+ * consommé ses parents tout autant qu'un réussi, c'est bien sur les tentatives
+ * que le temps se compte, pas sur les bébés obtenus.
+ *
+ * Les dix places d'un enclos se préparent ensemble : vingt parents ne coûtent
+ * pas dix fois deux parents, mais deux fournées. C'est ce qui rend les grosses
+ * séries proportionnellement plus rapides, et donc les hautes générations moins
+ * pénalisées qu'il n'y paraît.
+ */
+export const planDuration = (
+  plan: BreedingPlan,
+  timing: EnclosTiming,
+  /**
+   * Monter les montures finales avant de les vendre, le cas échéant.
+   *
+   * À ne pas oublier quand la sortie retenue est la vente niveau 200 : la
+   * montée coûte des centaines d'heures de Mangeoire, bien plus qu'un cycle de
+   * fécondité. L'omettre ferait passer cette sortie pour gratuite en temps
+   * alors qu'elle est de loin la plus longue.
+   *
+   * Pas de cycle de fécondité ici : une monture qu'on vend n'a pas à être
+   * fécondée, seulement montée.
+   */
+  finalLevelUp: { count: number; level: number } | null = null
+): PlanDuration => {
+  const slots = timing.slots ?? 10;
+  const enclos = Math.max(timing.enclosCount, 1);
+
+  let enclosHours = 0;
+  let batches = 0;
+  /** Le plus long chemin de dépendances : une fournée par génération au moins. */
+  const longestByGeneration = new Map<number, number>();
+
+  for (const step of plan.steps) {
+    const perBatch = batchHoursForLevel(step.parentLevel, timing);
+    // Deux parents par accouplement, préparés dans la limite des places.
+    const stepBatches = Math.ceil((2 * step.attempts) / slots);
+
+    enclosHours += stepBatches * perBatch;
+    batches += stepBatches;
+
+    longestByGeneration.set(
+      step.generation,
+      Math.max(longestByGeneration.get(step.generation) ?? 0, perBatch)
+    );
+  }
+
+  let criticalPathHours = [...longestByGeneration.values()].reduce(
+    (total, hours) => total + hours,
+    0
+  );
+
+  if (finalLevelUp && finalLevelUp.count > 0 && timing.mangeoirePointsPerHour > 0) {
+    const hours = mountXpForLevel(finalLevelUp.level) / timing.mangeoirePointsPerHour;
+    const finalBatches = Math.ceil(finalLevelUp.count / slots);
+    enclosHours += finalBatches * hours;
+    batches += finalBatches;
+    // La montée vient après le dernier croisement : elle rallonge le chemin.
+    criticalPathHours += hours;
+  }
+
+  return {
+    enclosHours,
+    criticalPathHours,
+    // Plus d'enclos raccourcit le délai, mais jamais en deçà de la chaîne des
+    // générations : la gen 5 attend la gen 4, quel que soit le parc.
+    wallClockHours: Math.max(enclosHours / enclos, criticalPathHours),
+    batches,
+  };
+};
+
+/** Ce qu'une jauge demande à un plan, et ce que le stock en couvre. */
+export type GaugeRequirement = {
+  gauge: string;
+  /** Points à transférer sur l'ensemble du plan. */
+  points: number;
+  /** Points déjà en réserve, plafonnés à ce que le plan consomme. */
+  covered: number;
+  costPerPoint: number;
+  /** Ce que coûtent les points restants. */
+  cost: number;
+  /** Ce que la réserve dispense de racheter. */
+  credit: number;
+  /** Le carburant retenu, pour dire lequel racheter. */
+  fuel: string;
+};
+
+/**
+ * Ce qu'un plan demande à chaque jauge, une fois le stock déduit.
+ *
+ * Compté en **points** et non en unités : une unité d'Élixir en vaut huit
+ * d'Extrait, donc un stock ne se compare à un besoin que dans cette monnaie-là.
+ *
+ * Les fournées portent le calcul, pas les montures : l'enclos transfère à ses
+ * dix places d'un coup, donc préparer dix parents coûte le même carburant qu'en
+ * préparer un. C'est ce qui rend les objectifs élevés proportionnellement moins
+ * chers, et ce qu'un compte par monture raterait.
+ */
+export const planGaugeNeeds = (
+  plan: BreedingPlan,
+  timing: Pick<EnclosTiming, 'slots'>,
+  cycleGauges: { gauge: string; pointsPerBatch: number; costPerPoint: number; fuel: string }[],
+  mangeoire: { gauge: string; costPerPoint: number; fuel: string } | null,
+  /** Points déjà en réserve, par jauge. */
+  ownedPoints: Map<string, number> = new Map()
+): GaugeRequirement[] => {
+  const slots = timing.slots ?? 10;
+  const needs = new Map<string, { points: number; costPerPoint: number; fuel: string }>();
+
+  const add = (gauge: string, points: number, costPerPoint: number, fuel: string) => {
+    const current = needs.get(gauge);
+    needs.set(gauge, { points: (current?.points ?? 0) + points, costPerPoint, fuel });
+  };
+
+  for (const step of plan.steps) {
+    const batches = Math.ceil((2 * step.attempts) / slots);
+
+    for (const gauge of cycleGauges) {
+      add(gauge.gauge, batches * gauge.pointsPerBatch, gauge.costPerPoint, gauge.fuel);
+    }
+    // La Mangeoire dépend du niveau visé, qui change d'un croisement à l'autre.
+    if (mangeoire) {
+      add(
+        mangeoire.gauge,
+        batches * mountXpForLevel(step.parentLevel),
+        mangeoire.costPerPoint,
+        mangeoire.fuel
+      );
+    }
+  }
+
+  return [...needs].map(([gauge, { points, costPerPoint, fuel }]) => {
+    // Le stock ne vaut que ce que le plan en consomme : dix mille points
+    // d'Abreuvoir en réserve ne financent rien si le plan n'en demande mille.
+    const covered = Math.min(ownedPoints.get(gauge) ?? 0, points);
+    return {
+      gauge,
+      points,
+      covered,
+      costPerPoint,
+      cost: (points - covered) * costPerPoint,
+      credit: covered * costPerPoint,
+      fuel,
+    };
+  });
+};
+
+export type PlanFunding = {
+  budget: number;
+  /**
+   * Ce qu'il faut sortir en kamas, réserves déduites.
+   *
+   * Le carburant déjà en réserve n'est pas une dépense : il a été payé. Les
+   * montures possédées, elles, ne comptent déjà plus — le plan ne les demande
+   * plus du tout.
+   */
+  cashNeeded: number;
+  affordable: boolean;
+  /** Ce qui manque au pire moment, ou 0 si le budget tient. */
+  shortfall: number;
+  /**
+   * La première étape que le budget ne couvre plus.
+   *
+   * Un plan se paie dans l'ordre, et les génétons rentrent en cours de route :
+   * ce n'est donc pas le total qui bloque mais le point le plus tendu. Dire
+   * *où* ça coince vaut mieux que dire que ça coince — c'est là qu'il faut
+   * vendre, ou réduire l'objectif.
+   */
+  blockedAt: { kind: 'purchase' | 'crossing'; colorId: string } | null;
+};
+
+/**
+ * Si le budget tient le plan, et où il lâche sinon.
+ *
+ * Les dépenses se suivent dans l'ordre d'exécution : d'abord les montures de
+ * base, puis les croisements par génération. Les génétons se déduisent au
+ * passage, puisqu'ils tombent à chaque naissance et se revendent aussitôt.
+ *
+ * Un budget de 0 vaut « pas de contrainte » plutôt que « rien n'est possible » :
+ * c'est la valeur par défaut, et refuser tous les plans à un éleveur qui n'a
+ * simplement pas renseigné son budget serait absurde.
+ */
+export const planFunding = (
+  plan: BreedingPlan,
+  estimates: Map<string, BreedingEstimate>,
+  budget: number,
+  { genetonValue = 0, gaugeCredit = 0 }: { genetonValue?: number; gaugeCredit?: number } = {}
+): PlanFunding => {
+  const cashNeeded = Math.max(plan.totalCost - gaugeCredit, 0);
+  if (budget <= 0) {
+    return { budget, cashNeeded, affordable: true, shortfall: 0, blockedAt: null };
+  }
+
+  // Le carburant en réserve dispense d'autant de dépense : pour le suivi de
+  // trésorerie, c'est équivalent à disposer de ces kamas-là en plus.
+  let remaining = budget + gaugeCredit;
+  let worst = 0;
+  let blockedAt: PlanFunding['blockedAt'] = null;
+
+  const spend = (amount: number, at: NonNullable<PlanFunding['blockedAt']>) => {
+    remaining -= amount;
+    if (remaining < 0 && -remaining > worst) {
+      worst = -remaining;
+      blockedAt = at;
+    }
+  };
+
+  for (const purchase of plan.purchases) {
+    spend(purchase.count * purchase.unitCost, { kind: 'purchase', colorId: purchase.colorId });
+  }
+
+  for (const step of plan.steps) {
+    const overhead = (estimates.get(step.colorId)?.parents?.overheadCost ?? 0) * step.count;
+    spend(overhead - step.genetons * step.count * genetonValue, {
+      kind: 'crossing',
+      colorId: step.colorId,
+    });
+  }
+
+  return { budget, cashNeeded, affordable: worst === 0, shortfall: worst, blockedAt };
 };

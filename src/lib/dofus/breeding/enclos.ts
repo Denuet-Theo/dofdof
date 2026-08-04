@@ -24,6 +24,14 @@
 /** Une jauge d'enclos est pleine à 100 000. */
 export const GAUGE_MAX = 100_000;
 
+/**
+ * Places d'un enclos.
+ *
+ * Décide de tout ce qui se compte en fournées : le transfert se fait au niveau
+ * de l'enclos, donc dix montures préparées ensemble coûtent ce qu'en coûte une.
+ */
+export const ENCLOS_SLOTS = 10;
+
 /** Intervalle entre deux transferts, en secondes. */
 const TICK_SECONDS = 10;
 

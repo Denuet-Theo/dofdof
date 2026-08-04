@@ -1364,7 +1364,19 @@ export const planDuration = (
    * Pas de cycle de fécondité ici : une monture qu'on vend n'a pas à être
    * fécondée, seulement montée.
    */
-  finalLevelUp: { count: number; level: number } | null = null
+  finalLevelUp: { count: number; level: number } | null = null,
+  /**
+   * Tours de cycles que chaque étape demande réellement, par couleur produite.
+   *
+   * Sans ce compte, le chemin critique vaut une fournée par génération, ce qui
+   * suppose tous les parents d'une étape préparables de front. C'est faux dès
+   * que l'écurie est courte sur l'un d'eux : les manquants viennent du clonage
+   * des stériles de la vague précédente, et un clone sort les jauges vides, donc
+   * refait un cycle entier. Ces tours-là s'ajoutent, ils ne se recouvrent pas.
+   *
+   * Voir `planWaves`. Absent, on retombe sur un tour par étape.
+   */
+  waveCounts: Map<string, number> | null = null
 ): PlanDuration => {
   const slots = timing.slots ?? 10;
   const enclos = Math.max(timing.enclosCount, 1);
@@ -1382,9 +1394,14 @@ export const planDuration = (
     enclosHours += stepBatches * perBatch;
     batches += stepBatches;
 
+    // Les vagues d'une étape s'enchaînent, faute de quoi le clonage qui les
+    // sépare n'aurait pas lieu d'être ; celles de deux étapes d'une même
+    // génération se mènent en parallèle, tant que le parc suit.
+    const rounds = waveCounts?.get(step.colorId) ?? 1;
+
     longestByGeneration.set(
       step.generation,
-      Math.max(longestByGeneration.get(step.generation) ?? 0, perBatch)
+      Math.max(longestByGeneration.get(step.generation) ?? 0, rounds * perBatch)
     );
   }
 

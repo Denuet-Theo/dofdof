@@ -7,6 +7,7 @@ import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
 import BreedingPlanPanel from '@/components/breeding/BreedingPlanPanel';
 import { formatHours } from '@/lib/utils/date';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
+import type { Wave } from '@/lib/dofus/breeding/waves';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
 const STRATEGY_LABEL = {
@@ -36,6 +37,8 @@ type Props = {
   enclosCount: number;
   /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
   targetCount: number;
+  /** Le programme des fournées, pour le seul plan suivi. */
+  waves: Wave[] | null;
   /** Le plan sélectionné, s'il porte sur cette couleur. */
   selected: boolean;
   onSelect: () => void;
@@ -50,6 +53,7 @@ const ColorRow = ({
   onSaveMount,
   enclosCount,
   targetCount,
+  waves,
   selected,
   onSelect,
   onAbandon,
@@ -232,6 +236,7 @@ const ColorRow = ({
                 onSaveMount={onSaveMount}
                 enclosCount={enclosCount}
                 targetCount={targetCount}
+                waves={waves}
                 selected={selected}
                 onSelect={onSelect}
                 onAbandon={onAbandon}

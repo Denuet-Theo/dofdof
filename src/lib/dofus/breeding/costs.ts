@@ -221,8 +221,16 @@ export const levelForMountXp = (points: number) => {
 };
 
 /**
- * Probabilité d'obtenir la génération cible : 30 % de base, plus 0,15 % par
+ * Probabilité d'obtenir la **génération** cible : 30 % de base, plus 0,15 % par
  * niveau, les niveaux des deux parents s'additionnant.
+ *
+ * Vérifié au point près en jeu. Deux parents niveau 69 donnent 50,70 %, et le
+ * jeu affiche bien 40,02 % + 5,34 % + 5,34 % pour les trois couleurs de la
+ * génération visée, soit 50,70 %. Le complément, 27,55 % + 21,75 % = 49,30 %,
+ * couvre les deux couleurs de génération inférieure.
+ *
+ * La génération, donc, et **pas la couleur** : c'est le piège de cette formule.
+ * Voir `lineageValue` pour ce que ça implique.
  *
  * Deux parents niveau 200 plafonnent à 90 % — la certitude n'est pas atteignable
  * par le niveau seul (il y faudrait 233 niveaux par parent). Les Optimakina
@@ -686,16 +694,38 @@ export const computeBreedingCosts = (
   /**
    * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
    *
-   * Le bébé raté tire sa couleur dans la généalogie proche : **25 % chaque
-   * parent, 12,5 % chaque grand-parent**. Un parent pèse donc 50 % à lui seul,
-   * moitié pour lui, moitié pour ses deux ascendants — et les deux parents
-   * couvrent l'ensemble.
+   * Le bébé raté tire sa couleur dans la généalogie proche. Le modèle applique
+   * **25 % chaque parent, 12,5 % chaque grand-parent** : un parent pèse 50 % à
+   * lui seul, moitié pour lui, moitié pour ses deux ascendants.
+   *
+   * La **portée** est confirmée : le jeu ne retient qu'un niveau d'ascendance
+   * par monture, même en génération 3, donc un croisement ne peut rendre que
+   * les parents et les grands-parents. Rien de plus profond n'existe, et il n'y
+   * a rien à ajouter à ce parcours.
+   *
+   * Les **poids** restent une hypothèse. Le seul relevé dont on dispose ne les
+   * contraint pas : il portait sur des parents de génération 1, si bien que les
+   * grands-parents, de génération 2, tombaient du côté de la **réussite** et non
+   * de l'échec. Sa masse d'échec ne contenait donc que les deux parents, à
+   * 55,9 % et 44,1 % — proche d'un partage égal, le parent sans ascendance
+   * l'emportant de peu.
+   *
+   * Ce qu'il faudrait pour trancher : un croisement dont les grands-parents sont
+   * d'une génération **inférieure** à la cible, donc du côté de l'échec. C'est le
+   * cas courant dans un plan propre, et c'est justement celui que le modèle
+   * décrit.
    *
    * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
    * payer économise exactement cela. Quand un parent est acheté ou capturé, il
    * n'a pas d'ascendants dans notre plan, et sa part de grands-parents revient
-   * sur lui — ce n'est pas sa vraie généalogie, mais son coût est la meilleure
-   * approximation dont on dispose de ce que sa lignée vaut.
+   * sur lui.
+   *
+   * Limite de fond, que ce relevé met au jour : la répartition dépend de la
+   * généalogie de l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont
+   * pas la même distribution selon d'où ils viennent — celui du relevé traînait
+   * une ascendance de génération supérieure à la sienne, faute d'être issu de sa
+   * propre recette. Ce calcul-ci raisonne sur des couleurs et approxime la
+   * lignée d'un parent par sa recette ; il ne pourra jamais coller exactement.
    */
   const lineageValue = (parentId: string): number => {
     const parent = estimates.get(parentId);

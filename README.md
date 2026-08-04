@@ -283,7 +283,7 @@ Quatre points valent d'être connus avant de toucher au calcul :
 
 | Mécanique | Formule | Origine |
 | --- | --- | --- |
-| Réussite | `30 % + 0,15 % × (niveau A + niveau B)`, 90 % au plafond | guide, recoupé sur son exemple |
+| Réussite (génération) | `30 % + 0,15 % × (niveau A + niveau B)`, 90 % au plafond | guide, **vérifié au point près en jeu** |
 | XP monture | `3,795 × niveau^2,329` points de Mangeoire | 5 relevés en jeu, écart max 0,0008 % |
 | Transfert de jauge | 10/20/30/40 points par 10 s selon le palier | relevé en jeu, reproduit les 17h49 de vidange |
 | Génétons | 1/2/4/8/15/30/60/120/250 par génération de parent | guide |
@@ -294,6 +294,30 @@ Quatre points valent d'être connus avant de toucher au calcul :
 Le taux de réussite dépend du niveau des **montures**, pas de celui de l'Éleveur — lequel ne
 sert qu'à débloquer les enclos.
 
+Ce taux porte sur la **génération**, pas sur la couleur, et la nuance n'est pas académique.
+Relevé en jeu, deux parents niveau 69 croisant Doré (pur) × Pourpre (issu d'Ébène-Orchidée et
+Indigo-Pourpre) :
+
+| Issue | Génération | Probabilité |
+| --- | --- | --- |
+| Doré-Pourpre — la combinaison visée | 2 | 40,02 % |
+| Indigo-Pourpre — grand-parent | 2 | 5,34 % |
+| Ébène-Orchidée — grand-parent | 2 | 5,34 % |
+| Doré — parent | 1 | 27,55 % |
+| Pourpre — parent | 1 | 21,75 % |
+
+Les trois couleurs de génération 2 totalisent **50,70 %**, soit exactement
+`30 % + 0,15 % × 138`. La formule est juste au point près ; ce qu'elle ne dit pas, c'est que la
+génération cible peut se présenter sous **plusieurs couleurs** quand un grand-parent s'y
+trouve déjà.
+
+Le calcul n'en souffre pas, mais pour une raison qu'il faut connaître : dans un plan propre,
+chaque monture est élevée selon sa recette, donc les générations décroissent strictement en
+remontant l'arbre et aucun grand-parent ne peut être de la génération visée. La situation
+ci-dessus vient de ce que le Pourpre est lui-même un bébé hors cible, réutilisé comme parent —
+il traîne une ascendance de génération **supérieure** à la sienne. Réemployer ses ratés, c'est
+donc sortir du régime que `successRate` modélise.
+
 Trois hypothèses ne sont pas vérifiées, et toutes trois sont signalées dans le code :
 
 - **la progression est proportionnelle aux points transférés** — tout le modèle de durée en
@@ -301,10 +325,29 @@ Trois hypothèses ne sont pas vérifiées, et toutes trois sont signalées dans 
 - **les deux dernières stats montent vraiment en parallèle**, ce qui raccourcit le cycle de
   20 000 points (5 h 33 au palier Extrait). Mesurable : un cycle complet doit prendre 15 h 17
   à ce palier, pas 20 h 50 ;
-- **la répartition des couleurs d'un bébé hors cible** (25 % chaque parent, 12,5 % chaque
-  grand-parent), provisoire. Elle est trop généreuse : elle produit des coûts unitaires
-  négatifs en haute génération et pousse l'optimiseur vers des parents de bas niveau, donc
-  vers beaucoup de tentatives bon marché.
+- **les poids de la répartition d'un bébé hors cible** (25 % chaque parent, 12,5 % chaque
+  grand-parent) — mesurés faux, voir ci-dessous, mais pas encore remplacés.
+
+### La couleur d'un bébé hors cible
+
+Un accouplement produit toujours un bébé ; le taux ci-dessus porte sur sa génération. Sa
+**portée** est établie : le jeu ne retient qu'un niveau d'ascendance par monture, même en
+génération 3, donc un croisement ne peut rendre que les parents et les grands-parents. Le
+parcours de `lineageValue` s'arrête au bon endroit.
+
+Les **poids** (25 % chaque parent, 12,5 % chaque grand-parent) restent une hypothèse. Le relevé
+ci-dessus ne les contraint pas : ses parents étaient de génération 1, si bien que les
+grands-parents, de génération 2, tombaient du côté de la réussite. Sa masse d'échec ne
+contenait que les deux parents, à 55,9 % et 44,1 %.
+
+Pour trancher il faut un croisement dont les grands-parents sont d'une génération
+**inférieure** à la cible, donc du côté de l'échec — le cas courant dans un plan propre, et
+celui que le modèle décrit.
+
+Limite de fond mise au jour par cette mesure : la répartition dépend de la généalogie de
+l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont pas la même distribution selon
+d'où ils viennent. Le calcul raisonne sur des couleurs et approxime la lignée d'un parent par
+sa recette ; il ne collera jamais exactement.
 
 ### Le temps, et pourquoi il classe mieux que la marge
 

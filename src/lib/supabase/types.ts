@@ -282,9 +282,59 @@ export type UserBreedingSettings = {
   updated_at: string;
 };
 
+/** Un plan d'élevage suivi (migration 20260804160000), privé à son éleveur. */
+export type BreedingProject = {
+  id: string;
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  target_color_id: string;
+  target_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Ce qu'un éleveur possède déjà pour un projet donné. Ligne absente = zéro. */
+export type BreedingProjectStock = {
+  project_id: string;
+  color_id: string;
+  count: number;
+  updated_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
+      breeding_projects: {
+        Row: BreedingProject;
+        Insert: {
+          id?: string;
+          user_id?: string;
+          family: BreedingProject['family'];
+          target_color_id: string;
+          target_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          target_count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      breeding_project_stock: {
+        Row: BreedingProjectStock;
+        Insert: {
+          project_id: string;
+          color_id: string;
+          count?: number;
+          updated_at?: string;
+        };
+        Update: {
+          count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       breeding_color_prices: {
         Row: BreedingColorPrice;
         Insert: {

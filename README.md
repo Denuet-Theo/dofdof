@@ -213,8 +213,9 @@ is an opt-in filter at query time. (There is no cosmetic item type in this datas
 ## Élevage
 
 L'écran `/breeding` classe les 306 couleurs de monture (66 dragodindes, 120 muldos,
-120 volkornes) par marge, en arbitrant pour chacune entre **acheter**, **capturer** et
-**élever**.
+120 volkornes) par **marge horaire**, en arbitrant pour chacune entre **acheter**,
+**capturer** et **élever**. Chaque couleur qu'on élève ouvre son plan complet, étape par
+étape, avec un suivi de la progression.
 
 ### D'où viennent les arbres de croisement
 
@@ -293,9 +294,61 @@ Quatre points valent d'être connus avant de toucher au calcul :
 Le taux de réussite dépend du niveau des **montures**, pas de celui de l'Éleveur — lequel ne
 sert qu'à débloquer les enclos.
 
-Une seule hypothèse n'est pas vérifiée, et elle est signalée dans le code : que la progression
-d'une monture soit strictement proportionnelle aux points transférés. Tout le reste vient
-d'un relevé en jeu ou du guide.
+Trois hypothèses ne sont pas vérifiées, et toutes trois sont signalées dans le code :
+
+- **la progression est proportionnelle aux points transférés** — tout le modèle de durée en
+  dépend ;
+- **les deux dernières stats montent vraiment en parallèle**, ce qui raccourcit le cycle de
+  20 000 points (5 h 33 au palier Extrait). Mesurable : un cycle complet doit prendre 15 h 17
+  à ce palier, pas 20 h 50 ;
+- **la répartition des couleurs d'un bébé hors cible** (25 % chaque parent, 12,5 % chaque
+  grand-parent), provisoire. Elle est trop généreuse : elle produit des coûts unitaires
+  négatifs en haute génération et pousse l'optimiseur vers des parents de bas niveau, donc
+  vers beaucoup de tentatives bon marché.
+
+### Le temps, et pourquoi il classe mieux que la marge
+
+Ce qui coûte du temps n'est pas le croisement — il est instantané — mais la **préparation de
+ses deux parents** : les monter au niveau retenu, puis leur faire faire un cycle de fécondité.
+Un accouplement raté ayant consommé ses parents autant qu'un réussi, le temps se compte sur
+les *tentatives*, pas sur les bébés obtenus.
+
+Deux effets rendent le calcul non trivial, et les ignorer fausse tout dans le même sens :
+
+- **Les dix places d'un enclos se préparent ensemble.** Vingt parents coûtent deux fournées,
+  pas dix fois deux parents. C'est ce qui rend les grosses séries proportionnellement plus
+  rapides.
+- **Montée et cycle ne s'additionnent pas.** Trois des quatre étapes du cycle n'occupent qu'un
+  des deux emplacements de jauge, et la Mangeoire s'y glisse gratuitement. Elle ne rallonge la
+  fournée que par ce qui dépasse — d'où `cycleFreeSlotHours`.
+
+`planDuration` en tire `enclosHours` (le total, indépendant du parc) et `wallClockHours`
+(le délai réel, jamais inférieur à la chaîne des générations : la gen 5 attend la gen 4).
+
+Le classement par défaut est **la marge par heure d'enclos**, parce que c'est l'heure d'enclos
+qui est rare. Trier sur la marge brute met les hautes générations en tête par construction :
+elles rapportent plus parce qu'elles demandent plus de travail, pas parce qu'elles sont
+meilleures. Une couleur qu'on achète ou capture ne mobilise aucun enclos et ne concourt donc
+pas pour cette ressource — à marge positive elle passe devant tout le reste.
+
+Attention en revanche : `optimalParentLevel` minimise les **kamas** et ne connaît le temps que
+via `kamas_per_hour`. À 0, monter les parents paraît presque gratuit et l'optimiseur préfère
+multiplier les tentatives — ce qui allonge beaucoup les plans sans que le coût le dise.
+
+### Suivre un plan
+
+`breedingPlan` liste les montures de base à se procurer puis les croisements dans l'ordre.
+`breeding_projects` / `breeding_project_stock` gardent l'avancement, mais **ne stockent ni les
+étapes ni leur état** : le reste à faire se recalcule de la cible moins le stock.
+
+C'est la seule façon de tenir compte de l'aléa. Un croisement échoue deux fois sur trois en
+début de partie, donc une liste d'étapes cochées une à une serait fausse dès le premier échec.
+En déduisant le stock **avant** de remonter aux parents, une fournée chanceuse allège toute
+l'ascendance et une fournée malchanceuse la remet au programme, sans rien de plus.
+
+Le coût d'un plan est un **majorant** : il crédite les génétons, qui sont certains, mais pas
+les bébés hors cible, dont la valeur dépend de l'hypothèse provisoire ci-dessus. Leur nombre
+est affiché pour dire de combien le coût pourrait baisser.
 
 ### Ce que le palier de jauge change
 

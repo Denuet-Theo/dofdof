@@ -1,3 +1,17 @@
+/**
+ * Une durée d'enclos, en jours au-delà de 48 h.
+ *
+ * Les cycles se comptent en heures, mais monter une monture au niveau 200 en
+ * demande des centaines et un plan de haute génération des milliers : « 2 891h »
+ * ne se lit pas, « 120 j » si.
+ */
+export function formatHours(hours: number): string {
+  if (!Number.isFinite(hours)) return '—';
+  if (hours >= 48) return `${Math.round(hours / 24)} j`;
+  const whole = Math.floor(hours);
+  return `${whole}h${String(Math.round((hours - whole) * 60)).padStart(2, '0')}`;
+}
+
 export function formatTimeAgo(dateString: string | null | undefined): string {
   if (!dateString) return 'Jamais';
 

@@ -19,8 +19,14 @@ import {
 import {
   computeBreedingCosts,
   bestGenetonValue,
+  breedingPlan,
+  planDuration,
+  MAX_MOUNT_LEVEL,
   type BreedingEstimate,
+  type BreedingPlan,
   type ColorPrice,
+  type EnclosTiming,
+  type PlanDuration,
 } from '@/lib/dofus/breeding/costs';
 
 /**
@@ -52,7 +58,44 @@ export type BreedingRow = {
   itemId: number | null;
   source: 'game' | 'site' | null;
   estimate: BreedingEstimate;
+  /**
+   * Le plan complet, multiplicités et recyclage compris. `null` pour les
+   * couleurs qu'il vaut mieux acheter ou capturer : il n'y a alors rien à
+   * élever, donc pas de plan.
+   */
+  plan: BreedingPlan | null;
+  duration: PlanDuration | null;
+  /**
+   * Gain net du plan : ce que la sortie retenue rapporte, moins ce que le plan
+   * a réellement coûté.
+   *
+   * Se calcule sur `plan.totalCost` et non sur `estimate.cost` : celui-ci compte
+   * chaque exemplaire au prix fort, en ignorant qu'une couleur servant à
+   * plusieurs recettes n'est produite qu'une fois de plus, pas deux.
+   */
+  planMargin: number | null;
+  /**
+   * Kamas par heure d'enclos — le seul classement qui réponde à « est-ce que ça
+   * vaut le coup ».
+   *
+   * Une marge brute favorise mécaniquement les hautes générations : elles
+   * rapportent plus parce qu'elles coûtent plus de travail, pas parce qu'elles
+   * sont meilleures. Rapporter au temps d'enclos, qui est la ressource
+   * réellement contrainte, remet une gen 6 rapide au-dessus d'une gen 10 qui
+   * mobilise le parc trois fois plus longtemps.
+   *
+   * `null` quand la couleur ne s'élève pas : elle ne consomme alors aucune heure
+   * d'enclos, et diviser par zéro n'aurait pas de sens.
+   */
+  marginPerHour: number | null;
 };
+
+/** Le plan d'une couleur, recalculé à la demande avec un stock donné. */
+export type MakePlan = (
+  colorId: string,
+  targetCount?: number,
+  stock?: Map<string, number>
+) => { plan: BreedingPlan; duration: PlanDuration | null } | null;
 
 export const useBreeding = (family: FamilyId) => {
   const [prices, setPrices] = useState<Map<string, ColorPrice>>(new Map());
@@ -148,10 +191,31 @@ export const useBreeding = (family: FamilyId) => {
     [tree, fuelItems, itemPrices, settings]
   );
 
-  const rows = useMemo<BreedingRow[]>(() => {
-    if (!tree) return [];
+  /**
+   * Ce que l'enclos sait faire, une fois les carburants tarifés. `null` tant
+   * qu'il en manque : une durée déduite de prix partiels serait fausse sans le
+   * dire.
+   */
+  const timing = useMemo<EnclosTiming | null>(() => {
+    if (
+      supplies?.cycleHours == null ||
+      supplies.cycleFreeSlotHours == null ||
+      !supplies.mangeoirePointsPerHour
+    ) {
+      return null;
+    }
+    return {
+      cycleHours: supplies.cycleHours,
+      freeSlotHours: supplies.cycleFreeSlotHours,
+      mangeoirePointsPerHour: supplies.mangeoirePointsPerHour,
+      enclosCount: settings.enclos_count,
+    };
+  }, [supplies, settings.enclos_count]);
 
-    const estimates = computeBreedingCosts(tree.colors, prices, {
+  const estimates = useMemo(() => {
+    if (!tree) return new Map<string, BreedingEstimate>();
+
+    return computeBreedingCosts(tree.colors, prices, {
       parentLevel: 'auto',
       // `null` signifie « prix manquants » et non « gratuit » : on retombe alors
       // sur zéro, ce que la page signale explicitement plutôt que de le taire.
@@ -170,18 +234,73 @@ export const useBreeding = (family: FamilyId) => {
       recycleSteriles: settings.recycle_steriles,
       neverSell: settings.never_sell_mounts,
     });
-
-    return tree.colors
-      .map((color) => ({
-        colorId: color.id,
-        name: color.name,
-        generation: color.generation,
-        itemId: color.itemId,
-        source: color.source,
-        estimate: estimates.get(color.id)!,
-      }))
-      .filter((row) => row.estimate !== undefined);
   }, [tree, prices, supplies, genetonValuation, priceOf, settings]);
+
+  /**
+   * Le plan d'une couleur et sa durée, stock déduit.
+   *
+   * Exposé plutôt que gardé pour soi : l'écran de suivi le rappelle à chaque
+   * saisie, avec le stock du moment, et c'est ce recalcul qui fait le
+   * rattrapage. Le stock n'entre donc jamais dans le classement, qui doit rester
+   * comparable d'une couleur à l'autre.
+   */
+  const makePlan = useCallback(
+    (colorId: string, targetCount = 1, stock?: Map<string, number>) => {
+      if (!tree) return null;
+
+      const estimate = estimates.get(colorId);
+      const plan = breedingPlan(colorId, tree.colors, estimates, {
+        targetCount,
+        recycleSteriles: settings.recycle_steriles,
+        genetonValue: genetonValuation?.valuePerGeneton ?? 0,
+        stock,
+      });
+      const duration = timing
+        ? planDuration(
+            plan,
+            timing,
+            // La montée au 200 ne se paie qu'à la revente à ce niveau ; ailleurs
+            // le poulain part tel quel.
+            estimate?.bestExit === 'sell200'
+              ? { count: targetCount, level: MAX_MOUNT_LEVEL }
+              : null
+          )
+        : null;
+
+      return { plan, duration };
+    },
+    [tree, estimates, settings.recycle_steriles, genetonValuation, timing]
+  );
+
+  const rows = useMemo<BreedingRow[]>(() => {
+    if (!tree) return [];
+
+    return tree.colors.flatMap((color) => {
+      const estimate = estimates.get(color.id);
+      if (!estimate) return [];
+
+      // Rien à planifier pour une couleur qu'il vaut mieux acheter : elle
+      // n'occupe aucun enclos, donc aucune heure à rapporter.
+      const planned = estimate.strategy === 'breed' ? makePlan(color.id) : null;
+      const planMargin = planned ? estimate.bestExitValue - planned.plan.totalCost : null;
+      const hours = planned?.duration?.enclosHours ?? 0;
+
+      return [
+        {
+          colorId: color.id,
+          name: color.name,
+          generation: color.generation,
+          itemId: color.itemId,
+          source: color.source,
+          estimate,
+          plan: planned?.plan ?? null,
+          duration: planned?.duration ?? null,
+          planMargin,
+          marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
+        },
+      ];
+    });
+  }, [tree, estimates, makePlan]);
 
   /** Enregistre un prix et le reflète localement sans recharger toute la page. */
   const savePrice = useCallback(
@@ -238,6 +357,7 @@ export const useBreeding = (family: FamilyId) => {
     settings,
     genetonValuation,
     supplies,
+    makePlan,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,
     // `loaded` couvre le tout premier rendu, avant que la transition démarre :
     // sans lui la page clignoterait sur un « aucun résultat » vide.

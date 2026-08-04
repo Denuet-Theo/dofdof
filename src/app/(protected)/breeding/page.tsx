@@ -7,7 +7,8 @@ import BreedingSettings from '@/components/breeding/BreedingSettings';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
-import { useBreeding, type FamilyId } from '@/lib/hooks/useBreeding';
+import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
+import { formatHours } from '@/lib/utils/date';
 
 const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'muldo', label: 'Muldos' },
@@ -15,23 +16,31 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'volkorne', label: 'Volkornes' },
 ];
 
-type SortBy = 'margin' | 'cost' | 'generation';
+type SortBy = 'hourly' | 'margin' | 'cost' | 'generation';
 
 /**
- * Une durée d'enclos, en jours au-delà de 48 h.
+ * Ce sur quoi le tri horaire compare.
  *
- * Les cycles se comptent en heures, mais monter une monture au niveau 200 en
- * demande des centaines : « 289h » ne se lit pas, « 12 j » si.
+ * Une couleur qu'on achète ou capture ne mobilise **aucun** enclos : elle ne
+ * concourt pas pour la ressource dont ce classement parle. À marge positive
+ * elle bat donc tout ce qui en demande — c'est du gain sans immobiliser le
+ * parc — et à marge négative elle ne vaut rien de plus. La renvoyer en queue
+ * dans les deux cas, comme le ferait un simple `?? -Infinity`, dirait l'inverse
+ * de la vérité sur les couleurs sauvages, qui sont justement les plus rentables
+ * à l'heure.
  */
-const formatHours = (hours: number) => {
-  if (hours >= 48) return `${Math.round(hours / 24)} j`;
-  const whole = Math.floor(hours);
-  return `${whole}h${String(Math.round((hours - whole) * 60)).padStart(2, '0')}`;
+const hourlyKey = (row: BreedingRow) => {
+  if (row.marginPerHour !== null) return row.marginPerHour;
+  const margin = row.estimate.bestMargin;
+  return margin !== null && margin > 0 ? Infinity : -Infinity;
 };
 
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
-  const [sortBy, setSortBy] = useState<SortBy>('margin');
+  // Par heure d'enclos par défaut : c'est la question que se pose l'éleveur.
+  // Trier sur la marge brute mettrait les hautes générations en tête par
+  // construction, puisqu'elles coûtent plus de travail à produire.
+  const [sortBy, setSortBy] = useState<SortBy>('hourly');
   const [pricedOnly, setPricedOnly] = useState(false);
   const [entryMode, setEntryMode] = useState(false);
 
@@ -42,11 +51,18 @@ const BreedingPage = () => {
     genetonValuation,
     sacrificePrice,
     supplies,
+    makePlan,
     loading,
     error,
     savePrice,
     saveSettings,
   } = useBreeding(family);
+
+  /** Le plan ne porte que des identifiants ; les lignes ont les noms. */
+  const nameOf = useMemo(() => {
+    const names = new Map(rows.map((row) => [row.colorId, row.name]));
+    return (colorId: string) => names.get(colorId) ?? colorId;
+  }, [rows]);
 
   const sorted = useMemo(() => {
     const kept = pricedOnly ? rows.filter((row) => row.estimate.priceLevel0 !== null) : rows;
@@ -58,7 +74,12 @@ const BreedingPage = () => {
         // traitées comme gratuites.
         return (a.estimate.cost ?? Infinity) - (b.estimate.cost ?? Infinity);
       }
-      return (b.estimate.bestMargin ?? -Infinity) - (a.estimate.bestMargin ?? -Infinity);
+      if (sortBy === 'hourly') return hourlyKey(b) - hourlyKey(a);
+      // Même base de coût que la colonne : celui du plan quand il y en a un.
+      return (
+        (b.planMargin ?? b.estimate.bestMargin ?? -Infinity) -
+        (a.planMargin ?? a.estimate.bestMargin ?? -Infinity)
+      );
     });
   }, [rows, sortBy, pricedOnly]);
 
@@ -167,7 +188,8 @@ const BreedingPage = () => {
           className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
             text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
         >
-          <option value="margin">Marge</option>
+          <option value="hourly">Marge par heure d&apos;enclos</option>
+          <option value="margin">Marge par monture</option>
           <option value="cost">Coût de revient</option>
           <option value="generation">Génération</option>
         </select>
@@ -213,7 +235,15 @@ const BreedingPage = () => {
       ) : (
         <div className="space-y-2">
           {sorted.map((row) => (
-            <ColorRow key={row.colorId} row={row} onSavePrice={savePrice} />
+            <ColorRow
+              key={row.colorId}
+              row={row}
+              family={family}
+              nameOf={nameOf}
+              makePlan={makePlan}
+              enclosCount={settings.enclos_count}
+              onSavePrice={savePrice}
+            />
           ))}
         </div>
       )}

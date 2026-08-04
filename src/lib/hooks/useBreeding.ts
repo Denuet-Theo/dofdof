@@ -35,6 +35,8 @@ import {
   type PlanDuration,
   type PlanFunding,
 } from '@/lib/dofus/breeding/costs';
+import { planWaves, wavesByStep, type Wave } from '@/lib/dofus/breeding/waves';
+import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 
 /**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
@@ -102,6 +104,14 @@ export type BreedingRow = {
 export type PlannedColor = {
   plan: BreedingPlan;
   duration: PlanDuration | null;
+  /**
+   * Le plan découpé en tours de cycles, contraint par l'écurie.
+   *
+   * Sans remplissage des places libres : la couleur qui les occupe se choisit
+   * sur le classement, qui n'existe pas encore quand ce plan se construit. Le
+   * panneau le recalcule avec elle, sans que rien d'autre en dépende.
+   */
+  waves: Wave[];
   gaugeNeeds: GaugeRequirement[];
   funding: PlanFunding | null;
   /**
@@ -367,6 +377,17 @@ export const useBreeding = (
           // saturer la dernière fournée plutôt que de la lancer à moitié vide.
           slots: timing?.slots,
         });
+        // Le découpage en vagues sert d'abord le délai, d'où ce calcul ici,
+        // sans remplissage : la couleur qui occupe les places libres dépend du
+        // classement, donc de plans qui ne sont pas encore construits. Elle se
+        // rajoute à l'affichage, où elle ne change aucun chiffre.
+        const waves = planWaves(plan, {
+          stock: mountStock,
+          capacity: Math.max(settings.enclos_count, 1) * (timing?.slots ?? ENCLOS_SLOTS),
+          recycleSteriles: settings.recycle_steriles,
+          filler: null,
+        });
+
         const duration = timing
           ? planDuration(
               plan,
@@ -378,7 +399,8 @@ export const useBreeding = (
               // plus, et elles passent par la Mangeoire comme les autres.
               estimate?.bestExit === 'sell200'
                 ? { count: plan.targetProduced, level: MAX_MOUNT_LEVEL }
-                : null
+                : null,
+              wavesByStep(waves)
             )
           : null;
 
@@ -399,6 +421,7 @@ export const useBreeding = (
         return {
           plan,
           duration,
+          waves,
           gaugeNeeds,
           estimate,
           funding: planFunding(plan, estimates, settings.kamas_available, {
@@ -434,6 +457,8 @@ export const useBreeding = (
     [
       tree,
       estimateVariants,
+      // Le parc dimensionne les vagues : plus d'enclos, moins de tours.
+      settings.enclos_count,
       settings.recycle_steriles,
       settings.kamas_available,
       genetonValuation,

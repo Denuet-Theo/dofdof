@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import { formatHours } from '@/lib/utils/date';
 import type { PlannedColor } from '@/lib/hooks/useBreeding';
+import type { Wave } from '@/lib/dofus/breeding/waves';
 
 /**
  * La marche à suivre pour produire une couleur, étape par étape.
@@ -32,6 +33,13 @@ type Props = {
   enclosCount: number;
   /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
   targetCount: number;
+  /**
+   * Le programme des fournées, remplissage compris.
+   *
+   * Recalculé par la page plutôt que repris du plan : la couleur qui occupe les
+   * places libres se lit sur le classement, que le plan ne connaît pas.
+   */
+  waves: Wave[] | null;
   selected: boolean;
   onSelect: () => void;
   onAbandon: () => void;
@@ -47,6 +55,7 @@ const BreedingPlanPanel = ({
   onSaveMount,
   enclosCount,
   targetCount,
+  waves,
   selected,
   onSelect,
   onAbandon,
@@ -195,6 +204,55 @@ const BreedingPlanPanel = ({
                       </p>
                     </div>
                     {countField(step.colorId)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Le programme, qui est la seule vue qui réponde à « qu'est-ce que
+              je lance maintenant ». La liste de croisements ci-dessus dit
+              combien ; celle-ci dit dans quel ordre l'écurie le permet. */}
+          {waves && waves.length > 0 && (
+            <div>
+              <p className="text-[11px] text-dark-500 mb-1.5">
+                Programme des fournées — {waves.length} tour{waves.length > 1 ? 's' : ''} de
+                cycles, {enclosCount * 10} places par tour
+              </p>
+              <div className="space-y-1">
+                {waves.map((wave) => (
+                  <div key={wave.index} className="text-xs px-3 py-2 rounded-xl bg-dark-800/40">
+                    <div className="flex items-center gap-3">
+                      <span className="text-dark-600 shrink-0 w-16">Vague {wave.index}</span>
+                      <span className="text-dark-200 flex-1 truncate">
+                        {nameOf(wave.target.colorId)}{' '}
+                        <span className="text-dark-500">×{wave.target.crossings}</span> —{' '}
+                        {wave.target.mounts} places
+                      </span>
+                      <span className="text-dark-500 shrink-0">
+                        {wave.used}/{wave.capacity}
+                      </span>
+                    </div>
+
+                    {/* Les places libres sont du carburant déjà payé : les
+                        occuper ne coûte que les parents qu'on y met. */}
+                    {wave.filler && (
+                      <p className="text-[10px] text-dark-500 mt-1 pl-[4.75rem]">
+                        + {wave.filler.mounts} places libres :{' '}
+                        <span className="text-dark-300">{nameOf(wave.filler.colorId)}</span> ×
+                        {wave.filler.crossings}
+                      </p>
+                    )}
+
+                    {wave.clonings.length > 0 && (
+                      <p className="text-[10px] text-dark-500 mt-0.5 pl-[4.75rem]">
+                        puis cloner —{' '}
+                        {wave.clonings
+                          .map((clone) => `${clone.count} × ${nameOf(clone.colorId)}`)
+                          .join(', ')}{' '}
+                        pour réarmer la vague suivante
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

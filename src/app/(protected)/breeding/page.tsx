@@ -10,6 +10,8 @@ import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
+import { planWaves } from '@/lib/dofus/breeding/waves';
+import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { formatHours } from '@/lib/utils/date';
 
@@ -96,6 +98,49 @@ const BreedingPage = () => {
 
   /** La couleur du plan suivi, qui réduit la liste à elle seule. */
   const selectedColorId = project.current?.target_color_id ?? null;
+
+  /**
+   * Le programme des fournées du plan suivi, places libres comprises.
+   *
+   * Se recalcule ici et non dans le hook : la couleur qui occupe les places
+   * libres est la mieux classée **après** la cible, donc elle suppose le
+   * classement construit — ce que le plan, qui en fait partie, ne peut pas
+   * supposer de lui-même. Rien d'autre n'en dépend : le remplissage ne change
+   * ni le coût, ni le délai, qui se comptent sur la cible seule.
+   */
+  const waves = useMemo(() => {
+    const target = rows.find((row) => row.colorId === selectedColorId);
+    if (!target?.planned) return null;
+
+    // Seules les couleurs qu'on élève concourent : une couleur qu'on achète
+    // n'occupe aucune place, elle ne remplit donc rien.
+    const candidates = rows.filter(
+      (row) =>
+        row.colorId !== selectedColorId && row.planned !== null && (row.planMargin ?? 0) > 0
+    );
+
+    // La marge horaire départage quand elle existe, faute de quoi la marge du
+    // plan prend le relais. Sans ce repli, un éleveur qui n'a pas encore tarifé
+    // ses carburants n'avait aucune couleur de remplissage — or c'est
+    // exactement l'état dans lequel on découvre l'écran. Les deux mesures ne se
+    // mélangent pas : ou bien les durées sont chiffrables et toutes les lignes
+    // ont la première, ou bien aucune ne l'a.
+    const hourly = candidates.some((row) => row.marginPerHour !== null);
+    const rank = (row: BreedingRow) =>
+      (hourly ? row.marginPerHour : row.planMargin) ?? -Infinity;
+
+    const filler = candidates.reduce<BreedingRow | null>(
+      (best, row) => (best === null || rank(row) > rank(best) ? row : best),
+      null
+    );
+
+    return planWaves(target.planned.plan, {
+      stock: mountStock,
+      capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
+      recycleSteriles: settings.recycle_steriles,
+      filler: filler?.colorId ?? null,
+    });
+  }, [rows, selectedColorId, mountStock, settings.enclos_count, settings.recycle_steriles]);
 
   const sorted = useMemo(() => {
     // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
@@ -412,6 +457,7 @@ const BreedingPage = () => {
                     onSaveMount={saveMountStock}
                     enclosCount={settings.enclos_count}
                     targetCount={targetCount}
+                    waves={row.colorId === selectedColorId ? waves : null}
                     selected={project.current?.target_color_id === row.colorId}
                     onSelect={() => project.select(row.colorId, targetCount)}
                     onAbandon={project.abandon}

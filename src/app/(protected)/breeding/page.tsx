@@ -207,8 +207,8 @@ const BreedingPage = () => {
         <span className="text-dark-400">
           Cycle de fécondité :{' '}
           <strong className="text-dark-200">
-            {supplies?.fuelCostPerBaby != null
-              ? `${Math.round(supplies.fuelCostPerBaby).toLocaleString('fr-FR')} kamas / monture`
+            {supplies?.fuelCostPerCycle != null
+              ? `${Math.round(supplies.fuelCostPerCycle).toLocaleString('fr-FR')} kamas / monture`
               : 'carburants non tarifés'}
             {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
           </strong>

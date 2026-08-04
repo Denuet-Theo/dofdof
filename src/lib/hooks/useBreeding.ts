@@ -318,7 +318,7 @@ export const useBreeding = (
         parentLevel: 'auto',
         // `null` signifie « prix manquants » et non « gratuit » : on retombe
         // alors sur zéro, ce que la page signale plutôt que de le taire.
-        fuelCostPerBaby: supplies?.fuelCostPerBaby ?? 0,
+        fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
         mangeoireCostPerMountPoint: supplies?.mangeoireCostPerMountPoint ?? 0,
         genetonValue: genetonValuation?.valuePerGeneton ?? 0,
         sacrificeUnitValue: priceOf(tree.sacrificeItem.id),

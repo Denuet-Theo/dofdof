@@ -447,14 +447,18 @@ export type BreedingOptions = {
    */
   parentLevel: number | 'auto';
   /**
-   * Coût en kamas du carburant d'enclos imputable à un bébé.
+   * Coût en kamas du carburant qu'un **cycle de fécondité sur une monture**
+   * consomme.
    *
    * Une jauge se vide au rythme de l'enclos, pas de l'animal, et un enclos
    * porte 10 montures : le coût se divise donc par le nombre de montures
    * réellement présentes. C'est l'appelant qui fait cette division — ici on ne
-   * reçoit que le résultat par bébé.
+   * reçoit que le résultat par monture.
+   *
+   * Un croisement en consomme **deux**, un par parent : voir le calcul de
+   * `fuelCost` dans `computeBreedingCosts`.
    */
-  fuelCostPerBaby: number;
+  fuelCostPerCycle: number;
   /**
    * Valeur d'un généton en kamas, échangeable contre des parchemins.
    *
@@ -482,7 +486,7 @@ export type BreedingOptions = {
    * La Mangeoire alimente les dix places de l'enclos d'un coup, exactement comme
    * les jauges de stat : monter dix montures coûte ce que coûte d'en monter une.
    * L'appelant fait donc la division par l'effectif avant d'arriver ici, comme il
-   * la fait déjà pour `fuelCostPerBaby`.
+   * la fait déjà pour `fuelCostPerCycle`.
    *
    * À 0, la montée est réputée gratuite et la marge niveau 200 redevient une
    * borne haute plutôt qu'un net.
@@ -669,7 +673,7 @@ export const computeBreedingCosts = (
   prices: Map<string, ColorPrice>,
   {
     parentLevel,
-    fuelCostPerBaby,
+    fuelCostPerCycle,
     genetonValue,
     sacrificeUnitValue,
     mangeoireCostPerMountPoint,
@@ -717,7 +721,7 @@ export const computeBreedingCosts = (
    * Ce qu'il faudrait pour trancher : un croisement dont les grands-parents sont
    * d'une génération **inférieure** à la cible, donc du côté de l'échec. C'est le
    * cas courant dans un plan propre, et c'est justement celui que le modèle
-   * décrit.
+   * décrit. Relevé à faire, suivi en issue #49.
    *
    * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
    * payer économise exactement cela. Quand un parent est acheté ou capturé, il
@@ -792,9 +796,14 @@ export const computeBreedingCosts = (
       // plus se lit sur sa propre marge, pas sur le prix de ses enfants.
       const parentsCost =
         (Math.max(first.cost, 0) + Math.max(second.cost, 0)) * (recycleSteriles ? 0.5 : 1);
-      // Le clone sort les jauges à zéro : il lui faut son propre cycle de
-      // fécondité avant de servir, en plus de celui du bébé.
-      const fuelCost = fuelCostPerBaby * (recycleSteriles ? 2 : 1);
+      // Un accouplement demande **deux** parents à fécondité pleine et les rend
+      // tous deux à zéro : il faut donc deux cycles, un par parent, quelle que
+      // soit leur provenance. Le facturer à l'usage plutôt qu'à la naissance
+      // n'est pas un choix de présentation — imputer un cycle à chaque bébé
+      // laisserait les montures achetées, capturées et clonées ne jamais payer
+      // le leur. `planDuration` et `planGaugeNeeds` comptent déjà `2 ×
+      // tentatives` montures à préparer ; le coût attendu suit enfin.
+      const fuelCost = fuelCostPerCycle * 2;
 
       // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
       // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.

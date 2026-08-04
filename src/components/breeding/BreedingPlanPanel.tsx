@@ -30,6 +30,8 @@ type Props = {
   onSaveMount: (colorId: string, count: number) => Promise<void>;
   /** Enclos possédés, pour traduire les heures d'enclos en délai réel. */
   enclosCount: number;
+  /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
+  targetCount: number;
   selected: boolean;
   onSelect: () => void;
   onAbandon: () => void;
@@ -44,30 +46,42 @@ const BreedingPlanPanel = ({
   mountStock,
   onSaveMount,
   enclosCount,
+  targetCount,
   selected,
   onSelect,
   onAbandon,
 }: Props) => {
   const { plan, duration, gaugeNeeds, funding } = planned;
 
+  /**
+   * Ce qu'on possède déjà de cette couleur.
+   *
+   * Le libellé est porté par le champ lui-même plutôt que par un en-tête de
+   * colonne : les lignes n'en ont pas, et renvoyer le lecteur vers « la colonne
+   * de droite » désignait quelque chose qui n'existait pas à l'écran.
+   */
   const countField = (colorId: string) => (
-    <input
-      type="number"
-      min={0}
-      max={999}
-      value={String(mountStock.get(colorId) ?? 0)}
-      onChange={(event) =>
-        onSaveMount(colorId, Math.max(0, Math.min(999, Number(event.target.value) || 0)))
-      }
-      title="Combien j'en ai déjà en écurie"
-      className="w-16 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
-        text-dark-100 text-xs text-right transition-all hover:border-dark-500
-        focus:border-kamas/50"
-    />
+    <label className="flex items-center gap-1.5 shrink-0">
+      <span className="text-[10px] text-dark-500">j&apos;en ai</span>
+      <input
+        type="number"
+        min={0}
+        max={999}
+        value={String(mountStock.get(colorId) ?? 0)}
+        onChange={(event) =>
+          onSaveMount(colorId, Math.max(0, Math.min(999, Number(event.target.value) || 0)))
+        }
+        title="Combien j'en ai déjà en écurie, montures fertiles uniquement"
+        className="w-14 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
+          text-dark-100 text-xs text-right transition-all hover:border-dark-500
+          focus:border-kamas/50"
+      />
+    </label>
   );
 
   const done = plan.steps.length === 0 && plan.purchases.length === 0;
   const missingFuel = gaugeNeeds.filter((need) => need.cost > 0);
+  const cashNeeded = funding?.cashNeeded ?? plan.totalCost;
 
   return (
     <div className="space-y-4">
@@ -94,7 +108,7 @@ const BreedingPlanPanel = ({
       </div>
 
       <p className="text-[11px] text-dark-600">
-        Saisis dans la colonne de droite ce que tu possèdes déjà : le plan se recalcule et ne
+        Renseigne le champ « j&apos;en ai » au bout de chaque ligne : le plan se recalcule et ne
         demande que ce qui manque. Ne compte que les montures <strong>fertiles</strong>.
       </p>
 
@@ -212,12 +226,37 @@ const BreedingPlanPanel = ({
         <span>
           Total : <strong className="text-dark-200">{plan.crossings} accouplements</strong>
         </span>
+        {/* L'écart avec l'objectif se dit, sinon un « ×11 » demandé à 10 passe
+            pour une erreur de calcul — c'est au contraire du gratuit. */}
+        {plan.targetProduced > targetCount && (
+          <span>
+            Produites :{' '}
+            <strong className="text-dark-200">{plan.targetProduced}</strong> pour {targetCount}{' '}
+            demandées — la dernière fournée part pleine, à carburant et délai constants
+          </span>
+        )}
+        {/* `cashNeeded` est écrasé à 0 dès que les génétons et la réserve de
+            carburant remboursent plus que le plan ne coûte. Afficher « 0 kamas »
+            se lit alors « c'est gratuit » là où la vérité est « c'est
+            remboursé » — deux choses différentes, et la seconde mérite d'être
+            dite en toutes lettres. */}
         <span>
           À débourser :{' '}
           <strong className="text-dark-200">
-            {Math.round(funding?.cashNeeded ?? plan.totalCost).toLocaleString('fr-FR')} kamas
+            {cashNeeded > 0
+              ? `${Math.round(cashNeeded).toLocaleString('fr-FR')} kamas`
+              : 'rien — génétons et réserve couvrent la dépense'}
           </strong>
         </span>
+        {/* Une consigne, pas une dépense : l'appairage ne coûte ni enclos ni
+            carburant, mais sans lui le plan manque de parents. */}
+        {plan.clonings > 0 && (
+          <span>
+            Clonages à faire :{' '}
+            <strong className="text-dark-200">{plan.clonings}</strong> — gratuits, deux
+            stériles de même rang donnent un fertile
+          </span>
+        )}
         {plan.genetons > 0 && (
           <span>
             Génétons rendus :{' '}

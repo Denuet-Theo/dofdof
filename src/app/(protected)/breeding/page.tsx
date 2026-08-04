@@ -94,7 +94,17 @@ const BreedingPage = () => {
     return (colorId: string) => names.get(colorId) ?? colorId;
   }, [rows]);
 
+  /** La couleur du plan suivi, qui réduit la liste à elle seule. */
+  const selectedColorId = project.current?.target_color_id ?? null;
+
   const sorted = useMemo(() => {
+    // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
+    // n'a plus rien à départager. Garder les autres couleurs à l'écran invite à
+    // comparer une décision déjà prise, et noie la seule ligne qu'on vient
+    // consulter. Ni le tri ni `pricedOnly` ne s'y appliquent — la ligne suivie
+    // doit rester visible même sous un filtre qui la masquerait.
+    if (selectedColorId) return rows.filter((row) => row.colorId === selectedColorId);
+
     const kept = pricedOnly ? rows.filter((row) => row.estimate.priceLevel0 !== null) : rows;
 
     return [...kept].sort((a, b) => {
@@ -111,7 +121,7 @@ const BreedingPage = () => {
         (a.planMargin ?? a.estimate.bestMargin ?? -Infinity)
       );
     });
-  }, [rows, sortBy, pricedOnly]);
+  }, [rows, sortBy, pricedOnly, selectedColorId]);
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
@@ -323,29 +333,40 @@ const BreedingPage = () => {
               </p>
             )}
 
-            {/* Tri */}
+            {/* Tri — sans objet dès qu'une seule ligne reste à l'écran. */}
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-              <span>Trier par</span>
-              <select
-                value={sortBy}
-                onChange={(event) => setSortBy(event.target.value as SortBy)}
-                className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
-                  text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
-              >
-                <option value="hourly">Marge par heure d&apos;enclos</option>
-                <option value="margin">Marge par monture</option>
-                <option value="cost">Coût de revient</option>
-                <option value="generation">Génération</option>
-              </select>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={pricedOnly}
-                  onChange={(event) => setPricedOnly(event.target.checked)}
-                  className="accent-kamas cursor-pointer"
-                />
-                Seulement les couleurs tarifées
-              </label>
+              {!selectedColorId && (
+                <>
+                  <span>Trier par</span>
+                  <select
+                    value={sortBy}
+                    onChange={(event) => setSortBy(event.target.value as SortBy)}
+                    className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
+                      text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
+                  >
+                    <option value="hourly">Marge par heure d&apos;enclos</option>
+                    <option value="margin">Marge par monture</option>
+                    <option value="cost">Coût de revient</option>
+                    <option value="generation">Génération</option>
+                  </select>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pricedOnly}
+                      onChange={(event) => setPricedOnly(event.target.checked)}
+                      className="accent-kamas cursor-pointer"
+                    />
+                    Seulement les couleurs tarifées
+                  </label>
+                </>
+              )}
+
+              {selectedColorId && (
+                <span>
+                  Les autres couleurs sont masquées tant que ce plan est suivi — abandonne-le
+                  pour revoir le classement.
+                </span>
+              )}
 
               <button
                 type="button"
@@ -390,6 +411,7 @@ const BreedingPage = () => {
                     mountStock={mountStock}
                     onSaveMount={saveMountStock}
                     enclosCount={settings.enclos_count}
+                    targetCount={targetCount}
                     selected={project.current?.target_color_id === row.colorId}
                     onSelect={() => project.select(row.colorId, targetCount)}
                     onAbandon={project.abandon}

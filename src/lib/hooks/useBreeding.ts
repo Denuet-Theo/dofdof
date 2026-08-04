@@ -363,6 +363,9 @@ export const useBreeding = (
           recycleSteriles: settings.recycle_steriles,
           genetonValue,
           stock: mountStock,
+          // L'objectif est un plancher : les places d'enclos permettent de
+          // saturer la dernière fournée plutôt que de la lancer à moitié vide.
+          slots: timing?.slots,
         });
         const duration = timing
           ? planDuration(
@@ -370,7 +373,12 @@ export const useBreeding = (
               timing,
               // La montée au 200 ne se paie qu'à la revente à ce niveau ;
               // ailleurs le poulain part tel quel.
-              estimate?.bestExit === 'sell200' ? { count, level: MAX_MOUNT_LEVEL } : null
+              // Ce sont les montures réellement produites qu'il faut monter,
+              // pas l'objectif : le plancher en rend souvent quelques-unes de
+              // plus, et elles passent par la Mangeoire comme les autres.
+              estimate?.bestExit === 'sell200'
+                ? { count: plan.targetProduced, level: MAX_MOUNT_LEVEL }
+                : null
             )
           : null;
 
@@ -406,7 +414,9 @@ export const useBreeding = (
       // bas gagne, à trente c'est le seuil d'XP gratuite.
       const rate = (candidate: PlannedColor) => {
         const hours = candidate.duration?.enclosHours ?? 0;
-        const margin = (candidate.estimate?.bestExitValue ?? 0) * count - candidate.plan.totalCost;
+        const margin =
+          (candidate.estimate?.bestExitValue ?? 0) * candidate.plan.targetProduced -
+          candidate.plan.totalCost;
         // Sans durée chiffrable, le moins cher fait office d'arbitre.
         return hours > 0 ? margin / hours : -candidate.plan.totalCost;
       };
@@ -444,9 +454,13 @@ export const useBreeding = (
       const estimate = planned?.estimate ?? estimateVariants[0]?.get(color.id);
       if (!estimate) return [];
 
-      // La sortie rapporte par monture ; le plan en produit `targetCount`.
+      // La sortie rapporte par monture, et le plan en produit au moins
+      // `targetCount` — davantage quand remplir la dernière fournée le permet.
+      // Compter sur l'objectif retiendrait le coût des tentatives ajoutées sans
+      // leur recette, et ferait passer pour moins bonne une couleur qu'on vient
+      // justement de produire en plus grand nombre à carburant constant.
       const planMargin = planned
-        ? estimate.bestExitValue * targetCount - planned.plan.totalCost
+        ? estimate.bestExitValue * planned.plan.targetProduced - planned.plan.totalCost
         : null;
       const hours = planned?.duration?.enclosHours ?? 0;
 

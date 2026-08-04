@@ -34,6 +34,8 @@ type Props = {
   mountStock: Map<string, number>;
   onSaveMount: (colorId: string, count: number) => Promise<void>;
   enclosCount: number;
+  /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
+  targetCount: number;
   /** Le plan sélectionné, s'il porte sur cette couleur. */
   selected: boolean;
   onSelect: () => void;
@@ -47,6 +49,7 @@ const ColorRow = ({
   mountStock,
   onSaveMount,
   enclosCount,
+  targetCount,
   selected,
   onSelect,
   onAbandon,
@@ -54,6 +57,19 @@ const ColorRow = ({
 }: Props) => {
   // Le plan sélectionné s'ouvre d'emblée : c'est celui qu'on vient consulter.
   const [open, setOpen] = useState(selected);
+
+  // `useState` ne lit sa valeur initiale qu'au montage, or la ligne est déjà
+  // affichée quand on clique « Optimiser » : sans ce rattrapage, sélectionner un
+  // plan ne l'ouvrait pas, et depuis que la sélection masque les autres couleurs
+  // cela laisserait l'écran sur une unique ligne repliée. On ajuste pendant le
+  // rendu plutôt que dans un effet, qui afficherait d'abord l'état périmé.
+  const [wasSelected, setWasSelected] = useState(selected);
+  if (selected !== wasSelected) {
+    setWasSelected(selected);
+    // À la sélection seulement : abandonner un plan ne doit pas refermer la
+    // ligne sous les yeux de qui vient de le faire.
+    if (selected) setOpen(true);
+  }
   const { estimate } = row;
   const strategy = estimate.strategy ? STRATEGY_LABEL[estimate.strategy] : null;
 
@@ -215,6 +231,7 @@ const ColorRow = ({
                 mountStock={mountStock}
                 onSaveMount={onSaveMount}
                 enclosCount={enclosCount}
+                targetCount={targetCount}
                 selected={selected}
                 onSelect={onSelect}
                 onAbandon={onAbandon}

@@ -968,6 +968,29 @@ export type BreedingPlan = {
   purchases: BreedingPurchase[];
   /** Nombre total de croisements, multiplicités comprises. */
   crossings: number;
+  /**
+   * Exemplaires de la cible que le plan met en main, stock compris.
+   *
+   * Peut dépasser l'objectif, qui est un plancher : remplir la dernière fournée
+   * rend quelques montures de plus sans carburant ni délai supplémentaires. Tout
+   * ce qui valorise le plan doit compter sur ce nombre et non sur l'objectif,
+   * sans quoi les tentatives ajoutées grèveraient le coût sans jamais créditer
+   * la recette qu'elles produisent.
+   */
+  targetProduced: number;
+  /**
+   * Appairages de clonage que le plan suppose, toutes couleurs confondues.
+   *
+   * Gratuits : deux stériles de même rang donnent un fertile, sans égard à leurs
+   * jauges. Rien à facturer donc, ni enclos ni carburant — le clone sort les
+   * jauges vides et son cycle de fécondité est déjà compté avec les autres, la
+   * durée se comptant par usage de parent et non par monture distincte.
+   *
+   * Reste que c'est une manipulation à faire, et sans elle le plan manque de
+   * parents : c'est à ce titre qu'on l'affiche, comme une consigne et non comme
+   * une dépense.
+   */
+  clonings: number;
   genetons: number;
   /**
    * Bébés produits hors génération cible, sur l'ensemble du plan.
@@ -1014,7 +1037,29 @@ export type BreedingPlanOptions = {
    * ne servirait qu'une fois, au premier croisement.
    */
   stock?: Map<string, number>;
+  /**
+   * Places d'un enclos, pour saturer la dernière fournée de la cible.
+   *
+   * Sans cette valeur le plan produit le compte exact et laisse la dernière
+   * fournée à moitié vide — du carburant payé pour des places inoccupées.
+   */
+  slots?: number;
 };
+
+/**
+ * Tentatives arrondies pour que la dernière fournée d'enclos parte pleine.
+ *
+ * L'objectif est un **plancher**, pas un compte exact. Le carburant se consomme
+ * au niveau de l'enclos et non de la monture (voir `cyclePointsCostPerMount`) :
+ * une fournée à six places occupées coûte exactement ce que coûte une fournée
+ * pleine. Les quatre places libres sont donc du carburant déjà payé, et les
+ * tentatives qu'elles portent ne coûtent plus que leurs parents.
+ *
+ * Deux parents par tentative, dix places par enclos : une fournée porte cinq
+ * tentatives.
+ */
+export const fillLastBatch = (attempts: number, slots: number) =>
+  slots > 0 ? (Math.ceil((2 * attempts) / slots) * slots) / 2 : attempts;
 
 /**
  * Les croisements à réaliser pour produire `colorId`, parents avant enfants.
@@ -1049,7 +1094,13 @@ export const breedingPlan = (
   colorId: string,
   colors: BreedingColor[],
   estimates: Map<string, BreedingEstimate>,
-  { targetCount = 1, recycleSteriles = false, genetonValue = 0, stock }: BreedingPlanOptions = {}
+  {
+    targetCount = 1,
+    recycleSteriles = false,
+    genetonValue = 0,
+    stock,
+    slots = 10,
+  }: BreedingPlanOptions = {}
 ): BreedingPlan => {
   const generationOf = new Map(colors.map((color) => [color.id, color.generation]));
   const counts = new Map<string, number>([[colorId, targetCount]]);
@@ -1059,6 +1110,14 @@ export const breedingPlan = (
   const fromStock = new Map<string, number>();
   /** Accouplements à réaliser, tentatives ratées comprises. */
   const attemptsBy = new Map<string, number>();
+  /**
+   * Appairages de clonage supposés, toutes couleurs confondues.
+   *
+   * Chaque clonage transforme deux stériles en un fertile, donc rend
+   * exactement un usage de plus que les exemplaires frais n'en portent : sur
+   * `needed` usages tirés de `copies` exemplaires, il en faut `needed − copies`.
+   */
+  let clonings = 0;
 
   // Les besoins se propagent des enfants vers les parents, donc en génération
   // décroissante : quand on traite une couleur, tout ce qui la réclame a déjà
@@ -1077,7 +1136,24 @@ export const breedingPlan = (
     // Le recyclage s'applique ici, sur le besoin de **cette** couleur, et pas
     // en facteur global : il dépend du nombre d'exemplaires, qui varie d'une
     // couleur à l'autre dans un même plan.
-    const copies = copiesToObtain(needed, recycleSteriles);
+    //
+    // Sauf sur la cible, qu'il faut posséder et non consommer. `copiesToObtain`
+    // répond à « combien d'exemplaires frais pour N *utilisations comme
+    // parent* » : chaque usage rend un stérile, et deux stériles font un
+    // clone. La couleur visée n'est parent de rien ici, donc elle ne produit
+    // aucun stérile et il n'y a rien à recycler. L'y appliquer quand même
+    // ramenait un objectif de 10 à 6 montures produites.
+    const copies =
+      color.id === colorId ? needed : copiesToObtain(needed, recycleSteriles);
+
+    // Le clonage ne comble que ce que les exemplaires frais ne portent pas, et
+    // une écurie fournie en porte davantage que le minimum : `copies` est le
+    // plancher d'achat, pas le compte réel de montures fraîches disponibles.
+    // Compter les clonages dessus en annoncerait à qui n'en a pas besoin — et
+    // comme l'appairage est gratuit, rien n'incite à en faire plus que
+    // nécessaire.
+    const fresh = Math.max(copies, Math.min(stock?.get(color.id) ?? 0, needed));
+    clonings += needed - fresh;
 
     // Le stock se déduit **avant** de remonter aux parents : ce qu'on possède
     // déjà n'a plus à être élevé, donc plus rien de son ascendance non plus.
@@ -1096,7 +1172,31 @@ export const breedingPlan = (
     // faut donc `1/taux` pour obtenir un bébé, et autant d'exemplaires de chaque
     // parent. Propager `toProduce` au lieu des tentatives sous-compterait tout
     // l'amont, et d'autant plus qu'on remonte les générations.
-    const attempts = toProduce / estimate.parents!.successRate;
+    let attempts = toProduce / estimate.parents!.successRate;
+
+    // Sur la cible seulement, l'objectif se lit comme un plancher : on remplit
+    // la dernière fournée plutôt que de la laisser à moitié vide, ce qui rend
+    // quelques montures de plus pour le même carburant et le même délai. Les
+    // couleurs intermédiaires restent tirées par la demande — en surproduire
+    // n'immobiliserait des enclos que pour du stock dont personne ne veut.
+    //
+    // À condition que l'élevage rapporte : sur une couleur à marge négative,
+    // chaque tentative supplémentaire creuse la perte. C'est bien `breedCost`
+    // qui arbitre, et non `bestMargin`, qui se compte contre le prix d'achat —
+    // une couleur moins chère à acheter qu'à élever reste rentable à revendre
+    // sans qu'il faille pour autant en élever davantage.
+    if (
+      color.id === colorId &&
+      estimate.breedCost !== null &&
+      estimate.bestExitValue > estimate.breedCost
+    ) {
+      attempts = fillLastBatch(attempts, slots);
+      produced.set(
+        color.id,
+        Math.max(toProduce, Math.floor(attempts * estimate.parents!.successRate))
+      );
+    }
+
     attemptsBy.set(color.id, attempts);
 
     for (const parent of estimate.breedRecipe) {
@@ -1170,6 +1270,8 @@ export const breedingPlan = (
     // que les bébés obtenus. `overheadCost` porte déjà la division par le taux
     // de réussite, d'où un coût calculé sur `count` et non sur les tentatives.
     crossings: steps.reduce((total, step) => total + step.attempts, 0),
+    targetProduced: (fromStock.get(colorId) ?? 0) + (produced.get(colorId) ?? 0),
+    clonings,
     genetons,
     offTargetBabies: steps.reduce((total, step) => total + (step.attempts - step.count), 0),
     purchasesCost,

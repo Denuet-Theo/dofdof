@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo, useTransition } from 'react';
-import { Swords, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback, useTransition } from 'react';
+import { Swords, AlertTriangle, RefreshCw } from 'lucide-react';
 import FarmFilters, { DEFAULT_FILTERS, type FarmFilterState } from '@/components/farm/FarmFilters';
 import MonsterCard from '@/components/farm/MonsterCard';
 import { useFarmFilters } from '@/lib/hooks/useFarmFilters';
@@ -13,6 +13,45 @@ import type { DofusDBResponse, FarmTarget } from '@/lib/supabase/types';
 const PAGE_SIZE = 50;
 
 type Area = { id: number; name_fr: string };
+
+/**
+ * Répercute sur le classement affiché un prix qu'on vient d'enregistrer.
+ *
+ * Le calcul est fait ici plutôt que redemandé au serveur, et l'ordre est laissé
+ * tel quel à dessein : le prix se saisit depuis une carte dépliée, et reclasser
+ * à chaque enregistrement ferait fuir cette carte sous le curseur au beau
+ * milieu de la saisie des drops suivants. Même raisonnement que la grille de
+ * suggestions du tableau de bord, qui grise la carte saisie sans la déplacer.
+ *
+ * L'écart appliqué est exact malgré les dix drops affichés au maximum :
+ * l'espérance d'un drop vaut taux × prix, donc changer un prix ne déplace le
+ * total du monstre que du drop concerné — lequel est forcément sous les yeux,
+ * puisque c'est là qu'on l'a saisi.
+ *
+ * Reste ce que l'écran ne peut pas savoir : un monstre dont ce drop tombe
+ * au-delà du dixième garde un total sous-évalué, et le rang de tout le monde
+ * date de la dernière requête. D'où le bouton de reclassement.
+ */
+const applyPrice = (targets: FarmTarget[], itemId: number, price: number): FarmTarget[] =>
+  targets.map((target) => {
+    if (!target.top_drops.some((drop) => drop.objectId === itemId)) return target;
+
+    let delta = 0;
+    const top_drops = target.top_drops.map((drop) => {
+      // Un même objet peut figurer deux fois, sous deux jeux de conditions :
+      // la clé des drops est (monstre, objet, critères). Les deux lignes
+      // bougent, et chacune compte dans l'écart.
+      if (drop.objectId !== itemId) return drop;
+      delta += ((Number(drop.percent) || 0) / 100) * (price - (Number(drop.price) || 0));
+      return { ...drop, price };
+    });
+
+    return {
+      ...target,
+      top_drops,
+      kamas_per_fight: (Number(target.kamas_per_fight) || 0) + delta,
+    };
+  });
 
 /**
  * Traduit l'état des filtres en paramètres d'URL.
@@ -79,6 +118,18 @@ const FarmPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, startLoading] = useTransition();
 
+  // Des prix ont été saisis depuis la dernière requête : les totaux affichés
+  // sont à jour, mais l'ordre et les monstres écartés par les filtres, non.
+  const [priced, setPriced] = useState(false);
+  // Compteur de reclassement. Passe dans les dépendances de l'effet de
+  // chargement, ce qui relance la même requête sans passer par les filtres.
+  const [reload, setReload] = useState(0);
+
+  const handlePriceSaved = useCallback((itemId: number, price: number) => {
+    setTargets((current) => (current === null ? current : applyPrice(current, itemId, price)));
+    setPriced(true);
+  }, []);
+
   useEffect(() => {
     // Le sélecteur de zone ne dépend d'aucun filtre : une seule fois au montage.
     fetch('/api/dofusdb/areas')
@@ -112,6 +163,7 @@ const FarmPage = () => {
 
         setError(null);
         setTargets((body as DofusDBResponse<FarmTarget>).data ?? []);
+        setPriced(false);
       } catch (err) {
         if (controller.signal.aborted) return;
         console.error('[farm] fetch failed:', err);
@@ -121,7 +173,7 @@ const FarmPage = () => {
     });
 
     return () => controller.abort();
-  }, [query, restored]);
+  }, [query, restored, reload]);
 
   return (
     <div className="space-y-6">
@@ -157,8 +209,28 @@ const FarmPage = () => {
         />
       ) : (
         <div className={`space-y-3 transition-opacity ${loading ? 'opacity-50' : ''}`}>
+          {/* Le classement ne se réordonne pas tout seul après une saisie : la
+              carte qu'on est en train de remplir s'en irait sous le curseur.
+              C'est donc un geste, proposé seulement quand il a lieu d'être. */}
+          {priced ? (
+            <button
+              type="button"
+              onClick={() => setReload((count) => count + 1)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl
+                border border-kamas/30 bg-kamas/5 text-xs text-kamas
+                hover:bg-kamas/10 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={13} />
+              Des prix ont changé — reclasser les monstres
+            </button>
+          ) : null}
+
           {(targets ?? []).map((target) => (
-            <MonsterCard key={target.monster_id} target={target} />
+            <MonsterCard
+              key={target.monster_id}
+              target={target}
+              onPriceSaved={handlePriceSaved}
+            />
           ))}
 
           {targets && targets.length === PAGE_SIZE ? (

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { catalogResponse, clampInt, parseIdList } from '@/lib/dofus/catalog';
+import { clampInt, parseIdList } from '@/lib/dofus/catalog';
 import { ELEMENTS, type Element } from '@/lib/supabase/types';
 import type { FarmTarget } from '@/lib/supabase/types';
 
@@ -109,5 +109,15 @@ export const GET = async (request: NextRequest) => {
     }
   }
 
-  return catalogResponse({ total: rows.length, limit, skip: 0, data: rows });
+  // Pas de `catalogResponse` ici, et c'est tout l'objet de la distinction : son
+  // `max-age=300, stale-while-revalidate=3600` convient au catalogue, qui ne
+  // bouge qu'aux patchs du jeu, mais ce classement dépend aussi d'`item_prices`,
+  // que les joueurs corrigent à la main. Servi depuis le cache navigateur, un
+  // prix qu'on vient de changer restait invisible sur les monstres pendant cinq
+  // minutes, et jusqu'à une heure par la revalidation en arrière-plan — soit
+  // exactement le geste que la page existe pour rendre.
+  return Response.json(
+    { total: rows.length, limit, skip: 0, data: rows },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 };

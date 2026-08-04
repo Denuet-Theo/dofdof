@@ -75,8 +75,13 @@ const planFor = (
 ) => (fuels && fuels.length > 0 ? bestFuelFor(points, fuels, kamasPerHour, forcedCap) : null);
 
 export type SupplyCosts = {
-  /** Coût du cycle de fécondité, ramené à une monture de l'enclos. */
-  fuelCostPerBaby: number | null;
+  /**
+   * Coût du cycle de fécondité, ramené à une monture de l'enclos.
+   *
+   * Un accouplement en demande deux — un par parent, tous deux rendus jauges à
+   * zéro. Le doublement se fait chez l'appelant, au croisement.
+   */
+  fuelCostPerCycle: number | null;
   /**
    * Ce que coûte **un point d'expérience sur une monture**, et non un point de
    * jauge : le rapport est de un à dix.
@@ -107,6 +112,9 @@ export type SupplyCosts = {
    * Trois des quatre étapes ne sollicitent qu'une jauge : l'XP s'y glisse
    * gratuitement. C'est ce qui empêche de compter naïvement montée et cycle
    * comme deux durées à additionner.
+   *
+   * Confirmé en jeu : la Mangeoire tourne bien en même temps qu'une jauge de
+   * stat.
    */
   cycleFreeSlotHours: number | null;
   /** Heures de Mangeoire pour monter une monture au niveau 200. */
@@ -160,7 +168,8 @@ export type SupplyCosts = {
  * ensemble, donc leurs coûts s'additionnent mais leurs durées non — la phase dure
  * ce que dure sa jauge la plus lente. Additionner les cinq legs surestimerait le
  * cycle de la dernière étape entière, qui est justement la seule à occuper les
- * deux emplacements en parallèle.
+ * deux emplacements en parallèle. Confirmé en jeu : le cycle complet prend
+ * 15 h 17 au palier Extrait, et non les 20 h 50 d'un enchaînement séquentiel.
  *
  * Chaque leg peut passer par l'une ou l'autre jauge selon le sens choisi
  * (Baffeur ou Caresseur, Foudroyeur ou Dragofesse) : on retient la moins chère,
@@ -264,7 +273,7 @@ export const computeSupplyCosts = (
 
   return {
     // Un enclos transfère à ses dix places d'un coup : le cycle se partage.
-    fuelCostPerBaby: complete && mountsInEnclos > 0 ? cycleCost / mountsInEnclos : null,
+    fuelCostPerCycle: complete && mountsInEnclos > 0 ? cycleCost / mountsInEnclos : null,
     // Divisé par l'effectif, comme le cycle juste au-dessus : la Mangeoire monte
     // les dix places ensemble. Sans cette division, la montée revenait dix fois
     // son prix — et c'est elle qui décide du niveau des parents.

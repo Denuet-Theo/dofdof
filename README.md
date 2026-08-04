@@ -274,6 +274,11 @@ Quatre points valent d'être connus avant de toucher au calcul :
 - **Une tentative ratée consomme ses parents sans rien produire.** Les multiplicités se
   propagent donc en `1/taux`, sans quoi tout l'amont est sous-compté — d'autant plus qu'on
   monte en génération.
+- **Un accouplement demande deux cycles de fécondité, pas un.** Il faut deux parents à
+  fécondité pleine et il les rend tous deux à zéro. Le carburant se facture donc **à l'usage**
+  — deux cycles par croisement — et non à la naissance de chaque bébé : cette seconde
+  répartition laisserait les montures achetées, capturées et clonées ne jamais payer le leur.
+  `planDuration` et `planGaugeNeeds` comptaient déjà `2 × tentatives` montures à préparer.
 - **Les coûts sont bornés à zéro avant d'être réinjectés.** Un croisement dont les génétons
   dépassent la dépense affiche un coût négatif, ce qui est exact ; le propager casserait
   l'optimisation, puisque diviser un négatif par le taux de réussite rend un *mauvais* taux
@@ -318,15 +323,16 @@ ci-dessus vient de ce que le Pourpre est lui-même un bébé hors cible, réutil
 il traîne une ascendance de génération **supérieure** à la sienne. Réemployer ses ratés, c'est
 donc sortir du régime que `successRate` modélise.
 
-Trois hypothèses ne sont pas vérifiées, et toutes trois sont signalées dans le code :
+Deux hypothèses ne sont pas vérifiées, et toutes deux sont signalées dans le code :
 
 - **la progression est proportionnelle aux points transférés** — tout le modèle de durée en
   dépend ;
-- **les deux dernières stats montent vraiment en parallèle**, ce qui raccourcit le cycle de
-  20 000 points (5 h 33 au palier Extrait). Mesurable : un cycle complet doit prendre 15 h 17
-  à ce palier, pas 20 h 50 ;
 - **les poids de la répartition d'un bébé hors cible** (25 % chaque parent, 12,5 % chaque
-  grand-parent) — mesurés faux, voir ci-dessous, mais pas encore remplacés.
+  grand-parent) — voir ci-dessous, relevé suivi en [issue #49](https://github.com/Denuet-Theo/dofdof/issues/49).
+
+Deux autres, elles, sont confirmées en jeu : les **deux dernières stats montent bien en
+parallèle** (le cycle complet prend 15 h 17 au palier Extrait, pas 20 h 50), et la **Mangeoire
+tourne bien en même temps qu'une jauge de stat**, ce qui fonde toute l'XP gratuite ci-dessous.
 
 ### La couleur d'un bébé hors cible
 
@@ -342,7 +348,8 @@ contenait que les deux parents, à 55,9 % et 44,1 %.
 
 Pour trancher il faut un croisement dont les grands-parents sont d'une génération
 **inférieure** à la cible, donc du côté de l'échec — le cas courant dans un plan propre, et
-celui que le modèle décrit.
+celui que le modèle décrit. Le relevé à faire est décrit en
+[issue #49](https://github.com/Denuet-Theo/dofdof/issues/49).
 
 Limite de fond mise au jour par cette mesure : la répartition dépend de la généalogie de
 l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont pas la même distribution selon

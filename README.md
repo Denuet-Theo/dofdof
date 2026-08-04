@@ -331,9 +331,29 @@ elles rapportent plus parce qu'elles demandent plus de travail, pas parce qu'ell
 meilleures. Une couleur qu'on achète ou capture ne mobilise aucun enclos et ne concourt donc
 pas pour cette ressource — à marge positive elle passe devant tout le reste.
 
-Attention en revanche : `optimalParentLevel` minimise les **kamas** et ne connaît le temps que
-via `kamas_per_hour`. À 0, monter les parents paraît presque gratuit et l'optimiseur préfère
-multiplier les tentatives — ce qui allonge beaucoup les plans sans que le coût le dise.
+### Le niveau des parents dépend de l'objectif
+
+`optimalParentLevel` minimise les **kamas** et ne voit pas les heures d'enclos. Ce n'est pas un
+oubli qu'on puisse corriger par un plancher : le bon niveau change avec l'objectif.
+
+Trois des quatre étapes du cycle ne mobilisent qu'un des deux emplacements de jauge, et la
+Mangeoire tient dans l'autre. Leurs 35 010 points sont donc de l'XP **gratuite en durée** —
+environ le niveau 50. Monter jusque-là ne rallonge aucune fournée et augmente le taux de
+réussite, donc réduit les tentatives.
+
+Mais ça reste payant en carburant, et les tentatives ne se convertissent en heures que par
+fournées de dix : `ceil(2 × tentatives / 10)`. À un exemplaire on arrondit à la même fournée
+dans les deux cas, et la montée est payée pour rien. Mesuré sur un muldo gen 4 :
+
+| Objectif | Niveau bas | Seuil (niv 50) |
+| --- | --- | --- |
+| 1 | **+1 229 /h** | +484 /h |
+| 30 | +11 944 /h | **+14 789 /h** |
+
+D'où deux jeux d'estimations calculés en parallèle — l'un au moins cher en kamas, l'autre
+planché au seuil — que `makePlan` départage sur la marge horaire, la même mesure que le
+classement. Le régime gagnant se lit sur la ligne : le niveau des parents change avec
+l'objectif, et c'est voulu.
 
 ### Combien on en veut change lequel on élève
 

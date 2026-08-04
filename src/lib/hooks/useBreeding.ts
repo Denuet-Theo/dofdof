@@ -104,6 +104,14 @@ export type PlannedColor = {
   duration: PlanDuration | null;
   gaugeNeeds: GaugeRequirement[];
   funding: PlanFunding | null;
+  /**
+   * L'estimation du régime retenu — niveau des parents, taux, coût.
+   *
+   * Portée par le plan et non lue à part : deux régimes de niveau donnent deux
+   * estimations, et afficher celle qui n'a pas servi ferait mentir la ligne sur
+   * le plan qu'elle résume.
+   */
+  estimate: BreedingEstimate | null;
 };
 
 /** Le plan d'une couleur, recalculé à la demande pour un objectif donné. */
@@ -278,28 +286,55 @@ export const useBreeding = (
     return points;
   }, [fuelItems, itemStock]);
 
-  const estimates = useMemo(() => {
-    if (!tree) return new Map<string, BreedingEstimate>();
+  /**
+   * Deux jeux d'estimations, qui ne diffèrent que par le niveau des parents.
+   *
+   * Il n'y a pas un bon niveau mais deux régimes, et l'objectif décide lequel :
+   *
+   * - **au moins cher en kamas** : l'optimiseur choisit un niveau bas, paie peu
+   *   de Mangeoire et accepte de rater souvent ;
+   * - **au seuil d'XP gratuite** (niveau 50) : monter jusque-là ne rallonge
+   *   aucune fournée, puisque la Mangeoire tient dans l'emplacement de jauge que
+   *   les étapes à une seule stat laissent libre.
+   *
+   * Le second réduit les tentatives, mais coûte du carburant — et les tentatives
+   * ne se convertissent en heures d'enclos que par fournées de dix. À un
+   * exemplaire, on arrondit à la même fournée dans les deux cas : on paie la
+   * montée pour rien. À trente, la réduction devient des fournées entières et le
+   * seuil gagne largement.
+   *
+   * Mesuré sur un muldo gen 4 : le seuil fait perdre 60 % de marge horaire à
+   * l'objectif 1, et en gagner 24 % à l'objectif 30. D'où l'essai des deux, et
+   * non un plancher imposé.
+   */
+  const estimateVariants = useMemo(() => {
+    if (!tree) return [] as Map<string, BreedingEstimate>[];
 
-    return computeBreedingCosts(tree.colors, prices, {
-      parentLevel: 'auto',
-      // `null` signifie « prix manquants » et non « gratuit » : on retombe alors
-      // sur zéro, ce que la page signale explicitement plutôt que de le taire.
-      fuelCostPerBaby: supplies?.fuelCostPerBaby ?? 0,
-      mangeoireCostPerPoint: supplies?.mangeoireCostPerPoint ?? 0,
-      genetonValue: genetonValuation?.valuePerGeneton ?? 0,
-      sacrificeUnitValue: priceOf(tree.sacrificeItem.id),
-      captureCost: supplies?.capture?.costPerMount ?? null,
-      // Une Optimakina sans prix connu n'est pas gratuite, elle est indisponible :
-      // l'omettre vaut mieux que de la faire retenir à tort par l'optimiseur.
-      optimakinaPrices: new Map(
-        Object.entries(tree.optimakinaByGeneration)
-          .map(([generation, item]) => [Number(generation), priceOf(item.id)] as const)
-          .filter(([, price]) => price > 0)
-      ),
-      recycleSteriles: settings.recycle_steriles,
-      neverSell: settings.never_sell_mounts,
-    });
+    const floors = [0];
+    if (supplies?.freeXpPoints) floors.push(supplies.freeXpPoints);
+
+    return floors.map((freeXpPoints) =>
+      computeBreedingCosts(tree.colors, prices, {
+        parentLevel: 'auto',
+        // `null` signifie « prix manquants » et non « gratuit » : on retombe
+        // alors sur zéro, ce que la page signale plutôt que de le taire.
+        fuelCostPerBaby: supplies?.fuelCostPerBaby ?? 0,
+        mangeoireCostPerPoint: supplies?.mangeoireCostPerPoint ?? 0,
+        genetonValue: genetonValuation?.valuePerGeneton ?? 0,
+        sacrificeUnitValue: priceOf(tree.sacrificeItem.id),
+        captureCost: supplies?.capture?.costPerMount ?? null,
+        // Une Optimakina sans prix connu n'est pas gratuite, elle est
+        // indisponible : l'omettre vaut mieux que de la faire retenir à tort.
+        optimakinaPrices: new Map(
+          Object.entries(tree.optimakinaByGeneration)
+            .map(([generation, item]) => [Number(generation), priceOf(item.id)] as const)
+            .filter(([, price]) => price > 0)
+        ),
+        recycleSteriles: settings.recycle_steriles,
+        freeXpPoints,
+        neverSell: settings.never_sell_mounts,
+      })
+    );
   }, [tree, prices, supplies, genetonValuation, priceOf, settings]);
 
   /**
@@ -315,52 +350,80 @@ export const useBreeding = (
     (colorId, count = 1) => {
       if (!tree) return null;
 
-      const estimate = estimates.get(colorId);
       const genetonValue = genetonValuation?.valuePerGeneton ?? 0;
 
-      const plan = breedingPlan(colorId, tree.colors, estimates, {
-        targetCount: count,
-        recycleSteriles: settings.recycle_steriles,
-        genetonValue,
-        stock: mountStock,
-      });
-      const duration = timing
-        ? planDuration(
-            plan,
-            timing,
-            // La montée au 200 ne se paie qu'à la revente à ce niveau ; ailleurs
-            // le poulain part tel quel.
-            estimate?.bestExit === 'sell200' ? { count, level: MAX_MOUNT_LEVEL } : null
-          )
-        : null;
+      const build = (estimates: Map<string, BreedingEstimate>): PlannedColor | null => {
+        const estimate = estimates.get(colorId);
+        // Rien à planifier pour une couleur qu'il vaut mieux acheter ou
+        // capturer : elle n'occupe aucun enclos.
+        if (estimate?.strategy !== 'breed') return null;
 
-      const gaugeNeeds = supplies
-        ? planGaugeNeeds(
-            plan,
-            { slots: timing?.slots },
-            supplies.cycleGauges,
-            supplies.mangeoire,
-            ownedGaugePoints
-          )
-        : [];
-
-      // Ce que la réserve de carburant dispense de racheter. Plafonné par
-      // `planGaugeNeeds` à ce que le plan consomme réellement.
-      const gaugeCredit = gaugeNeeds.reduce((total, need) => total + need.credit, 0);
-
-      return {
-        plan,
-        duration,
-        gaugeNeeds,
-        funding: planFunding(plan, estimates, settings.kamas_available, {
+        const plan = breedingPlan(colorId, tree.colors, estimates, {
+          targetCount: count,
+          recycleSteriles: settings.recycle_steriles,
           genetonValue,
-          gaugeCredit,
-        }),
+          stock: mountStock,
+        });
+        const duration = timing
+          ? planDuration(
+              plan,
+              timing,
+              // La montée au 200 ne se paie qu'à la revente à ce niveau ;
+              // ailleurs le poulain part tel quel.
+              estimate?.bestExit === 'sell200' ? { count, level: MAX_MOUNT_LEVEL } : null
+            )
+          : null;
+
+        const gaugeNeeds = supplies
+          ? planGaugeNeeds(
+              plan,
+              { slots: timing?.slots },
+              supplies.cycleGauges,
+              supplies.mangeoire,
+              ownedGaugePoints
+            )
+          : [];
+
+        // Ce que la réserve de carburant dispense de racheter. Plafonné par
+        // `planGaugeNeeds` à ce que le plan consomme réellement.
+        const gaugeCredit = gaugeNeeds.reduce((total, need) => total + need.credit, 0);
+
+        return {
+          plan,
+          duration,
+          gaugeNeeds,
+          estimate,
+          funding: planFunding(plan, estimates, settings.kamas_available, {
+            genetonValue,
+            gaugeCredit,
+          }),
+        };
       };
+
+      // Les deux régimes de niveau des parents s'essaient et se départagent sur
+      // la marge horaire — la même mesure que le classement. Le bon régime
+      // dépend de l'objectif, et lui seul le sait : à un exemplaire le niveau
+      // bas gagne, à trente c'est le seuil d'XP gratuite.
+      const rate = (candidate: PlannedColor) => {
+        const hours = candidate.duration?.enclosHours ?? 0;
+        const margin = (candidate.estimate?.bestExitValue ?? 0) * count - candidate.plan.totalCost;
+        // Sans durée chiffrable, le moins cher fait office d'arbitre.
+        return hours > 0 ? margin / hours : -candidate.plan.totalCost;
+      };
+
+      const candidates = estimateVariants
+        .map(build)
+        .filter((candidate): candidate is PlannedColor => candidate !== null);
+
+      return candidates.length === 0
+        ? null
+        : candidates.reduce((best, candidate) =>
+            rate(candidate) > rate(best) ? candidate : best
+          );
     },
     [
       tree,
-      estimates,
+      estimateVariants,
       settings.recycle_steriles,
       settings.kamas_available,
       genetonValuation,
@@ -375,12 +438,12 @@ export const useBreeding = (
     if (!tree) return [];
 
     return tree.colors.flatMap((color) => {
-      const estimate = estimates.get(color.id);
+      const planned = makePlan(color.id, targetCount);
+      // L'estimation du régime retenu fait foi ; à défaut de plan, celle du
+      // régime au moins cher, qui est aussi celle qui a décidé d'acheter.
+      const estimate = planned?.estimate ?? estimateVariants[0]?.get(color.id);
       if (!estimate) return [];
 
-      // Rien à planifier pour une couleur qu'il vaut mieux acheter : elle
-      // n'occupe aucun enclos, donc aucune heure à rapporter.
-      const planned = estimate.strategy === 'breed' ? makePlan(color.id, targetCount) : null;
       // La sortie rapporte par monture ; le plan en produit `targetCount`.
       const planMargin = planned
         ? estimate.bestExitValue * targetCount - planned.plan.totalCost
@@ -401,7 +464,7 @@ export const useBreeding = (
         },
       ];
     });
-  }, [tree, estimates, makePlan, targetCount]);
+  }, [tree, estimateVariants, makePlan, targetCount]);
 
   /** Enregistre un prix et le reflète localement sans recharger toute la page. */
   const savePrice = useCallback(

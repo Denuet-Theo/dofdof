@@ -211,6 +211,16 @@ export const mountXpForLevel = (level: number) =>
 export const MAX_MOUNT_LEVEL = 200;
 
 /**
+ * Le niveau qu'on atteint avec `points` de Mangeoire — l'inverse de
+ * `mountXpForLevel`, arrondi vers le bas.
+ */
+export const levelForMountXp = (points: number) => {
+  if (points <= 0) return 1;
+  const level = Math.pow(points / MOUNT_XP_COEFFICIENT, 1 / MOUNT_XP_EXPONENT);
+  return Math.min(MAX_MOUNT_LEVEL, Math.max(1, Math.floor(level)));
+};
+
+/**
  * Probabilité d'obtenir la génération cible : 30 % de base, plus 0,15 % par
  * niveau, les niveaux des deux parents s'additionnant.
  *
@@ -272,7 +282,17 @@ export const optimalParentLevel = (
    * monture d'une autre couleur, qui vaut ce qu'on aurait payé pour l'obtenir.
    * L'ignorer surfacturait chaque croisement de `(1/taux − 1)` montures.
    */
-  failureValue = 0
+  failureValue = 0,
+  /**
+   * Niveau en dessous duquel il ne sert à rien de descendre.
+   *
+   * Voir `freeXpPoints` : sous ce niveau, monter les parents **ne coûte aucune
+   * heure d'enclos** et augmente le taux de réussite, donc réduit le nombre de
+   * fournées. Ce calcul-ci ne compte que des kamas et ne peut pas le voir : il
+   * choisirait le niveau 1, en payant 38 % de temps d'enclos en trop pour
+   * économiser un peu de carburant.
+   */
+  minLevel = 1
 ): ParentLevelChoice => {
   let best: ParentLevelChoice | null = null;
 
@@ -282,7 +302,9 @@ export const optimalParentLevel = (
   const optimakinaChoices =
     optimakinaPrice !== null && optimakinaPrice > 0 ? [false, true] : [false];
 
-  for (let level = 1; level <= MAX_MOUNT_LEVEL; level++) {
+  const floor = Math.min(Math.max(minLevel, 1), MAX_MOUNT_LEVEL);
+
+  for (let level = floor; level <= MAX_MOUNT_LEVEL; level++) {
     for (const useOptimakina of optimakinaChoices) {
       const successRate = Math.min(
         1,
@@ -483,6 +505,25 @@ export type BreedingOptions = {
    */
   recycleSteriles: boolean;
   /**
+   * Points de Mangeoire qu'un cycle de fécondité absorbe **sans rien
+   * rallonger**.
+   *
+   * Trois des quatre étapes du cycle ne mobilisent qu'un des deux emplacements
+   * de jauge ; la Mangeoire occupe l'autre pendant ce temps-là. Les 35 010
+   * points de ces trois étapes sont donc de l'expérience gratuite en temps
+   * d'enclos — soit le niveau 50 environ.
+   *
+   * Ça pose un plancher au niveau des parents. En dessous, monter est gratuit en
+   * durée et augmente le taux de réussite, donc réduit le nombre de fournées :
+   * il n'y a aucune raison de s'en priver. `optimalParentLevel` ne peut pas le
+   * voir seul — il ne compte que des kamas, et la montée coûte du carburant —
+   * si bien qu'il choisissait le niveau 9 là où le 50 rend le même bébé pour
+   * 38 % d'heures d'enclos en moins.
+   *
+   * À 0, aucun plancher : le comportement d'avant, purement kamas.
+   */
+  freeXpPoints?: number;
+  /**
    * Coût de capture d'**une** monture sauvage, filet compris.
    *
    * À calculer par l'appelant depuis les filets de la famille : pour chacun,
@@ -622,6 +663,7 @@ export const computeBreedingCosts = (
     mangeoireCostPerPoint,
     optimakinaPrices,
     recycleSteriles,
+    freeXpPoints = 0,
     captureCost,
     neverSell = false,
   }: BreedingOptions
@@ -633,6 +675,10 @@ export const computeBreedingCosts = (
   // Identique pour toutes les couleurs : la courbe d'expérience ne dépend que du
   // niveau visé, pas de la rareté de la monture.
   const levelUpCost = mountXpForLevel(MAX_MOUNT_LEVEL) * mangeoireCostPerPoint;
+
+  // Le niveau que l'expérience gratuite du cycle permet d'atteindre. Constant
+  // sur tout l'arbre : il ne dépend que du cycle, pas de la couleur.
+  const parentLevelFloor = levelForMountXp(freeXpPoints);
 
   const estimates = new Map<string, BreedingEstimate>();
   const byId = new Map(colors.map((color) => [color.id, color]));
@@ -727,7 +773,8 @@ export const computeBreedingCosts = (
               fuelCost,
               mangeoireCostPerPoint,
               optimakinaPrice,
-              failureValue
+              failureValue,
+              parentLevelFloor
             )
           : fixedParentLevel(
               parentLevel,

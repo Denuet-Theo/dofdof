@@ -111,6 +111,16 @@ export type SupplyCosts = {
   /** Le carburant de Mangeoire retenu, pour dire lequel acheter. */
   mangeoireFuel: string | null;
   /**
+   * Points de Mangeoire qu'un cycle absorbe **sans rien rallonger**, en logeant
+   * l'XP dans l'emplacement de jauge que les étapes à une seule stat laissent
+   * libre.
+   *
+   * Vaut 35 010 quand cycle et Mangeoire tournent au même palier — soit
+   * exactement les trois étapes solitaires — et le rapport des débits l'écarte
+   * de cette valeur sinon. C'est ce qui pose le plancher du niveau des parents.
+   */
+  freeXpPoints: number | null;
+  /**
    * Ce qu'un cycle de fécondité demande à chaque jauge, et à quel prix au point.
    *
    * Les points, et non les kamas : c'est en points qu'un stock de carburant se
@@ -248,6 +258,9 @@ export const computeSupplyCosts = (
     levelUpHours: mangeoirePlan?.hours ?? null,
     mangeoirePointsPerHour: mangeoirePlan?.pointsPerHour ?? null,
     mangeoireFuel: mangeoirePlan?.fuel.name ?? null,
+    // Les heures libres du cycle, converties au débit de la Mangeoire.
+    freeXpPoints:
+      complete && mangeoirePlan ? cycleFreeSlotHours * mangeoirePlan.pointsPerHour : null,
     cycleGauges: [...cycleGauges].map(([gauge, usage]) => ({ gauge, ...usage })),
     mangeoire: mangeoirePlan
       ? {

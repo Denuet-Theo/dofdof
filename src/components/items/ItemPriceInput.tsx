@@ -27,6 +27,17 @@ const ItemPriceInput = ({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // The same item can be priced from more than one card on screen — a resource
+  // dropped by several monsters on /farm, say — so the field has to follow a
+  // price that moved elsewhere. Keyed off a *change* in the prop rather than
+  // its current value: re-seating on every render would wipe whatever is being
+  // typed the moment the parent re-renders for an unrelated reason.
+  const [lastSeen, setLastSeen] = useState(currentPrice);
+  if (currentPrice !== lastSeen) {
+    setLastSeen(currentPrice);
+    setPrice(currentPrice?.toString() || '');
+  }
+
   const handleSave = async () => {
     const numPrice = parseInt(price, 10);
     if (isNaN(numPrice) || numPrice < 0) return;

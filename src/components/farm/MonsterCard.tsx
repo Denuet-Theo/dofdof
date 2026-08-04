@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import { ChevronDown, Swords, MapPin, AlertTriangle } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
+import CopyableIcon from '@/components/ui/CopyableIcon';
 import KamasDisplay from '@/components/ui/KamasDisplay';
+import ItemPriceInput from '@/components/items/ItemPriceInput';
 import { ELEMENT_LABELS, ELEMENT_COLORS } from '@/lib/constants/elements';
 import { ELEMENTS, type Element, type FarmTarget } from '@/lib/supabase/types';
 
@@ -28,7 +30,13 @@ const weakestElement = (resistances: FarmTarget['resistances']): { element: Elem
   return best;
 };
 
-const MonsterCard = ({ target }: { target: FarmTarget }) => {
+type Props = {
+  target: FarmTarget;
+  /** Un prix de drop vient d'être écrit : à l'écran de répercuter le classement. */
+  onPriceSaved: (itemId: number, price: number) => void;
+};
+
+const MonsterCard = ({ target, onPriceSaved }: Props) => {
   const [expanded, setExpanded] = useState(false);
 
   const weak = weakestElement(target.resistances);
@@ -123,36 +131,52 @@ const MonsterCard = ({ target }: { target: FarmTarget }) => {
           {target.top_drops.length === 0 ? (
             <p className="text-xs text-dark-500">Aucun drop ne passe les filtres courants.</p>
           ) : (
-            target.top_drops.map((drop) => (
-              <div
-                key={`${drop.objectId}-${drop.criterions}`}
-                className="flex items-center gap-3 text-sm"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- idem. */}
-                <img
-                  src={drop.img}
-                  alt=""
-                  className="w-7 h-7 rounded-lg bg-dark-800/60 object-contain shrink-0"
-                  loading="lazy"
-                />
-                <span className="flex-1 truncate text-dark-200">{drop.name}</span>
+            target.top_drops.map((drop) => {
+              const price = Number(drop.price) || 0;
 
-                {drop.hasCriterions ? (
-                  <AlertTriangle
-                    size={12}
-                    className="text-kamas/70 shrink-0"
-                    aria-label="Drop conditionnel"
+              // Le champ de prix ajoute 160 px incompressibles à la ligne. Sans
+              // `flex-wrap`, c'est le nom qui payait : sous ~800 px il tombait à
+              // zéro et on se retrouvait à tarifer une ressource qu'on ne
+              // pouvait plus lire. Le `min-w-24` fixe le seuil — dès que le nom
+              // n'obtient plus ses 96 px, le prix passe à la ligne suivante.
+              return (
+                <div
+                  key={`${drop.objectId}-${drop.criterions}`}
+                  className="flex items-center gap-x-3 gap-y-2 text-sm flex-wrap"
+                >
+                  {/* `toast={false}` : la carte a `overflow-hidden`, la pastille
+                      flottante y serait coupée. La coche sur l'icône suffit. */}
+                  <CopyableIcon src={drop.img} name={drop.name} size="sm" toast={false} />
+
+                  <span className="flex-1 min-w-24 truncate text-dark-200">{drop.name}</span>
+
+                  {drop.hasCriterions ? (
+                    <AlertTriangle
+                      size={12}
+                      className="text-kamas/70 shrink-0"
+                      aria-label="Drop conditionnel"
+                    />
+                  ) : null}
+
+                  <span className="text-xs text-dark-400 tabular-nums shrink-0 w-16 text-right">
+                    {Number(drop.percent).toFixed(2)} %
+                  </span>
+
+                  {/* Un prix à 0 est un trou de saisie, pas un prix : passer
+                      `undefined` laisse le champ vide et son invite visible,
+                      plutôt que de faire corriger un « 0 » qui n'a jamais été
+                      saisi. */}
+                  <ItemPriceInput
+                    itemId={drop.objectId}
+                    itemName={drop.name}
+                    iconUrl={drop.img}
+                    currentPrice={price > 0 ? price : undefined}
+                    onPriceSaved={(itemId, saved) => onPriceSaved(itemId, saved)}
+                    className="w-40 shrink-0 ml-auto"
                   />
-                ) : null}
-
-                <span className="text-xs text-dark-400 tabular-nums shrink-0 w-16 text-right">
-                  {Number(drop.percent).toFixed(2)} %
-                </span>
-                <span className="shrink-0 w-24 text-right">
-                  <KamasDisplay amount={Number(drop.price) || 0} size="sm" />
-                </span>
-              </div>
-            ))
+                </div>
+              );
+            })
           )}
 
           {target.drop_count > target.top_drops.length ? (

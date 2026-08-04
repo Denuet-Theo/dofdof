@@ -134,16 +134,21 @@ const MonsterCard = ({ target, onPriceSaved }: Props) => {
             target.top_drops.map((drop) => {
               const price = Number(drop.price) || 0;
 
+              // Le champ de prix ajoute 160 px incompressibles à la ligne. Sans
+              // `flex-wrap`, c'est le nom qui payait : sous ~800 px il tombait à
+              // zéro et on se retrouvait à tarifer une ressource qu'on ne
+              // pouvait plus lire. Le `min-w-24` fixe le seuil — dès que le nom
+              // n'obtient plus ses 96 px, le prix passe à la ligne suivante.
               return (
                 <div
                   key={`${drop.objectId}-${drop.criterions}`}
-                  className="flex items-center gap-3 text-sm"
+                  className="flex items-center gap-x-3 gap-y-2 text-sm flex-wrap"
                 >
                   {/* `toast={false}` : la carte a `overflow-hidden`, la pastille
                       flottante y serait coupée. La coche sur l'icône suffit. */}
                   <CopyableIcon src={drop.img} name={drop.name} size="sm" toast={false} />
 
-                  <span className="flex-1 truncate text-dark-200">{drop.name}</span>
+                  <span className="flex-1 min-w-24 truncate text-dark-200">{drop.name}</span>
 
                   {drop.hasCriterions ? (
                     <AlertTriangle
@@ -167,7 +172,7 @@ const MonsterCard = ({ target, onPriceSaved }: Props) => {
                     iconUrl={drop.img}
                     currentPrice={price > 0 ? price : undefined}
                     onPriceSaved={(itemId, saved) => onPriceSaved(itemId, saved)}
-                    className="w-40 shrink-0"
+                    className="w-40 shrink-0 ml-auto"
                   />
                 </div>
               );

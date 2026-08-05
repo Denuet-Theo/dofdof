@@ -5,14 +5,23 @@ import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
 import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
+import BreedingBatches from '@/components/breeding/BreedingBatches';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
+import { nextBatches } from '@/lib/dofus/breeding/batches';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
+import {
+  OBJECTIVES,
+  rankFor,
+  recommendedFor,
+  type Candidate,
+  type ObjectiveId,
+} from '@/lib/dofus/breeding/objectives';
 import { formatHours } from '@/lib/utils/date';
 
 const FAMILIES: { id: FamilyId; label: string }[] = [
@@ -59,6 +68,8 @@ const BreedingPage = () => {
    * et non un champ enfoui dans un plan.
    */
   const [draftCount, setDraftCount] = useState(1);
+  /** L'objectif tant qu'aucun plan n'est suivi — ensuite, c'est le projet qui le porte. */
+  const [draftObjective, setDraftObjective] = useState<ObjectiveId>('profit');
 
   const project = useBreedingProject(family);
 
@@ -91,6 +102,7 @@ const BreedingPage = () => {
     addIndividual,
     updateIndividual,
     removeIndividual,
+    recordBirths,
     saveItemStock,
   } = useBreeding(family, targetCount);
 
@@ -155,6 +167,49 @@ const BreedingPage = () => {
     });
   }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
+  /**
+   * Ce que le plan cherche. Porté par le projet quand il y en a un, sinon local :
+   * on doit pouvoir changer d'objectif **avant** d'avoir choisi une couleur,
+   * puisque c'est justement l'objectif qui la désigne.
+   */
+  const objective = project.current?.objective ?? draftObjective;
+
+  const setObjective = (next: ObjectiveId) => {
+    if (project.current) project.setObjective(next);
+    else setDraftObjective(next);
+  };
+
+  /** Les lignes réduites à ce dont un objectif a besoin pour les départager. */
+  const candidates = useMemo<(Candidate & { row: BreedingRow })[]>(
+    () =>
+      rows.map((row) => ({
+        row,
+        colorId: row.colorId,
+        generation: row.generation,
+        planMargin: row.planMargin,
+        marginPerHour: row.marginPerHour,
+        enclosHours: row.planned?.duration?.enclosHours ?? null,
+        wallClockHours: row.planned?.duration?.wallClockHours ?? null,
+        totalCost: row.planned?.plan.totalCost ?? null,
+        breedable: row.planned !== null,
+      })),
+    [rows]
+  );
+
+  /**
+   * La couleur que l'objectif désigne, **parmi celles qu'on peut financer**.
+   *
+   * Un plan hors budget n'est pas une recommandation, c'est une frustration :
+   * l'écarter vaut mieux que de le proposer en sachant qu'il bloquera.
+   */
+  const recommended = useMemo(() => {
+    const affordable = candidates.filter(
+      (candidate) =>
+        !candidate.row.planned?.funding || candidate.row.planned.funding.affordable
+    );
+    return recommendedFor(affordable, objective)?.row ?? null;
+  }, [candidates, objective]);
+
   const sorted = useMemo(() => {
     // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
     // n'a plus rien à départager. Garder les autres couleurs à l'écran invite à
@@ -162,6 +217,12 @@ const BreedingPage = () => {
     // consulter. Ni le tri ni `pricedOnly` ne s'y appliquent — la ligne suivie
     // doit rester visible même sous un filtre qui la masquerait.
     if (selectedColorId) return rows.filter((row) => row.colorId === selectedColorId);
+
+    // Un objectif explicite décide seul de l'ordre, et le tri manuel disparaît
+    // avec lui : les deux répondraient à la même question, en se contredisant.
+    if (objective !== 'color') {
+      return rankFor(candidates, objective).map((ranked) => ranked.item.row);
+    }
 
     const kept = pricedOnly ? rows.filter((row) => row.estimate.priceLevel0 !== null) : rows;
 
@@ -179,28 +240,34 @@ const BreedingPage = () => {
         (a.planMargin ?? a.estimate.bestMargin ?? -Infinity)
       );
     });
-  }, [rows, sortBy, pricedOnly, selectedColorId]);
-
-  const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
+  }, [rows, candidates, objective, sortBy, pricedOnly, selectedColorId]);
 
   /**
-   * La couleur la plus rentable à l'heure d'enclos, **parmi celles qu'on peut
-   * financer**.
+   * Les deux prochaines fournées du plan suivi, montures nommées.
    *
-   * Un plan hors budget n'est pas une recommandation, c'est une frustration :
-   * l'écarter vaut mieux que de le proposer en sachant qu'il bloquera. Et
-   * seules les couleurs qu'on élève concourent — celles qu'on achète ne
-   * mobilisent aucun enclos, donc rien à optimiser.
+   * Ne se calcule que pour le plan suivi : c'est une consigne d'action, pas une
+   * comparaison, et l'établir pour les 120 couleurs n'aurait ni sens ni intérêt.
    */
-  const bestAffordable = useMemo(
-    () =>
-      rows.reduce<BreedingRow | null>((best, row) => {
-        if (row.marginPerHour === null || row.marginPerHour <= 0) return best;
-        if (row.planned?.funding && !row.planned.funding.affordable) return best;
-        return best === null || row.marginPerHour > best.marginPerHour! ? row : best;
-      }, null),
-    [rows]
-  );
+  const batches = useMemo(() => {
+    const target = rows.find((row) => row.colorId === selectedColorId);
+    if (!target?.planned) return [];
+
+    return nextBatches(target.planned.plan, stable, {
+      capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
+      count: 2,
+      recycleSteriles: settings.recycle_steriles,
+      generationOf,
+    });
+  }, [
+    rows,
+    selectedColorId,
+    stable,
+    settings.enclos_count,
+    settings.recycle_steriles,
+    generationOf,
+  ]);
+
+  const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
   return (
     <div className="space-y-6">
@@ -250,6 +317,32 @@ const BreedingPage = () => {
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
       />
+
+      {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
+          d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
+          qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
+      {selectedColorId && (
+        <div className="glass rounded-2xl px-5 py-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-dark-200">
+              Prochaines fournées — {nameOf(selectedColorId)}
+            </span>
+            <span className="text-xs text-dark-500">
+              les montures à charger, et ce qui en est né
+            </span>
+          </div>
+          <BreedingBatches
+            batches={batches}
+            nameOf={nameOf}
+            colors={rows.map((row) => ({
+              colorId: row.colorId,
+              name: row.name,
+              generation: row.generation,
+            }))}
+            onRecord={recordBirths}
+          />
+        </div>
+      )}
 
       {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
           pans entiers du résultat valent zéro et il vaut mieux le voir. */}
@@ -307,8 +400,9 @@ const BreedingPage = () => {
       {/* Ce qui manque se dit, plutôt que de disparaître dans un zéro. */}
       {supplies && supplies.missingGauges.length > 0 && (
         <p className="text-[11px] text-amber-400/80">
-          Aucun carburant tarifé pour {supplies.missingGauges.join(', ')} — le coût des cycles
-          et de la montée en niveau est sous-estimé tant que ces prix manquent.
+          Aucun carburant tarifé pour {supplies.missingGauges.join(', ')} — ces jauges sont
+          chiffrées au prix relevé par défaut. Renseigne les carburants pour coller au
+          cours du jour et au palier que tu utilises vraiment.
         </p>
       )}
 
@@ -336,6 +430,32 @@ const BreedingPage = () => {
 
         {goalsOpen && (
           <div className="px-5 pb-5 pt-4 border-t border-dark-700/40 space-y-4">
+            {/* Ce qu'on cherche vient avant tout le reste : c'est ce qui décide
+                du gagnant, et les trois critères ne désignent pas la même
+                couleur. La marge horaire, seule, ne pouvait jamais recommander
+                une route vers la gen 10 — elle y perd toujours. */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {OBJECTIVES.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setObjective(option.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer border ${
+                      objective === option.id
+                        ? 'bg-kamas/15 border-kamas/40 text-kamas'
+                        : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-dark-500'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-dark-600">
+                {OBJECTIVES.find((option) => option.id === objective)?.hint}
+              </p>
+            </div>
+
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
               <label className="flex items-center gap-2">
                 Je veux
@@ -374,30 +494,38 @@ const BreedingPage = () => {
                 <Button
                   size="sm"
                   className="ml-auto"
-                  disabled={!bestAffordable}
+                  disabled={!recommended}
                   onClick={() =>
-                    bestAffordable && project.select(bestAffordable.colorId, targetCount)
+                    recommended && project.select(recommended.colorId, targetCount, objective)
                   }
                 >
                   <Wand2 size={13} />
-                  {bestAffordable
-                    ? `Optimiser : ${bestAffordable.name}`
-                    : 'Rien de rentable à ce budget'}
+                  {recommended
+                    ? `Suivre : ${recommended.name}`
+                    : objective === 'color'
+                      ? 'Choisis une couleur ci-dessous'
+                      : 'Aucune route ne convient'}
                 </Button>
               )}
             </div>
 
-            {!project.current && settings.kamas_available > 0 && !bestAffordable && (
-              <p className="text-[11px] text-amber-400/80">
-                Aucune couleur n&apos;est à la fois rentable et finançable avec{' '}
-                {settings.kamas_available.toLocaleString('fr-FR')} kamas. Baisse
-                l&apos;objectif, ou relève le budget dans « Mes stocks ».
-              </p>
-            )}
+            {!project.current &&
+              objective !== 'color' &&
+              settings.kamas_available > 0 &&
+              !recommended && (
+                <p className="text-[11px] text-amber-400/80">
+                  Aucune route ne répond à cet objectif dans les limites de{' '}
+                  {settings.kamas_available.toLocaleString('fr-FR')} kamas. Baisse le
+                  nombre visé, relève le budget dans « Mes stocks », ou change
+                  d&apos;objectif.
+                </p>
+              )}
 
-            {/* Tri — sans objet dès qu'une seule ligne reste à l'écran. */}
+            {/* Tri manuel : réservé à « une couleur précise ». Ailleurs c'est
+                l'objectif qui ordonne, et deux tris concurrents se
+                contrediraient. */}
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-              {!selectedColorId && (
+              {!selectedColorId && objective === 'color' && (
                 <>
                   <span>Trier par</span>
                   <select

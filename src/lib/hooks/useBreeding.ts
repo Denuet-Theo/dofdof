@@ -41,10 +41,26 @@ import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   stableBySex,
+  INDIVIDUAL_TRACKING_FROM,
   type Individual,
+  type Pairing,
   type Sex,
   type Stable,
 } from '@/lib/dofus/breeding/stable';
+
+/**
+ * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
+ *
+ * Un accouplement produit **toujours** un bébé — les 30 à 90 % portent sur sa
+ * couleur, pas sur son existence — donc il n'y a pas de cas « rien n'est né ».
+ * Un raté se saisit comme une couleur parmi d'autres.
+ */
+export type BirthEntry = {
+  male: Pairing;
+  female: Pairing;
+  colorId: string;
+  sex: Sex;
+};
 
 /**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
@@ -694,6 +710,149 @@ export const useBreeding = (
     []
   );
 
+  /**
+   * Enregistre ce qu'une fournée a donné : parents stériles, bébés en écurie.
+   *
+   * C'est ce qui rend le plan reprenable sans rien noter ailleurs. Un
+   * accouplement **produit toujours un bébé** — les 30 à 90 % portent sur sa
+   * couleur, pas sur sa venue au monde — donc chaque couple rend une ligne, et
+   * l'échec se saisit comme une couleur parmi d'autres et non comme un vide.
+   *
+   * Les parents passent stériles dans le même mouvement : c'est l'accouplement
+   * qui les consomme, et les laisser fertiles ferait reproposer à la fournée
+   * suivante des montures déjà dépensées.
+   */
+  const recordBirths = useCallback(
+    async (entries: BirthEntry[]) => {
+      if (entries.length === 0 || !tree) return;
+      const supabase = createClient();
+      const generations = new Map(tree.colors.map((color) => [color.id, color.generation]));
+
+      /** Individus à passer stériles, et effectifs de vrac à décrémenter. */
+      const steriles = new Set<string>();
+      const bulkSpent = new Map<string, { males: number; females: number }>();
+
+      for (const entry of entries) {
+        for (const side of [entry.male, entry.female]) {
+          if (side.mountId) {
+            steriles.add(side.mountId);
+            continue;
+          }
+          const spent = bulkSpent.get(side.colorId) ?? { males: 0, females: 0 };
+          if (side.sex === 'M') spent.males += 1;
+          else spent.females += 1;
+          bulkSpent.set(side.colorId, spent);
+        }
+      }
+
+      const bulkBorn = new Map<string, { males: number; females: number }>();
+      const individualsBorn: {
+        family: FamilyId;
+        color_id: string;
+        sex: Sex;
+        parent_a_color: string;
+        parent_b_color: string;
+      }[] = [];
+
+      for (const entry of entries) {
+        const generation = generations.get(entry.colorId) ?? 1;
+        if (generation < INDIVIDUAL_TRACKING_FROM) {
+          const born = bulkBorn.get(entry.colorId) ?? { males: 0, females: 0 };
+          if (entry.sex === 'M') born.males += 1;
+          else born.females += 1;
+          bulkBorn.set(entry.colorId, born);
+          continue;
+        }
+        individualsBorn.push({
+          family,
+          color_id: entry.colorId,
+          sex: entry.sex,
+          // La généalogie du bébé, c'est-à-dire les couleurs de ses deux
+          // parents : c'est elle qui décidera de ses propres ratés.
+          parent_a_color: entry.male.colorId,
+          parent_b_color: entry.female.colorId,
+        });
+      }
+
+      // Le vrac se recalcule depuis l'état courant : dépensé d'un côté, né de
+      // l'autre, et les deux peuvent porter sur la même couleur.
+      const nextBulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
+      for (const [colorId, spent] of bulkSpent) {
+        const current = nextBulk.get(colorId) ?? { males: 0, females: 0 };
+        nextBulk.set(colorId, {
+          males: Math.max(0, current.males - spent.males),
+          females: Math.max(0, current.females - spent.females),
+        });
+      }
+      for (const [colorId, born] of bulkBorn) {
+        const current = nextBulk.get(colorId) ?? { males: 0, females: 0 };
+        nextBulk.set(colorId, {
+          males: current.males + born.males,
+          females: current.females + born.females,
+        });
+      }
+
+      const [sterileResult, insertResult] = await Promise.all([
+        steriles.size > 0
+          ? supabase
+              .from('user_breeding_individuals')
+              .update({ fertile: false, updated_at: new Date().toISOString() })
+              .in('id', [...steriles])
+          : Promise.resolve({ error: null }),
+        individualsBorn.length > 0
+          ? supabase.from('user_breeding_individuals').insert(individualsBorn).select()
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      const touched = [...bulkSpent.keys(), ...bulkBorn.keys()];
+      const bulkResult = await (touched.length > 0
+        ? supabase.from('user_breeding_mounts').upsert(
+            [...new Set(touched)].map((colorId) => ({
+              family,
+              color_id: colorId,
+              males: nextBulk.get(colorId)?.males ?? 0,
+              females: nextBulk.get(colorId)?.females ?? 0,
+              updated_at: new Date().toISOString(),
+            })),
+            { onConflict: 'user_id,family,color_id' }
+          )
+        : Promise.resolve({ error: null }));
+
+      if (sterileResult.error || insertResult.error || bulkResult.error) {
+        console.error(
+          '[breeding] fournée non enregistrée:',
+          sterileResult.error ?? insertResult.error ?? bulkResult.error
+        );
+        // L'écriture a pu passer à moitié : on relit plutôt que de deviner.
+        load();
+        return;
+      }
+
+      const added = ((insertResult.data ?? []) as UserBreedingIndividual[]).map((row) => ({
+        id: row.id,
+        colorId: row.color_id,
+        sex: row.sex,
+        level: row.level,
+        fertile: row.fertile,
+        parents:
+          row.parent_a_color && row.parent_b_color
+            ? ([row.parent_a_color, row.parent_b_color] as [string, string])
+            : null,
+      }));
+
+      setStable((current) => ({
+        bulk: nextBulk,
+        individuals: [
+          ...current.individuals.map((mount) =>
+            steriles.has(mount.id) ? { ...mount, fertile: false } : mount
+          ),
+          ...added,
+        ],
+      }));
+    },
+    [family, tree, stable, load]
+  );
+
   /** Retire une monture de l'écurie — vendue, sacrifiée, ou saisie par erreur. */
   const removeIndividual = useCallback(async (id: string) => {
     setStable((current) => ({
@@ -761,6 +920,7 @@ export const useBreeding = (
     addIndividual,
     updateIndividual,
     removeIndividual,
+    recordBirths,
     saveItemStock,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,
     // `loaded` couvre le tout premier rendu, avant que la transition démarre :

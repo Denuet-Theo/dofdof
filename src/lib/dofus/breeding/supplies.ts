@@ -297,12 +297,15 @@ export const computeSupplyCosts = (
     netRecoveryRate,
     mountsInEnclos,
     gaugeCap,
+    countNetCost = true,
   }: {
     kamasPerHour: number;
     minutesPerFight: number;
     netRecoveryRate: number;
     mountsInEnclos: number;
     gaugeCap: number | null;
+    /** Compter le prix des filets, ou ne facturer que le temps de combat. */
+    countNetCost?: boolean;
   }
 ): SupplyCosts => {
   const byGauge = fuelsByGauge(fuelItems, prices);
@@ -421,6 +424,7 @@ export const computeSupplyCosts = (
       recoveryRate: netRecoveryRate,
       minutesPerFight,
       kamasPerHour,
+      countNetCost,
     }),
     missingGauges,
   };

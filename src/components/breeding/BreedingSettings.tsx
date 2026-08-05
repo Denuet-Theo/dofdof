@@ -177,6 +177,25 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
           <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
             <input
               type="checkbox"
+              checked={!draft.count_net_cost}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, count_net_cost: !event.target.checked }))
+              }
+              className="accent-kamas cursor-pointer"
+            />
+            Ne pas compter le prix des filets — je récolte mes matériaux
+          </label>
+          {!draft.count_net_cost && (
+            <p className="text-[10px] text-dark-600 -mt-2 ml-6">
+              Une capture ne coûte plus que le temps de combat. Les filets sans prix
+              redeviennent utilisables, et le choix bascule sur le plus gros disponible —
+              un filet vaut un combat, quel que soit son palier.
+            </p>
+          )}
+
+          <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
+            <input
+              type="checkbox"
               checked={!draft.credit_off_target}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, credit_off_target: !event.target.checked }))

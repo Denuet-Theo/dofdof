@@ -290,6 +290,14 @@ export type UserBreedingSettings = {
    * que l'optimiseur choisisse de rater pour encaisser des ancêtres.
    */
   credit_off_target: boolean;
+  /**
+   * Imputer le prix de craft des filets au coût d'une capture
+   * (migration 20260806090000).
+   *
+   * À `false`, seul le temps de combat est compté : le régime de qui récolte
+   * ses propres matériaux, où le craft ne sort aucun kama de la poche.
+   */
+  count_net_cost: boolean;
   /** Plafond de jauge imposé, ou null pour laisser l'arbitrage temps/kamas décider. */
   gauge_cap: number | null;
   updated_at: string;
@@ -511,6 +519,7 @@ export interface Database {
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
           credit_off_target?: boolean;
+          count_net_cost?: boolean;
           gauge_cap?: number | null;
           updated_at?: string;
         };
@@ -524,6 +533,7 @@ export interface Database {
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
           credit_off_target?: boolean;
+          count_net_cost?: boolean;
           gauge_cap?: number | null;
           updated_at?: string;
         };

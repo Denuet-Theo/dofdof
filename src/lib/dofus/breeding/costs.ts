@@ -58,6 +58,23 @@ export type CaptureOptions = {
    * qu'il gagnerait à faire autre chose — donc jamais deviné ici.
    */
   kamasPerHour: number;
+  /**
+   * Compter le prix des filets dans le coût d'une capture.
+   *
+   * À `false`, un filet est réputé gratuit et il ne reste que le temps de
+   * combat. C'est le régime de qui récolte ses propres matériaux : le craft ne
+   * sort alors aucun kama de la poche, et lui imputer un prix d'hôtel de vente
+   * revient à facturer un coût qu'on n'a pas payé.
+   *
+   * Deux conséquences, et la seconde importe autant que la première :
+   *
+   * 1. les filets **sans prix connu** redeviennent éligibles — leur prix ne
+   *    décide plus de rien, donc l'ignorer n'est plus une approximation ;
+   * 2. le choix du filet bascule entièrement sur le temps, donc sur le **plus
+   *    gros** disponible, puisqu'un filet vaut un combat quel que soit son
+   *    palier.
+   */
+  countNetCost?: boolean;
 };
 
 export type CaptureChoice = {
@@ -78,21 +95,31 @@ export type CaptureChoice = {
  */
 export const bestCaptureNet = (
   nets: CaptureNet[],
-  { netCosts, recoveryRate, minutesPerFight, kamasPerHour }: CaptureOptions
+  { netCosts, recoveryRate, minutesPerFight, kamasPerHour, countNetCost = true }: CaptureOptions
 ): CaptureChoice | null => {
   let best: CaptureChoice | null = null;
 
   for (const net of nets) {
     const craftCost = netCosts.get(net.id);
-    if (craftCost === undefined || craftCost < 0) continue;
+    // Un filet sans prix n'est écarté que si son prix compte : sinon il est
+    // aussi utilisable que les autres, et l'exclure priverait du plus gros.
+    if (countNetCost && (craftCost === undefined || craftCost < 0)) continue;
 
     // Le filet et le combat se répartissent tous deux sur les `captures`
     // montures ramenées — un seul combat, quel que soit le palier.
-    const netCostPerMount = (craftCost * (1 - recoveryRate)) / net.captures;
+    const netCostPerMount = countNetCost ? ((craftCost ?? 0) * (1 - recoveryRate)) / net.captures : 0;
     const timeCostPerMount = (minutesPerFight / 60) * (kamasPerHour / net.captures);
     const costPerMount = netCostPerMount + timeCostPerMount;
 
-    if (!best || costPerMount < best.costPerMount) {
+    // À coût égal, le plus gros filet gagne. Le cas se présente vraiment : sans
+    // prix de filet **et** sans heure valorisée, toutes les captures reviennent
+    // à zéro, et sans départage c'est le premier parcouru — donc le plus petit —
+    // qui l'emporterait, pour autant de combats en plus.
+    if (
+      !best ||
+      costPerMount < best.costPerMount ||
+      (costPerMount === best.costPerMount && net.captures > best.net.captures)
+    ) {
       best = { net, costPerMount, netCostPerMount, timeCostPerMount };
     }
   }

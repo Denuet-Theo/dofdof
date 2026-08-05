@@ -7,6 +7,7 @@ import type {
   DofusDBItem,
   DofusDBResponse,
   ItemPrice,
+  UserBreedingIndividual,
   UserBreedingMount,
   UserBreedingSettings,
   UserItemStock,
@@ -37,6 +38,13 @@ import {
 } from '@/lib/dofus/breeding/costs';
 import { planWaves, wavesByStep, type Wave } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
+import {
+  emptyStable,
+  stableBySex,
+  type Individual,
+  type Sex,
+  type Stable,
+} from '@/lib/dofus/breeding/stable';
 
 /**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
@@ -143,7 +151,7 @@ export const useBreeding = (
   const [itemPrices, setItemPrices] = useState<Map<number, ItemPrice>>(new Map());
   const [fuelItems, setFuelItems] = useState<DofusDBItem[]>([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [mountStock, setMountStock] = useState<Map<string, number>>(new Map());
+  const [stable, setStable] = useState<Stable>(emptyStable);
   const [itemStock, setItemStock] = useState<Map<number, number>>(new Map());
   // Même patron que la page Farm : la transition porte l'état de chargement,
   // ce qui évite un `setState` synchrone dans l'effet.
@@ -158,12 +166,20 @@ export const useBreeding = (
       try {
         // Les prix de couleurs sont partagés, les réglages sont privés : deux
         // requêtes distinctes, mais rien ne les sérialise.
-        const [colorRows, settingRows, itemRows, mountRows, stockRows, fuelResponse] =
-          await Promise.all([
+        const [
+          colorRows,
+          settingRows,
+          itemRows,
+          mountRows,
+          individualRows,
+          stockRows,
+          fuelResponse,
+        ] = await Promise.all([
             supabase.from('breeding_color_prices').select('*').eq('family', family),
             supabase.from('user_breeding_settings').select('*').maybeSingle(),
             supabase.from('item_prices').select('*'),
             supabase.from('user_breeding_mounts').select('*').eq('family', family),
+            supabase.from('user_breeding_individuals').select('*').eq('family', family),
             supabase.from('user_item_stock').select('*'),
             // Les 120 carburants d'enclos tiennent en une page du miroir local :
             // c'est ce qui chiffre le cycle de fécondité et la montée en niveau.
@@ -189,13 +205,27 @@ export const useBreeding = (
         );
         setFuelItems((fuelResponse as DofusDBResponse<DofusDBItem>).data ?? []);
 
-        setMountStock(
-          new Map(
+        setStable({
+          bulk: new Map(
             ((mountRows.data ?? []) as UserBreedingMount[])
-              .filter((row) => row.count > 0)
-              .map((row) => [row.color_id, row.count])
-          )
-        );
+              .filter((row) => row.males > 0 || row.females > 0)
+              .map((row) => [row.color_id, { males: row.males, females: row.females }])
+          ),
+          individuals: ((individualRows.data ?? []) as UserBreedingIndividual[]).map((row) => ({
+            id: row.id,
+            colorId: row.color_id,
+            sex: row.sex,
+            level: row.level,
+            fertile: row.fertile,
+            // Les deux couleurs vont ensemble ou pas du tout : une ascendance à
+            // moitié connue ne se distingue pas d'une monture achetée, et la
+            // traiter comme telle vaut mieux que d'inventer le parent manquant.
+            parents:
+              row.parent_a_color && row.parent_b_color
+                ? [row.parent_a_color, row.parent_b_color]
+                : null,
+          })),
+        });
         setItemStock(
           new Map(
             ((stockRows.data ?? []) as UserItemStock[])
@@ -222,6 +252,28 @@ export const useBreeding = (
   }, [load]);
 
   const tree = findFamily(family);
+
+  /**
+   * L'écurie vue par couleur et par sexe — ce dont le découpage en fournées a
+   * besoin, puisqu'un accouplement demande un mâle et une femelle.
+   */
+  const stockBySex = useMemo(() => stableBySex(stable), [stable]);
+
+  /**
+   * Les effectifs totaux, sexes confondus.
+   *
+   * C'est ce que `breedingPlan` consomme : le **coût** d'un plan ne dépend pas
+   * de la répartition des sexes, seulement du nombre de montures à se procurer.
+   * Le déséquilibre ne coûte pas de kamas, il coûte des tours d'enclos — et
+   * c'est donc au découpage en vagues, pas au chiffrage, de le voir.
+   */
+  const mountStock = useMemo(
+    () =>
+      new Map(
+        [...stockBySex].map(([colorId, { males, females }]) => [colorId, males + females] as const)
+      ),
+    [stockBySex]
+  );
 
   /** Prix nu d'un item, pour les co-produits qu'on ne fait que revendre. */
   const priceOf = useCallback(
@@ -382,7 +434,7 @@ export const useBreeding = (
         // classement, donc de plans qui ne sont pas encore construits. Elle se
         // rajoute à l'affichage, où elle ne change aucun chiffre.
         const waves = planWaves(plan, {
-          stock: mountStock,
+          stock: stockBySex,
           capacity: Math.max(settings.enclos_count, 1) * (timing?.slots ?? ENCLOS_SLOTS),
           recycleSteriles: settings.recycle_steriles,
           filler: null,
@@ -466,6 +518,7 @@ export const useBreeding = (
       supplies,
       ownedGaugePoints,
       mountStock,
+      stockBySex,
     ]
   );
 
@@ -545,20 +598,20 @@ export const useBreeding = (
    * L'état local part devant : le classement entier se recalcule à chaque
    * saisie, et l'attendre du réseau rendrait la frappe poussive.
    */
-  const saveMountStock = useCallback(
-    async (colorId: string, count: number) => {
-      setMountStock((current) => {
-        const next = new Map(current);
-        if (count > 0) next.set(colorId, count);
-        else next.delete(colorId);
-        return next;
+  const saveBulkStock = useCallback(
+    async (colorId: string, males: number, females: number) => {
+      setStable((current) => {
+        const bulk = new Map(current.bulk);
+        if (males > 0 || females > 0) bulk.set(colorId, { males, females });
+        else bulk.delete(colorId);
+        return { ...current, bulk };
       });
 
       const supabase = createClient();
       const { error: saveError } = await supabase
         .from('user_breeding_mounts')
         .upsert(
-          { family, color_id: colorId, count, updated_at: new Date().toISOString() },
+          { family, color_id: colorId, males, females, updated_at: new Date().toISOString() },
           { onConflict: 'user_id,family,color_id' }
         );
 
@@ -566,6 +619,96 @@ export const useBreeding = (
     },
     [family]
   );
+
+  /**
+   * Ajoute une monture suivie individuellement.
+   *
+   * L'identifiant vient de la base et non d'un tirage local : les ascendances
+   * s'y référencent, et une monture dont l'identifiant changerait au rechargement
+   * casserait la généalogie de ses enfants. D'où l'attente du retour, contrairement
+   * aux compteurs où l'état local peut partir devant sans risque.
+   */
+  const addIndividual = useCallback(
+    async (mount: {
+      colorId: string;
+      sex: Sex;
+      level?: number;
+      parents?: [string, string] | null;
+    }) => {
+      const supabase = createClient();
+      const { data, error: saveError } = await supabase
+        .from('user_breeding_individuals')
+        .insert({
+          family,
+          color_id: mount.colorId,
+          sex: mount.sex,
+          level: mount.level ?? 1,
+          parent_a_color: mount.parents?.[0] ?? null,
+          parent_b_color: mount.parents?.[1] ?? null,
+        })
+        .select()
+        .single();
+
+      if (saveError || !data) {
+        console.error('[breeding] individu non enregistré:', saveError);
+        return null;
+      }
+
+      const row = data as UserBreedingIndividual;
+      const added: Individual = {
+        id: row.id,
+        colorId: row.color_id,
+        sex: row.sex,
+        level: row.level,
+        fertile: row.fertile,
+        parents:
+          row.parent_a_color && row.parent_b_color
+            ? [row.parent_a_color, row.parent_b_color]
+            : null,
+      };
+
+      setStable((current) => ({ ...current, individuals: [...current.individuals, added] }));
+      return added;
+    },
+    [family]
+  );
+
+  /** Corrige une monture suivie : niveau, sexe ou fertilité. */
+  const updateIndividual = useCallback(
+    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile'>>) => {
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.map((mount) =>
+          mount.id === id ? { ...mount, ...patch } : mount
+        ),
+      }));
+
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from('user_breeding_individuals')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (saveError) console.error('[breeding] individu non mis à jour:', saveError);
+    },
+    []
+  );
+
+  /** Retire une monture de l'écurie — vendue, sacrifiée, ou saisie par erreur. */
+  const removeIndividual = useCallback(async (id: string) => {
+    setStable((current) => ({
+      ...current,
+      individuals: current.individuals.filter((mount) => mount.id !== id),
+    }));
+
+    const supabase = createClient();
+    const { error: saveError } = await supabase
+      .from('user_breeding_individuals')
+      .delete()
+      .eq('id', id);
+
+    if (saveError) console.error('[breeding] individu non supprimé:', saveError);
+  }, []);
 
   /** Idem pour un carburant en réserve. */
   const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
@@ -609,10 +752,15 @@ export const useBreeding = (
     genetonValuation,
     supplies,
     fuelItems,
+    stable,
+    stockBySex,
     mountStock,
     itemStock,
     ownedGaugePoints,
-    saveMountStock,
+    saveBulkStock,
+    addIndividual,
+    updateIndividual,
+    removeIndividual,
     saveItemStock,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,
     // `loaded` couvre le tout premier rendu, avant que la transition démarre :

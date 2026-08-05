@@ -1,9 +1,15 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Boxes, Check, Coins, Search } from 'lucide-react';
+import { Boxes, Check, Coins, Plus, Search, Trash2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
+import {
+  INDIVIDUAL_TRACKING_FROM,
+  type BulkStock,
+  type Individual,
+  type Sex,
+} from '@/lib/dofus/breeding/stable';
 import type { DofusDBItem } from '@/lib/supabase/types';
 import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
@@ -26,11 +32,24 @@ type Settings = typeof DEFAULT_SETTINGS;
 type Props = {
   rows: BreedingRow[];
   fuelItems: DofusDBItem[];
-  mountStock: Map<string, number>;
+  /** Effectifs par couleur et par sexe, vrac et individus confondus. */
+  stockBySex: Map<string, BulkStock>;
+  /** Les montures de génération 3 et plus, suivies une par une. */
+  individuals: Individual[];
   itemStock: Map<number, number>;
   ownedGaugePoints: Map<string, number>;
   settings: Settings;
-  onSaveMount: (colorId: string, count: number) => Promise<void>;
+  onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
+  onAddIndividual: (mount: {
+    colorId: string;
+    sex: Sex;
+    level?: number;
+  }) => Promise<Individual | null>;
+  onUpdateIndividual: (
+    id: string,
+    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile'>>
+  ) => Promise<void>;
+  onRemoveIndividual: (id: string) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
   onSaveSettings: (next: Settings) => Promise<boolean>;
 };
@@ -55,11 +74,15 @@ const countInput = (
 const BreedingStocks = ({
   rows,
   fuelItems,
-  mountStock,
+  stockBySex,
+  individuals,
   itemStock,
   ownedGaugePoints,
   settings,
-  onSaveMount,
+  onSaveBulk,
+  onAddIndividual,
+  onUpdateIndividual,
+  onRemoveIndividual,
   onSaveItem,
   onSaveSettings,
 }: Props) => {
@@ -70,19 +93,45 @@ const BreedingStocks = ({
   const [budget, setBudget] = useState(String(settings.kamas_available));
   const [savedBudget, setSavedBudget] = useState(false);
 
+  /** Les ascendances ne portent que des identifiants ; les lignes ont les noms. */
+  const nameOf = useMemo(() => {
+    const names = new Map(rows.map((row) => [row.colorId, row.name]));
+    return (colorId: string) => names.get(colorId) ?? colorId;
+  }, [rows]);
+
   const mounts = useMemo(() => {
     const needle = mountQuery.trim().toLowerCase();
+    const total = (colorId: string) => {
+      const counts = stockBySex.get(colorId);
+      return (counts?.males ?? 0) + (counts?.females ?? 0);
+    };
     return rows
       .filter((row) => {
-        if (ownedOnly && !(mountStock.get(row.colorId) ?? 0)) return false;
+        if (ownedOnly && !total(row.colorId)) return false;
         return !needle || row.name.toLowerCase().includes(needle);
       })
       .sort((a, b) => {
         // Ce qu'on possède remonte : c'est ce qu'on vient corriger.
-        const owned = (mountStock.get(b.colorId) ?? 0) - (mountStock.get(a.colorId) ?? 0);
+        const owned = total(b.colorId) - total(a.colorId);
         return owned || a.generation - b.generation || a.name.localeCompare(b.name);
       });
-  }, [rows, mountQuery, ownedOnly, mountStock]);
+  }, [rows, mountQuery, ownedOnly, stockBySex]);
+
+  /** Les individus d'une couleur, les fertiles devant puis par niveau. */
+  const individualsOf = useMemo(() => {
+    const byColor = new Map<string, Individual[]>();
+    for (const mount of individuals) {
+      const group = byColor.get(mount.colorId) ?? [];
+      group.push(mount);
+      byColor.set(mount.colorId, group);
+    }
+    for (const group of byColor.values()) {
+      group.sort(
+        (a, b) => Number(b.fertile) - Number(a.fertile) || a.level - b.level || a.id.localeCompare(b.id)
+      );
+    }
+    return byColor;
+  }, [individuals]);
 
   /** Les carburants d'enclos, groupés par jauge et ordonnés par palier. */
   const fuelsByGauge = useMemo(() => {
@@ -107,7 +156,10 @@ const BreedingStocks = ({
     return [...groups].sort(([a], [b]) => a.localeCompare(b));
   }, [fuelItems, fuelQuery]);
 
-  const ownedMounts = [...mountStock.values()].reduce((total, count) => total + count, 0);
+  const ownedMounts = [...stockBySex.values()].reduce(
+    (total, { males, females }) => total + males + females,
+    0
+  );
   const ownedFuels = [...itemStock.values()].reduce((total, quantity) => total + quantity, 0);
 
   return (
@@ -208,18 +260,122 @@ const BreedingStocks = ({
               dans les plans.
             </p>
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
-              {mounts.map((row) => (
-                <div
-                  key={row.colorId}
-                  className="flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-dark-800/40"
-                >
-                  <span className="text-xs text-dark-200 flex-1 truncate">{row.name}</span>
-                  <span className="text-[10px] text-dark-500 shrink-0">gen {row.generation}</span>
-                  {countInput(mountStock.get(row.colorId) ?? 0, (next) =>
-                    onSaveMount(row.colorId, next)
-                  )}
-                </div>
-              ))}
+              {mounts.map((row) => {
+                const counts = stockBySex.get(row.colorId) ?? { males: 0, females: 0 };
+                const tracked = row.generation >= INDIVIDUAL_TRACKING_FROM;
+                const owned = individualsOf.get(row.colorId) ?? [];
+
+                return (
+                  <div key={row.colorId} className="px-3 py-1.5 rounded-xl hover:bg-dark-800/40">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-dark-200 flex-1 truncate">{row.name}</span>
+                      <span className="text-[10px] text-dark-500 shrink-0">
+                        gen {row.generation}
+                      </span>
+
+                      {tracked ? (
+                        // Rien à compter : on ajoute des montures une par une, et
+                        // le sexe se choisit à l'ajout puisqu'il ne se corrige
+                        // presque jamais.
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span className="text-[10px] text-dark-500 tabular-nums mr-1">
+                            {counts.males}♂ {counts.females}♀
+                          </span>
+                          {(['M', 'F'] as const).map((sex) => (
+                            <button
+                              key={sex}
+                              type="button"
+                              onClick={() => onAddIndividual({ colorId: row.colorId, sex })}
+                              title={`Ajouter ${sex === 'M' ? 'un mâle' : 'une femelle'} ${row.name}`}
+                              className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg
+                                bg-dark-800/80 border border-dark-600/50 text-[10px] text-dark-300
+                                transition-all hover:border-dark-500 hover:text-dark-100
+                                cursor-pointer"
+                            >
+                              <Plus size={10} />
+                              {sex === 'M' ? '♂' : '♀'}
+                            </button>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[10px] text-dark-500">♂</span>
+                          {countInput(counts.males, (next) =>
+                            onSaveBulk(row.colorId, next, counts.females)
+                          )}
+                          <span className="text-[10px] text-dark-500">♀</span>
+                          {countInput(counts.females, (next) =>
+                            onSaveBulk(row.colorId, counts.males, next)
+                          )}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Le détail des individus : leur niveau décide du taux de
+                        réussite de leurs accouplements, et leur fertilité de leur
+                        disponibilité tout court. */}
+                    {tracked && owned.length > 0 && (
+                      <div className="mt-1.5 ml-3 pl-3 border-l border-dark-700/40 space-y-1">
+                        {owned.map((mount) => (
+                          <div key={mount.id} className="flex items-center gap-2">
+                            <span className="text-[11px] text-dark-400 w-4 shrink-0">
+                              {mount.sex === 'M' ? '♂' : '♀'}
+                            </span>
+                            <label className="flex items-center gap-1 text-[10px] text-dark-500">
+                              niv
+                              <input
+                                type="number"
+                                min={1}
+                                max={200}
+                                value={String(mount.level)}
+                                onChange={(event) =>
+                                  onUpdateIndividual(mount.id, {
+                                    level: Math.max(
+                                      1,
+                                      Math.min(200, Number(event.target.value) || 1)
+                                    ),
+                                  })
+                                }
+                                className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                                  border-dark-600/50 text-dark-100 text-[11px] text-right
+                                  transition-all hover:border-dark-500 focus:border-kamas/50"
+                              />
+                            </label>
+                            <label className="flex items-center gap-1 text-[10px] text-dark-500 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={mount.fertile}
+                                onChange={(event) =>
+                                  onUpdateIndividual(mount.id, { fertile: event.target.checked })
+                                }
+                                className="accent-kamas cursor-pointer"
+                              />
+                              fertile
+                            </label>
+                            {mount.parents && (
+                              <span
+                                className="text-[10px] text-dark-600 truncate"
+                                title={`Née de ${mount.parents[0]} et ${mount.parents[1]}`}
+                              >
+                                ← {mount.parents.map((id) => nameOf(id)).join(' × ')}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onRemoveIndividual(mount.id)}
+                              title="Retirer de l'écurie"
+                              className="ml-auto text-dark-600 hover:text-loss transition-colors
+                                cursor-pointer shrink-0"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {mounts.length === 0 && (
                 <p className="text-xs text-dark-500 text-center py-4">
                   Aucune couleur ne correspond.

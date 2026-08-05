@@ -10,6 +10,7 @@ import {
   type Individual,
   type Sex,
 } from '@/lib/dofus/breeding/stable';
+import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage';
 import type { DofusDBItem } from '@/lib/supabase/types';
 import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
@@ -118,6 +119,15 @@ const BreedingStocks = ({
         return owned || a.generation - b.generation || a.name.localeCompare(b.name);
       });
   }, [rows, mountQuery, ownedOnly, stockBySex]);
+
+  /**
+   * À quel point la lignée d'une monture est concentrée sur une seule couleur.
+   *
+   * `null` quand une génération manque au catalogue — mieux vaut ne rien dire
+   * qu'afficher un chiffre bâti sur une ascendance à moitié connue.
+   */
+  const purityOf = (mount: Individual): number | null =>
+    mount.parents ? lineagePurity(lineageDistribution(mount.colorId, mount.parents)) : null;
 
   /** Les individus d'une couleur, les fertiles devant puis par niveau. */
   const individualsOf = useMemo(() => {
@@ -361,12 +371,36 @@ const BreedingStocks = ({
                               fertile
                             </label>
                             {mount.parents && (
-                              <span
-                                className="text-[10px] text-dark-600 truncate"
-                                title={`Née de ${mount.parents[0]} et ${mount.parents[1]}`}
-                              >
-                                ← {mount.parents.map((id) => nameOf(id)).join(' × ')}
-                              </span>
+                              <>
+                                <span
+                                  className="text-[10px] text-dark-600 truncate"
+                                  title={`Née de ${nameOf(mount.parents[0])} et ${nameOf(mount.parents[1])}`}
+                                >
+                                  ← {mount.parents.map((id) => nameOf(id)).join(' × ')}
+                                </span>
+                                {/* La concentration de la lignée décide de
+                                    l'éventail des couleurs que cette monture
+                                    peut transmettre : plus elle est haute, plus
+                                    le résultat d'un croisement est prévisible. */}
+                                {(() => {
+                                  const purity = purityOf(mount);
+                                  if (purity === null) return null;
+                                  return (
+                                    <span
+                                      className={`text-[10px] shrink-0 ${
+                                        purity >= 0.99
+                                          ? 'text-profit'
+                                          : purity >= 0.75
+                                            ? 'text-dark-400'
+                                            : 'text-amber-400/70'
+                                      }`}
+                                      title={`Lignée concentrée à ${(purity * 100).toFixed(0)} % sur une seule couleur. Croiser cette couleur avec elle-même monte ce chiffre, et rend le résultat des croisements suivants plus sûr.`}
+                                    >
+                                      lignée {(purity * 100).toFixed(0)}%
+                                    </span>
+                                  );
+                                })()}
+                              </>
                             )}
                             <button
                               type="button"

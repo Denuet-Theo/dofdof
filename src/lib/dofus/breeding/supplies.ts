@@ -1,6 +1,13 @@
 import type { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
-import { bestFuelFor, CYCLE_STEPS, GAUGE_MAX, type Fuel } from './enclos';
+import {
+  bestFuelFor,
+  transferRatePerSecond,
+  CYCLE_STEPS,
+  GAUGE_MAX,
+  type Fuel,
+  type FuelPlan,
+} from './enclos';
 import {
   bestCaptureNet,
   mountXpForLevel,
@@ -21,6 +28,39 @@ import {
 
 /** Le type d'item des carburants d'enclos, toutes jauges confondues. */
 export const FUEL_TYPE_ID = 326;
+
+/**
+ * Points de jauge obtenus par kama dépensé, jauge par jauge.
+ *
+ * Relevés par l'éleveur sur ses propres achats, et non déduits du catalogue :
+ * ils intègrent le carburant qu'il utilise réellement et le prix auquel il
+ * l'obtient, ce que `item_prices` ne dit pas tant que les 120 carburants ne sont
+ * pas tarifés un par un.
+ *
+ * Ils servent de **repli**, jamais de surcharge : dès qu'une jauge a un
+ * carburant tarifé, c'est lui qui décide, puisqu'il porte en plus le palier et
+ * donc le débit. Sans ce repli, un éleveur qui n'a rien tarifé n'obtenait aucun
+ * coût de cycle, donc aucune durée, donc aucun objectif chiffrable — c'est-à-dire
+ * l'état dans lequel on découvre la page.
+ *
+ * Recoupés contre le modèle du cycle : ils redonnent **exactement** les 7 253
+ * kamas par monture que le tableur impute aux cinq jauges de stat et de
+ * sérénité, une fois les 75 010 points de `CYCLE_POINTS` partagés sur les dix
+ * places d'un enclos.
+ *
+ * Le cycle complet en ressort à 15 853 kamas pour des parents niveau 67, là où
+ * le tableur dit 15 734. L'écart tient entier dans la Mangeoire : le tableur y
+ * met 67 000 points ronds quand `mountXpForLevel(67)` en demande 67 942. C'est
+ * la courbe d'XP qui tranche, pas l'arrondi.
+ */
+export const DEFAULT_POINTS_PER_KAMA: Record<string, number> = {
+  Baffeur: 5.62,
+  Caresseur: 0.89,
+  Dragofesse: 0.85,
+  Foudroyeur: 1.34,
+  Abreuvoir: 0.75,
+  Mangeoire: 0.79,
+};
 
 /**
  * Les carburants d'une jauge donnée, prêts pour `bestFuelFor`.
@@ -66,13 +106,59 @@ export const fuelsByGauge = (
   return byGauge;
 };
 
-/** Le plan de carburant d'une jauge : coût **et** durée. */
+/**
+ * Le plan de repli d'une jauge, bâti sur `DEFAULT_POINTS_PER_KAMA`.
+ *
+ * Le prix au point vient du relevé ; le **débit**, lui, n'en vient pas — un prix
+ * ne dit pas à quel palier on tient la jauge. On retient donc le plafond imposé
+ * s'il y en a un, et le palier haut sinon, qui est le régime que vise un éleveur
+ * qui ne veut pas attendre. C'est une hypothèse, et elle ne porte que sur la
+ * durée : le coût, lui, est celui du relevé.
+ */
+const fallbackPlanFor = (
+  gauge: string,
+  points: number,
+  kamasPerHour: number,
+  forcedCap: number | null
+): FuelPlan | null => {
+  const pointsPerKama = DEFAULT_POINTS_PER_KAMA[gauge];
+  if (!pointsPerKama || pointsPerKama <= 0) return null;
+
+  const cap = forcedCap ?? GAUGE_MAX;
+  const costPerPoint = 1 / pointsPerKama;
+  const pointsPerHour = transferRatePerSecond(cap) * 3600;
+  const hours = pointsPerHour > 0 ? points / pointsPerHour : Infinity;
+  const fuelCost = points * costPerPoint;
+
+  return {
+    // Aucun item derrière ce plan : le nom le dit plutôt que d'en inventer un,
+    // puisqu'il remonte tel quel dans « quel carburant racheter ».
+    fuel: { itemId: -1, name: `${gauge} (prix relevé)`, cap, rechargeAmount: 1, price: costPerPoint },
+    costPerPoint,
+    pointsPerHour,
+    hours,
+    fuelCost,
+    timeCost: hours * kamasPerHour,
+    totalCost: fuelCost + hours * kamasPerHour,
+  };
+};
+
+/**
+ * Le plan de carburant d'une jauge : coût **et** durée.
+ *
+ * Les carburants tarifés l'emportent toujours : eux seuls portent le palier réel.
+ * Le repli n'intervient que faute de prix, pour que la page reste chiffrable.
+ */
 const planFor = (
+  gauge: string,
   fuels: Fuel[] | undefined,
   points: number,
   kamasPerHour: number,
   forcedCap: number | null
-) => (fuels && fuels.length > 0 ? bestFuelFor(points, fuels, kamasPerHour, forcedCap) : null);
+) =>
+  fuels && fuels.length > 0
+    ? bestFuelFor(points, fuels, kamasPerHour, forcedCap)
+    : fallbackPlanFor(gauge, points, kamasPerHour, forcedCap);
 
 export type SupplyCosts = {
   /**
@@ -172,8 +258,19 @@ export type SupplyCosts = {
  * 15 h 17 au palier Extrait, et non les 20 h 50 d'un enchaînement séquentiel.
  *
  * Chaque leg peut passer par l'une ou l'autre jauge selon le sens choisi
- * (Baffeur ou Caresseur, Foudroyeur ou Dragofesse) : on retient la moins chère,
- * puisque le cycle est symétrique et que rien n'impose le sens.
+ * (Baffeur ou Caresseur, Foudroyeur ou Dragofesse) : rien n'impose le sens, donc
+ * on retient la moins chère — mais **une jauge déjà employée ne se repropose
+ * pas**. C'est ce qui manquait : la sérénité monte avec une jauge et redescend
+ * avec l'autre, on ne peut pas prendre deux fois la même ; et les trois stats se
+ * montent chacune avec la sienne. Sans cette exclusion, le Foudroyeur seul
+ * couvrait les trois legs de stat dès qu'il était le moins cher, et le cycle
+ * ressortait à deux tiers de son prix.
+ *
+ * L'attribution gloutonne, dans l'ordre des legs, est ici optimale : les trois
+ * legs de stat pèsent le même nombre de points, donc leur coût total ne dépend
+ * pas de l'ordre, et les deux legs de sérénité étant de tailles différentes, la
+ * jauge la moins chère doit aller au plus gros — ce que donne le parcours dans
+ * l'ordre.
  */
 const CYCLE_PHASES: { points: number; candidates: string[] }[][] = [
   [{ points: CYCLE_STEPS[0].points, candidates: ['Baffeur', 'Caresseur'] }],
@@ -218,30 +315,44 @@ export const computeSupplyCosts = (
   /** Points demandés à chaque jauge sur un cycle, cumulés phase par phase. */
   const cycleGauges = new Map<string, { pointsPerBatch: number; costPerPoint: number; fuel: string }>();
 
+  /**
+   * Les jauges déjà employées dans ce cycle.
+   *
+   * Une jauge ne sert qu'une fois : la sérénité monte avec l'une et redescend
+   * avec l'autre, et chaque stat a la sienne. Sans ce jeu d'exclusion, la moins
+   * chère raflait tous les legs et le cycle ressortait à deux tiers de son prix.
+   */
+  const used = new Set<string>();
+
   for (const phase of CYCLE_PHASES) {
     let phaseHours = 0;
 
     for (const { points, candidates } of phase) {
       const plans = candidates
+        .filter((gauge) => !used.has(gauge))
         .map((gauge) => {
-          const plan = planFor(byGauge.get(gauge), points, kamasPerHour, gaugeCap);
+          const plan = planFor(gauge, byGauge.get(gauge), points, kamasPerHour, gaugeCap);
           return plan ? { gauge, plan } : null;
         })
         .filter((entry): entry is { gauge: string; plan: NonNullable<ReturnType<typeof planFor>> } =>
           entry !== null
         );
 
+      // Une jauge servie par le repli reste signalée : le chiffre tient, mais il
+      // vient d'un relevé et non du cours du jour, et l'éleveur doit le savoir.
+      for (const gauge of candidates) {
+        if (!byGauge.has(gauge) && !missingGauges.includes(gauge)) missingGauges.push(gauge);
+      }
+
       if (plans.length === 0) {
         complete = false;
-        for (const gauge of candidates) {
-          if (!byGauge.has(gauge) && !missingGauges.includes(gauge)) missingGauges.push(gauge);
-        }
         continue;
       }
 
       const cheapest = plans.reduce((best, entry) =>
         entry.plan.totalCost < best.plan.totalCost ? entry : best
       );
+      used.add(cheapest.gauge);
       cycleCost += cheapest.plan.fuelCost;
 
       // Une jauge peut servir à plusieurs phases (la sérénité monte puis
@@ -266,8 +377,14 @@ export const computeSupplyCosts = (
   }
 
   const mangeoirePoints = mountXpForLevel(MAX_MOUNT_LEVEL);
-  const mangeoirePlan = planFor(byGauge.get('Mangeoire'), mangeoirePoints, kamasPerHour, gaugeCap);
-  if (mangeoirePlan === null && !missingGauges.includes('Mangeoire')) {
+  const mangeoirePlan = planFor(
+    'Mangeoire',
+    byGauge.get('Mangeoire'),
+    mangeoirePoints,
+    kamasPerHour,
+    gaugeCap
+  );
+  if (!byGauge.has('Mangeoire') && !missingGauges.includes('Mangeoire')) {
     missingGauges.push('Mangeoire');
   }
 

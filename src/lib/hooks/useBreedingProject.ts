@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { BreedingProject } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
+import type { ObjectiveId } from '@/lib/dofus/breeding/objectives';
 
 /**
  * Le plan que l'éleveur suit en ce moment : une couleur et une quantité.
@@ -22,8 +23,15 @@ export type BreedingProjectState = {
   /** Le plan en cours, ou `null` si aucun n'est sélectionné. */
   current: BreedingProject | null;
   loading: boolean;
-  select: (colorId: string, targetCount: number) => Promise<void>;
+  select: (colorId: string, targetCount: number, objective?: ObjectiveId) => Promise<void>;
   setTargetCount: (count: number) => Promise<void>;
+  /**
+   * Change ce que le plan cherche, sans le rouvrir.
+   *
+   * L'objectif ne se déduit d'aucun prix : deux éleveurs devant le même arbre
+   * n'ont pas la même bonne réponse, et c'est justement pourquoi il se choisit.
+   */
+  setObjective: (objective: ObjectiveId) => Promise<void>;
   abandon: () => Promise<void>;
 };
 
@@ -56,7 +64,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
   }, [load]);
 
   const select = useCallback(
-    async (colorId: string, targetCount: number) => {
+    async (colorId: string, targetCount: number, objective: ObjectiveId = 'color') => {
       const supabase = createClient();
       // `upsert` plutôt qu'`insert` : reprendre une couleur déjà visée puis
       // abandonnée doit rouvrir la même ligne, pas buter sur la contrainte
@@ -68,6 +76,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
             family,
             target_color_id: colorId,
             target_count: targetCount,
+            objective,
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'user_id,family,target_color_id' }
@@ -100,6 +109,22 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
     [current]
   );
 
+  const setObjective = useCallback(
+    async (objective: ObjectiveId) => {
+      if (!current) return;
+      setCurrent({ ...current, objective });
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('breeding_projects')
+        .update({ objective, updated_at: new Date().toISOString() })
+        .eq('id', current.id);
+
+      if (error) console.error('[breeding] objectif non enregistré:', error);
+    },
+    [current]
+  );
+
   const abandon = useCallback(async () => {
     if (!current) return;
     const supabase = createClient();
@@ -112,5 +137,5 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
     setCurrent(null);
   }, [current]);
 
-  return { current, loading, select, setTargetCount, abandon };
+  return { current, loading, select, setTargetCount, setObjective, abandon };
 };

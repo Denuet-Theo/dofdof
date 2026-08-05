@@ -295,6 +295,13 @@ export type BreedingProject = {
   family: 'dragodinde' | 'muldo' | 'volkorne';
   target_color_id: string;
   target_count: number;
+  /**
+   * Ce que le plan cherche (migration 20260805170000), et donc ce qui départage
+   * deux couleurs. Voir `ObjectiveId` dans `lib/dofus/breeding/objectives.ts` :
+   * la marge horaire ne peut pas désigner une route vers la génération 10, qui
+   * perd toujours sur ce critère.
+   */
+  objective: 'profit' | 'gen10_fast' | 'gen10_profit' | 'color';
   created_at: string;
   updated_at: string;
 };
@@ -392,11 +399,13 @@ export interface Database {
           family: BreedingProject['family'];
           target_color_id: string;
           target_count?: number;
+          objective?: BreedingProject['objective'];
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           target_count?: number;
+          objective?: BreedingProject['objective'];
           updated_at?: string;
         };
         Relationships: [];

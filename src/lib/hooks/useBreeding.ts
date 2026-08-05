@@ -87,6 +87,9 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   // Le comportement d'avant : le crédit s'applique. Le couper est un choix
   // explicite, pas un défaut imposé.
   credit_off_target: true,
+  // Le prix des filets compte par défaut : c'est vrai de qui les achète, et
+  // celui qui récolte ses matériaux sait, lui, qu'il doit décocher.
+  count_net_cost: true,
   gauge_cap: null,
 };
 
@@ -318,6 +321,7 @@ export const useBreeding = (
             // régime visé, et le seul qui ne gaspille pas de transfert.
             mountsInEnclos: 10,
             gaugeCap: settings.gauge_cap,
+            countNetCost: settings.count_net_cost,
           })
         : null,
     [tree, fuelItems, itemPrices, settings]

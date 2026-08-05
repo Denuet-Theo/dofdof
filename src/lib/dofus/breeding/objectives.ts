@@ -62,6 +62,12 @@ export type Candidate = {
   marginPerHour: number | null;
   /** Heures d'enclos du plan, la vraie ressource rare. */
   enclosHours: number | null;
+  /**
+   * Accouplements du plan. Dernier recours pour classer « au plus vite » quand
+   * aucune durée n'est chiffrable : il en faut toujours un, sinon l'écran
+   * annonce qu'aucune route n'existe alors qu'il y en a.
+   */
+  crossings: number | null;
   /** Délai réel, parc de l'éleveur compris. */
   wallClockHours: number | null;
   totalCost: number | null;
@@ -104,15 +110,23 @@ export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId):
     const reachable = breedable.filter((row) => row.generation === top);
 
     if (objective === 'gen10_fast') {
-      return reachable
-        .filter((row) => (row.wallClockHours ?? row.enclosHours) !== null)
-        .map((row) => {
-          const hours = (row.wallClockHours ?? row.enclosHours)!;
-          // Le score est orienté « plus grand = mieux » partout, d'où l'opposé :
-          // ici le gagnant est le plus court.
-          return { item: row, score: -hours, display: hours };
-        })
-        .sort((a, b) => b.score - a.score);
+      return (
+        reachable
+          .map((row) => {
+            // Trois mesures de la même chose, de la plus fine à la plus grossière.
+            // Le délai réel suppose les carburants tarifés ; à défaut, les heures
+            // d'enclos ; à défaut, le **nombre d'accouplements**, qui reste un
+            // ordre de grandeur du travail à fournir. Rendre une liste vide parce
+            // qu'une durée manque serait le pire des trois : l'écran dirait
+            // « aucune route » là où il y en a une, simplement pas chiffrée.
+            const hours = row.wallClockHours ?? row.enclosHours;
+            const score = hours !== null ? -hours : -(row.crossings ?? Infinity);
+            return { item: row, score, display: hours };
+          })
+          // Une route sans aucune de ces trois mesures n'est pas classable.
+          .filter((ranked) => Number.isFinite(ranked.score))
+          .sort((a, b) => b.score - a.score)
+      );
     }
 
     return reachable
@@ -135,19 +149,38 @@ export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId):
 };
 
 /** La couleur que l'objectif recommande, ou `null` si aucune ne convient. */
+export type Recommendation<T> = {
+  item: T;
+  /** `false` quand aucune route finançable n'existe et qu'on désigne quand même. */
+  affordable: boolean;
+};
+
 export const recommendedFor = <T extends Candidate>(
   rows: T[],
-  objective: ObjectiveId
-): T | null => {
+  objective: ObjectiveId,
+  /** Ce que le budget permet. Tout est réputé finançable sans cette fonction. */
+  isAffordable: (row: T) => boolean = () => true
+): Recommendation<T> | null => {
   if (objective === 'color') return null;
+
   const ranked = rankFor(rows, objective);
+  if (ranked.length === 0) return null;
+
   // Une route à marge négative reste une route : sur les objectifs « gen 10 »,
   // c'est même le cas courant, et refuser de la désigner reviendrait à dire que
   // la génération 10 est hors d'atteinte. Sur la rentabilité, en revanche, une
   // marge négative ne se recommande pas — c'est précisément ce qu'on cherchait
   // à éviter.
-  const best = ranked[0] ?? null;
-  if (!best) return null;
-  if (objective === 'profit' && (best.display ?? 0) <= 0) return null;
-  return best.item;
+  const eligible =
+    objective === 'profit' ? ranked.filter((entry) => (entry.display ?? 0) > 0) : ranked;
+  if (eligible.length === 0) return null;
+
+  // Le budget **trie**, il n'élimine pas. Une route trop chère reste la bonne
+  // route : dire « aucune route ne convient » à qui vise la génération 10 avec
+  // dix millions lui cache qu'elle existe et qu'il lui manque seulement de quoi
+  // la payer.
+  const affordable = eligible.find((entry) => isAffordable(entry.item));
+  if (affordable) return { item: affordable.item, affordable: true };
+
+  return { item: eligible[0].item, affordable: false };
 };

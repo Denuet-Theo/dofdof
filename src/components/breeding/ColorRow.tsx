@@ -132,17 +132,35 @@ const ColorRow = ({
           )}
         </div>
 
-        <div className="text-right shrink-0">
-          <p className="text-[10px] text-dark-500">Coût de revient</p>
+        {/* Un coût négatif est exact — les génétons, l'extraction et les bébés
+            hors cible peuvent dépasser la dépense — mais « coût : −190 495 » ne
+            se lit pas. On retourne la phrase plutôt que le signe : ce n'est plus
+            un coût, c'est une recette, et il faut le dire avec ce mot-là. */}
+        <div className="text-right shrink-0 w-32">
+          <p
+            className="text-[10px] text-dark-500"
+            title="Ce qu'une monture de cette couleur te coûte à te procurer, par la voie la moins chère — acheter, capturer ou élever. Les tentatives ratées sont comptées, les génétons et l'extraction déduits. Négatif quand ces recettes dépassent la dépense."
+          >
+            {(estimate.cost ?? 0) < 0 ? 'Rapporte / monture' : 'Coût / monture'}
+          </p>
           {estimate.cost === null ? (
             <p className="text-sm text-dark-600">—</p>
+          ) : estimate.cost < 0 ? (
+            <p className="text-sm font-semibold text-profit">
+              +{Math.round(-estimate.cost).toLocaleString('fr-FR')}
+            </p>
           ) : (
             <KamasDisplay amount={Math.round(estimate.cost)} size="sm" />
           )}
         </div>
 
         <div className="text-right shrink-0 w-32">
-          <p className="text-[10px] text-dark-500">Marge ({EXIT_SHORT[estimate.bestExit]})</p>
+          <p
+            className="text-[10px] text-dark-500"
+            title={`Ce que la meilleure sortie rapporte — ici ${EXIT_LABEL[estimate.bestExit]} — moins ce que la monture t'a coûté à te procurer. Compté contre le coût d'acquisition et non contre le coût d'élevage : ce qu'une couleur rapporte ne dépend pas de la voie par laquelle tu l'as obtenue.`}
+          >
+            Gain net ({EXIT_SHORT[estimate.bestExit]})
+          </p>
           {margin === null ? (
             // Plus « prix manquant » : depuis que la marge se compte contre le
             // coût d'acquisition, l'absence vient d'une couleur qu'on ne sait ni
@@ -161,7 +179,12 @@ const ColorRow = ({
             qu'elle est meilleure. Seul le rapport au temps d'enclos les
             départage. */}
         <div className="text-right shrink-0 w-28 hidden sm:block">
-          <p className="text-[10px] text-dark-500">Par heure d&apos;enclos</p>
+          <p
+            className="text-[10px] text-dark-500"
+            title="Le gain net divisé par les heures d'enclos que le plan mobilise. C'est le seul classement comparable entre générations : une gen 10 rapporte plus qu'une gen 6 parce qu'elle demande plus de travail, pas parce qu'elle est meilleure."
+          >
+            Par heure d&apos;enclos
+          </p>
           {row.marginPerHour === null ? (
             <p className="text-sm text-dark-600">{estimate.strategy === 'breed' ? '—' : 'immédiat'}</p>
           ) : (

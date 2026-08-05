@@ -147,7 +147,16 @@ const fallbackPlanFor = (
  * Le plan de carburant d'une jauge : coût **et** durée.
  *
  * Les carburants tarifés l'emportent toujours : eux seuls portent le palier réel.
- * Le repli n'intervient que faute de prix, pour que la page reste chiffrable.
+ * Le repli n'intervient que faute de plan chiffrable.
+ *
+ * Le test porte sur le **résultat** de `bestFuelFor` et non sur la présence de
+ * carburants, et c'est tout l'objet du correctif : une jauge peut avoir des
+ * carburants tarifés sans qu'aucun soit retenu — un plafond imposé qu'aucun
+ * palier disponible n'atteint suffit. On repartait alors sans plan du tout,
+ * `complete` passait à `false`, et **toutes les durées de la page
+ * disparaissaient**. Le classement par coût continuait de fonctionner, celui
+ * « au plus vite » n'avait plus rien à trier, et l'écran annonçait qu'aucune
+ * route n'existait.
  */
 const planFor = (
   gauge: string,
@@ -156,9 +165,8 @@ const planFor = (
   kamasPerHour: number,
   forcedCap: number | null
 ) =>
-  fuels && fuels.length > 0
-    ? bestFuelFor(points, fuels, kamasPerHour, forcedCap)
-    : fallbackPlanFor(gauge, points, kamasPerHour, forcedCap);
+  (fuels && fuels.length > 0 ? bestFuelFor(points, fuels, kamasPerHour, forcedCap) : null) ??
+  fallbackPlanFor(gauge, points, kamasPerHour, forcedCap);
 
 export type SupplyCosts = {
   /**
@@ -297,12 +305,15 @@ export const computeSupplyCosts = (
     netRecoveryRate,
     mountsInEnclos,
     gaugeCap,
+    countNetCost = true,
   }: {
     kamasPerHour: number;
     minutesPerFight: number;
     netRecoveryRate: number;
     mountsInEnclos: number;
     gaugeCap: number | null;
+    /** Compter le prix des filets, ou ne facturer que le temps de combat. */
+    countNetCost?: boolean;
   }
 ): SupplyCosts => {
   const byGauge = fuelsByGauge(fuelItems, prices);
@@ -421,6 +432,7 @@ export const computeSupplyCosts = (
       recoveryRate: netRecoveryRate,
       minutesPerFight,
       kamasPerHour,
+      countNetCost,
     }),
     missingGauges,
   };

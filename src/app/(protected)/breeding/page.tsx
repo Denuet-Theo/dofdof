@@ -17,6 +17,7 @@ import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import {
   OBJECTIVES,
+  fundingSplit,
   rankFor,
   recommendedFor,
   type Candidate,
@@ -203,6 +204,21 @@ const BreedingPage = () => {
   );
 
   const recommended = recommendation?.item.row ?? null;
+
+  /**
+   * La répartition du parc qui tient l'équilibre, sur l'objectif qui la vise.
+   *
+   * Calculée sur la couleur **suivie** quand il y en a une, et sur la
+   * recommandation sinon : c'est une consigne d'exécution, donc elle doit
+   * parler du plan qu'on mène et pas de celui qu'on aurait pu mener.
+   */
+  const split = useMemo(() => {
+    if (objective !== 'gen10_balanced') return null;
+    const target = candidates.find(
+      (candidate) => candidate.colorId === (selectedColorId ?? recommended?.colorId)
+    );
+    return target ? fundingSplit(target, candidates) : null;
+  }, [objective, candidates, selectedColorId, recommended]);
 
   /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
   const shortfall =
@@ -439,6 +455,38 @@ const BreedingPage = () => {
               <p className="text-[11px] text-dark-600">
                 {OBJECTIVES.find((option) => option.id === objective)?.hint}
               </p>
+
+              {/* La consigne concrète de l'objectif d'équilibre : deux élevages
+                  menés de front, et la part du parc qui rend l'ensemble
+                  neutre. C'est ça, ne pas alterner. */}
+              {split && (
+                <p className="text-[11px] text-dark-300 flex flex-wrap items-baseline gap-x-1">
+                  <span className="text-dark-500">Pour tenir l&apos;équilibre :</span>
+                  <strong className="text-kamas">
+                    {Math.round(split.funderShare * 100)} %
+                  </strong>
+                  <span className="text-dark-500">du parc sur</span>
+                  <strong className="text-dark-100">{split.funder.row.name}</strong>
+                  <span className="text-dark-500">
+                    ({Math.round(split.funder.marginPerHour!).toLocaleString('fr-FR')} k/h),
+                  </span>
+                  <strong className="text-kamas">
+                    {Math.round(split.targetShare * 100)} %
+                  </strong>
+                  <span className="text-dark-500">
+                    sur {selectedColorId ? nameOf(selectedColorId) : recommended?.name}. Les
+                    deux tournent en même temps — c&apos;est ce qui évite d&apos;alterner.
+                  </span>
+                </p>
+              )}
+
+              {objective === 'gen10_balanced' && !split && recommended && (
+                <p className="text-[11px] text-amber-400/80">
+                  Aucune couleur ne dégage de marge horaire positive : rien ne peut
+                  financer la montée, et le parc ne peut pas s&apos;équilibrer seul.
+                  Renseigne des prix de revente, ou décoche « ne jamais vendre ».
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
@@ -494,6 +542,26 @@ const BreedingPage = () => {
 
             {/* Trois états distincts, et les confondre était le défaut : aucune
                 route du tout, une route trop chère, ou rien à signaler. */}
+            {/* Un plan suivi masque le classement, si bien que changer
+                d'objectif ne montrait plus rien : les boutons restaient
+                cliquables et paraissaient inertes. On dit donc ce que le nouvel
+                objectif recommanderait, et on laisse basculer d'un clic. */}
+            {project.current && recommended && recommended.colorId !== selectedColorId && (
+              <p className="text-[11px] text-dark-400 flex flex-wrap items-baseline gap-x-1">
+                <span>
+                  Cet objectif recommanderait plutôt{' '}
+                  <strong className="text-dark-100">{recommended.name}</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => project.select(recommended.colorId, targetCount, objective)}
+                  className="text-kamas hover:underline cursor-pointer"
+                >
+                  Suivre celle-là à la place
+                </button>
+              </p>
+            )}
+
             {!project.current && !recommendation && (
               <p className="text-[11px] text-amber-400/80">
                 Aucune route chiffrable pour cet objectif. Il manque des prix de

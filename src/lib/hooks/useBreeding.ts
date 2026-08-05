@@ -84,6 +84,9 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   net_recovery_rate: 0.8,
   recycle_steriles: true,
   never_sell_mounts: false,
+  // Le comportement d'avant : le crédit s'applique. Le couper est un choix
+  // explicite, pas un défaut imposé.
+  credit_off_target: true,
   gauge_cap: null,
 };
 
@@ -411,6 +414,7 @@ export const useBreeding = (
         recycleSteriles: settings.recycle_steriles,
         freeXpPoints,
         neverSell: settings.never_sell_mounts,
+        creditOffTarget: settings.credit_off_target,
       })
     );
   }, [tree, prices, supplies, genetonValuation, priceOf, settings]);

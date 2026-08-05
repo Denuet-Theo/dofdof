@@ -283,6 +283,13 @@ export type UserBreedingSettings = {
   net_recovery_rate: number;
   recycle_steriles: boolean;
   never_sell_mounts: boolean;
+  /**
+   * Valoriser les bébés hors cible (migration 20260805220000).
+   *
+   * À `false`, un croisement raté ne rapporte rien : borne prudente, qui évite
+   * que l'optimiseur choisisse de rater pour encaisser des ancêtres.
+   */
+  credit_off_target: boolean;
   /** Plafond de jauge imposé, ou null pour laisser l'arbitrage temps/kamas décider. */
   gauge_cap: number | null;
   updated_at: string;
@@ -503,6 +510,7 @@ export interface Database {
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
+          credit_off_target?: boolean;
           gauge_cap?: number | null;
           updated_at?: string;
         };
@@ -515,6 +523,7 @@ export interface Database {
           net_recovery_rate?: number;
           recycle_steriles?: boolean;
           never_sell_mounts?: boolean;
+          credit_off_target?: boolean;
           gauge_cap?: number | null;
           updated_at?: string;
         };

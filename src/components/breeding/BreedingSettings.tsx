@@ -84,6 +84,9 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
             ? `${settings.kamas_per_hour.toLocaleString('fr-FR')} k/h`
             : 'temps non valorisé'}
           {settings.never_sell_mounts && ' · sans revente'}
+          {/* Un réglage qui déplace tous les coûts mérite d'être lisible sans
+              déplier le panneau. */}
+          {!settings.credit_off_target && ' · ratés non crédités'}
         </span>
         <span className="ml-auto text-xs text-dark-500">{open ? 'Fermer' : 'Modifier'}</span>
       </button>
@@ -168,6 +171,27 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
               Le marché des certificats est peu liquide : un prix saisi ne garantit pas un
               acheteur. Les prix restent utilisés pour <em>acheter</em> une couleur plutôt que
               l&apos;élever, mais plus pour la revendre.
+            </p>
+          )}
+
+          <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={!draft.credit_off_target}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, credit_off_target: !event.target.checked }))
+              }
+              className="accent-kamas cursor-pointer"
+            />
+            Ne pas créditer les bébés hors cible — chaque tentative se paie plein pot
+          </label>
+          {!draft.credit_off_target && (
+            <p className="text-[10px] text-dark-600 -mt-2 ml-6">
+              Un croisement raté rend bel et bien une monture, et elle vaut quelque chose. Mais
+              elle est tirée dans l&apos;ascendance, pas choisie : sur une route vers la
+              génération 10, on accumule des couleurs basses dont on ne fera rien. Sans le
+              crédit, les coûts montent et l&apos;optimiseur cesse de préférer les croisements
+              qui ratent souvent.
             </p>
           )}
 

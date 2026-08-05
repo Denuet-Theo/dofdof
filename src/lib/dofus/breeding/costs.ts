@@ -555,6 +555,26 @@ export type BreedingOptions = {
    */
   captureCost?: number | null;
   /**
+   * Valoriser les bébés hors cible à ce qu'ils auraient coûté à se procurer.
+   *
+   * Un accouplement produit toujours un bébé, et `lineageValue` sait désormais
+   * ce qu'il vaut — le modèle d'ascendance est mesuré, pas supposé. C'est exact
+   * pour **valoriser**, et optimiste pour **planifier** : un raté rend une
+   * couleur tirée dans l'ascendance, pas celle dont le plan a besoin. Sur une
+   * route vers la génération 10, on accumule des couleurs de génération 2 dont
+   * on ne fera rien.
+   *
+   * L'écart n'est pas cosmétique : une gen 10 revient à 472 000 kamas sans
+   * crédit, et ressort à gain net avec. Et le crédit change le **comportement**
+   * de l'optimiseur, pas seulement le chiffre — plus un raté rapporte, moins il
+   * vaut la peine de monter les parents, jusqu'à choisir de rater exprès.
+   *
+   * `false` coupe le crédit : chaque tentative se paie plein pot. Les deux
+   * lectures sont défendables, aucune n'est « la » vérité, et c'est pourquoi
+   * c'est un réglage.
+   */
+  creditOffTarget?: boolean;
+  /**
    * Écarter la revente des montures et ne valoriser que l'extraction.
    *
    * Le marché des certificats est peu liquide : un prix saisi ne garantit pas
@@ -684,6 +704,7 @@ export const computeBreedingCosts = (
     freeXpPoints = 0,
     captureCost,
     neverSell = false,
+    creditOffTarget = true,
   }: BreedingOptions
 ): Map<string, BreedingEstimate> => {
   if (parentLevel !== 'auto' && (parentLevel < 1 || parentLevel > MAX_MOUNT_LEVEL)) {
@@ -798,7 +819,9 @@ export const computeBreedingCosts = (
 
       // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
       // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
-      const failureValue = lineageValueOf(recipe[0]) + lineageValueOf(recipe[1]);
+      const failureValue = creditOffTarget
+        ? lineageValueOf(recipe[0]) + lineageValueOf(recipe[1])
+        : 0;
 
       const parents =
         parentLevel === 'auto'

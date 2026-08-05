@@ -15,7 +15,7 @@
  * sépare.
  */
 
-export type ObjectiveId = 'profit' | 'gen10_fast' | 'gen10_profit' | 'color';
+export type ObjectiveId = 'profit' | 'gen10_balanced' | 'gen10_profit';
 
 export type Objective = {
   id: ObjectiveId;
@@ -34,22 +34,16 @@ export const OBJECTIVES: Objective[] = [
     unit: 'kamas/h',
   },
   {
-    id: 'gen10_fast',
-    label: 'Gen 10 au plus vite',
-    hint: 'La route vers la génération 10 qui immobilise le parc le moins longtemps. Le coût passe après : c’est le délai qu’on minimise.',
-    unit: 'heures',
+    id: 'gen10_balanced',
+    label: 'Gen 10 en restant à l’équilibre',
+    hint: 'La route vers la génération 10 dont les recettes couvrent le mieux les dépenses. À prendre pour monter sans avoir à alterner : sans elle, on enchaîne des sessions de rentabilité pour financer des sessions de montée, ce qui fait deux plans au lieu d’un.',
+    unit: 'kamas',
   },
   {
     id: 'gen10_profit',
     label: 'Gen 10 au moins cher',
-    hint: 'La route vers la génération 10 qui coûte le moins, temps d’enclos non compté. À prendre quand on n’est pas pressé mais qu’on compte ses kamas.',
+    hint: 'La route vers la génération 10 qui coûte le moins, quoi qu’elle rapporte. À prendre quand c’est la mise de départ qui contraint, et non le solde.',
     unit: 'kamas',
-  },
-  {
-    id: 'color',
-    label: 'Une couleur précise',
-    hint: 'Le classement complet, trié par marge horaire. À prendre quand la couleur est déjà choisie.',
-    unit: 'kamas/h',
   },
 ];
 
@@ -62,15 +56,17 @@ export type Candidate = {
   marginPerHour: number | null;
   /** Heures d'enclos du plan, la vraie ressource rare. */
   enclosHours: number | null;
-  /**
-   * Accouplements du plan. Dernier recours pour classer « au plus vite » quand
-   * aucune durée n'est chiffrable : il en faut toujours un, sinon l'écran
-   * annonce qu'aucune route n'existe alors qu'il y en a.
-   */
+  /** Accouplements du plan, pour l'affichage du volume de travail. */
   crossings: number | null;
   /** Délai réel, parc de l'éleveur compris. */
   wallClockHours: number | null;
   totalCost: number | null;
+  /**
+   * Marge de la couleur hors plan — ce qu'elle rapporte quand on l'achète ou la
+   * capture plutôt que de l'élever. Sert à classer les couleurs sauvages, qui
+   * n'ont pas de plan mais sont souvent les plus rentables à l'heure.
+   */
+  bestMargin: number | null;
   breedable: boolean;
 };
 
@@ -105,28 +101,19 @@ export const topGeneration = (candidates: Candidate[]) =>
 export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId): Ranked<T>[] => {
   const breedable = rows.filter((row) => row.breedable);
 
-  if (objective === 'gen10_fast' || objective === 'gen10_profit') {
+  if (objective === 'gen10_balanced' || objective === 'gen10_profit') {
     const top = topGeneration(rows);
     const reachable = breedable.filter((row) => row.generation === top);
 
-    if (objective === 'gen10_fast') {
-      return (
-        reachable
-          .map((row) => {
-            // Trois mesures de la même chose, de la plus fine à la plus grossière.
-            // Le délai réel suppose les carburants tarifés ; à défaut, les heures
-            // d'enclos ; à défaut, le **nombre d'accouplements**, qui reste un
-            // ordre de grandeur du travail à fournir. Rendre une liste vide parce
-            // qu'une durée manque serait le pire des trois : l'écran dirait
-            // « aucune route » là où il y en a une, simplement pas chiffrée.
-            const hours = row.wallClockHours ?? row.enclosHours;
-            const score = hours !== null ? -hours : -(row.crossings ?? Infinity);
-            return { item: row, score, display: hours };
-          })
-          // Une route sans aucune de ces trois mesures n'est pas classable.
-          .filter((ranked) => Number.isFinite(ranked.score))
-          .sort((a, b) => b.score - a.score)
-      );
+    if (objective === 'gen10_balanced') {
+      // Au **solde**, et non au coût : ce qui compte ici n'est pas la mise de
+      // départ mais de quel montant la route s'auto-finance. Deux routes au
+      // même prix ne se valent pas si l'une rend deux fois plus en génétons,
+      // en extractions et en couleurs revendables.
+      return reachable
+        .filter((row) => row.planMargin !== null)
+        .map((row) => ({ item: row, score: row.planMargin!, display: row.planMargin }))
+        .sort((a, b) => b.score - a.score);
     }
 
     return reachable
@@ -135,15 +122,30 @@ export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId):
       .sort((a, b) => b.score - a.score);
   }
 
-  // « Rentabilité » et « couleur précise » partagent le même critère : la marge
-  // par heure d'enclos, qui est la seule mesure comparable entre générations.
-  // Ils ne diffèrent que par ce que l'écran en fait — l'un désigne un gagnant,
-  // l'autre laisse choisir.
-  const hourly = breedable.some((row) => row.marginPerHour !== null);
-  return breedable
+  // La rentabilité se classe à la marge par heure d'enclos, la seule mesure
+  // comparable entre générations — et elle n'écarte **aucune** couleur, ce qui
+  // en fait aussi la vue où l'on va chercher une couleur précise à la main.
+  const hourly = rows.some((row) => row.marginPerHour !== null);
+
+  /**
+   * Une couleur qu'on achète ou capture ne mobilise **aucun** enclos : elle ne
+   * concourt pas pour la ressource dont ce classement parle. À marge positive
+   * elle bat donc tout ce qui en demande — c'est du gain sans immobiliser le
+   * parc — et à marge négative elle ne vaut rien de plus. Les renvoyer toutes en
+   * queue dirait l'inverse de la vérité sur les couleurs sauvages, qui sont
+   * justement les plus rentables à l'heure.
+   */
+  const score = (row: T) => {
+    if (!hourly) return row.planMargin ?? row.bestMargin ?? -Infinity;
+    if (row.marginPerHour !== null) return row.marginPerHour;
+    const margin = row.bestMargin;
+    return margin !== null && margin > 0 ? Infinity : -Infinity;
+  };
+
+  return rows
     .map((row) => {
-      const value = hourly ? row.marginPerHour : row.planMargin;
-      return { item: row, score: value ?? -Infinity, display: value };
+      const value = hourly ? row.marginPerHour : (row.planMargin ?? row.bestMargin);
+      return { item: row, score: score(row), display: value };
     })
     .sort((a, b) => b.score - a.score);
 };
@@ -161,8 +163,6 @@ export const recommendedFor = <T extends Candidate>(
   /** Ce que le budget permet. Tout est réputé finançable sans cette fonction. */
   isAffordable: (row: T) => boolean = () => true
 ): Recommendation<T> | null => {
-  if (objective === 'color') return null;
-
   const ranked = rankFor(rows, objective);
   if (ranked.length === 0) return null;
 

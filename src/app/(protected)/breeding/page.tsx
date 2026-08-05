@@ -30,31 +30,8 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'volkorne', label: 'Volkornes' },
 ];
 
-type SortBy = 'hourly' | 'margin' | 'cost' | 'generation';
-
-/**
- * Ce sur quoi le tri horaire compare.
- *
- * Une couleur qu'on achète ou capture ne mobilise **aucun** enclos : elle ne
- * concourt pas pour la ressource dont ce classement parle. À marge positive
- * elle bat donc tout ce qui en demande — c'est du gain sans immobiliser le
- * parc — et à marge négative elle ne vaut rien de plus. La renvoyer en queue
- * dans les deux cas, comme le ferait un simple `?? -Infinity`, dirait l'inverse
- * de la vérité sur les couleurs sauvages, qui sont justement les plus rentables
- * à l'heure.
- */
-const hourlyKey = (row: BreedingRow) => {
-  if (row.marginPerHour !== null) return row.marginPerHour;
-  const margin = row.estimate.bestMargin;
-  return margin !== null && margin > 0 ? Infinity : -Infinity;
-};
-
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
-  // Par heure d'enclos par défaut : c'est la question que se pose l'éleveur.
-  // Trier sur la marge brute mettrait les hautes générations en tête par
-  // construction, puisqu'elles coûtent plus de travail à produire.
-  const [sortBy, setSortBy] = useState<SortBy>('hourly');
   const [pricedOnly, setPricedOnly] = useState(false);
   const [entryMode, setEntryMode] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(true);
@@ -200,6 +177,7 @@ const BreedingPage = () => {
         wallClockHours: row.planned?.duration?.wallClockHours ?? null,
         crossings: row.planned?.plan.crossings ?? null,
         totalCost: row.planned?.plan.totalCost ?? null,
+        bestMargin: row.estimate.bestMargin,
         breedable: row.planned !== null,
       })),
     [rows]
@@ -240,29 +218,12 @@ const BreedingPage = () => {
     // doit rester visible même sous un filtre qui la masquerait.
     if (selectedColorId) return rows.filter((row) => row.colorId === selectedColorId);
 
-    // Un objectif explicite décide seul de l'ordre, et le tri manuel disparaît
-    // avec lui : les deux répondraient à la même question, en se contredisant.
-    if (objective !== 'color') {
-      return rankFor(candidates, objective).map((ranked) => ranked.item.row);
-    }
-
-    const kept = pricedOnly ? rows.filter((row) => row.estimate.priceLevel0 !== null) : rows;
-
-    return [...kept].sort((a, b) => {
-      if (sortBy === 'generation') return a.generation - b.generation;
-      if (sortBy === 'cost') {
-        // Les couleurs sans coût chiffrable finissent en queue plutôt que d'être
-        // traitées comme gratuites.
-        return (a.estimate.cost ?? Infinity) - (b.estimate.cost ?? Infinity);
-      }
-      if (sortBy === 'hourly') return hourlyKey(b) - hourlyKey(a);
-      // Même base de coût que la colonne : celui du plan quand il y en a un.
-      return (
-        (b.planMargin ?? b.estimate.bestMargin ?? -Infinity) -
-        (a.planMargin ?? a.estimate.bestMargin ?? -Infinity)
-      );
-    });
-  }, [rows, candidates, objective, sortBy, pricedOnly, selectedColorId]);
+    // L'objectif décide seul de l'ordre. Les deux objectifs « gen 10 » ne
+    // gardent que la génération maximale ; « rentabilité » n'écarte rien, et
+    // c'est donc là qu'on va chercher une couleur précise à la main.
+    const ranked = rankFor(candidates, objective).map((entry) => entry.item.row);
+    return pricedOnly ? ranked.filter((row) => row.estimate.priceLevel0 !== null) : ranked;
+  }, [candidates, objective, pricedOnly, selectedColorId, rows]);
 
   /**
    * Les deux prochaines fournées du plan suivi, montures nommées.
@@ -526,16 +487,14 @@ const BreedingPage = () => {
                   <Wand2 size={13} />
                   {recommended
                     ? `Suivre : ${recommended.name}${recommendation?.affordable === false ? ' (hors budget)' : ''}`
-                    : objective === 'color'
-                      ? 'Choisis une couleur ci-dessous'
-                      : 'Aucune route chiffrable'}
+                    : 'Aucune route chiffrable'}
                 </Button>
               )}
             </div>
 
             {/* Trois états distincts, et les confondre était le défaut : aucune
                 route du tout, une route trop chère, ou rien à signaler. */}
-            {!project.current && objective !== 'color' && !recommendation && (
+            {!project.current && !recommendation && (
               <p className="text-[11px] text-amber-400/80">
                 Aucune route chiffrable pour cet objectif. Il manque des prix de
                 couleurs — renseigne-les avec « Saisir les prix ».
@@ -557,34 +516,21 @@ const BreedingPage = () => {
               </p>
             )}
 
-            {/* Tri manuel : réservé à « une couleur précise ». Ailleurs c'est
-                l'objectif qui ordonne, et deux tris concurrents se
-                contrediraient. */}
+            {/* Plus de tri manuel : l'objectif ordonne, et deux tris
+                concurrents répondraient à la même question en se contredisant.
+                Le filtre, lui, reste — il réduit la liste sans en changer
+                l'ordre. */}
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-              {!selectedColorId && objective === 'color' && (
-                <>
-                  <span>Trier par</span>
-                  <select
-                    value={sortBy}
-                    onChange={(event) => setSortBy(event.target.value as SortBy)}
-                    className="px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
-                      text-dark-200 text-xs hover:border-dark-500 focus:border-kamas/50 cursor-pointer"
-                  >
-                    <option value="hourly">Marge par heure d&apos;enclos</option>
-                    <option value="margin">Marge par monture</option>
-                    <option value="cost">Coût de revient</option>
-                    <option value="generation">Génération</option>
-                  </select>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={pricedOnly}
-                      onChange={(event) => setPricedOnly(event.target.checked)}
-                      className="accent-kamas cursor-pointer"
-                    />
-                    Seulement les couleurs tarifées
-                  </label>
-                </>
+              {!selectedColorId && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pricedOnly}
+                    onChange={(event) => setPricedOnly(event.target.checked)}
+                    className="accent-kamas cursor-pointer"
+                  />
+                  Seulement les couleurs tarifées
+                </label>
               )}
 
               {selectedColorId && (

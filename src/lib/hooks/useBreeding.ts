@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { saveItemPrice } from '@/lib/hooks/useItemPrices';
 import type {
   BreedingColorPrice,
   DofusDBItem,
@@ -902,6 +903,50 @@ export const useBreeding = (
     if (saveError) console.error('[breeding] individu non supprimé:', saveError);
   }, []);
 
+  /**
+   * Enregistre le prix d'un carburant, et le reflète aussitôt localement.
+   *
+   * Les prix de carburants sont l'entrée la plus déterminante de tout le calcul
+   * d'élevage : ils fixent le coût du cycle, le coût d'un point de Mangeoire —
+   * donc le niveau des parents — et ils décident du **palier** retenu, donc du
+   * délai. Ils vivaient pourtant sur une autre page, si bien que l'écran où on
+   * les cherche n'en montrait aucun.
+   *
+   * L'état local part devant, comme pour les prix de couleurs : tout le
+   * classement se recalcule à chaque saisie, et l'attendre du réseau rendrait
+   * la frappe poussive.
+   */
+  const saveFuelPrice = useCallback(
+    async (itemId: number, itemName: string, price: number) => {
+      const updated_at = new Date().toISOString();
+      setItemPrices((current) => {
+        const next = new Map(current);
+        if (price > 0) {
+          next.set(itemId, {
+            ...(next.get(itemId) ?? { item_id: itemId, icon_url: null, updated_by: null }),
+            item_id: itemId,
+            item_name: itemName,
+            price,
+            updated_at,
+          } as ItemPrice);
+        } else {
+          // Un prix effacé n'est pas un prix nul : un carburant à zéro raflerait
+          // tous les arbitrages en paraissant offert. On le retire.
+          next.delete(itemId);
+        }
+        return next;
+      });
+
+      if (price <= 0) return;
+      try {
+        await saveItemPrice({ itemId, itemName, price });
+      } catch (saveError) {
+        console.error('[breeding] prix de carburant non enregistré:', saveError);
+      }
+    },
+    []
+  );
+
   /** Idem pour un carburant en réserve. */
   const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
     setItemStock((current) => {
@@ -944,6 +989,8 @@ export const useBreeding = (
     genetonValuation,
     supplies,
     fuelItems,
+    itemPrices,
+    saveFuelPrice,
     stable,
     stockBySex,
     mountStock,

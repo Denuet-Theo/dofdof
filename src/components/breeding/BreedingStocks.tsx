@@ -38,6 +38,9 @@ type Props = {
   /** Les montures de génération 3 et plus, suivies une par une. */
   individuals: Individual[];
   itemStock: Map<number, number>;
+  /** Prix unitaire des carburants, pour les afficher et les comparer au point. */
+  itemPrices: Map<number, number>;
+  onSaveFuelPrice: (itemId: number, itemName: string, price: number) => Promise<void>;
   ownedGaugePoints: Map<string, number>;
   settings: Settings;
   onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
@@ -80,6 +83,8 @@ const BreedingStocks = ({
   stockBySex,
   individuals,
   itemStock,
+  itemPrices,
+  onSaveFuelPrice,
   ownedGaugePoints,
   settings,
   onSaveBulk,
@@ -167,6 +172,24 @@ const BreedingStocks = ({
     for (const group of groups.values()) group.sort((a, b) => a.recharge - b.recharge);
     return [...groups].sort(([a], [b]) => a.localeCompare(b));
   }, [fuelItems, fuelQuery]);
+
+  /**
+   * Le meilleur prix au point de chaque jauge, pour signaler le carburant que
+   * l'arbitrage retiendra à temps non valorisé.
+   */
+  const bestPerPoint = useMemo(() => {
+    const best = new Map<string, number>();
+    for (const [gauge, fuels] of fuelsByGauge) {
+      for (const { item, recharge } of fuels) {
+        const price = itemPrices.get(item.id) ?? 0;
+        if (price <= 0 || recharge <= 0) continue;
+        const perPoint = price / recharge;
+        const current = best.get(gauge);
+        if (current === undefined || perPoint < current) best.set(gauge, perPoint);
+      }
+    }
+    return best;
+  }, [fuelsByGauge, itemPrices]);
 
   const ownedMounts = [...stockBySex.values()].reduce(
     (total, { males, females }) => total + males + females,
@@ -460,22 +483,57 @@ const BreedingStocks = ({
                     )}
                   </p>
                   <div className="space-y-1">
-                    {fuels.map(({ item, recharge }) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-dark-800/40"
-                      >
-                        <span className="text-xs text-dark-200 flex-1 truncate">
-                          {item.name?.fr ?? item.id}
-                        </span>
-                        <span className="text-[10px] text-dark-500 shrink-0">
-                          {recharge.toLocaleString('fr-FR')} pts / unité
-                        </span>
-                        {countInput(itemStock.get(item.id) ?? 0, (next) =>
-                          onSaveItem(item.id, next)
-                        )}
-                      </div>
-                    ))}
+                    {fuels.map(({ item, recharge }) => {
+                      const name = item.name?.fr ?? String(item.id);
+                      const price = itemPrices.get(item.id) ?? 0;
+                      // Le prix au point est la seule mesure qui compare deux
+                      // paliers : un Élixir verse huit fois plus qu'un Extrait,
+                      // donc leurs prix bruts ne se comparent pas.
+                      const perPoint = price > 0 && recharge > 0 ? price / recharge : null;
+                      const cheapest = perPoint !== null && perPoint === bestPerPoint.get(gauge);
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-dark-800/40"
+                        >
+                          <span className="text-xs text-dark-200 flex-1 truncate">{name}</span>
+                          <span className="text-[10px] text-dark-500 shrink-0">
+                            {recharge.toLocaleString('fr-FR')} pts / unité
+                          </span>
+                          <span
+                            className={`text-[10px] shrink-0 w-24 text-right tabular-nums ${
+                              cheapest ? 'text-profit' : 'text-dark-500'
+                            }`}
+                            title={
+                              perPoint === null
+                                ? 'Sans prix, ce carburant est écarté de tous les arbitrages — il n’est pas réputé gratuit, il est réputé indisponible.'
+                                : `${perPoint.toFixed(3)} kamas par point${cheapest ? ' — le moins cher de cette jauge' : ''}`
+                            }
+                          >
+                            {perPoint === null ? 'sans prix' : `${perPoint.toFixed(2)} k/pt`}
+                          </span>
+                          <label className="flex items-center gap-1 shrink-0">
+                            <span className="text-[10px] text-dark-500">prix</span>
+                            {countInput(
+                              price,
+                              (next) => onSaveFuelPrice(item.id, name, next),
+                              99_999_999,
+                              `Prix d'achat d'une unité de ${name}`
+                            )}
+                          </label>
+                          <label className="flex items-center gap-1 shrink-0">
+                            <span className="text-[10px] text-dark-500">j&apos;en ai</span>
+                            {countInput(
+                              itemStock.get(item.id) ?? 0,
+                              (next) => onSaveItem(item.id, next),
+                              9999,
+                              `Unités de ${name} en réserve`
+                            )}
+                          </label>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

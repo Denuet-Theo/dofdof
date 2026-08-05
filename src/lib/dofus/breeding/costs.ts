@@ -707,7 +707,7 @@ export type BreedingEstimate = {
 };
 
 /** Taxe prélevée à la vente en hôtel de vente. */
-const HDV_TAX_RATE = 0.02;
+export const HDV_TAX_RATE = 0.02;
 
 /**
  * Coût de revient de chaque couleur d'une famille, par génération croissante.

@@ -90,6 +90,8 @@ const BreedingPage = () => {
     sacrificePrice,
     supplies,
     fuelItems,
+    itemPrices,
+    saveFuelPrice,
     stable,
     stockBySex,
     itemStock,
@@ -105,6 +107,12 @@ const BreedingPage = () => {
     recordBirths,
     saveItemStock,
   } = useBreeding(family, targetCount);
+
+  /** Les prix nus, la table complète portant aussi les noms et les icônes. */
+  const fuelPrices = useMemo(
+    () => new Map([...itemPrices].map(([id, row]) => [id, row.price] as const)),
+    [itemPrices]
+  );
 
   /** Le plan ne porte que des identifiants ; les lignes ont les noms. */
   const nameOf = useMemo(() => {
@@ -322,6 +330,8 @@ const BreedingPage = () => {
         stockBySex={stockBySex}
         individuals={stable.individuals}
         itemStock={itemStock}
+        itemPrices={fuelPrices}
+        onSaveFuelPrice={saveFuelPrice}
         ownedGaugePoints={ownedGaugePoints}
         settings={settings}
         onSaveBulk={saveBulkStock}

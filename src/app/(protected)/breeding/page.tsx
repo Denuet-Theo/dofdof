@@ -190,6 +190,7 @@ const BreedingPage = () => {
         marginPerHour: row.marginPerHour,
         enclosHours: row.planned?.duration?.enclosHours ?? null,
         wallClockHours: row.planned?.duration?.wallClockHours ?? null,
+        crossings: row.planned?.plan.crossings ?? null,
         totalCost: row.planned?.plan.totalCost ?? null,
         breedable: row.planned !== null,
       })),
@@ -202,13 +203,26 @@ const BreedingPage = () => {
    * Un plan hors budget n'est pas une recommandation, c'est une frustration :
    * l'écarter vaut mieux que de le proposer en sachant qu'il bloquera.
    */
-  const recommended = useMemo(() => {
-    const affordable = candidates.filter(
-      (candidate) =>
-        !candidate.row.planned?.funding || candidate.row.planned.funding.affordable
-    );
-    return recommendedFor(affordable, objective)?.row ?? null;
-  }, [candidates, objective]);
+  const recommendation = useMemo(
+    () =>
+      recommendedFor(
+        candidates,
+        objective,
+        // Le budget trie, il n'élimine pas : si rien n'est finançable, on désigne
+        // quand même la meilleure route et l'écran dit ce qu'il y manque.
+        (candidate) =>
+          !candidate.row.planned?.funding || candidate.row.planned.funding.affordable
+      ),
+    [candidates, objective]
+  );
+
+  const recommended = recommendation?.item.row ?? null;
+
+  /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
+  const shortfall =
+    recommendation && !recommendation.affordable
+      ? (recommendation.item.row.planned?.funding?.shortfall ?? null)
+      : null;
 
   const sorted = useMemo(() => {
     // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
@@ -501,25 +515,37 @@ const BreedingPage = () => {
                 >
                   <Wand2 size={13} />
                   {recommended
-                    ? `Suivre : ${recommended.name}`
+                    ? `Suivre : ${recommended.name}${recommendation?.affordable === false ? ' (hors budget)' : ''}`
                     : objective === 'color'
                       ? 'Choisis une couleur ci-dessous'
-                      : 'Aucune route ne convient'}
+                      : 'Aucune route chiffrable'}
                 </Button>
               )}
             </div>
 
-            {!project.current &&
-              objective !== 'color' &&
-              settings.kamas_available > 0 &&
-              !recommended && (
-                <p className="text-[11px] text-amber-400/80">
-                  Aucune route ne répond à cet objectif dans les limites de{' '}
-                  {settings.kamas_available.toLocaleString('fr-FR')} kamas. Baisse le
-                  nombre visé, relève le budget dans « Mes stocks », ou change
-                  d&apos;objectif.
-                </p>
-              )}
+            {/* Trois états distincts, et les confondre était le défaut : aucune
+                route du tout, une route trop chère, ou rien à signaler. */}
+            {!project.current && objective !== 'color' && !recommendation && (
+              <p className="text-[11px] text-amber-400/80">
+                Aucune route chiffrable pour cet objectif. Il manque des prix de
+                couleurs — renseigne-les avec « Saisir les prix ».
+              </p>
+            )}
+
+            {!project.current && recommendation && !recommendation.affordable && (
+              <p className="text-[11px] text-amber-400/80">
+                {recommended?.name} est la meilleure route pour cet objectif, mais elle
+                dépasse ton budget
+                {shortfall !== null && (
+                  <>
+                    {' '}
+                    de{' '}
+                    <strong>{Math.round(shortfall).toLocaleString('fr-FR')} kamas</strong>
+                  </>
+                )}
+                . Elle reste sélectionnable — le plan te dira où l&apos;argent manque.
+              </p>
+            )}
 
             {/* Tri manuel : réservé à « une couleur précise ». Ailleurs c'est
                 l'objectif qui ordonne, et deux tris concurrents se

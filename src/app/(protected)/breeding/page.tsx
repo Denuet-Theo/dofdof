@@ -5,12 +5,14 @@ import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
 import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
+import BreedingBatches from '@/components/breeding/BreedingBatches';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
+import { nextBatches } from '@/lib/dofus/breeding/batches';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import {
@@ -100,6 +102,7 @@ const BreedingPage = () => {
     addIndividual,
     updateIndividual,
     removeIndividual,
+    recordBirths,
     saveItemStock,
   } = useBreeding(family, targetCount);
 
@@ -239,6 +242,31 @@ const BreedingPage = () => {
     });
   }, [rows, candidates, objective, sortBy, pricedOnly, selectedColorId]);
 
+  /**
+   * Les deux prochaines fournées du plan suivi, montures nommées.
+   *
+   * Ne se calcule que pour le plan suivi : c'est une consigne d'action, pas une
+   * comparaison, et l'établir pour les 120 couleurs n'aurait ni sens ni intérêt.
+   */
+  const batches = useMemo(() => {
+    const target = rows.find((row) => row.colorId === selectedColorId);
+    if (!target?.planned) return [];
+
+    return nextBatches(target.planned.plan, stable, {
+      capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
+      count: 2,
+      recycleSteriles: settings.recycle_steriles,
+      generationOf,
+    });
+  }, [
+    rows,
+    selectedColorId,
+    stable,
+    settings.enclos_count,
+    settings.recycle_steriles,
+    generationOf,
+  ]);
+
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
   return (
@@ -289,6 +317,32 @@ const BreedingPage = () => {
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
       />
+
+      {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
+          d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
+          qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
+      {selectedColorId && (
+        <div className="glass rounded-2xl px-5 py-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-dark-200">
+              Prochaines fournées — {nameOf(selectedColorId)}
+            </span>
+            <span className="text-xs text-dark-500">
+              les montures à charger, et ce qui en est né
+            </span>
+          </div>
+          <BreedingBatches
+            batches={batches}
+            nameOf={nameOf}
+            colors={rows.map((row) => ({
+              colorId: row.colorId,
+              name: row.name,
+              generation: row.generation,
+            }))}
+            onRecord={recordBirths}
+          />
+        </div>
+      )}
 
       {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
           pans entiers du résultat valent zéro et il vaut mieux le voir. */}

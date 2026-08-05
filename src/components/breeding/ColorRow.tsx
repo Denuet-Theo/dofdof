@@ -6,6 +6,7 @@ import KamasDisplay from '@/components/ui/KamasDisplay';
 import ColorPriceInputs from '@/components/breeding/ColorPriceInputs';
 import BreedingPlanPanel from '@/components/breeding/BreedingPlanPanel';
 import { formatHours } from '@/lib/utils/date';
+import { HDV_TAX_RATE } from '@/lib/dofus/breeding/costs';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
 import type { Wave } from '@/lib/dofus/breeding/waves';
 import type { BulkStock } from '@/lib/dofus/breeding/stable';
@@ -90,8 +91,31 @@ const ColorRow = ({
   // centaine : afficher l'un à côté du rendement horaire, qui dérive de
   // l'autre, donnerait deux chiffres de signes contraires sur la même ligne.
   const margin = row.planMargin ?? estimate.bestMargin;
-  /** Même base que la marge : le plan quand il existe, le prix sinon. */
-  const planCost = row.planCostPerMount ?? estimate.cost;
+  /**
+   * Le coût de **tout le processus**, dans la même unité que le gain net.
+   *
+   * Les deux sont des totaux. Le prix d'une monture prise isolément n'intéresse
+   * personne sur un objectif qu'on ne poursuit qu'une fois, et le poser à côté
+   * d'un total rendait la ligne impossible à lire.
+   */
+  const planCost = row.planTotalCost;
+  /**
+   * Le prix de vente par monture à partir duquel tout le processus est
+   * remboursé, taxe d'hôtel de vente comprise.
+   *
+   * C'est le chiffre qu'un éleveur cherche quand il **fixe** son prix plutôt
+   * que de subir le marché : « ça m'a coûté deux millions, je vendrai trois ».
+   * Le savoir sur une couleur que personne ne cote est même le seul moyen d'en
+   * annoncer un prix qui tienne.
+   *
+   * Divisé par les montures réellement produites : remplir la dernière fournée
+   * en rend parfois quelques-unes de plus, et elles se vendent aussi.
+   */
+  const produced = row.planned?.plan.targetProduced ?? targetCount;
+  const floorPrice =
+    planCost !== null && planCost > 0 && produced > 0
+      ? planCost / (produced * (1 - HDV_TAX_RATE))
+      : null;
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -144,12 +168,16 @@ const ColorRow = ({
             côte — 295 K de coût en face de 2 M de perte. Pour une couleur qu'on
             achète ou qu'on capture, il n'y a pas de plan et `estimate.cost` est
             justement son prix. */}
+        {/* Le coût de tout le processus, pas d'une monture : c'est la question
+            qu'on se pose devant l'écran, et c'est aussi la seule unité qui se
+            compare au gain net, qui en est déjà un. */}
         <div className="text-right shrink-0 w-32">
           <p
             className="text-[10px] text-dark-500"
-            title="Ce qu'une monture de cette couleur te coûte réellement, sur la base du plan retenu — multiplicités, fournées et clonage compris. Pour une couleur qu'on achète ou capture, c'est son prix. Négatif quand les génétons et l'extraction dépassent la dépense."
+            title={`Ce que coûte l'ensemble du processus — tous les croisements, achats et captures, génétons et extractions déduits${produced > 1 ? `, pour les ${produced} montures que le plan produit` : ''}. Négatif quand les recettes dépassent la dépense.`}
           >
-            {(planCost ?? 0) < 0 ? 'Rapporte / monture' : 'Coût / monture'}
+            {(planCost ?? 0) < 0 ? 'Rapporte en tout' : 'Coût total'}
+            {produced > 1 && <span className="text-dark-600"> ×{produced}</span>}
           </p>
           {planCost === null ? (
             <p className="text-sm text-dark-600">—</p>
@@ -159,6 +187,25 @@ const ColorRow = ({
             </p>
           ) : (
             <KamasDisplay amount={Math.round(planCost)} size="sm" />
+          )}
+        </div>
+
+        {/* Le prix à battre. Un éleveur qui vise une couleur que personne ne
+            cote ne subit pas le marché, il le fait : ce qu'il lui faut, c'est le
+            seuil au-dessus duquel il gagne. */}
+        <div className="text-right shrink-0 w-32 hidden md:block">
+          <p
+            className="text-[10px] text-dark-500"
+            title="Le prix de vente, par monture, à partir duquel tout le processus est remboursé — les 2 % de taxe de l'hôtel de vente compris. Vends au-dessus et tu gagnes."
+          >
+            Vendre au-dessus de
+          </p>
+          {floorPrice === null ? (
+            <p className="text-sm text-dark-600">—</p>
+          ) : (
+            <p className="text-sm font-semibold text-dark-100">
+              {Math.round(floorPrice).toLocaleString('fr-FR')}
+            </p>
           )}
         </div>
 

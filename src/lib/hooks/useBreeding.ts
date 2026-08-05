@@ -131,23 +131,22 @@ export type BreedingRow = {
    */
   marginPerHour: number | null;
   /**
-   * Ce qu'une monture coûte **dans le plan retenu**, et non dans l'estimation
-   * par exemplaire.
+   * Ce que **tout le processus** coûte, et non ce que coûte une monture.
    *
-   * Les deux diffèrent, parfois d'un facteur sept : `estimate.cost` chiffre un
-   * exemplaire isolé, en ignorant qu'une couleur servant à plusieurs recettes
-   * n'est produite qu'une fois de plus, et en appliquant un demi forfaitaire au
-   * clonage. Le plan, lui, compte les multiplicités, arrondit les fournées et
-   * sait combien d'exemplaires frais il faut réellement.
+   * C'est la question qu'on se pose devant l'écran : « combien ça va me
+   * coûter », pas « quel est le prix unitaire ». Le prix unitaire n'intéresse
+   * personne sur un objectif qu'on ne poursuit qu'une fois.
    *
-   * C'est cette valeur-là qu'il faut afficher à côté du gain net, qui se compte
-   * déjà sur `plan.totalCost` : sans quoi les deux colonnes ne se réconcilient
-   * pas — 295 K de coût affiché en face de 2 M de perte annoncée.
+   * Et c'est aussi ce qui rendait la ligne illisible : le gain net est **déjà**
+   * un total — `bestExitValue × produites − plan.totalCost` — si bien qu'un
+   * coût ramené à la monture posait un prix unitaire à côté d'un total. Les deux
+   * chiffres ne pouvaient pas se réconcilier, et c'est exactement ce que les
+   * joueurs ont buté dessus.
    *
-   * `null` pour une couleur qu'on n'élève pas : c'est alors son prix d'achat ou
-   * de capture qui fait foi, et `estimate.cost` le porte déjà.
+   * Pour une couleur qu'on achète ou capture, il n'y a pas de plan : le total
+   * est alors le prix unitaire multiplié par ce qu'on en veut.
    */
-  planCostPerMount: number | null;
+  planTotalCost: number | null;
 };
 
 export type PlannedColor = {
@@ -584,12 +583,14 @@ export const useBreeding = (
         ? estimate.bestExitValue * planned.plan.targetProduced - planned.plan.totalCost
         : null;
       const hours = planned?.duration?.enclosHours ?? 0;
-      // Sur les montures réellement produites, pas sur l'objectif : remplir la
-      // dernière fournée en rend parfois quelques-unes de plus, à carburant
-      // constant, et les ignorer surfacturerait chacune.
-      const produced = planned?.plan.targetProduced ?? 0;
-      const planCostPerMount =
-        planned && produced > 0 ? planned.plan.totalCost / produced : null;
+      // Le total du plan tel quel — c'est déjà la bonne unité, la même que le
+      // gain net. À défaut de plan, ce qu'il en coûterait de simplement en
+      // acheter ou capturer le nombre visé.
+      const planTotalCost = planned
+        ? planned.plan.totalCost
+        : estimate.cost !== null
+          ? estimate.cost * targetCount
+          : null;
 
       return [
         {
@@ -602,7 +603,7 @@ export const useBreeding = (
           planned,
           planMargin,
           marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
-          planCostPerMount,
+          planTotalCost,
         },
       ];
     });

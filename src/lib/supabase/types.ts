@@ -300,16 +300,50 @@ export type BreedingProject = {
 };
 
 /**
- * Une monture en écurie (migration 20260804210000). Ligne absente = zéro.
+ * Le vrac de l'écurie (migrations 20260804210000 puis 20260805120000) : les
+ * générations 1 et 2, comptées **par sexe**. Ligne absente = zéro.
  *
  * Rattachée au joueur et non à un projet : posséder un muldo Roux allège tous
  * les plans qui en demandent, pas seulement celui qu'on suit.
+ *
+ * Le compteur unique d'avant ne suffisait pas : un accouplement demande un mâle
+ * et une femelle, et dix mâles sans femelle ne font aucun couple. Au-delà de la
+ * génération 2, voir `UserBreedingIndividual` — la généalogie y devient
+ * discriminante et un compteur ne peut plus la porter.
  */
 export type UserBreedingMount = {
   user_id: string;
   family: 'dragodinde' | 'muldo' | 'volkorne';
   color_id: string;
-  count: number;
+  males: number;
+  females: number;
+  updated_at: string;
+};
+
+/**
+ * Une monture de génération 3 ou plus, suivie individuellement
+ * (migration 20260805120000).
+ *
+ * Les couleurs des parents sont portées ici plutôt que déduites de la recette :
+ * la distribution des couleurs à l'échec dépend de la généalogie de
+ * l'**individu**, et deux montures de même couleur n'ont pas la même ascendance
+ * selon d'où elles viennent. Les `_id` ne sont renseignés que lorsque le parent
+ * est lui-même suivi — un parent de génération 1 ou 2 vit dans le vrac et n'a
+ * pas d'identifiant.
+ */
+export type UserBreedingIndividual = {
+  id: string;
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  color_id: string;
+  sex: 'M' | 'F';
+  level: number;
+  fertile: boolean;
+  parent_a_color: string | null;
+  parent_b_color: string | null;
+  parent_a_id: string | null;
+  parent_b_id: string | null;
+  created_at: string;
   updated_at: string;
 };
 
@@ -373,11 +407,43 @@ export interface Database {
           user_id?: string;
           family: UserBreedingMount['family'];
           color_id: string;
-          count?: number;
+          males?: number;
+          females?: number;
           updated_at?: string;
         };
         Update: {
-          count?: number;
+          males?: number;
+          females?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_breeding_individuals: {
+        Row: UserBreedingIndividual;
+        Insert: {
+          id?: string;
+          user_id?: string;
+          family: UserBreedingIndividual['family'];
+          color_id: string;
+          sex: UserBreedingIndividual['sex'];
+          level?: number;
+          fertile?: boolean;
+          parent_a_color?: string | null;
+          parent_b_color?: string | null;
+          parent_a_id?: string | null;
+          parent_b_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          color_id?: string;
+          sex?: UserBreedingIndividual['sex'];
+          level?: number;
+          fertile?: boolean;
+          parent_a_color?: string | null;
+          parent_b_color?: string | null;
+          parent_a_id?: string | null;
+          parent_b_id?: string | null;
           updated_at?: string;
         };
         Relationships: [];

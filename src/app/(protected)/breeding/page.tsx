@@ -79,14 +79,18 @@ const BreedingPage = () => {
     sacrificePrice,
     supplies,
     fuelItems,
-    mountStock,
+    stable,
+    stockBySex,
     itemStock,
     ownedGaugePoints,
     loading,
     error,
     savePrice,
     saveSettings,
-    saveMountStock,
+    saveBulkStock,
+    addIndividual,
+    updateIndividual,
+    removeIndividual,
     saveItemStock,
   } = useBreeding(family, targetCount);
 
@@ -94,6 +98,15 @@ const BreedingPage = () => {
   const nameOf = useMemo(() => {
     const names = new Map(rows.map((row) => [row.colorId, row.name]));
     return (colorId: string) => names.get(colorId) ?? colorId;
+  }, [rows]);
+
+  /**
+   * La génération d'une couleur, qui décide de la façon dont l'écurie la porte :
+   * comptée en vrac jusqu'à la gen 2, suivie monture par monture au-delà.
+   */
+  const generationOf = useMemo(() => {
+    const generations = new Map(rows.map((row) => [row.colorId, row.generation]));
+    return (colorId: string) => generations.get(colorId) ?? 1;
   }, [rows]);
 
   /** La couleur du plan suivi, qui réduit la liste à elle seule. */
@@ -135,12 +148,12 @@ const BreedingPage = () => {
     );
 
     return planWaves(target.planned.plan, {
-      stock: mountStock,
+      stock: stockBySex,
       capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
       recycleSteriles: settings.recycle_steriles,
       filler: filler?.colorId ?? null,
     });
-  }, [rows, selectedColorId, mountStock, settings.enclos_count, settings.recycle_steriles]);
+  }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
   const sorted = useMemo(() => {
     // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
@@ -225,11 +238,15 @@ const BreedingPage = () => {
       <BreedingStocks
         rows={rows}
         fuelItems={fuelItems}
-        mountStock={mountStock}
+        stockBySex={stockBySex}
+        individuals={stable.individuals}
         itemStock={itemStock}
         ownedGaugePoints={ownedGaugePoints}
         settings={settings}
-        onSaveMount={saveMountStock}
+        onSaveBulk={saveBulkStock}
+        onAddIndividual={addIndividual}
+        onUpdateIndividual={updateIndividual}
+        onRemoveIndividual={removeIndividual}
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
       />
@@ -453,8 +470,9 @@ const BreedingPage = () => {
                     key={row.colorId}
                     row={row}
                     nameOf={nameOf}
-                    mountStock={mountStock}
-                    onSaveMount={saveMountStock}
+                    generationOf={generationOf}
+                    stockBySex={stockBySex}
+                    onSaveBulk={saveBulkStock}
                     enclosCount={settings.enclos_count}
                     targetCount={targetCount}
                     waves={row.colorId === selectedColorId ? waves : null}

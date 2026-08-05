@@ -3,9 +3,11 @@
 import { ListOrdered, TriangleAlert } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import KamasDisplay from '@/components/ui/KamasDisplay';
+import StableCountField from '@/components/breeding/StableCountField';
 import { formatHours } from '@/lib/utils/date';
 import type { PlannedColor } from '@/lib/hooks/useBreeding';
 import type { Wave } from '@/lib/dofus/breeding/waves';
+import type { BulkStock } from '@/lib/dofus/breeding/stable';
 
 /**
  * La marche à suivre pour produire une couleur, étape par étape.
@@ -27,8 +29,10 @@ type Props = {
   colorName: string;
   /** Nom lisible d'une couleur, le plan ne portant que des identifiants. */
   nameOf: (colorId: string) => string;
-  mountStock: Map<string, number>;
-  onSaveMount: (colorId: string, count: number) => Promise<void>;
+  /** Génération d'une couleur : décide si elle se compte ou se suit une par une. */
+  generationOf: (colorId: string) => number;
+  stockBySex: Map<string, BulkStock>;
+  onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
   /** Enclos possédés, pour traduire les heures d'enclos en délai réel. */
   enclosCount: number;
   /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
@@ -51,8 +55,9 @@ const BreedingPlanPanel = ({
   planned,
   colorName,
   nameOf,
-  mountStock,
-  onSaveMount,
+  generationOf,
+  stockBySex,
+  onSaveBulk,
   enclosCount,
   targetCount,
   waves,
@@ -63,29 +68,19 @@ const BreedingPlanPanel = ({
   const { plan, duration, gaugeNeeds, funding } = planned;
 
   /**
-   * Ce qu'on possède déjà de cette couleur.
+   * Ce qu'on possède déjà de cette couleur, mâles et femelles distingués.
    *
    * Le libellé est porté par le champ lui-même plutôt que par un en-tête de
    * colonne : les lignes n'en ont pas, et renvoyer le lecteur vers « la colonne
    * de droite » désignait quelque chose qui n'existait pas à l'écran.
    */
   const countField = (colorId: string) => (
-    <label className="flex items-center gap-1.5 shrink-0">
-      <span className="text-[10px] text-dark-500">j&apos;en ai</span>
-      <input
-        type="number"
-        min={0}
-        max={999}
-        value={String(mountStock.get(colorId) ?? 0)}
-        onChange={(event) =>
-          onSaveMount(colorId, Math.max(0, Math.min(999, Number(event.target.value) || 0)))
-        }
-        title="Combien j'en ai déjà en écurie, montures fertiles uniquement"
-        className="w-14 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
-          text-dark-100 text-xs text-right transition-all hover:border-dark-500
-          focus:border-kamas/50"
-      />
-    </label>
+    <StableCountField
+      colorId={colorId}
+      generation={generationOf(colorId)}
+      stockBySex={stockBySex}
+      onSaveBulk={onSaveBulk}
+    />
   );
 
   const done = plan.steps.length === 0 && plan.purchases.length === 0;

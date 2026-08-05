@@ -8,6 +8,7 @@ import BreedingPlanPanel from '@/components/breeding/BreedingPlanPanel';
 import { formatHours } from '@/lib/utils/date';
 import type { BreedingRow } from '@/lib/hooks/useBreeding';
 import type { Wave } from '@/lib/dofus/breeding/waves';
+import type { BulkStock } from '@/lib/dofus/breeding/stable';
 
 /** Ce que dit la stratégie retenue, en un mot et une couleur. */
 const STRATEGY_LABEL = {
@@ -32,8 +33,9 @@ const EXIT_LABEL = {
 type Props = {
   row: BreedingRow;
   nameOf: (colorId: string) => string;
-  mountStock: Map<string, number>;
-  onSaveMount: (colorId: string, count: number) => Promise<void>;
+  generationOf: (colorId: string) => number;
+  stockBySex: Map<string, BulkStock>;
+  onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
   enclosCount: number;
   /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
   targetCount: number;
@@ -49,8 +51,9 @@ type Props = {
 const ColorRow = ({
   row,
   nameOf,
-  mountStock,
-  onSaveMount,
+  generationOf,
+  stockBySex,
+  onSaveBulk,
   enclosCount,
   targetCount,
   waves,
@@ -232,8 +235,9 @@ const ColorRow = ({
                 planned={row.planned}
                 colorName={row.name}
                 nameOf={nameOf}
-                mountStock={mountStock}
-                onSaveMount={onSaveMount}
+                generationOf={generationOf}
+                stockBySex={stockBySex}
+                onSaveBulk={onSaveBulk}
                 enclosCount={enclosCount}
                 targetCount={targetCount}
                 waves={waves}

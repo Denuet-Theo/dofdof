@@ -1,4 +1,5 @@
 import type { BreedingPlan } from './costs';
+import { maxPairings, splitBySex, type BulkStock } from './stable';
 
 /**
  * Le plan en fournées d'enclos, et non plus en liste de croisements.
@@ -18,8 +19,11 @@ import type { BreedingPlan } from './costs';
  * Deux contraintes la dimensionnent, et c'est la plus serrée qui décide :
  *
  * 1. **Les places.** Cinquante places portent au plus vingt-cinq accouplements.
- * 2. **Les parents fertiles disponibles à cet instant.** C'est celle qu'une
- *    liste de croisements ignore, et c'est presque toujours elle qui mord.
+ * 2. **Les parents fertiles disponibles à cet instant**, sexes compris. C'est
+ *    celle qu'une liste de croisements ignore, et c'est presque toujours elle
+ *    qui mord. Un accouplement demande un mâle et une femelle : dix mâles d'une
+ *    couleur et aucune femelle ne font aucun couple, là où compter les montures
+ *    sans distinguer les sexes en annonçait cinq.
  *
  * Entre deux vagues, les parents ressortis stériles se clonent — deux stériles
  * de même rang donnent un fertile, gratuitement et sans égard aux jauges. Le
@@ -65,8 +69,11 @@ export type Wave = {
 };
 
 export type WavePlanOptions = {
-  /** Ce que l'éleveur possède réellement, et non le minimum que le plan achète. */
-  stock: Map<string, number>;
+  /**
+   * Ce que l'éleveur possède réellement, par couleur **et par sexe**, et non le
+   * minimum que le plan achète. Vient de `stableBySex`.
+   */
+  stock: Map<string, BulkStock>;
   /** Places du parc : dix par enclos. */
   capacity: number;
   recycleSteriles: boolean;
@@ -109,9 +116,34 @@ export const planWaves = (
    * montures réellement en main qui décide de la taille de la première vague.
    * Les achats s'y ajoutent, puisqu'on les fait avant de commencer.
    */
-  const available = new Map(stock);
+  const available = new Map([...stock].map(([id, counts]) => [id, { ...counts }]));
+
+  /**
+   * Ajoute des montures dont le sexe n'est pas encore connu — achats, clones et
+   * naissances. Réparties à moitié-moitié : c'est l'espérance, et rien dans le
+   * jeu ne permet de choisir. Voir `splitBySex`.
+   */
+  const addUnsexed = (colorId: string, count: number) => {
+    if (count <= 0) return;
+    const current = available.get(colorId) ?? { males: 0, females: 0 };
+    const { males, females } = splitBySex(count);
+    available.set(colorId, {
+      males: current.males + males,
+      females: current.females + females,
+    });
+  };
+
+  /** Retire `count` montures d'une couleur, en entamant le sexe le mieux fourni. */
+  const consume = (colorId: string, males: number, females: number) => {
+    const current = available.get(colorId) ?? { males: 0, females: 0 };
+    available.set(colorId, {
+      males: current.males - males,
+      females: current.females - females,
+    });
+  };
+
   for (const purchase of plan.purchases) {
-    available.set(purchase.colorId, (available.get(purchase.colorId) ?? 0) + purchase.count);
+    addUnsexed(purchase.colorId, purchase.count);
   }
 
   const waves: Wave[] = [];
@@ -124,22 +156,38 @@ export const planWaves = (
 
     while (remaining > 0 && waves.length < MAX_WAVES) {
       const [first, second] = step.recipe;
-      const firstFree = available.get(first) ?? 0;
-      const secondFree = available.get(second) ?? 0;
+      const sameColor = first === second;
+      const firstFree = available.get(first) ?? { males: 0, females: 0 };
+      const secondFree = available.get(second) ?? { males: 0, females: 0 };
 
-      // Une recette qui appaire deux fois la même couleur consomme deux
-      // exemplaires par accouplement, pas un de chaque.
-      const byParents =
-        first === second ? Math.floor(firstFree / 2) : Math.min(firstFree, secondFree);
+      // Un accouplement demande un mâle et une femelle. Sur une recette à deux
+      // couleurs, les deux orientations — mâle de l'une avec femelle de l'autre,
+      // et l'inverse — ne se disputent aucune monture ; sur une recette à
+      // couleur unique, c'est le sexe le moins représenté qui plafonne.
+      const byParents = maxPairings(firstFree, secondFree, sameColor);
       const crossings = Math.min(remaining, byParents, perWave);
 
       // Plus aucun parent mobilisable : le programme s'arrête là plutôt que de
       // tourner à vide.
       if (crossings <= 0) return waves;
 
-      for (const parent of step.recipe) {
-        available.set(parent, (available.get(parent) ?? 0) - crossings);
-        sterile.set(parent, (sterile.get(parent) ?? 0) + crossings);
+      if (sameColor) {
+        consume(first, crossings, crossings);
+        sterile.set(first, (sterile.get(first) ?? 0) + 2 * crossings);
+      } else {
+        // On sert d'abord l'orientation la plus disponible, puis l'autre pour le
+        // reste. Les deux puisant dans des sexes distincts, l'ordre ne change
+        // pas le total — seulement quel sexe reste en fin de vague.
+        const firstOrientation = Math.min(
+          Math.min(firstFree.males, secondFree.females),
+          crossings
+        );
+        const secondOrientation = crossings - firstOrientation;
+
+        consume(first, firstOrientation, secondOrientation);
+        consume(second, secondOrientation, firstOrientation);
+        sterile.set(first, (sterile.get(first) ?? 0) + crossings);
+        sterile.set(second, (sterile.get(second) ?? 0) + crossings);
       }
 
       const used = crossings * 2;
@@ -157,7 +205,9 @@ export const planWaves = (
           const clones = Math.floor(idle / 2);
           if (clones <= 0) continue;
           sterile.set(parent, idle - clones * 2);
-          available.set(parent, (available.get(parent) ?? 0) + clones);
+          // Le clone est au hasard l'une des deux montures appairées, donc son
+          // sexe ne se choisit pas plus que celui d'un bébé.
+          addUnsexed(parent, clones);
           clonings.push({ colorId: parent, count: clones });
         }
       }
@@ -178,8 +228,8 @@ export const planWaves = (
     }
 
     // Les bébés de l'étape rejoignent le vivier : les générations suivantes s'en
-    // servent comme parents.
-    available.set(step.colorId, (available.get(step.colorId) ?? 0) + step.count);
+    // servent comme parents. Sexes inconnus tant qu'ils ne sont pas nés.
+    addUnsexed(step.colorId, step.count);
   }
 
   return waves;

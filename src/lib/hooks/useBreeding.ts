@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { saveItemPrice } from '@/lib/hooks/useItemPrices';
 import type {
   BreedingColorPrice,
   DofusDBItem,
@@ -130,23 +131,22 @@ export type BreedingRow = {
    */
   marginPerHour: number | null;
   /**
-   * Ce qu'une monture coûte **dans le plan retenu**, et non dans l'estimation
-   * par exemplaire.
+   * Ce que **tout le processus** coûte, et non ce que coûte une monture.
    *
-   * Les deux diffèrent, parfois d'un facteur sept : `estimate.cost` chiffre un
-   * exemplaire isolé, en ignorant qu'une couleur servant à plusieurs recettes
-   * n'est produite qu'une fois de plus, et en appliquant un demi forfaitaire au
-   * clonage. Le plan, lui, compte les multiplicités, arrondit les fournées et
-   * sait combien d'exemplaires frais il faut réellement.
+   * C'est la question qu'on se pose devant l'écran : « combien ça va me
+   * coûter », pas « quel est le prix unitaire ». Le prix unitaire n'intéresse
+   * personne sur un objectif qu'on ne poursuit qu'une fois.
    *
-   * C'est cette valeur-là qu'il faut afficher à côté du gain net, qui se compte
-   * déjà sur `plan.totalCost` : sans quoi les deux colonnes ne se réconcilient
-   * pas — 295 K de coût affiché en face de 2 M de perte annoncée.
+   * Et c'est aussi ce qui rendait la ligne illisible : le gain net est **déjà**
+   * un total — `bestExitValue × produites − plan.totalCost` — si bien qu'un
+   * coût ramené à la monture posait un prix unitaire à côté d'un total. Les deux
+   * chiffres ne pouvaient pas se réconcilier, et c'est exactement ce que les
+   * joueurs ont buté dessus.
    *
-   * `null` pour une couleur qu'on n'élève pas : c'est alors son prix d'achat ou
-   * de capture qui fait foi, et `estimate.cost` le porte déjà.
+   * Pour une couleur qu'on achète ou capture, il n'y a pas de plan : le total
+   * est alors le prix unitaire multiplié par ce qu'on en veut.
    */
-  planCostPerMount: number | null;
+  planTotalCost: number | null;
 };
 
 export type PlannedColor = {
@@ -583,12 +583,14 @@ export const useBreeding = (
         ? estimate.bestExitValue * planned.plan.targetProduced - planned.plan.totalCost
         : null;
       const hours = planned?.duration?.enclosHours ?? 0;
-      // Sur les montures réellement produites, pas sur l'objectif : remplir la
-      // dernière fournée en rend parfois quelques-unes de plus, à carburant
-      // constant, et les ignorer surfacturerait chacune.
-      const produced = planned?.plan.targetProduced ?? 0;
-      const planCostPerMount =
-        planned && produced > 0 ? planned.plan.totalCost / produced : null;
+      // Le total du plan tel quel — c'est déjà la bonne unité, la même que le
+      // gain net. À défaut de plan, ce qu'il en coûterait de simplement en
+      // acheter ou capturer le nombre visé.
+      const planTotalCost = planned
+        ? planned.plan.totalCost
+        : estimate.cost !== null
+          ? estimate.cost * targetCount
+          : null;
 
       return [
         {
@@ -601,7 +603,7 @@ export const useBreeding = (
           planned,
           planMargin,
           marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
-          planCostPerMount,
+          planTotalCost,
         },
       ];
     });
@@ -902,6 +904,50 @@ export const useBreeding = (
     if (saveError) console.error('[breeding] individu non supprimé:', saveError);
   }, []);
 
+  /**
+   * Enregistre le prix d'un carburant, et le reflète aussitôt localement.
+   *
+   * Les prix de carburants sont l'entrée la plus déterminante de tout le calcul
+   * d'élevage : ils fixent le coût du cycle, le coût d'un point de Mangeoire —
+   * donc le niveau des parents — et ils décident du **palier** retenu, donc du
+   * délai. Ils vivaient pourtant sur une autre page, si bien que l'écran où on
+   * les cherche n'en montrait aucun.
+   *
+   * L'état local part devant, comme pour les prix de couleurs : tout le
+   * classement se recalcule à chaque saisie, et l'attendre du réseau rendrait
+   * la frappe poussive.
+   */
+  const saveFuelPrice = useCallback(
+    async (itemId: number, itemName: string, price: number) => {
+      const updated_at = new Date().toISOString();
+      setItemPrices((current) => {
+        const next = new Map(current);
+        if (price > 0) {
+          next.set(itemId, {
+            ...(next.get(itemId) ?? { item_id: itemId, icon_url: null, updated_by: null }),
+            item_id: itemId,
+            item_name: itemName,
+            price,
+            updated_at,
+          } as ItemPrice);
+        } else {
+          // Un prix effacé n'est pas un prix nul : un carburant à zéro raflerait
+          // tous les arbitrages en paraissant offert. On le retire.
+          next.delete(itemId);
+        }
+        return next;
+      });
+
+      if (price <= 0) return;
+      try {
+        await saveItemPrice({ itemId, itemName, price });
+      } catch (saveError) {
+        console.error('[breeding] prix de carburant non enregistré:', saveError);
+      }
+    },
+    []
+  );
+
   /** Idem pour un carburant en réserve. */
   const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
     setItemStock((current) => {
@@ -944,6 +990,8 @@ export const useBreeding = (
     genetonValuation,
     supplies,
     fuelItems,
+    itemPrices,
+    saveFuelPrice,
     stable,
     stockBySex,
     mountStock,

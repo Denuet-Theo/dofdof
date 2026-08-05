@@ -64,7 +64,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
   }, [load]);
 
   const select = useCallback(
-    async (colorId: string, targetCount: number, objective: ObjectiveId = 'color') => {
+    async (colorId: string, targetCount: number, objective: ObjectiveId = 'profit') => {
       const supabase = createClient();
       // `upsert` plutôt qu'`insert` : reprendre une couleur déjà visée puis
       // abandonnée doit rouvrir la même ligne, pas buter sur la contrainte

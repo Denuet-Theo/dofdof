@@ -316,7 +316,7 @@ export type BreedingProject = {
    * la marge horaire ne peut pas désigner une route vers la génération 10, qui
    * perd toujours sur ce critère.
    */
-  objective: 'profit' | 'gen10_fast' | 'gen10_profit' | 'color';
+  objective: 'profit' | 'gen10_balanced' | 'gen10_profit';
   created_at: string;
   updated_at: string;
 };

@@ -57,12 +57,14 @@ type Props = {
 const countInput = (
   value: number,
   onChange: (next: number) => void,
-  max = 9999
+  max = 9999,
+  title?: string
 ) => (
   <input
     type="number"
     min={0}
     max={max}
+    title={title}
     value={String(value)}
     onChange={(event) => onChange(Math.max(0, Math.min(max, Number(event.target.value) || 0)))}
     className="w-20 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
@@ -300,12 +302,18 @@ const BreedingStocks = ({
                       ) : (
                         <span className="flex items-center gap-1.5 shrink-0">
                           <span className="text-[10px] text-dark-500">♂</span>
-                          {countInput(counts.males, (next) =>
-                            onSaveBulk(row.colorId, next, counts.females)
+                          {countInput(
+                            counts.males,
+                            (next) => onSaveBulk(row.colorId, next, counts.females),
+                            9999,
+                            `Mâles ${row.name} fertiles en écurie`
                           )}
                           <span className="text-[10px] text-dark-500">♀</span>
-                          {countInput(counts.females, (next) =>
-                            onSaveBulk(row.colorId, counts.males, next)
+                          {countInput(
+                            counts.females,
+                            (next) => onSaveBulk(row.colorId, counts.males, next),
+                            9999,
+                            `Femelles ${row.name} fertiles en écurie`
                           )}
                         </span>
                       )}

@@ -169,7 +169,10 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
           {draft.never_sell_mounts && (
             <p className="text-[10px] text-dark-600 -mt-2 ml-6">
               Le marché des certificats est peu liquide : un prix saisi ne garantit pas un
-              acheteur. Les prix restent utilisés pour <em>acheter</em> une couleur plutôt que
+              {/* `{' '}` explicite : JSX avale l'espace qui précède une fin de
+                  ligne, et le rendu collait « acheterune ». */}
+              acheteur. Les prix restent utilisés pour <em>acheter</em>{' '}
+              une couleur plutôt que
               l&apos;élever, mais plus pour la revendre.
             </p>
           )}

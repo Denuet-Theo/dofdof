@@ -129,6 +129,24 @@ export type BreedingRow = {
    * d'enclos, et diviser par zéro n'aurait pas de sens.
    */
   marginPerHour: number | null;
+  /**
+   * Ce qu'une monture coûte **dans le plan retenu**, et non dans l'estimation
+   * par exemplaire.
+   *
+   * Les deux diffèrent, parfois d'un facteur sept : `estimate.cost` chiffre un
+   * exemplaire isolé, en ignorant qu'une couleur servant à plusieurs recettes
+   * n'est produite qu'une fois de plus, et en appliquant un demi forfaitaire au
+   * clonage. Le plan, lui, compte les multiplicités, arrondit les fournées et
+   * sait combien d'exemplaires frais il faut réellement.
+   *
+   * C'est cette valeur-là qu'il faut afficher à côté du gain net, qui se compte
+   * déjà sur `plan.totalCost` : sans quoi les deux colonnes ne se réconcilient
+   * pas — 295 K de coût affiché en face de 2 M de perte annoncée.
+   *
+   * `null` pour une couleur qu'on n'élève pas : c'est alors son prix d'achat ou
+   * de capture qui fait foi, et `estimate.cost` le porte déjà.
+   */
+  planCostPerMount: number | null;
 };
 
 export type PlannedColor = {
@@ -565,6 +583,12 @@ export const useBreeding = (
         ? estimate.bestExitValue * planned.plan.targetProduced - planned.plan.totalCost
         : null;
       const hours = planned?.duration?.enclosHours ?? 0;
+      // Sur les montures réellement produites, pas sur l'objectif : remplir la
+      // dernière fournée en rend parfois quelques-unes de plus, à carburant
+      // constant, et les ignorer surfacturerait chacune.
+      const produced = planned?.plan.targetProduced ?? 0;
+      const planCostPerMount =
+        planned && produced > 0 ? planned.plan.totalCost / produced : null;
 
       return [
         {
@@ -577,6 +601,7 @@ export const useBreeding = (
           planned,
           planMargin,
           marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
+          planCostPerMount,
         },
       ];
     });

@@ -90,6 +90,8 @@ const ColorRow = ({
   // centaine : afficher l'un à côté du rendement horaire, qui dérive de
   // l'autre, donnerait deux chiffres de signes contraires sur la même ligne.
   const margin = row.planMargin ?? estimate.bestMargin;
+  /** Même base que la marge : le plan quand il existe, le prix sinon. */
+  const planCost = row.planCostPerMount ?? estimate.cost;
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -136,21 +138,27 @@ const ColorRow = ({
             hors cible peuvent dépasser la dépense — mais « coût : −190 495 » ne
             se lit pas. On retourne la phrase plutôt que le signe : ce n'est plus
             un coût, c'est une recette, et il faut le dire avec ce mot-là. */}
+        {/* Le coût du **plan** quand il y en a un, et non l'estimation par
+            exemplaire : le gain net se compte déjà sur `plan.totalCost`, donc
+            afficher l'autre base laissait deux chiffres irréconciliables côte à
+            côte — 295 K de coût en face de 2 M de perte. Pour une couleur qu'on
+            achète ou qu'on capture, il n'y a pas de plan et `estimate.cost` est
+            justement son prix. */}
         <div className="text-right shrink-0 w-32">
           <p
             className="text-[10px] text-dark-500"
-            title="Ce qu'une monture de cette couleur te coûte à te procurer, par la voie la moins chère — acheter, capturer ou élever. Les tentatives ratées sont comptées, les génétons et l'extraction déduits. Négatif quand ces recettes dépassent la dépense."
+            title="Ce qu'une monture de cette couleur te coûte réellement, sur la base du plan retenu — multiplicités, fournées et clonage compris. Pour une couleur qu'on achète ou capture, c'est son prix. Négatif quand les génétons et l'extraction dépassent la dépense."
           >
-            {(estimate.cost ?? 0) < 0 ? 'Rapporte / monture' : 'Coût / monture'}
+            {(planCost ?? 0) < 0 ? 'Rapporte / monture' : 'Coût / monture'}
           </p>
-          {estimate.cost === null ? (
+          {planCost === null ? (
             <p className="text-sm text-dark-600">—</p>
-          ) : estimate.cost < 0 ? (
+          ) : planCost < 0 ? (
             <p className="text-sm font-semibold text-profit">
-              +{Math.round(-estimate.cost).toLocaleString('fr-FR')}
+              +{Math.round(-planCost).toLocaleString('fr-FR')}
             </p>
           ) : (
-            <KamasDisplay amount={Math.round(estimate.cost)} size="sm" />
+            <KamasDisplay amount={Math.round(planCost)} size="sm" />
           )}
         </div>
 

@@ -24,6 +24,8 @@
  * suffit : quand on traite une couleur, ses parents ont déjà leur coût.
  */
 
+import { lineageValue } from './lineage';
+
 export type BreedingRecipe = [string, string];
 
 /** Un filet de capture, et combien de montures il rend. */
@@ -702,51 +704,40 @@ export const computeBreedingCosts = (
   /**
    * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
    *
-   * Le bébé raté tire sa couleur dans la généalogie proche. Le modèle applique
-   * **25 % chaque parent, 12,5 % chaque grand-parent** : un parent pèse 50 % à
-   * lui seul, moitié pour lui, moitié pour ses deux ascendants.
-   *
-   * La **portée** est confirmée : le jeu ne retient qu'un niveau d'ascendance
-   * par monture, même en génération 3, donc un croisement ne peut rendre que
-   * les parents et les grands-parents. Rien de plus profond n'existe, et il n'y
-   * a rien à ajouter à ce parcours.
-   *
-   * Les **poids** restent une hypothèse. Le seul relevé dont on dispose ne les
-   * contraint pas : il portait sur des parents de génération 1, si bien que les
-   * grands-parents, de génération 2, tombaient du côté de la **réussite** et non
-   * de l'échec. Sa masse d'échec ne contenait donc que les deux parents, à
-   * 55,9 % et 44,1 % — proche d'un partage égal, le parent sans ascendance
-   * l'emportant de peu.
-   *
-   * Ce qu'il faudrait pour trancher : un croisement dont les grands-parents sont
-   * d'une génération **inférieure** à la cible, donc du côté de l'échec. C'est le
-   * cas courant dans un plan propre, et c'est justement celui que le modèle
-   * décrit. Relevé à faire, suivi en issue #49.
+   * Les poids ne sont plus posés par symétrie : ils sont **mesurés**, sur sept
+   * relevés en jeu consignés dans l'issue #49. Voir `lineage.ts`, qui porte la
+   * table et ce qu'elle recouvre — un parent pèse 15/19 de sa lignée quand ses
+   * grands-parents sont d'une génération inférieure, là où le modèle précédent
+   * lui en donnait la moitié.
    *
    * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
    * payer économise exactement cela. Quand un parent est acheté ou capturé, il
    * n'a pas d'ascendants dans notre plan, et sa part de grands-parents revient
-   * sur lui.
+   * sur lui — ce que le relevé 2 confirme.
    *
-   * Limite de fond, que ce relevé met au jour : la répartition dépend de la
-   * généalogie de l'**individu**, pas de la couleur. Deux muldos Pourpre n'ont
-   * pas la même distribution selon d'où ils viennent — celui du relevé traînait
-   * une ascendance de génération supérieure à la sienne, faute d'être issu de sa
-   * propre recette. Ce calcul-ci raisonne sur des couleurs et approxime la
-   * lignée d'un parent par sa recette ; il ne pourra jamais coller exactement.
+   * Limite de fond, inchangée : la répartition dépend de la généalogie de
+   * l'**individu**, pas de la couleur. Deux muldos Amande ne se valent pas selon
+   * d'où ils viennent. Ce calcul-ci raisonne sur des couleurs et approxime la
+   * lignée d'un parent par sa recette ; il ne peut pas coller à l'individu. Le
+   * suivi individuel de l'écurie, lui, le peut — voir `lineageDistribution`.
    */
-  const lineageValue = (parentId: string): number => {
+  const lineageValueOf = (parentId: string): number => {
     const parent = estimates.get(parentId);
     if (!parent?.cost) return 0;
 
+    const slot = { colorId: parentId, cost: Math.max(parent.cost, 0) };
     const recipe = parent.strategy === 'breed' ? parent.breedRecipe : null;
-    if (!recipe) return 0.5 * parent.cost;
+    if (!recipe) return lineageValue(slot, null);
 
-    const grandparents = recipe.reduce(
-      (total, id) => total + Math.max(estimates.get(id)?.cost ?? 0, 0),
-      0
+    return lineageValue(
+      slot,
+      recipe.map((id) => ({
+        colorId: id,
+        // Borné à zéro comme ailleurs : une monture ne vaut pas moins que rien,
+        // et un coût négatif ferait baisser le crédit au lieu de le monter.
+        cost: Math.max(estimates.get(id)?.cost ?? 0, 0),
+      }))
     );
-    return 0.25 * parent.cost + 0.125 * grandparents;
   };
   const byGeneration = [...colors].sort((a, b) => a.generation - b.generation);
   /** Un prix nul ou négatif vaut « non renseigné » : la saisie part de 0. */
@@ -807,7 +798,7 @@ export const computeBreedingCosts = (
 
       // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
       // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
-      const failureValue = lineageValue(recipe[0]) + lineageValue(recipe[1]);
+      const failureValue = lineageValueOf(recipe[0]) + lineageValueOf(recipe[1]);
 
       const parents =
         parentLevel === 'auto'

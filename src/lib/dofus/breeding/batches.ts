@@ -123,6 +123,62 @@ const addExpectedBirths = (
   }
 };
 
+/**
+ * Applique `count` clonages sur les stériles d'une couleur.
+ *
+ * Un clonage n'est **pas une naissance**, et les confondre coûtait cher. L'écran
+ * du jeu est explicite : « la monture obtenue sera fertile et conservera la
+ * couleur, le genre, le nom et la généalogie de l'original ». Deux montures de
+ * même génération entrent, elles sont détruites, l'une des deux ressort — avec
+ * tout ce qui la distingue. Seules les jauges repartent à zéro, d'où le niveau 1.
+ *
+ * Le clone était traité comme un poulain sans ascendance et de sexe tiré à pile
+ * ou face. Deux erreurs, et la première est la plus grave depuis #59 : **un
+ * clone de porteur de raccourci porte encore le raccourci**. Le jeter revenait à
+ * perdre en projection la monture la plus utile de l'écurie.
+ *
+ * ## Pourquoi on n'appaire que des identiques
+ *
+ * C'est **l'une des deux au hasard** qui est clonée. Appairer deux montures de
+ * même couleur mais d'ascendances différentes rend donc une généalogie tirée à
+ * pile ou face, et une projection ne doit pas promettre le bon côté d'une pièce.
+ * On n'apparie donc que des stériles de même couleur, **même ascendance et même
+ * sexe** : le résultat est alors certain sur les quatre attributs que le jeu
+ * conserve. Les stériles qui ne trouvent pas leur pareil attendent.
+ *
+ * Ce n'est pas une restriction du jeu — il accepte n'importe quelles deux
+ * montures de même génération — c'est une restriction de ce qu'on ose annoncer.
+ */
+const applyClonings = (stable: Stable, colorId: string, count: number): number => {
+  if (count <= 0) return 0;
+
+  /** Les stériles de cette couleur, groupés par ce que le clone conserverait. */
+  const groups = new Map<string, Individual[]>();
+  for (const mount of stable.individuals) {
+    if (mount.colorId !== colorId || mount.fertile) continue;
+    const key = `${(mount.parents ?? []).join('+')}|${mount.sex}`;
+    const group = groups.get(key) ?? [];
+    group.push(mount);
+    groups.set(key, group);
+  }
+
+  let made = 0;
+  for (const group of groups.values()) {
+    while (made < count && group.length >= 2) {
+      // Deux entrent, une ressort. Celle qui ressort reprend sa fécondité et
+      // repart les jauges vides ; l'autre a été détruite.
+      const survivor = group.shift()!;
+      const consumed = group.shift()!;
+      survivor.fertile = true;
+      survivor.level = 1;
+      stable.individuals = stable.individuals.filter((mount) => mount !== consumed);
+      made += 1;
+    }
+  }
+
+  return made;
+};
+
 export type BatchOptions = {
   /** Places du parc : dix par enclos. */
   capacity: number;
@@ -224,8 +280,18 @@ export const nextBatches = (
       for (const [colorId, idle] of sterile) {
         const clones = Math.floor(idle / 2);
         if (clones <= 0) continue;
+
+        // Les stériles suivis individuellement se clonent en gardant tout ce
+        // que le jeu conserve — ascendance comprise. Ceux qui n'ont pas trouvé
+        // leur pareil, et le vrac qui n'a pas d'individu à ressusciter,
+        // retombent sur un simple effectif.
+        const revived = applyClonings(working, colorId, clones);
+        const remainder = clones - revived;
+        if (remainder > 0) {
+          addExpectedBirths(working, colorId, generationOf(colorId), remainder, 1, 100 + index);
+        }
+
         sterile.set(colorId, idle - clones * 2);
-        addExpectedBirths(working, colorId, generationOf(colorId), clones, 1, 100 + index);
         pendingClonings.push({ colorId, count: clones });
       }
     }

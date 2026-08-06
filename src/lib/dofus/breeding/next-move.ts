@@ -120,6 +120,19 @@ const expectedBirthValue = (outlook: PairOutlook, { valueOf }: MoveContext): num
  * exactement ce qui les sépare de la rentabilité, et c'est déjà ce que
  * `rankFor` fait sur les couleurs.
  */
+/**
+ * Ce qu'on retranche à un croisement dont les issues ne sont pas modélisées.
+ *
+ * Assez pour le renvoyer derrière tout croisement chiffrable, quel que soit
+ * l'objectif et son échelle — mais fini, pour qu'il reste visible et ordonné
+ * entre semblables. Cacher une stratégie valable parce qu'on ne sait pas la
+ * chiffrer est pire que de dire qu'on ne sait pas.
+ */
+const UNKNOWN_OUTCOME_PENALTY = -1e9;
+
+/** Ce qu'on retranche à un croisement qui dépense une réserve pour rien. */
+const RESERVE_PENALTY = -1e6;
+
 const scoreOf = (
   move: Omit<Move, 'score'>,
   objective: ObjectiveId,
@@ -127,7 +140,7 @@ const scoreOf = (
    * Les couleurs qui manquent pour composer l'étage au-dessus de la frontière,
    * et jusqu'où compte celui qui en produit une. Voir `frontierNeeds`.
    */
-  needs: { depths: Map<string, number>; reach: number }
+  needs: { depths: Map<string, number>; reserved: Set<string>; reach: number }
 ): number => {
   // Une cible sans couleur n'est pas une cible. La recombinaison des deux
   // lignées doit **nommer** une couleur de la génération visée, sinon le
@@ -139,13 +152,44 @@ const scoreOf = (
   // La garde vaut pour **tous** les objectifs, y compris la rentabilité. Elle
   // n'y était pas, et la fournée proposait d'accoupler Doré-Amande × Amande en
   // annonçant « GEN. 5 » — alors qu'aucune couleur de génération 5 ne se compose
-  // de ces deux-là. Le croisement consommait deux montures gen 3 et gen 4 pour
-  // ne jamais rendre ce qu'il affichait.
-  if (move.targetColors.length === 0) return -Infinity;
+  // de ces deux-là.
+  //
+  // Elle **écarte** au lieu de masquer. Un croisement sans couleur cible reste
+  // réalisable, et c'en est même un qu'on monte exprès : la **purification**
+  // consiste à croiser une couleur avec elle-même, donc sans génération à
+  // gagner. L'exclure revenait à conseiller la purification dans l'écurie — où
+  // la concentration de lignée s'affiche — tout en la rendant impossible à
+  // proposer dans la fournée. On la relègue donc en queue, avec ses issues
+  // annoncées inconnues, plutôt que de la faire disparaître.
+  //
+  // Ce qu'elle rend n'est pas modélisé : voir le régime « recopie » de
+  // `lineage.ts`, mesuré sur un unique relevé, et l'issue #68 qui le confirme.
+  const unknown = move.targetColors.length === 0 ? UNKNOWN_OUTCOME_PENALTY : 0;
+
+  /**
+   * Dépenser une réserve pour produire ce qu'on possède déjà.
+   *
+   * Une **réserve** est une couleur qu'on tient et qui sert à fabriquer ce qui
+   * manque pour franchir la frontière. La consommer est parfois nécessaire — et
+   * c'est le cas normal — mais la consommer pour rendre une couleur déjà en
+   * écurie est une perte sèche que rien ne signale.
+   *
+   * Relevé sur une écurie réelle : six Amande gen 3, seule ressource rare du
+   * parc, dépensées contre des gen 1 pour produire des Doré-Amande dont onze
+   * dormaient déjà. L'Amande ne vaut qu'avec du Roux, pour ouvrir `roux_amande`.
+   */
+  const spendsReserve =
+    (needs.reserved.has(move.male.colorId) || needs.reserved.has(move.female.colorId)) &&
+    !move.targetColors.some((color) => needs.depths.has(color.colorId));
+  const waste = spendsReserve ? RESERVE_PENALTY : 0;
 
   if (objective === 'profit') {
-    return move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
+    const rate =
+      move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
+    return rate + unknown + waste;
   }
+
+  if (unknown < 0) return unknown + waste;
 
   // Monter au-dessus du plafond de la famille n'existe pas, et `pairOutlook`
   // l'a déjà écarté. Reste que gagner une génération qu'on tient déjà ne fait
@@ -218,7 +262,7 @@ const scoreOf = (
       ? move.targetGeneration
       : Math.max(move.targetGeneration, needs.reach - 0.5 - depth * 0.5);
 
-  return reach + efficiency / (1 + efficiency);
+  return reach + efficiency / (1 + efficiency) + waste;
 };
 
 /**
@@ -236,7 +280,7 @@ const scoreOf = (
 export const frontierNeeds = (
   stable: Stable,
   context: MoveContext
-): { depths: Map<string, number>; reach: number } => {
+): { depths: Map<string, number>; reserved: Set<string>; reach: number } => {
   const held = new Set<string>();
   let frontier = 0;
 
@@ -310,7 +354,28 @@ export const frontierNeeds = (
     }
   }
 
-  return { depths, reach: frontier + 1 };
+  /**
+   * Les couleurs qu'on **tient** et qui servent à fabriquer ce qui manque.
+   *
+   * Ce sont les réserves : les dépenser ailleurs recule la montée sans qu'aucun
+   * compteur ne le signale. Relevé sur une écurie réelle — six Amande gen 3, la
+   * seule ressource rare du parc, et le glouton les consommait contre des gen 1
+   * pour produire des Doré-Amande dont onze dormaient déjà en écurie. L'Amande
+   * ne vaut qu'associée à du Roux, pour ouvrir `roux_amande` ; la dépenser avant
+   * d'avoir du Roux est une perte sèche que rien ne rattrape.
+   *
+   * On ne les interdit pas — il faut parfois consommer une réserve pour avancer,
+   * et c'est même le cas normal. On pénalise seulement de la dépenser pour
+   * produire une couleur **qu'on possède déjà**.
+   */
+  const reserved = new Set<string>();
+  for (const colorId of depths.keys()) {
+    for (const [a, b] of byId.get(colorId)?.recipes ?? []) {
+      for (const component of [a, b]) if (held.has(component)) reserved.add(component);
+    }
+  }
+
+  return { depths, reserved, reach: frontier + 1 };
 };
 
 /**

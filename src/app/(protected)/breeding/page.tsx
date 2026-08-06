@@ -17,7 +17,9 @@ import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import {
   OBJECTIVES,
+  combinedRate,
   fundingSplit,
+  minimumFunderPercent,
   rankFor,
   recommendedFor,
   type Candidate,
@@ -219,6 +221,40 @@ const BreedingPage = () => {
     );
     return target ? fundingSplit(target, candidates) : null;
   }, [objective, candidates, selectedColorId, recommended]);
+
+  /**
+   * La part imposée au financeur, quand on veut plus que l'équilibre.
+   *
+   * Rester à l'équilibre monte le plus vite possible sans perdre d'argent ;
+   * au-dessus, on avance moins vite mais on dégage une marge. C'est un
+   * arbitrage que seul l'éleveur peut faire, d'où un réglage plutôt qu'un
+   * arrondi imposé.
+   */
+  const [fundingBoost, setFundingBoost] = useState<number | null>(null);
+
+  const minFunderPercent = split ? minimumFunderPercent(split) : 0;
+  const funderPercent = Math.max(minFunderPercent, fundingBoost ?? 0);
+  /** Ce que le parc dégage à cette part, en kamas par heure d'enclos. */
+  const surplus = split ? combinedRate(split, funderPercent / 100) : 0;
+
+  /**
+   * La part de parc à financer, couleur par couleur, sous l'objectif
+   * d'équilibre.
+   *
+   * C'est le chiffre comparable d'une route à l'autre — une gen 10 à 15 % de
+   * financement vaut mieux qu'une à 40 % — et c'est celui sur lequel le
+   * classement trie. La marge isolée, elle, est négative par construction sur
+   * toutes : l'afficher laissait croire que l'objectif ne servait à rien.
+   */
+  const fundingShares = useMemo(() => {
+    if (objective !== 'gen10_balanced') return new Map<string, number>();
+    return new Map(
+      candidates.flatMap((candidate) => {
+        const share = fundingSplit(candidate, candidates)?.funderShare;
+        return share === undefined ? [] : [[candidate.colorId, share] as const];
+      })
+    );
+  }, [objective, candidates]);
 
   /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
   const shortfall =
@@ -460,24 +496,65 @@ const BreedingPage = () => {
                   menés de front, et la part du parc qui rend l'ensemble
                   neutre. C'est ça, ne pas alterner. */}
               {split && (
-                <p className="text-[11px] text-dark-300 flex flex-wrap items-baseline gap-x-1">
-                  <span className="text-dark-500">Pour tenir l&apos;équilibre :</span>
-                  <strong className="text-kamas">
-                    {Math.round(split.funderShare * 100)} %
-                  </strong>
-                  <span className="text-dark-500">du parc sur</span>
-                  <strong className="text-dark-100">{split.funder.row.name}</strong>
-                  <span className="text-dark-500">
-                    ({Math.round(split.funder.marginPerHour!).toLocaleString('fr-FR')} k/h),
-                  </span>
-                  <strong className="text-kamas">
-                    {Math.round(split.targetShare * 100)} %
-                  </strong>
-                  <span className="text-dark-500">
-                    sur {selectedColorId ? nameOf(selectedColorId) : recommended?.name}. Les
-                    deux tournent en même temps — c&apos;est ce qui évite d&apos;alterner.
-                  </span>
-                </p>
+                <div className="text-[11px] text-dark-300 space-y-1">
+                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <span className="text-dark-500">Consacrer</span>
+                    {/* Jamais en dessous du minimum : descendre sous l'équilibre
+                        ferait perdre de l'argent, ce que ce réglage est
+                        justement là pour éviter. Au-dessus, en revanche, c'est
+                        une marge de sécurité qu'on peut vouloir. */}
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={minFunderPercent}
+                        max={100}
+                        value={String(funderPercent)}
+                        onChange={(event) =>
+                          setFundingBoost(
+                            Math.max(
+                              minFunderPercent,
+                              Math.min(100, Number(event.target.value) || minFunderPercent)
+                            )
+                          )
+                        }
+                        title={`Minimum ${minFunderPercent} % — en dessous, le parc perd de l'argent. Au-dessus, tu montes moins vite mais tu dégages une marge.`}
+                        className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                          border-dark-600/50 text-kamas text-[11px] text-right font-semibold
+                          transition-all hover:border-dark-500 focus:border-kamas/50"
+                      />
+                      <span className="text-kamas font-semibold">%</span>
+                    </span>
+                    <span className="text-dark-500">du parc à</span>
+                    <strong className="text-dark-100">{split.funder.row.name}</strong>
+                    <span className="text-dark-500">
+                      ({Math.round(split.funderRate).toLocaleString('fr-FR')} k/h), les
+                    </span>
+                    <strong className="text-kamas">{100 - funderPercent} %</strong>
+                    <span className="text-dark-500">
+                      restants à{' '}
+                      {selectedColorId ? nameOf(selectedColorId) : recommended?.name}. Les deux
+                      tournent en même temps — c&apos;est ce qui évite d&apos;alterner.
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-dark-600">
+                    {surplus > 0.5 ? (
+                      <>
+                        Au-dessus du minimum de {minFunderPercent} % : le parc dégage{' '}
+                        <strong className="text-profit">
+                          +{Math.round(surplus).toLocaleString('fr-FR')} kamas / heure
+                        </strong>{' '}
+                        au lieu d&apos;être à zéro, et la montée avance d&apos;autant moins
+                        vite.
+                      </>
+                    ) : (
+                      <>
+                        À {minFunderPercent} %, le parc est exactement à l&apos;équilibre.
+                        Monte la part si tu préfères dégager une marge plutôt que d&apos;aller
+                        vite.
+                      </>
+                    )}
+                  </p>
+                </div>
               )}
 
               {objective === 'gen10_balanced' && !split && recommended && (
@@ -651,6 +728,7 @@ const BreedingPage = () => {
                     generationOf={generationOf}
                     stockBySex={stockBySex}
                     onSaveBulk={saveBulkStock}
+                    fundingShare={fundingShares.get(row.colorId) ?? null}
                     enclosCount={settings.enclos_count}
                     targetCount={targetCount}
                     waves={row.colorId === selectedColorId ? waves : null}

@@ -125,7 +125,7 @@ export const buildLoadout = (
   const needs = frontierNeeds(stable, context);
   // Assez de coups pour remplir n'importe quel parc : le classement décide de
   // l'ordre, l'allocation décide du nombre.
-  const ranked = availableMoves(stable, objective, context, 40);
+  const ranked = availableMoves(stable, objective, context, 40, true);
 
   /** Les montures encore libres, par ascendance et par sexe. */
   const pool = new Map<string, { mate: Mate; count: number }>();

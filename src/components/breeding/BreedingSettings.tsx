@@ -12,9 +12,6 @@ type Props = {
   onSave: (next: Settings) => Promise<boolean>;
 };
 
-/** Niveaux d'Éleveur qui débloquent un enclos supplémentaire. */
-const ENCLOS_UNLOCKS = [1, 40, 80, 120, 160, 200];
-
 /**
  * Les plafonds de carburant, qui sont aussi les paliers de transfert : tenir
  * une jauge au-dessus de 90 000 débite 4 pt/s, sous 40 000 seulement 1 pt/s.
@@ -26,9 +23,6 @@ const GAUGE_TIERS = [
   { cap: 90_000, label: 'Potion — jusqu’à 90 000', rate: 3 },
   { cap: 100_000, label: 'Élixir — sans plafond', rate: 4 },
 ];
-
-const enclosAllowedBy = (breederLevel: number) =>
-  ENCLOS_UNLOCKS.filter((level) => breederLevel >= level).length;
 
 const BreedingSettings = ({ settings, onSave }: Props) => {
   const [open, setOpen] = useState(false);
@@ -45,7 +39,6 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
     });
   };
 
-  const maxEnclos = enclosAllowedBy(draft.breeder_level);
 
   const field = (
     label: string,
@@ -79,14 +72,10 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
         <Settings2 size={16} className="text-kamas" />
         <span className="text-sm font-semibold text-dark-200">Mon élevage</span>
         <span className="text-xs text-dark-500 ml-2">
-          niveau {settings.breeder_level} · {settings.enclos_count} enclos ·{' '}
+          {settings.enclos_count} enclos ·{' '}
           {settings.kamas_per_hour > 0
             ? `${settings.kamas_per_hour.toLocaleString('fr-FR')} k/h`
             : 'temps non valorisé'}
-          {settings.never_sell_mounts && ' · sans revente'}
-          {/* Un réglage qui déplace tous les coûts mérite d'être lisible sans
-              déplier le panneau. */}
-          {!settings.credit_off_target && ' · ratés non crédités'}
         </span>
         <span className="ml-auto text-xs text-dark-500">{open ? 'Fermer' : 'Modifier'}</span>
       </button>
@@ -94,13 +83,9 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
       {open && (
         <div className="px-5 pb-5 space-y-4 border-t border-dark-700/40 pt-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {field('Niveau Éleveur', 'breeder_level', `débloque ${maxEnclos} enclos`, {
-              min: 1,
-              max: 200,
-            })}
             {field('Enclos possédés', 'enclos_count', '10 places, 2 jauges chacun', {
               min: 0,
-              max: maxEnclos,
+              max: 20,
             })}
             {field('Kamas par heure', 'kamas_per_hour', 'ce que vaut ton temps de jeu', {
               min: 0,
@@ -158,28 +143,6 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
           <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
             <input
               type="checkbox"
-              checked={draft.never_sell_mounts}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, never_sell_mounts: event.target.checked }))
-              }
-              className="accent-kamas cursor-pointer"
-            />
-            Ne jamais vendre les montures — ne valoriser que l&apos;extraction et les génétons
-          </label>
-          {draft.never_sell_mounts && (
-            <p className="text-[10px] text-dark-600 -mt-2 ml-6">
-              Le marché des certificats est peu liquide : un prix saisi ne garantit pas un
-              {/* `{' '}` explicite : JSX avale l'espace qui précède une fin de
-                  ligne, et le rendu collait « acheterune ». */}
-              acheteur. Les prix restent utilisés pour <em>acheter</em>{' '}
-              une couleur plutôt que
-              l&apos;élever, mais plus pour la revendre.
-            </p>
-          )}
-
-          <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
-            <input
-              type="checkbox"
               checked={!draft.count_net_cost}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, count_net_cost: !event.target.checked }))
@@ -196,39 +159,10 @@ const BreedingSettings = ({ settings, onSave }: Props) => {
             </p>
           )}
 
-          <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer w-fit">
-            <input
-              type="checkbox"
-              checked={!draft.credit_off_target}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, credit_off_target: !event.target.checked }))
-              }
-              className="accent-kamas cursor-pointer"
-            />
-            Ne pas créditer les bébés hors cible — chaque tentative se paie plein pot
-          </label>
-          {!draft.credit_off_target && (
-            <p className="text-[10px] text-dark-600 -mt-2 ml-6">
-              Un croisement raté rend bel et bien une monture, et elle vaut quelque chose. Mais
-              elle est tirée dans l&apos;ascendance, pas choisie : sur une route vers la
-              génération 10, on accumule des couleurs basses dont on ne fera rien. Sans le
-              crédit, les coûts montent et l&apos;optimiseur cesse de préférer les croisements
-              qui ratent souvent.
-            </p>
-          )}
-
-          {/* Le niveau peut avoir baissé sous le nombre d'enclos déjà saisi ;
-              le dire vaut mieux que de corriger en silence. */}
-          {draft.enclos_count > maxEnclos && (
-            <p className="text-[11px] text-amber-400/80">
-              Un éleveur niveau {draft.breeder_level} ne débloque que {maxEnclos} enclos.
-            </p>
-          )}
 
           <div className="flex items-center gap-3">
             <Button
               size="sm"
-              disabled={draft.enclos_count > maxEnclos}
               onClick={async () => {
                 if (await onSave(draft)) {
                   setSaved(true);

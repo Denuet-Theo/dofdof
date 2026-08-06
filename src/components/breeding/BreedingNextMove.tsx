@@ -1,126 +1,179 @@
 'use client';
 
-import { Compass, Dna } from 'lucide-react';
-import type { Move } from '@/lib/dofus/breeding/next-move';
+import { Compass, Dna, Flag } from 'lucide-react';
+import type { Loadout } from '@/lib/dofus/breeding/loadout';
 import type { CloneOption } from '@/lib/dofus/breeding/cloning';
-import type { Mate } from '@/lib/dofus/breeding/pairing';
 import { OBJECTIVES, type ObjectiveId } from '@/lib/dofus/breeding/objectives';
 
 /**
- * Ce qu'il faut lancer **maintenant**, compte tenu de ce qu'on tient.
+ * La fournée à charger, dans l'ordre où on s'en sert devant l'enclos.
  *
- * Remplace le panneau des raccourcis, qui n'en montrait qu'un cas particulier :
- * les croisements gagnant plus d'une génération. Or un raccourci qui ne mène
- * nulle part ne vaut pas un croisement ordinaire qui avance, et c'est entre eux
- * tous qu'il faut choisir. Voir `next-move.ts`.
+ * Trois blocs, et l'ordre n'est pas décoratif : **où j'en suis**, **ce que je
+ * lance**, **ce que je sors de l'écurie**. C'est la séquence dans laquelle la
+ * question se pose en jeu, et c'est celle qu'on a suivie en la faisant à la main
+ * avant de l'écrire.
  *
- * Le classement suit **l'objectif que l'éleveur a choisi** en haut de page, et
- * pas un critère propre : deux recommandations contradictoires sur le même écran
- * ne s'expliqueraient pas.
+ * Le classement suit l'objectif choisi juste au-dessus — pas un critère propre :
+ * deux recommandations contradictoires sur le même écran ne s'expliqueraient pas.
  *
- * La liste se recalcule à chaque saisie de naissance, et c'est tout l'intérêt —
- * une fournée chanceuse remonte un raccourci en tête, une malchanceuse le fait
+ * Tout se recalcule à chaque saisie de naissance, et c'est l'intérêt : une
+ * fournée chanceuse remonte un raccourci en tête, une malchanceuse le fait
  * disparaître. La route n'est plus un arbre qu'on déroule, c'est une décision
  * qu'on reprend.
  */
 
 type Props = {
-  moves: Move[];
-  /** Les stériles à appairer pour cloner, du plus rentable au moins. */
+  loadout: Loadout;
   clonings: CloneOption[];
   objective: ObjectiveId;
   nameOf: (colorId: string) => string;
 };
 
-const label = (mate: Mate, sex: '♂' | '♀', nameOf: (colorId: string) => string) =>
-  `${sex} ${nameOf(mate.colorId)}${mate.id ? ` · ${mate.id.slice(0, 6)}` : ''}`;
-
-const BreedingNextMove = ({ moves, clonings, objective, nameOf }: Props) => {
-  if (moves.length === 0 && clonings.length === 0) return null;
+const BreedingNextMove = ({ loadout, clonings, objective, nameOf }: Props) => {
+  if (loadout.lines.length === 0 && clonings.length === 0) return null;
 
   const hint = OBJECTIVES.find((option) => option.id === objective)?.label ?? '';
+  const climbing = objective !== 'profit';
 
   return (
-    <div className="glass rounded-2xl px-5 py-4 space-y-3">
+    <div className="glass rounded-2xl px-5 py-4 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Compass size={15} className="text-kamas" />
-        <span className="text-sm font-semibold text-dark-200">Le prochain coup</span>
-        <span className="text-xs text-dark-500">
-          ce que l&apos;écurie permet de lancer maintenant, classé pour « {hint} »
+        <span className="text-sm font-semibold text-dark-200">La fournée à charger</span>
+        <span className="text-xs text-dark-500">classée pour « {hint} »</span>
+        <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
+          {loadout.crossings} accouplements · {loadout.used}/{loadout.slots} places
         </span>
       </div>
 
-      <p className="text-[11px] text-dark-500">
-        Un plan se calcule avant la première naissance, et chaque accouplement est un tirage :
-        au troisième croisement il décrit déjà un parc qui n&apos;existe pas. Cette liste-là se
-        relit à chaque saisie de fournée — une naissance chanceuse remonte un raccourci en
-        tête, une malchanceuse le fait disparaître.
-      </p>
+      {/* Où j'en suis : la frontière, et ce qui la bloque. C'est la première
+          question qu'on se pose, et rien ne la répondait avant. */}
+      {climbing && loadout.frontier > 0 && (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+          <Flag size={13} className="text-kamas self-center" />
+          <span className="text-dark-300">
+            Frontière : <strong className="text-dark-100">génération {loadout.frontier}</strong>
+          </span>
+          {loadout.missing.length > 0 ? (
+            <span className="text-dark-500">
+              {' — il manque '}
+              <span className="text-amber-400/90">
+                {loadout.missing.slice(0, 4).map(nameOf).join(', ')}
+                {loadout.missing.length > 4 && ` +${loadout.missing.length - 4}`}
+              </span>
+              {` pour monter en génération ${loadout.frontier + 1}`}
+            </span>
+          ) : (
+            <span className="text-dark-500">
+              {` — tout est en main pour monter en génération ${loadout.frontier + 1}`}
+            </span>
+          )}
+        </div>
+      )}
 
+      {/* Ce que je lance. */}
       <div className="space-y-1">
-        {moves.map((move, index) => (
+        {loadout.lines.map((line, index) => (
           <div
-            key={`${move.male.id ?? move.male.colorId}-${move.female.id ?? move.female.colorId}`}
+            key={`${line.male.colorId}-${line.female.colorId}-${index}`}
             className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
               ${index === 0 ? 'bg-kamas/10' : 'bg-dark-800/40'}`}
           >
-            <span className="text-dark-600 w-4 shrink-0 tabular-nums">{index + 1}.</span>
-            <span className="text-dark-200">{label(move.male, '♂', nameOf)}</span>
-            <span className="text-dark-600">×</span>
-            <span className="text-dark-200">{label(move.female, '♀', nameOf)}</span>
+            <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0">
+              {line.count} ×
+            </span>
+            <span className="text-dark-200">
+              ♂ {nameOf(line.male.colorId)}
+              {line.male.id && <span className="text-dark-500"> · {line.male.id.slice(0, 6)}</span>}
+            </span>
+            <span className="text-dark-600">+</span>
+            <span className="text-dark-200">
+              ♀ {nameOf(line.female.colorId)}
+              {line.female.id && (
+                <span className="text-dark-500"> · {line.female.id.slice(0, 6)}</span>
+              )}
+            </span>
 
             <span
               className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-              title={`Ce couple vise la génération ${move.targetGeneration} : c'est la plus haute de toute sa généalogie, plus un.`}
+              title={`Ce couple vise la génération ${line.move.targetGeneration} : la plus haute de toute sa généalogie, plus un.`}
             >
-              GEN. {move.targetGeneration}
+              GEN. {line.move.targetGeneration}
             </span>
-            {move.gained > 1 && (
-              <span
-                className="text-[10px] text-profit"
-                title="Générations gagnées d'un coup sur la plus haute des deux montures accouplées."
-              >
-                +{move.gained} générations
-              </span>
-            )}
-            {move.leap > 0 && (
+            {line.move.leap > 0 && (
               <span
                 className="text-[10px] text-profit/80"
-                title={`Aucune recette ne porte ce croisement : elle annoncerait la génération ${move.targetGeneration - move.leap}.`}
+                title={`Aucune recette ne porte ce croisement : elle annoncerait la génération ${line.move.targetGeneration - line.move.leap}.`}
               >
                 hors recette
               </span>
             )}
-
             <span className="text-[10px] text-dark-500 tabular-nums">
-              {(move.successRate * 100).toFixed(1)} %
+              {(line.move.successRate * 100).toFixed(0)} %
             </span>
-            <span className="text-[10px] text-dark-500 tabular-nums">
-              {Math.round(move.cost).toLocaleString('fr-FR')} k
-            </span>
-            {move.targetColors.length > 0 && (
+            {line.move.targetColors.length > 0 && (
               <span className="text-[10px] text-dark-600 truncate">
-                → {nameOf(move.targetColors[0].colorId)}
-                {move.targetColors.length > 1 && ` (+${move.targetColors.length - 1})`}
-              </span>
-            )}
-            {move.available > 1 && (
-              <span
-                className="ml-auto text-[10px] text-dark-600"
-                title="Couples formables avec ces deux ascendances : les montures interchangeables sont repliées."
-              >
-                × {move.available}
+                → {nameOf(line.move.targetColors[0].colorId)}
               </span>
             )}
           </div>
         ))}
       </div>
 
-      <p className="text-[10px] text-dark-600">
-        Le coût compte les deux parents consommés et le carburant de leurs deux cycles, moitié
-        prix sur les parents quand le recyclage par clonage est activé. Une monture du vrac est
-        comptée au niveau 1, faute d&apos;en suivre le niveau.
-      </p>
+      {/* Ce que je sors de l'écurie : la seule chose qui se lise vraiment devant
+          le coffre. Les sexes ne sont pas interchangeables, d'où le détail. */}
+      {loadout.pull.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-dark-700/40">
+          <p className="text-[11px] text-dark-400">À sortir de l&apos;écurie</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {loadout.pull.map((pull) => (
+              <span key={pull.colorId} className="text-xs text-dark-300">
+                {nameOf(pull.colorId)}{' '}
+                <span className="text-dark-100 tabular-nums font-semibold">
+                  {pull.males > 0 && `${pull.males}♂`}
+                  {pull.males > 0 && pull.females > 0 && ' '}
+                  {pull.females > 0 && `${pull.females}♀`}
+                </span>
+                {pull.exhausts && (
+                  <span
+                    className="text-[10px] text-amber-400/70"
+                    title="La fournée vide cette couleur : il n'en restera aucune fertile."
+                  >
+                    {' '}
+                    vidée
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Les noms à recopier en jeu. C'est la seule chose qui distingue ensuite
+          deux montures de même couleur, et elle se perd si on ne la fait pas
+          tout de suite. */}
+      {loadout.names.length > 0 && (
+        <div className="space-y-1 pt-1 border-t border-dark-700/40">
+          <p className="text-[11px] text-dark-400">
+            Noms à donner en jeu aux poulains — sans eux, l&apos;ascendance se perd
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {loadout.names.map((entry) => (
+              <span
+                key={entry.name}
+                className="text-[11px] text-dark-200 bg-dark-800/60 px-2 py-1 rounded-lg"
+              >
+                <code>{entry.name}</code>
+                {entry.count > 1 && <span className="text-dark-500"> × {entry.count}</span>}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-dark-600">
+            Comptés en espérance, arrondis au supérieur : mieux vaut un nom de trop qu&apos;en
+            manquer un devant l&apos;enclos.
+          </p>
+        </div>
+      )}
 
       {clonings.length > 0 && (
         <div className="space-y-2 pt-2 border-t border-dark-700/40">
@@ -132,13 +185,6 @@ const BreedingNextMove = ({ moves, clonings, objective, nameOf }: Props) => {
             </span>
           </div>
 
-          <p className="text-[11px] text-dark-500">
-            Deux stériles de <strong>même génération affichée</strong>
-            {' entrent, l’une des deux ressort — avec sa couleur, son sexe, son nom et sa généalogie. Ce qui compte n’est pas qui va avec qui, mais qui reste '}
-            <strong>dépareillée</strong>
-            {' : une stérile sans partenaire ne vaut plus que son extraction.'}
-          </p>
-
           <div className="space-y-1">
             {clonings.map((option) => (
               <div
@@ -148,18 +194,11 @@ const BreedingNextMove = ({ moves, clonings, objective, nameOf }: Props) => {
               >
                 <span className="text-dark-200">
                   {option.keep.sex === 'M' ? '♂' : '♀'} {nameOf(option.keep.colorId)}
-                  {option.keep.id && (
-                    <span className="text-dark-500"> · {option.keep.id.slice(0, 6)}</span>
-                  )}
                 </span>
                 <span className="text-dark-600">+</span>
                 <span className="text-dark-400">
                   {option.partner.sex === 'M' ? '♂' : '♀'} {nameOf(option.partner.colorId)}
-                  {option.partner.id && (
-                    <span className="text-dark-600"> · {option.partner.id.slice(0, 6)}</span>
-                  )}
                 </span>
-
                 <span
                   className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
                   title={`Cette monture porte une génération ${option.keep.carried} dans son ascendance : c'est elle qui décide de ce que ses croisements viseront.`}
@@ -170,11 +209,6 @@ const BreedingNextMove = ({ moves, clonings, objective, nameOf }: Props) => {
                   className={`text-[10px] tabular-nums ${
                     option.keepChance === 1 ? 'text-profit' : 'text-dark-500'
                   }`}
-                  title={
-                    option.keepChance === 1
-                      ? 'Même ascendance des deux côtés : le tirage ne change rien, on la garde à coup sûr.'
-                      : 'Le jeu clone l’une des deux au hasard.'
-                  }
                 >
                   {(option.keepChance * 100).toFixed(0)} % de la garder
                 </span>
@@ -183,25 +217,24 @@ const BreedingNextMove = ({ moves, clonings, objective, nameOf }: Props) => {
                   title={
                     option.certainSex
                       ? 'Les deux sont du même sexe : celui du clone est certain.'
-                      : 'Sexes différents : celui du clone suit le tirage. Préfère une partenaire du même sexe si tu en as une.'
+                      : 'Sexes différents : celui du clone suit le tirage.'
                   }
                 >
-                  {option.certainSex ? `sexe certain ${option.sex === 'M' ? '♂' : '♀'}` : 'sexe au tirage'}
-                </span>
-                <span className="ml-auto text-[10px] text-dark-500 tabular-nums">
-                  {Math.round(option.expectedValue).toLocaleString('fr-FR')} k espérés
+                  {option.certainSex
+                    ? `sexe certain ${option.sex === 'M' ? '♂' : '♀'}`
+                    : 'sexe au tirage'}
                 </span>
               </div>
             ))}
           </div>
-
-          <p className="text-[10px] text-dark-600">
-            Une monture vaut ce qu&apos;il faudrait payer pour la remplacer dans son rôle : le
-            prix de la génération que son <strong>ascendance</strong> porte, pas celui de sa
-            couleur. Une gen 1 dont un parent est gen 9 vaut donc une gen 9.
-          </p>
         </div>
       )}
+
+      <p className="text-[10px] text-dark-600">
+        Un accouplement occupe deux places. Les taux supposent les niveaux enregistrés — une
+        monture du vrac est comptée au niveau 1, faute d&apos;en suivre le niveau, et monter
+        les parents est le levier le moins cher de la fournée.
+      </p>
     </div>
   );
 };

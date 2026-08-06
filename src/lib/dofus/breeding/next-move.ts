@@ -127,19 +127,25 @@ const scoreOf = (
    * Les couleurs qui manquent pour composer l'étage au-dessus de la frontière,
    * et jusqu'où compte celui qui en produit une. Voir `frontierNeeds`.
    */
-  needs: { colorIds: Set<string>; reach: number }
+  needs: { depths: Map<string, number>; reach: number }
 ): number => {
-  if (objective === 'profit') {
-    return move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
-  }
-
   // Une cible sans couleur n'est pas une cible. La recombinaison des deux
   // lignées doit **nommer** une couleur de la génération visée, sinon le
   // croisement ne peut rien produire à ce rang, quelle que soit sa probabilité
   // affichée — et la politique s'acharnait dessus. Trouvé en simulant :
   // `simulatePolicy` n'atteignait jamais la génération 10, parce que le
   // classement retenait des croisements que rien ne pouvait faire aboutir.
+  //
+  // La garde vaut pour **tous** les objectifs, y compris la rentabilité. Elle
+  // n'y était pas, et la fournée proposait d'accoupler Doré-Amande × Amande en
+  // annonçant « GEN. 5 » — alors qu'aucune couleur de génération 5 ne se compose
+  // de ces deux-là. Le croisement consommait deux montures gen 3 et gen 4 pour
+  // ne jamais rendre ce qu'il affichait.
   if (move.targetColors.length === 0) return -Infinity;
+
+  if (objective === 'profit') {
+    return move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
+  }
 
   // Monter au-dessus du plafond de la famille n'existe pas, et `pairOutlook`
   // l'a déjà écarté. Reste que gagner une génération qu'on tient déjà ne fait
@@ -190,13 +196,27 @@ const scoreOf = (
    * la voyait donc comme un croisement quelconque et ne la faisait jamais, alors
    * que c'est exactement ce qui débloque la montée.
    *
-   * On lui prête donc la portée de l'étage qu'elle ouvre, moins une demie : elle
-   * passe devant tout ce qui stagne, et derrière un croisement qui monte
-   * réellement — parce que monter vaut toujours mieux que préparer.
+   * On lui prête donc la portée de l'étage qu'elle ouvre, **amortie par sa
+   * distance** à la frontière : le prérequis immédiat vaut presque autant que
+   * monter, celui du prérequis nettement moins.
+   *
+   * L'amortissement n'est pas une précaution, il corrige une fournée réellement
+   * ratée. À crédit plat, le glouton consacrait ses cinquante places à fabriquer
+   * du Doré-Ébène — composant d'un composant, donc le moins cher du lot — et ne
+   * produisait pas un seul Roux, qui était pourtant le verrou. Le moins cher des
+   * prérequis est toujours le plus lointain ; sans décote, c'est toujours lui
+   * qui gagne.
    */
-  const reach = move.targetColors.some((color) => needs.colorIds.has(color.colorId))
-    ? Math.max(move.targetGeneration, needs.reach - 0.5)
-    : move.targetGeneration;
+  const depth = move.targetColors.reduce<number | null>((best, color) => {
+    const found = needs.depths.get(color.colorId);
+    if (found === undefined) return best;
+    return best === null ? found : Math.min(best, found);
+  }, null);
+
+  const reach =
+    depth === null
+      ? move.targetGeneration
+      : Math.max(move.targetGeneration, needs.reach - 0.5 - depth * 0.5);
 
   return reach + efficiency / (1 + efficiency);
 };
@@ -216,7 +236,7 @@ const scoreOf = (
 export const frontierNeeds = (
   stable: Stable,
   context: MoveContext
-): { colorIds: Set<string>; reach: number } => {
+): { depths: Map<string, number>; reach: number } => {
   const held = new Set<string>();
   let frontier = 0;
 
@@ -260,24 +280,37 @@ export const frontierNeeds = (
    *
    * On descend donc les recettes tant qu'une couleur voulue n'est pas en main.
    * La descente s'arrête d'elle-même : les recettes vont vers des générations
-   * strictement inférieures, et le catalogue est fini. Le garde-fou de
-   * profondeur ne protège que d'un arbre malformé.
+   * strictement inférieures, et le catalogue est fini.
+   *
+   * ## La profondeur compte, et elle a coûté une fournée entière
+   *
+   * Créditer tout le manque au même niveau ne suffit pas : le glouton prend
+   * alors le prérequis **le plus profond**, parce que c'est le moins cher.
+   * Reconstitué sur une écurie réelle, il consacrait ses cinquante places à
+   * fabriquer du Doré-Ébène — composant d'un composant — et ne produisait pas un
+   * seul Roux, qui était pourtant le vrai verrou.
+   *
+   * On retient donc **à quelle distance** de la frontière chaque couleur se
+   * trouve, et le crédit décroît d'autant. Le prérequis immédiat passe devant
+   * son propre prérequis, ce qui est l'ordre dans lequel on veut les fabriquer.
    */
-  const queue = [...colorIds];
+  const depths = new Map<string, number>([...colorIds].map((colorId) => [colorId, 0]));
+  const queue = [...colorIds].map((colorId) => ({ colorId, depth: 0 }));
   const byId = new Map(context.colors.map((color) => [color.id, color]));
-  for (let depth = 0; depth < 12 && queue.length > 0; depth += 1) {
-    const colorId = queue.shift()!;
-    if (held.has(colorId)) continue;
+
+  while (queue.length > 0) {
+    const { colorId, depth } = queue.shift()!;
+    if (held.has(colorId) || depth >= 12) continue;
     for (const [a, b] of byId.get(colorId)?.recipes ?? []) {
       for (const component of [a, b]) {
-        if (held.has(component) || colorIds.has(component)) continue;
-        colorIds.add(component);
-        queue.push(component);
+        if (held.has(component) || depths.has(component)) continue;
+        depths.set(component, depth + 1);
+        queue.push({ colorId: component, depth: depth + 1 });
       }
     }
   }
 
-  return { colorIds, reach: frontier + 1 };
+  return { depths, reach: frontier + 1 };
 };
 
 /**

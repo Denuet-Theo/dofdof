@@ -156,8 +156,17 @@ const ColorRow = ({
               {Math.round(estimate.parents.successRate * 100)} % de réussite
               {estimate.parents.useOptimakina && ' · Optimakina'}
               {row.planned && ` · ${row.planned.plan.crossings} accouplements`}
+              {/* Le délai s'étire de ce que la part financière détourne : à 60 %
+                  du parc sur une couleur rentable, il n'en reste que 40 % pour
+                  monter, donc deux fois et demie plus longtemps. Le montrer ici
+                  est tout l'intérêt du curseur — sans ça, augmenter la part
+                  paraissait gratuit. */}
               {row.planned?.duration &&
-                ` · ${formatHours(row.planned.duration.wallClockHours)}`}
+                ` · ${formatHours(
+                  fundingShare !== null && fundingShare < 1
+                    ? row.planned.duration.wallClockHours / (1 - fundingShare)
+                    : row.planned.duration.wallClockHours
+                )}`}
               {row.planned?.funding && !row.planned.funding.affordable && (
                 <span className="text-amber-400/80"> · hors budget</span>
               )}

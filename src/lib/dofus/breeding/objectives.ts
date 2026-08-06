@@ -36,8 +36,8 @@ export const OBJECTIVES: Objective[] = [
   {
     id: 'gen10_balanced',
     label: 'Gen 10 en restant à l’équilibre',
-    hint: 'La route vers la génération 10 dont les recettes couvrent le mieux les dépenses. À prendre pour monter sans avoir à alterner : sans elle, on enchaîne des sessions de rentabilité pour financer des sessions de montée, ce qui fait deux plans au lieu d’un.',
-    unit: 'kamas',
+    hint: 'Monter sans alterner : une part du parc sur une couleur rentable, le reste sur la génération 10, les deux menés de front. La route retenue est celle qui demande la plus petite part à se faire financer.',
+    unit: 'kamas/h',
   },
   {
     id: 'gen10_profit',
@@ -106,13 +106,20 @@ export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId):
     const reachable = breedable.filter((row) => row.generation === top);
 
     if (objective === 'gen10_balanced') {
-      // Au **solde**, et non au coût : ce qui compte ici n'est pas la mise de
-      // départ mais de quel montant la route s'auto-finance. Deux routes au
-      // même prix ne se valent pas si l'une rend deux fois plus en génétons,
-      // en extractions et en couleurs revendables.
+      // À la marge **horaire**, et c'est tout l'objet de cet objectif.
+      //
+      // On ne cherche pas la route la moins chère mais celle qui immobilise le
+      // moins de parc à se faire financer. Puisque les deux élevages tournent
+      // en parallèle — une part des enclos sur une couleur rentable, le reste
+      // sur la génération 10 — c'est le débit horaire qui décide de la
+      // répartition, pas le total. Voir `fundingSplit`.
       return reachable
-        .filter((row) => row.planMargin !== null)
-        .map((row) => ({ item: row, score: row.planMargin!, display: row.planMargin }))
+        .filter((row) => row.marginPerHour !== null || row.planMargin !== null)
+        .map((row) => ({
+          item: row,
+          score: row.marginPerHour ?? -Infinity,
+          display: row.marginPerHour,
+        }))
         .sort((a, b) => b.score - a.score);
     }
 
@@ -151,6 +158,55 @@ export const rankFor = <T extends Candidate>(rows: T[], objective: ObjectiveId):
 };
 
 /** La couleur que l'objectif recommande, ou `null` si aucune ne convient. */
+export type FundingSplit<T> = {
+  /** La couleur rentable qui finance, et la part du parc à lui consacrer. */
+  funder: T;
+  funderShare: number;
+  /** La part du parc qui reste pour la montée. */
+  targetShare: number;
+};
+
+/**
+ * Comment répartir le parc pour monter **sans alterner**.
+ *
+ * Une route vers la génération 10 perd des kamas à l'heure d'enclos. La réponse
+ * habituelle est d'alterner : des sessions rentables pour financer des sessions
+ * de montée. Mais ce sont deux plans, pas un, et rien n'oblige à les séquencer —
+ * les enclos se mènent **en parallèle**. Il suffit d'en consacrer une part à une
+ * couleur qui rapporte, et le reste à la montée.
+ *
+ * La part se déduit d'une égalité simple. En consacrant `f` du parc à une
+ * couleur qui rend `B` kamas par heure d'enclos, et `1 − f` à une cible qui en
+ * perd `A`, l'ensemble rapporte `f·B + (1 − f)·A` par heure. L'équilibre est
+ * atteint quand cette somme s'annule, soit `f = |A| / (B + |A|)`.
+ *
+ * `null` quand la cible est déjà rentable — il n'y a alors rien à financer — ou
+ * qu'aucune couleur ne dégage de marge horaire positive, auquel cas le parc ne
+ * peut pas se financer lui-même et il n'y a pas de répartition à proposer.
+ */
+export const fundingSplit = <T extends Candidate>(
+  target: T,
+  rows: T[]
+): FundingSplit<T> | null => {
+  const targetRate = target.marginPerHour;
+  if (targetRate === null || targetRate >= 0) return null;
+
+  // Le financeur ne peut pas être la cible elle-même, et il doit réellement
+  // dégager quelque chose : une couleur à marge nulle ne finance rien.
+  const funder = rows
+    .filter((row) => row.colorId !== target.colorId && (row.marginPerHour ?? 0) > 0)
+    .reduce<T | null>(
+      (best, row) => (best === null || row.marginPerHour! > best.marginPerHour! ? row : best),
+      null
+    );
+
+  if (!funder) return null;
+
+  const deficit = -targetRate;
+  const funderShare = deficit / (funder.marginPerHour! + deficit);
+  return { funder, funderShare, targetShare: 1 - funderShare };
+};
+
 export type Recommendation<T> = {
   item: T;
   /** `false` quand aucune route finançable n'existe et qu'on désigne quand même. */

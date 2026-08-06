@@ -8,6 +8,7 @@ import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import { availableMoves } from '@/lib/dofus/breeding/next-move';
+import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
@@ -75,7 +76,7 @@ const BreedingPage = () => {
     itemPrices,
     saveFuelPrice,
     stable,
-    stockBySex,
+    stockBySex,
     itemStock,
     ownedGaugePoints,
     loading,
@@ -334,6 +335,35 @@ const BreedingPage = () => {
     });
   }, [tree, rows, stable, objective, supplies, settings.recycle_steriles]);
 
+  /**
+   * Les clonages à faire, et ce qu'ils rendent.
+   *
+   * Une stérile ne vaut plus rien tant qu'on ne la clone pas : il ne lui reste
+   * que l'extraction. L'arbitrage porte donc sur **qui appairer avec qui**, et
+   * la valeur d'une monture s'y lit sur la génération que son ascendance porte
+   * — une gen 1 à parent gen 9 vaut une gen 9. Voir `cloning.ts`.
+   */
+  const clonings = useMemo(() => {
+    if (!tree) return [];
+
+    const byId = new Map(rows.map((row) => [row.colorId, row]));
+    /** La couleur la moins chère d'une génération : le prix de remplacement du rôle. */
+    const cheapest = new Map<number, number>();
+    for (const row of rows) {
+      const cost = row.estimate.cost;
+      if (cost === null || cost <= 0) continue;
+      const current = cheapest.get(row.generation);
+      if (current === undefined || cost < current) cheapest.set(row.generation, cost);
+    }
+
+    return cloneOptions(stable, {
+      generations: new Map(tree.colors.map((color) => [color.id, color.generation])),
+      costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
+      cheapestAt: (generation) => cheapest.get(generation) ?? 0,
+      sacrificeUnitValue: sacrificePrice,
+    });
+  }, [tree, rows, stable, sacrificePrice]);
+
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
   return (
@@ -392,7 +422,7 @@ const BreedingPage = () => {
           partie du plan qu'on s'apprêtait à charger. Le voir après aurait
           consommé les montures qui le portent. Le panneau disparaît de lui-même
           quand l'écurie ne permet aucun croisement. */}
-      <BreedingNextMove moves={moves} objective={objective} nameOf={nameOf} />
+      <BreedingNextMove moves={moves} clonings={clonings} objective={objective} nameOf={nameOf} />
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

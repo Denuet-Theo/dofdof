@@ -6,7 +6,8 @@ import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
-import BreedingShortcuts from '@/components/breeding/BreedingShortcuts';
+import BreedingNextMove from '@/components/breeding/BreedingNextMove';
+import { availableMoves } from '@/lib/dofus/breeding/next-move';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
@@ -74,8 +75,7 @@ const BreedingPage = () => {
     itemPrices,
     saveFuelPrice,
     stable,
-    stockBySex,
-    shortcuts,
+    stockBySex,
     itemStock,
     ownedGaugePoints,
     loading,
@@ -304,6 +304,36 @@ const BreedingPage = () => {
     generationOf,
   ]);
 
+  /**
+   * Les croisements lançables tout de suite, classés selon l'objectif courant.
+   *
+   * Se calcule sur l'écurie et non sur un plan : c'est le point de tout
+   * l'exercice. Voir `next-move.ts` — un arbre figé décrit un parc qui n'existe
+   * plus dès la troisième naissance, alors que cette liste se relit à chaque
+   * saisie.
+   */
+  const moves = useMemo(() => {
+    if (!tree) return [];
+
+    const byId = new Map(rows.map((row) => [row.colorId, row]));
+    const topGeneration = rows.reduce((top, row) => Math.max(top, row.generation), 0);
+
+    return availableMoves(stable, objective, {
+      colors: tree.colors,
+      generations: new Map(tree.colors.map((color) => [color.id, color.generation])),
+      costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
+      valueOf: (colorId) => byId.get(colorId)?.estimate.bestExitValue ?? 0,
+      fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
+      // La durée d'un cycle de fécondité suffit à départager : la montée en
+      // niveau se glisse en grande partie dans les emplacements libres du
+      // cycle, et ce qui dépasse ne dépend pas du couple qu'on compare.
+      batchHours: supplies?.cycleHours ?? 0,
+      slots: ENCLOS_SLOTS,
+      recycleSteriles: settings.recycle_steriles,
+      topGeneration,
+    });
+  }, [tree, rows, stable, objective, supplies, settings.recycle_steriles]);
+
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
   return (
@@ -357,12 +387,12 @@ const BreedingPage = () => {
         onSaveSettings={saveSettings}
       />
 
-      {/* Les raccourcis viennent avant les fournées, et ce n'est pas un détail
-          de mise en page : un couple qui saute une génération rend inutile une
+      {/* Le prochain coup vient avant les fournées, et ce n'est pas un détail de
+          mise en page : un croisement qui saute une génération rend inutile une
           partie du plan qu'on s'apprêtait à charger. Le voir après aurait
           consommé les montures qui le portent. Le panneau disparaît de lui-même
-          quand l'écurie n'en porte aucun. */}
-      <BreedingShortcuts shortcuts={shortcuts} nameOf={nameOf} />
+          quand l'écurie ne permet aucun croisement. */}
+      <BreedingNextMove moves={moves} objective={objective} nameOf={nameOf} />
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

@@ -48,7 +48,6 @@ import {
   type Sex,
   type Stable,
 } from '@/lib/dofus/breeding/stable';
-import { stableShortcuts, type Shortcut } from '@/lib/dofus/breeding/pairing';
 import { carriedGeneration, mountName } from '@/lib/dofus/breeding/naming';
 
 /**
@@ -325,19 +324,6 @@ export const useBreeding = (
       names: new Map((tree?.colors ?? []).map((color) => [color.id, color.name])),
     }),
     [tree]
-  );
-
-  /**
-   * Les raccourcis de génération que l'écurie porte en l'état.
-   *
-   * Ne dépend d'aucun prix ni d'aucun plan : c'est une lecture de la généalogie
-   * des montures en main, et elle vaut quel que soit l'objectif suivi. Voir
-   * `pairing.ts` — deux gen 2 à ascendance gen 3 visent la gen 4, et rien dans
-   * le graphe de recettes ne le dit.
-   */
-  const shortcuts = useMemo<Shortcut[]>(
-    () => (tree ? stableShortcuts(stable, tree.colors, colorIndex.generations) : []),
-    [tree, stable, colorIndex]
   );
 
   /**
@@ -1084,7 +1070,6 @@ export const useBreeding = (
     mountStock,
     itemStock,
     ownedGaugePoints,
-    shortcuts,
     saveBulkStock,
     addIndividual,
     updateIndividual,

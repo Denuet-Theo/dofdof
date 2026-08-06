@@ -130,9 +130,6 @@ const expectedBirthValue = (outlook: PairOutlook, { valueOf }: MoveContext): num
  */
 const UNKNOWN_OUTCOME_PENALTY = -1e9;
 
-/** Ce qu'on retranche à un croisement qui dépense une réserve pour rien. */
-const RESERVE_PENALTY = -1e6;
-
 const scoreOf = (
   move: Omit<Move, 'score'>,
   objective: ObjectiveId,
@@ -165,31 +162,13 @@ const scoreOf = (
   // Ce qu'elle rend n'est pas modélisé : voir le régime « recopie » de
   // `lineage.ts`, mesuré sur un unique relevé, et l'issue #68 qui le confirme.
   const unknown = move.targetColors.length === 0 ? UNKNOWN_OUTCOME_PENALTY : 0;
-
-  /**
-   * Dépenser une réserve pour produire ce qu'on possède déjà.
-   *
-   * Une **réserve** est une couleur qu'on tient et qui sert à fabriquer ce qui
-   * manque pour franchir la frontière. La consommer est parfois nécessaire — et
-   * c'est le cas normal — mais la consommer pour rendre une couleur déjà en
-   * écurie est une perte sèche que rien ne signale.
-   *
-   * Relevé sur une écurie réelle : six Amande gen 3, seule ressource rare du
-   * parc, dépensées contre des gen 1 pour produire des Doré-Amande dont onze
-   * dormaient déjà. L'Amande ne vaut qu'avec du Roux, pour ouvrir `roux_amande`.
-   */
-  const spendsReserve =
-    (needs.reserved.has(move.male.colorId) || needs.reserved.has(move.female.colorId)) &&
-    !move.targetColors.some((color) => needs.depths.has(color.colorId));
-  const waste = spendsReserve ? RESERVE_PENALTY : 0;
-
   if (objective === 'profit') {
     const rate =
       move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
-    return rate + unknown + waste;
+    return rate + unknown;
   }
 
-  if (unknown < 0) return unknown + waste;
+  if (unknown < 0) return unknown;
 
   // Monter au-dessus du plafond de la famille n'existe pas, et `pairOutlook`
   // l'a déjà écarté. Reste que gagner une génération qu'on tient déjà ne fait
@@ -262,7 +241,7 @@ const scoreOf = (
       ? move.targetGeneration
       : Math.max(move.targetGeneration, needs.reach - 0.5 - depth * 0.5);
 
-  return reach + efficiency / (1 + efficiency) + waste;
+  return reach + efficiency / (1 + efficiency);
 };
 
 /**
@@ -392,7 +371,21 @@ export const availableMoves = (
   stable: Stable,
   objective: ObjectiveId,
   context: MoveContext,
-  limit = 15
+  limit = 15,
+  /**
+   * Garder les croisements dont les issues ne sont pas modélisées — la
+   * purification, qui ne gagne aucune génération.
+   *
+   * Faux par défaut, et ce défaut compte : la **politique** ne doit pas les
+   * retenir. Mesuré durement — en les laissant entrer, la simulation tombait de
+   * 85 % de parties atteignant la gen 10 à 10 %. Elle ne voyait plus jamais
+   * « plus rien à faire », donc elle ne rachetait ni ne recyclait, et l'écurie
+   * s'asséchait sur des croisements qui n'avancent rien.
+   *
+   * Vrai pour l'**écran**, où les cacher reviendrait à conseiller la
+   * purification dans l'écurie sans jamais pouvoir la proposer.
+   */
+  includeUnknown = false
 ): Move[] => {
   // Ce qu'il manque pour franchir la frontière, calculé une fois pour toute
   // l'énumération : il ne dépend que de l'écurie, pas du couple examiné.
@@ -440,6 +433,7 @@ export const availableMoves = (
 
       const move: Move = { ...partial, score: scoreOf(partial, objective, needs) };
       if (move.score === -Infinity) continue;
+      if (!includeUnknown && move.targetColors.length === 0) continue;
 
       const key = [mateSignature(male.sample), mateSignature(female.sample)].sort().join('//');
       const current = best.get(key);

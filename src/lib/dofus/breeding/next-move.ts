@@ -120,7 +120,15 @@ const expectedBirthValue = (outlook: PairOutlook, { valueOf }: MoveContext): num
  * exactement ce qui les sépare de la rentabilité, et c'est déjà ce que
  * `rankFor` fait sur les couleurs.
  */
-const scoreOf = (move: Omit<Move, 'score'>, objective: ObjectiveId): number => {
+const scoreOf = (
+  move: Omit<Move, 'score'>,
+  objective: ObjectiveId,
+  /**
+   * Les couleurs qui manquent pour composer l'étage au-dessus de la frontière,
+   * et jusqu'où compte celui qui en produit une. Voir `frontierNeeds`.
+   */
+  needs: { colorIds: Set<string>; reach: number }
+): number => {
   if (objective === 'profit') {
     return move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
   }
@@ -171,7 +179,105 @@ const scoreOf = (move: Omit<Move, 'score'>, objective: ObjectiveId): number => {
    * valeur, ce qui la rend comparable d'un objectif à l'autre sans hypothèse sur
    * son ordre de grandeur.
    */
-  return move.targetGeneration + efficiency / (1 + efficiency);
+  /**
+   * Un croisement qui **fabrique le partenaire manquant** compte comme s'il
+   * montait, ou presque.
+   *
+   * C'est le seul ajout conceptuel de #79, et il vient d'une mesure : à la
+   * frontière, il manquait une couleur précise — Turquoise-Ivoire dans neuf
+   * parties sur vingt — pour composer l'étage suivant. Or produire cette
+   * couleur-là ne gagne aucune génération : on tient déjà son rang. Le glouton
+   * la voyait donc comme un croisement quelconque et ne la faisait jamais, alors
+   * que c'est exactement ce qui débloque la montée.
+   *
+   * On lui prête donc la portée de l'étage qu'elle ouvre, moins une demie : elle
+   * passe devant tout ce qui stagne, et derrière un croisement qui monte
+   * réellement — parce que monter vaut toujours mieux que préparer.
+   */
+  const reach = move.targetColors.some((color) => needs.colorIds.has(color.colorId))
+    ? Math.max(move.targetGeneration, needs.reach - 0.5)
+    : move.targetGeneration;
+
+  return reach + efficiency / (1 + efficiency);
+};
+
+/**
+ * Ce qu'il manque pour franchir la frontière, et jusqu'où ça porte.
+ *
+ * La **frontière** est la plus haute génération que l'écurie porte, ascendance
+ * comprise — et non la plus haute couleur possédée : une gen 1 dont un parent
+ * est gen 9 porte un 9, c'est tout l'objet de #59.
+ *
+ * Une couleur de l'étage suivant se compose de deux couleurs, sa recette. Quand
+ * l'écurie porte l'une et pas l'autre, l'autre est ce qu'il faut fabriquer — et
+ * c'est précisément ce qu'un classement sur la hauteur seule ne peut pas
+ * vouloir, puisque la produire ne monte pas.
+ */
+export const frontierNeeds = (
+  stable: Stable,
+  context: MoveContext
+): { colorIds: Set<string>; reach: number } => {
+  const held = new Set<string>();
+  let frontier = 0;
+
+  const consider = (colorId: string, parents: [string, string] | null) => {
+    held.add(colorId);
+    const own = context.generations.get(colorId) ?? 0;
+    const carried = parents
+      ? Math.max(
+          own,
+          context.generations.get(parents[0]) ?? 0,
+          context.generations.get(parents[1]) ?? 0
+        )
+      : own;
+    frontier = Math.max(frontier, carried);
+  };
+
+  for (const [colorId, counts] of stable.bulk) {
+    if (counts.males > 0 || counts.females > 0) consider(colorId, null);
+  }
+  for (const mount of stable.individuals) {
+    if (mount.fertile) consider(mount.colorId, mount.parents);
+  }
+
+  const colorIds = new Set<string>();
+  for (const color of context.colors) {
+    if (color.generation !== frontier + 1) continue;
+    for (const [a, b] of color.recipes) {
+      if (held.has(a) && !held.has(b)) colorIds.add(b);
+      else if (held.has(b) && !held.has(a)) colorIds.add(a);
+    }
+  }
+
+  /**
+   * Le besoin est **transitif**, et il fallait le mesurer pour s'en convaincre.
+   *
+   * Après avoir crédité la fabrication du partenaire manquant, la montée calait
+   * toujours au même endroit : il manquait un Turquoise-Ivoire dans onze parties
+   * sur vingt. Or Turquoise-Ivoire n'était pas fabricable non plus — il lui
+   * manquait *ses* composants. Créditer un seul niveau ne débloque rien quand la
+   * chaîne en compte deux.
+   *
+   * On descend donc les recettes tant qu'une couleur voulue n'est pas en main.
+   * La descente s'arrête d'elle-même : les recettes vont vers des générations
+   * strictement inférieures, et le catalogue est fini. Le garde-fou de
+   * profondeur ne protège que d'un arbre malformé.
+   */
+  const queue = [...colorIds];
+  const byId = new Map(context.colors.map((color) => [color.id, color]));
+  for (let depth = 0; depth < 12 && queue.length > 0; depth += 1) {
+    const colorId = queue.shift()!;
+    if (held.has(colorId)) continue;
+    for (const [a, b] of byId.get(colorId)?.recipes ?? []) {
+      for (const component of [a, b]) {
+        if (held.has(component) || colorIds.has(component)) continue;
+        colorIds.add(component);
+        queue.push(component);
+      }
+    }
+  }
+
+  return { colorIds, reach: frontier + 1 };
 };
 
 /**
@@ -190,6 +296,10 @@ export const availableMoves = (
   context: MoveContext,
   limit = 15
 ): Move[] => {
+  // Ce qu'il manque pour franchir la frontière, calculé une fois pour toute
+  // l'énumération : il ne dépend que de l'écurie, pas du couple examiné.
+  const needs = frontierNeeds(stable, context);
+
   const groups = [...mateGroups(stable).values()];
   const males = groups.filter((group) => group.sample.sex === 'M');
   const females = groups.filter((group) => group.sample.sex === 'F');
@@ -230,7 +340,7 @@ export const availableMoves = (
       };
       partial.expectedValue = expectedBirthValue(outlook, context);
 
-      const move: Move = { ...partial, score: scoreOf(partial, objective) };
+      const move: Move = { ...partial, score: scoreOf(partial, objective, needs) };
       if (move.score === -Infinity) continue;
 
       const key = [mateSignature(male.sample), mateSignature(female.sample)].sort().join('//');

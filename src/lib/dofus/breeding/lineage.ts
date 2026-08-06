@@ -50,12 +50,24 @@
  * part : la valeur d'une lignée étant une somme pondérée de coûts, compter deux
  * fois la même couleur avec ses deux poids revient exactement à la fusionner.
  *
- * ## Pourquoi « composée » et non « génération paire »
+ * ## « Composée » et « génération paire » ne font qu'un
  *
- * Les deux coïncident presque partout — les générations impaires sont simples,
- * les paires composées, dans les trois familles. Mais la génération 9 du muldo
- * fait exception, et c'est la **couleur** qui décide, pas son rang. On lit donc
- * la composition sur la couleur elle-même.
+ * On a longtemps cru le contraire : la génération 9 du muldo passait pour une
+ * exception, et c'est ce qui justifiait de lire la composition sur
+ * l'identifiant. **Il n'y a pas d'exception.** Sur les 306 couleurs des trois
+ * familles, lue sur le nom affiché, la parité est parfaite — générations
+ * impaires 0 % composées, paires 100 %.
+ *
+ * L'exception venait du slug. « Aigue-marine » est **une** couleur de deux
+ * mots, comme n'importe quel nom composé de mots ; son identifiant
+ * `aigue_marine` porte donc un souligné sans être une composition. Elle était
+ * seule dans ce cas sur tout le catalogue, et elle voyait son poids divisé par
+ * 4,5 à tort — sa part de lignée tombait à 15,63 % au lieu de 45,45 %, ce qui
+ * sous-estimait de 150 % le crédit d'un raté sur les routes qui la traversent.
+ *
+ * On continue de lire la composition sur l'identifiant, faute d'avoir la
+ * génération ou le nom sous la main ici, mais avec l'exception nommée : voir
+ * `SIMPLE_COLORS_WITH_UNDERSCORE`.
  *
  * ## Ce que ceci ne décrit pas
  *
@@ -84,14 +96,38 @@ export const GRANDPARENT_WEIGHT = 3;
 export const COMPOSITE_FACTOR = 2 / 9;
 
 /**
+ * Les couleurs **simples** dont l'identifiant porte quand même un souligné.
+ *
+ * Le souligné sépare deux teintes dans `dore_amande`, mais il sépare deux
+ * **mots d'un même nom** dans `aigue_marine` — « Aigue-marine », la couleur de
+ * génération 9 du muldo, qui n'est pas plus une composition d'« Aigue » et de
+ * « marine » que « Prune » n'en est une.
+ *
+ * La liste est courte et elle est exhaustive : sur les 306 couleurs des trois
+ * familles, c'est la **seule** dont la composition lue sur l'identifiant
+ * contredise celle lue sur le nom affiché. Le discriminant sur le nom est la
+ * casse — un composant commence par une majuscule (« Aigue-marine-Doré »), une
+ * continuation par une minuscule — et il donne la parité parfaite.
+ *
+ * Pour revérifier après une mise à jour des arbres : comparer, sur chaque
+ * couleur, `id.includes('_')` au fait que le nom porte plus d'un mot capitalisé.
+ * Toute nouvelle divergence est à ajouter ici.
+ */
+export const SIMPLE_COLORS_WITH_UNDERSCORE = new Set(['aigue_marine']);
+
+/**
  * Une couleur composée porte deux teintes — « doré_amande », affiché « Doré et
  * Amande ». Les couleurs simples n'en portent qu'une.
  *
- * Lu sur l'identifiant plutôt que sur la génération : la règle « impair =
- * simple » tient partout sauf en génération 9 du muldo, et c'est la couleur qui
- * décide.
+ * Lu sur l'identifiant, parce que c'est tout ce dont `lineageDistribution`
+ * dispose : elle reçoit des identifiants de couleurs, pas des générations ni des
+ * noms. L'exception nommée rattrape le seul cas où le slug ment.
+ *
+ * `aigue_marine_dore` reste composée, et sans traitement particulier : ce n'est
+ * pas `aigue_marine`, donc l'exception ne s'y applique pas.
  */
-export const isComposite = (colorId: string) => colorId.includes('_');
+export const isComposite = (colorId: string) =>
+  colorId.includes('_') && !SIMPLE_COLORS_WITH_UNDERSCORE.has(colorId);
 
 /** Le poids d'une case, position et composition combinées. */
 export const slotWeight = (position: number, colorId: string) =>

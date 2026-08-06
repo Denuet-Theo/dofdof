@@ -151,8 +151,18 @@ export const planWaves = (
 
   for (const step of plan.steps) {
     let remaining = step.attempts;
-    /** Parents ressortis stériles, en attente d'être clonés. */
-    const sterile = new Map<string, number>();
+    /**
+     * Parents ressortis stériles, **par sexe**, en attente d'être clonés.
+     *
+     * Le sexe était perdu ici, et c'est ce qui faisait manquer le levier : un
+     * clone conserve le genre de l'original, donc appairer deux stériles du même
+     * sexe donne un clone de ce sexe, à coup sûr. Voir plus bas.
+     */
+    const sterile = new Map<string, BulkStock>();
+    const addSterile = (colorId: string, males: number, females: number) => {
+      const current = sterile.get(colorId) ?? { males: 0, females: 0 };
+      sterile.set(colorId, { males: current.males + males, females: current.females + females });
+    };
 
     while (remaining > 0 && waves.length < MAX_WAVES) {
       const [first, second] = step.recipe;
@@ -173,7 +183,7 @@ export const planWaves = (
 
       if (sameColor) {
         consume(first, crossings, crossings);
-        sterile.set(first, (sterile.get(first) ?? 0) + 2 * crossings);
+        addSterile(first, crossings, crossings);
       } else {
         // On sert d'abord l'orientation la plus disponible, puis l'autre pour le
         // reste. Les deux puisant dans des sexes distincts, l'ordre ne change
@@ -186,8 +196,11 @@ export const planWaves = (
 
         consume(first, firstOrientation, secondOrientation);
         consume(second, secondOrientation, firstOrientation);
-        sterile.set(first, (sterile.get(first) ?? 0) + crossings);
-        sterile.set(second, (sterile.get(second) ?? 0) + crossings);
+        // Les stériles sortent sexés : ce sont exactement les montures qu'on
+        // vient de consommer, et c'est leur sexe qui décidera de celui des
+        // clones qu'on en tirera.
+        addSterile(first, firstOrientation, secondOrientation);
+        addSterile(second, secondOrientation, firstOrientation);
       }
 
       const used = crossings * 2;
@@ -201,13 +214,33 @@ export const planWaves = (
       const clonings: Wave['clonings'] = [];
       if (recycleSteriles && remaining - crossings > 0) {
         for (const parent of new Set(step.recipe)) {
-          const idle = sterile.get(parent) ?? 0;
-          const clones = Math.floor(idle / 2);
+          const idle = sterile.get(parent) ?? { males: 0, females: 0 };
+
+          // Le clone conserve le **genre** de l'original — l'écran du jeu le dit
+          // — et c'est l'une des deux appairées qui est clonée. Appairer deux
+          // stériles du même sexe rend donc un clone de ce sexe, à coup sûr.
+          //
+          // Le sexe ne se subit plus, il se choisit. C'est le remède direct au
+          // déséquilibre qui a motivé le suivi par sexe : huit mâles et deux
+          // femelles ne faisaient que deux couples, et les clones tirés à
+          // moitié-moitié ne corrigeaient rien. En n'appairant que des
+          // identiques, on reconstitue exactement le sexe qui manque.
+          const clonesM = Math.floor(idle.males / 2);
+          const clonesF = Math.floor(idle.females / 2);
+          const clones = clonesM + clonesF;
           if (clones <= 0) continue;
-          sterile.set(parent, idle - clones * 2);
-          // Le clone est au hasard l'une des deux montures appairées, donc son
-          // sexe ne se choisit pas plus que celui d'un bébé.
-          addUnsexed(parent, clones);
+
+          sterile.set(parent, {
+            males: idle.males - clonesM * 2,
+            females: idle.females - clonesF * 2,
+          });
+
+          const current = available.get(parent) ?? { males: 0, females: 0 };
+          available.set(parent, {
+            males: current.males + clonesM,
+            females: current.females + clonesF,
+          });
+
           clonings.push({ colorId: parent, count: clones });
         }
       }

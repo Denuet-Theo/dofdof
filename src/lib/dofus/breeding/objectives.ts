@@ -164,7 +164,29 @@ export type FundingSplit<T> = {
   funderShare: number;
   /** La part du parc qui reste pour la montée. */
   targetShare: number;
+  /** Ce que rend le financeur, et ce que perd la cible, par heure d'enclos. */
+  funderRate: number;
+  targetRate: number;
 };
+
+/**
+ * Ce que rapporte le parc, par heure d'enclos, à une répartition donnée.
+ *
+ * Nul à la part d'équilibre, positif au-dessus. C'est ce qui permet de dire à
+ * quoi sert d'arrondir une part vers le haut : la sécurité se chiffre.
+ */
+export const combinedRate = <T>(split: FundingSplit<T>, funderShare: number) =>
+  funderShare * split.funderRate + (1 - funderShare) * split.targetRate;
+
+/**
+ * La part d'équilibre arrondie **vers le haut**, en points de pourcentage.
+ *
+ * Arrondir au plus proche descendrait sous l'équilibre une fois sur deux : à
+ * 19,4 % de besoin réel, afficher 19 % laisse le parc en déficit. On ne montre
+ * donc jamais moins que ce qu'il faut.
+ */
+export const minimumFunderPercent = <T>(split: FundingSplit<T>) =>
+  Math.ceil(split.funderShare * 100);
 
 /**
  * Comment répartir le parc pour monter **sans alterner**.
@@ -204,7 +226,13 @@ export const fundingSplit = <T extends Candidate>(
 
   const deficit = -targetRate;
   const funderShare = deficit / (funder.marginPerHour! + deficit);
-  return { funder, funderShare, targetShare: 1 - funderShare };
+  return {
+    funder,
+    funderShare,
+    targetShare: 1 - funderShare,
+    funderRate: funder.marginPerHour!,
+    targetRate,
+  };
 };
 
 export type Recommendation<T> = {

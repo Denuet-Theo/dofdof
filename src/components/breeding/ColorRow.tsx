@@ -37,6 +37,12 @@ type Props = {
   generationOf: (colorId: string) => number;
   stockBySex: Map<string, BulkStock>;
   onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
+  /**
+   * Part du parc à consacrer à une couleur rentable pour que l'ensemble soit à
+   * l'équilibre. `null` hors de l'objectif d'équilibre, ou quand la route n'a
+   * rien à faire financer — la colonne reprend alors le gain net.
+   */
+  fundingShare: number | null;
   enclosCount: number;
   /** L'objectif, qui est un plancher : le plan peut en produire davantage. */
   targetCount: number;
@@ -55,6 +61,7 @@ const ColorRow = ({
   generationOf,
   stockBySex,
   onSaveBulk,
+  fundingShare,
   enclosCount,
   targetCount,
   waves,
@@ -209,6 +216,32 @@ const ColorRow = ({
           )}
         </div>
 
+        {/* Sous l'objectif d'équilibre, la marge isolée d'une route est
+            trompeuse : elle est négative **par construction**, et c'est
+            justement ce que la répartition du parc vient compenser. Le chiffre
+            comparable d'une gen 10 à l'autre est la part de parc qu'il faut lui
+            adosser — c'est aussi ce sur quoi le classement trie. */}
+        {fundingShare !== null ? (
+          <div className="text-right shrink-0 w-32">
+            <p
+              className="text-[10px] text-dark-500"
+              title="La part du parc à consacrer à une couleur rentable pour que l'ensemble soit à l'équilibre. Plus elle est basse, moins la montée coûte de temps d'enclos détourné — c'est ce qui départage deux routes vers la génération 10."
+            >
+              Part à financer
+            </p>
+            <p
+              className={`text-sm font-semibold ${
+                fundingShare <= 0.3
+                  ? 'text-profit'
+                  : fundingShare <= 0.6
+                    ? 'text-dark-100'
+                    : 'text-amber-400/90'
+              }`}
+            >
+              {Math.round(fundingShare * 100)} %
+            </p>
+          </div>
+        ) : (
         <div className="text-right shrink-0 w-32">
           <p
             className="text-[10px] text-dark-500"
@@ -228,6 +261,7 @@ const ColorRow = ({
             </p>
           )}
         </div>
+        )}
 
         {/* La marge horaire, qui est le vrai classement : une gen 10 rapporte
             plus qu'une gen 6 parce qu'elle demande plus de travail, pas parce

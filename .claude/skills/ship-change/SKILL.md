@@ -39,10 +39,50 @@ is on this side.
    beyond those is yours.
 4. **Verify in the browser** for anything a user sees. See the `browser-test`
    skill. Read the screenshot back; do not trust an exit code.
-5. **Commit**, one commit per idea. Split before pushing if two ideas crept into
+5. **Simulate, if you touched the breeding policy.** See below — this is not
+   optional and it is not covered by the two steps above.
+6. **Commit**, one commit per idea. Split before pushing if two ideas crept into
    one — `git reset --soft HEAD~1 && git reset` then stage in parts.
-6. **Push and open the PR.**
-7. **Stop touching that branch.**
+7. **Push and open the PR.**
+8. **Stop touching that branch.**
+
+## Simulate before merging a policy change
+
+`tsc` and `eslint` cannot see a wrong recommendation, and neither can a
+screenshot — the screen renders a ranked list perfectly whether the ranking is
+sound or nonsense. Only running the policy shows it.
+
+**If the diff touches `next-move.ts`, `pairing.ts`, `cloning.ts` or
+`loadout.ts`, run `simulatePolicy` before opening the PR** and put the number
+in the body. It costs about 200 ms for 20 runs.
+
+```
+npx tsc src/lib/dofus/breeding/simulate.ts src/lib/dofus/breeding/costs.ts \
+  --outDir "$SCRATCH/lib" --module commonjs --target es2020 \
+  --moduleResolution node --esModuleInterop --skipLibCheck
+```
+
+Then call `simulatePolicy` from a throwaway script: same seed, same crossing
+budget, before and after. The figure that matters is **the share of runs
+reaching generation 10**, and it must not drop.
+
+Every defect ever found in that policy was found by running it, never by
+rereading it:
+
+| Defect | Found by |
+| --- | --- |
+| Crossings that can never reach their target (#76) | simulation |
+| A greedy that never climbs (#78) | simulation |
+| The missing-partner blocker (#80) | simulation |
+| A finite penalty draining the stable (#83) | simulation |
+
+#83 is the cautionary one. #82 looked local — one penalty made finite so a badge
+could show — and it took the climb from **85% to 10%** of runs reaching
+generation 10. `tsc` was green, `eslint` was green, the browser rendered
+correctly, and it shipped. It was caught a day later, by accident, while
+measuring something else.
+
+A change to `scoreOf` is never local.
 
 ## Recovery, when commits are stranded on a merged PR's branch
 

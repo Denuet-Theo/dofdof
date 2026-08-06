@@ -110,6 +110,10 @@ const addExpectedBirths = (
       // pouvoir les enregistrer par mégarde.
       id: `projete-${seed}-${colorId}-${index}`,
       colorId,
+      // Une monture qui n'est pas née n'a évidemment pas de nom en jeu. Le
+      // laisser vide vaut « Anonyme » à l'affichage, ce qui est exact : c'est
+      // bien ce qu'elle portera tant qu'on ne l'aura pas renommée.
+      name: null,
       sex: index % 2 === 0 ? 'M' : 'F',
       level: 1,
       fertile: true,

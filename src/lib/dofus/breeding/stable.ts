@@ -87,6 +87,16 @@ export type BulkStock = {
 export type Individual = {
   id: string;
   colorId: string;
+  /**
+   * Le nom porté **dans le jeu**, 20 caractères au plus, ou `null` tant qu'il
+   * vaut le défaut « Anonyme ».
+   *
+   * C'est la seule chose qui se lise depuis la liste de l'écurie du jeu, donc
+   * le seul moyen de retrouver devant l'enclos la monture que l'outil désigne.
+   * Voir `naming.ts` : le nom porte la généalogie parce que c'est elle qui
+   * distingue deux montures de même couleur, et qu'elle est invisible autrement.
+   */
+  name: string | null;
   sex: Sex;
   /** Niveau courant, qui décide du taux de réussite de ses accouplements. */
   level: number;

@@ -49,6 +49,7 @@ import {
   type Stable,
 } from '@/lib/dofus/breeding/stable';
 import { stableShortcuts, type Shortcut } from '@/lib/dofus/breeding/pairing';
+import { carriedGeneration, mountName } from '@/lib/dofus/breeding/naming';
 
 /**
  * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
@@ -255,6 +256,7 @@ export const useBreeding = (
           individuals: ((individualRows.data ?? []) as UserBreedingIndividual[]).map((row) => ({
             id: row.id,
             colorId: row.color_id,
+            name: row.name ?? null,
             sex: row.sex,
             level: row.level,
             fertile: row.fertile,
@@ -316,6 +318,15 @@ export const useBreeding = (
     [stockBySex]
   );
 
+  /** Générations et noms d'affichage des couleurs, indexés une fois par famille. */
+  const colorIndex = useMemo(
+    () => ({
+      generations: new Map((tree?.colors ?? []).map((color) => [color.id, color.generation])),
+      names: new Map((tree?.colors ?? []).map((color) => [color.id, color.name])),
+    }),
+    [tree]
+  );
+
   /**
    * Les raccourcis de génération que l'écurie porte en l'état.
    *
@@ -324,11 +335,30 @@ export const useBreeding = (
    * `pairing.ts` — deux gen 2 à ascendance gen 3 visent la gen 4, et rien dans
    * le graphe de recettes ne le dit.
    */
-  const shortcuts = useMemo<Shortcut[]>(() => {
-    if (!tree) return [];
-    const generations = new Map(tree.colors.map((color) => [color.id, color.generation]));
-    return stableShortcuts(stable, tree.colors, generations);
-  }, [tree, stable]);
+  const shortcuts = useMemo<Shortcut[]>(
+    () => (tree ? stableShortcuts(stable, tree.colors, colorIndex.generations) : []),
+    [tree, stable, colorIndex]
+  );
+
+  /**
+   * Le nom à inscrire **dans le jeu** sur un poulain qui vient de naître.
+   *
+   * Se calcule sur la généalogie et non sur la couleur du bébé : ce qu'il faut
+   * lire depuis la liste de l'écurie, c'est la génération qu'il **porte** — la
+   * plus haute de son ascendance — parce que c'est elle qui décidera de ce que
+   * ses propres accouplements visent. Voir `naming.ts`.
+   */
+  const nameForBirth = useCallback(
+    (colorId: string, parents: [string, string]): string =>
+      mountName(
+        carriedGeneration(colorIndex.generations.get(colorId) ?? 1, [
+          colorIndex.generations.get(parents[0]) ?? 1,
+          colorIndex.generations.get(parents[1]) ?? 1,
+        ]),
+        [colorIndex.names.get(parents[0]) ?? parents[0], colorIndex.names.get(parents[1]) ?? parents[1]]
+      ),
+    [colorIndex]
+  );
 
   /** Prix nu d'un item, pour les co-produits qu'on ne fait que revendre. */
   const priceOf = useCallback(
@@ -728,6 +758,10 @@ export const useBreeding = (
         .insert({
           family,
           color_id: mount.colorId,
+          // Une monture ajoutée à la main est achetée ou capturée : elle n'a pas
+          // d'ascendance, donc rien à inscrire, donc « Anonyme » — qui est déjà
+          // son nom dans le jeu. En dicter un ferait renommer pour rien.
+          name: mount.parents ? nameForBirth(mount.colorId, mount.parents) : null,
           sex: mount.sex,
           level: mount.level ?? 1,
           parent_a_color: mount.parents?.[0] ?? null,
@@ -745,6 +779,7 @@ export const useBreeding = (
       const added: Individual = {
         id: row.id,
         colorId: row.color_id,
+        name: row.name ?? null,
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
@@ -757,12 +792,12 @@ export const useBreeding = (
       setStable((current) => ({ ...current, individuals: [...current.individuals, added] }));
       return added;
     },
-    [family]
+    [family, nameForBirth]
   );
 
   /** Corrige une monture suivie : niveau, sexe ou fertilité. */
   const updateIndividual = useCallback(
-    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile'>>) => {
+    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'name'>>) => {
       setStable((current) => ({
         ...current,
         individuals: current.individuals.map((mount) =>
@@ -820,6 +855,7 @@ export const useBreeding = (
       const individualsBorn: {
         family: FamilyId;
         color_id: string;
+        name: string;
         sex: Sex;
         parent_a_color: string;
         parent_b_color: string;
@@ -846,6 +882,11 @@ export const useBreeding = (
         individualsBorn.push({
           family,
           color_id: entry.colorId,
+          // Le nom qu'on vient de dicter à l'éleveur : on le retient pour
+          // pouvoir désigner cette monture-là au tour suivant. S'il ne le
+          // recopie pas en jeu, la fournée le lui redira — c'est le seul
+          // rattrapage possible, l'outil ne voit pas le jeu.
+          name: nameForBirth(entry.colorId, [entry.male.colorId, entry.female.colorId]),
           sex: entry.sex,
           // La généalogie du bébé, c'est-à-dire les couleurs de ses deux
           // parents : c'est elle qui décidera de ses propres ratés.
@@ -911,6 +952,7 @@ export const useBreeding = (
       const added = ((insertResult.data ?? []) as UserBreedingIndividual[]).map((row) => ({
         id: row.id,
         colorId: row.color_id,
+        name: row.name ?? null,
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
@@ -930,7 +972,7 @@ export const useBreeding = (
         ],
       }));
     },
-    [family, tree, stable, load]
+    [family, tree, stable, load, nameForBirth]
   );
 
   /** Retire une monture de l'écurie — vendue, sacrifiée, ou saisie par erreur. */

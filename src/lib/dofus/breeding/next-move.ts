@@ -139,13 +139,39 @@ const scoreOf = (move: Omit<Move, 'score'>, objective: ObjectiveId): number => {
   const progress = move.gained * move.successRate;
   if (progress <= 0) return -Infinity;
 
-  if (objective === 'gen10_profit') {
-    // Un coût nul est possible — carburant offert, parents déjà stériles à
-    // recycler. Il ne doit pas rendre le score infini et écraser le classement.
-    return move.cost > 0 ? progress / move.cost : progress * 1e6;
-  }
+  // Un coût nul est possible — carburant offert, parents déjà stériles à
+  // recycler. Il ne doit pas rendre le score infini et écraser le classement.
+  const efficiency =
+    objective === 'gen10_profit'
+      ? move.cost > 0
+        ? progress / move.cost
+        : progress * 1e6
+      : move.enclosHours > 0
+        ? progress / move.enclosHours
+        : 0;
 
-  return move.enclosHours > 0 ? progress / move.enclosHours : -Infinity;
+  /**
+   * La hauteur d'abord, l'efficacité pour départager.
+   *
+   * Sur un critère d'efficacité seul, le glouton ne monte jamais. `gained` vaut
+   * 1 pour deux gen 1 qui font une gen 2 comme pour une gen 9 qui fait une
+   * gen 10 — mais la première est cent fois moins chère, donc elle gagne, et la
+   * politique refaisait des gen 2 indéfiniment. Mesuré en simulant : zéro partie
+   * sur vingt n'atteignait la génération 10.
+   *
+   * Les générations ne se contournent pas : la seule façon d'arriver à dix est
+   * de passer par neuf. Ce qui compte est donc **jusqu'où** un croisement porte,
+   * et l'efficacité ne décide qu'entre croisements de même portée. Les
+   * croisements bas ne disparaissent pas pour autant — ils remontent en tête dès
+   * qu'il n'y a rien de plus haut à faire, c'est-à-dire exactement quand il faut
+   * fabriquer les parents de l'étage suivant.
+   *
+   * Le facteur d'échelle sépare les paliers sans jamais qu'un écart d'efficacité
+   * ne les franchisse : l'efficacité est ramenée dans `[0, 1[` par sa propre
+   * valeur, ce qui la rend comparable d'un objectif à l'autre sans hypothèse sur
+   * son ordre de grandeur.
+   */
+  return move.targetGeneration + efficiency / (1 + efficiency);
 };
 
 /**

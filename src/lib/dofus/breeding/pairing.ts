@@ -294,39 +294,89 @@ export type PairOutlook = {
  *    C'est un croisement qu'on ne monte pas volontairement, donc pas un
  *    raccourci.
  */
+/**
+ * Ce qu'un couple vise, **hors niveaux** : tout sauf le taux de réussite.
+ *
+ * La séparation n'est pas cosmétique, elle est ce qui rend l'énumération
+ * praticable. Un appariement se décrit par les deux **ascendances** ; les
+ * niveaux, eux, ne jouent que sur la probabilité, par une formule à deux
+ * additions. Or la partie coûteuse — deux distributions de lignée et leur
+ * produit croisé — ne dépend que des ascendances, et les mêmes reviennent sans
+ * cesse : une écurie de cent montures ne porte qu'une poignée d'ascendances
+ * distinctes.
+ *
+ * On mémoïse donc sur les signatures, et le taux se recalcule à chaque fois
+ * puisqu'il ne coûte rien.
+ */
+type PairShape = {
+  targetGeneration: number;
+  leap: number;
+  genetons: number;
+  targetColors: TargetColor[];
+};
+
+const shapeCache = new WeakMap<BreedingColor[], Map<string, PairShape | null>>();
+
+const pairShape = (
+  male: Mate,
+  female: Mate,
+  colors: BreedingColor[],
+  generations: Map<string, number>
+): PairShape | null => {
+  let byPair = shapeCache.get(colors);
+  if (!byPair) {
+    byPair = new Map();
+    shapeCache.set(colors, byPair);
+  }
+
+  const key = [mateSignature(male), mateSignature(female)].sort().join('//');
+  const cached = byPair.get(key);
+  if (cached !== undefined) return cached;
+
+  const targetGeneration = pairTargetGeneration(male, female, generations);
+  const byRecipe = recipeTargetGeneration(male, female, generations);
+
+  // Le plafond se lit sur la famille et non sur une constante : les trois
+  // plafonnent à 10 aujourd'hui, mais c'est une donnée du jeu, pas du calcul.
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+
+  if (targetGeneration === null || byRecipe === null || targetGeneration > top) {
+    byPair.set(key, null);
+    return null;
+  }
+
+  const shape: PairShape = {
+    targetGeneration,
+    leap: targetGeneration - byRecipe,
+    // L'ascendance décide de la **validité** du croisement, les parents de la
+    // quantité : quatre génétons sur deux parents gen 2, quelle que soit la
+    // génération visée. Voir `genetonsForCrossing`.
+    genetons: genetonsForCrossing(
+      targetGeneration,
+      [generations.get(male.colorId)!, generations.get(female.colorId)!],
+      targetGeneration - 1
+    ),
+    targetColors: pairTargetColors(male, female, colors, targetGeneration),
+  };
+
+  byPair.set(key, shape);
+  return shape;
+};
+
 export const pairOutlook = (
   male: Mate,
   female: Mate,
   colors: BreedingColor[],
   generations: Map<string, number>
 ): PairOutlook | null => {
-  const targetGeneration = pairTargetGeneration(male, female, generations);
-  const byRecipe = recipeTargetGeneration(male, female, generations);
-  if (targetGeneration === null || byRecipe === null) return null;
-
-  // Le plafond se lit sur la famille et non sur une constante : les trois
-  // plafonnent à 10 aujourd'hui, mais c'est une donnée du jeu, pas du calcul.
-  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
-  if (targetGeneration > top) return null;
-
-  const maleGeneration = generations.get(male.colorId)!;
-  const femaleGeneration = generations.get(female.colorId)!;
+  const shape = pairShape(male, female, colors, generations);
+  if (!shape) return null;
 
   return {
+    ...shape,
     male,
     female,
-    targetGeneration,
-    leap: targetGeneration - byRecipe,
     successRate: targetGenerationRate(male.level, female.level),
-    // L'ascendance décide de la **validité** du croisement, les parents de la
-    // quantité : quatre génétons sur deux parents gen 2, quelle que soit la
-    // génération visée. Voir `genetonsForCrossing`.
-    genetons: genetonsForCrossing(
-      targetGeneration,
-      [maleGeneration, femaleGeneration],
-      targetGeneration - 1
-    ),
-    targetColors: pairTargetColors(male, female, colors, targetGeneration),
   };
 };
 

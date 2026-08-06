@@ -11,6 +11,7 @@ import {
   type Sex,
 } from '@/lib/dofus/breeding/stable';
 import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage';
+import { ANONYMOUS_NAME, carriedGeneration, mountName } from '@/lib/dofus/breeding/naming';
 import type { DofusDBItem } from '@/lib/supabase/types';
 import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
@@ -51,7 +52,7 @@ type Props = {
   }) => Promise<Individual | null>;
   onUpdateIndividual: (
     id: string,
-    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile'>>
+    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'name'>>
   ) => Promise<void>;
   onRemoveIndividual: (id: string) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
@@ -133,6 +134,29 @@ const BreedingStocks = ({
    */
   const purityOf = (mount: Individual): number | null =>
     mount.parents ? lineagePurity(lineageDistribution(mount.colorId, mount.parents)) : null;
+
+  /** Générations des couleurs, pour dire quelle génération une monture porte. */
+  const generationOfColor = useMemo(() => {
+    const byId = new Map(rows.map((row) => [row.colorId, row.generation]));
+    return (colorId: string) => byId.get(colorId) ?? 1;
+  }, [rows]);
+
+  /**
+   * Le nom que cette monture devrait porter en jeu, d'après sa généalogie.
+   *
+   * Les montures saisies avant que l'outil dicte les noms n'en ont aucun ; c'est
+   * ce calcul qui permet de les rattraper une par une, au rythme où on y passe.
+   */
+  const nameForIndividual = (mount: Individual): string | null =>
+    mount.parents
+      ? mountName(
+          carriedGeneration(generationOfColor(mount.colorId), [
+            generationOfColor(mount.parents[0]),
+            generationOfColor(mount.parents[1]),
+          ]),
+          [nameOf(mount.parents[0]), nameOf(mount.parents[1])]
+        )
+      : null;
 
   /** Les individus d'une couleur, les fertiles devant puis par niveau. */
   const individualsOf = useMemo(() => {
@@ -399,6 +423,46 @@ const BreedingStocks = ({
                               />
                               fertile
                             </label>
+                            {/* Le nom porté en jeu, et le nom attendu quand ils
+                                divergent. C'est la seule chose qui permette de
+                                retrouver cette monture-là dans une écurie où
+                                tout s'appelle « Anonyme » — donc un écart se
+                                signale, et se corrige d'un clic. */}
+                            {(() => {
+                              const carried = mount.parents
+                                ? nameForIndividual(mount)
+                                : null;
+                              const current = mount.name ?? ANONYMOUS_NAME;
+                              return (
+                                <>
+                                  <code
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60
+                                      shrink-0 ${
+                                        current === ANONYMOUS_NAME
+                                          ? 'text-dark-500'
+                                          : 'text-kamas'
+                                      }`}
+                                    title="Le nom que porte cette monture dans le jeu."
+                                  >
+                                    {current}
+                                  </code>
+                                  {carried && carried !== current && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onUpdateIndividual(mount.id, { name: carried })
+                                      }
+                                      title={`Renomme-la « ${carried} » dans le jeu, puis clique ici pour le noter.`}
+                                      className="text-[10px] text-amber-400/80 hover:text-amber-300
+                                        transition-colors cursor-pointer shrink-0"
+                                    >
+                                      → {carried}
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+
                             {mount.parents && (
                               <>
                                 <span

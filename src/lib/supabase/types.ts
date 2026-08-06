@@ -358,6 +358,11 @@ export type UserBreedingIndividual = {
   user_id: string;
   family: 'dragodinde' | 'muldo' | 'volkorne';
   color_id: string;
+  /**
+   * Le nom porté dans le jeu (migration 20260806190000), 20 caractères au plus.
+   * `null` vaut « Anonyme », le défaut du jeu. Voir `naming.ts`.
+   */
+  name: string | null;
   sex: 'M' | 'F';
   level: number;
   fertile: boolean;
@@ -449,6 +454,7 @@ export interface Database {
           user_id?: string;
           family: UserBreedingIndividual['family'];
           color_id: string;
+          name?: string | null;
           sex: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;
@@ -461,6 +467,7 @@ export interface Database {
         };
         Update: {
           color_id?: string;
+          name?: string | null;
           sex?: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;

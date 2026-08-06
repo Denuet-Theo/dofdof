@@ -43,13 +43,26 @@ import type { Individual, Sex, Stable } from './stable';
  *
  * | Question | Attendu | Affiché | Verdict |
  * | --- | --- | --- | --- |
- * | Le taux suit-il la même formule sur un saut de deux générations ? | 0,3 + 0,0015 × (61+61) = 48,3 % | 48,3 % | oui |
+ * | Le taux suit-il la même formule sur un saut de générations ? | 0,3 + 0,0015 × (61+61) = 48,3 % | 48,3 % | oui |
  * | Les génétons suivent-ils les parents ou l'ascendance ? | parents gen 2 → 2 + 2 = 4 | 4 | les parents |
  *
- * Reste ouvert : le raccourci vaut-il pour n'importe quel écart, ou seulement
- * +2 ? Le calcul ci-dessous suppose la règle générale — `max + 1` — parce que
- * c'est la formulation dont le cas observé est un cas particulier, et parce
- * qu'une règle plafonnée à +2 demanderait une constante que rien ne mesure.
+ * Restait à savoir si le raccourci valait pour n'importe quel écart ou seulement
+ * pour +2. **Il n'est pas plafonné** : un gen 1 dont un parent est gen 9,
+ * apparié à un gen 1 anonyme, vise la **gen 10** — huit générations d'un coup —
+ * et à niveau 67 de chaque côté le taux annoncé est 50 %, soit
+ * `0,3 + 0,0015 × (67 + 67) = 50,1 %`. Rien ne s'atténue avec l'écart, ni la
+ * règle ni la probabilité.
+ *
+ * Ce second cas est **lu en ligne et non reproduit en jeu**, à la différence du
+ * premier. Il ne fonde donc rien à lui seul — mais il tombe exactement sur la
+ * formule générale, ce qui est difficile à mettre sur le compte du hasard, et
+ * c'est cette formule que le calcul ci-dessous applique.
+ *
+ * Il dit aussi quelque chose de plus fort que le premier relevé : la monture qui
+ * porte le raccourci peut être de **génération 1**. Une gen 1 ne s'élève pas,
+ * elle se capture — sauf celle-là, qui n'a pu naître que d'un croisement gen 9
+ * manqué. Le graphe de recettes la range parmi les feuilles sauvages ; c'est la
+ * monture la plus précieuse de l'écurie.
  *
  * ## Ce que ce module ne fait pas
  *
@@ -240,8 +253,18 @@ export type PairOutlook = {
 /**
  * Ce que vise un couple, tout compris.
  *
- * `null` quand une couleur de l'ascendance manque au catalogue : mieux vaut ne
- * rien annoncer qu'une cible bâtie sur une généalogie à moitié lue.
+ * `null` dans deux cas, et pour la même raison de fond — ne rien annoncer plutôt
+ * qu'annoncer faux :
+ *
+ * 1. **Une couleur de l'ascendance manque au catalogue.** La cible serait bâtie
+ *    sur une généalogie à moitié lue.
+ * 2. **La cible dépasse la génération la plus haute de la famille.** Deux
+ *    montures dont l'ascendance porte déjà une gen 10 ne visent pas une gen 11 :
+ *    elle n'existe pas. Il n'y a alors plus aucune génération à gagner, et le
+ *    jeu bascule dans le régime que `lineage.ts` appelle la **recopie** — la
+ *    masse se répartit sur les cases survivantes, toutes lignées confondues.
+ *    C'est un croisement qu'on ne monte pas volontairement, donc pas un
+ *    raccourci.
  */
 export const pairOutlook = (
   male: Mate,
@@ -252,6 +275,11 @@ export const pairOutlook = (
   const targetGeneration = pairTargetGeneration(male, female, generations);
   const byRecipe = recipeTargetGeneration(male, female, generations);
   if (targetGeneration === null || byRecipe === null) return null;
+
+  // Le plafond se lit sur la famille et non sur une constante : les trois
+  // plafonnent à 10 aujourd'hui, mais c'est une donnée du jeu, pas du calcul.
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+  if (targetGeneration > top) return null;
 
   const maleGeneration = generations.get(male.colorId)!;
   const femaleGeneration = generations.get(female.colorId)!;

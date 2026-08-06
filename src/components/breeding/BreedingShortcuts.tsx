@@ -40,8 +40,10 @@ const BreedingShortcuts = ({ shortcuts, nameOf }: Props) => {
       </div>
 
       <p className="text-[11px] text-dark-500">
-        Un croisement vise <strong>la génération la plus haute de toute la généalogie, plus
-        un</strong> — et non celle de ses deux parents. Une monture basse née d&apos;un
+        Un croisement vise{' '}
+        <strong>la génération la plus haute de toute la généalogie, plus un</strong>
+        {' — et non celle de ses deux parents. '}
+        Une monture basse née d&apos;un
         croisement haut traîne donc son ascendance avec elle. Ces couples-là ne sont dans
         aucune recette : les plans chiffrés ailleurs sur cette page ne les proposeront jamais.
       </p>

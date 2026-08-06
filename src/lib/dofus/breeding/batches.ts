@@ -2,7 +2,7 @@ import type { BreedingPlan } from './costs';
 import {
   formCouples,
   splitBySex,
-  INDIVIDUAL_TRACKING_FROM,
+  tracksIndividually,
   type Couple,
   type Individual,
   type Stable,
@@ -95,7 +95,9 @@ const addExpectedBirths = (
   const born = Math.floor(crossings * successRate);
   if (born <= 0) return;
 
-  if (generation < INDIVIDUAL_TRACKING_FROM) {
+  // Sans ascendance à projeter, le seuil retombe sur la seule génération — mais
+  // il se lit au même endroit que partout ailleurs.
+  if (!tracksIndividually(generation)) {
     const bulk = stable.bulk.get(colorId) ?? { males: 0, females: 0 };
     const { males, females } = splitBySex(born);
     stable.bulk.set(colorId, { males: bulk.males + males, females: bulk.females + females });

@@ -27,6 +27,11 @@
  * Le seuil est à 3 et non ailleurs parce que c'est la première génération dont
  * les grands-parents peuvent tomber du côté de l'échec : une gen 2 a des parents
  * gen 1, qui ne peuvent être que des feuilles.
+ *
+ * Mais il se lit sur l'**ascendance** et non sur la couleur — voir
+ * `tracksIndividually`. Une gen 2 achetée est du vrac ; une gen 2 née d'un
+ * croisement gen 3 n'en est pas, parce qu'elle traîne une gen 3 qui relève la
+ * cible de ses propres accouplements.
  */
 
 /** Le sexe d'une monture. Un accouplement en demande un de chaque. */
@@ -39,6 +44,31 @@ export type Sex = 'M' | 'F';
  * plusieurs centaines de lignes à saisir à la main.
  */
 export const INDIVIDUAL_TRACKING_FROM = 3;
+
+/**
+ * Si une monture doit être suivie une par une, ascendance comprise.
+ *
+ * Le seuil ne peut pas se lire sur la seule couleur, et c'est le relevé de
+ * l'issue #59 qui l'a montré : deux **gen 2** portant une *Amande* gen 3 en
+ * ascendance visent la **gen 4**. Ces gen 2-là ne sont pas interchangeables avec
+ * les autres — elles valent bien plus — et le compteur de vrac perdait
+ * exactement ce qui les distingue, c'est-à-dire le raccourci lui-même.
+ *
+ * D'où un critère sur toute la généalogie plutôt que sur la génération propre.
+ * Le compromis d'origine tient : une gen 1 ou 2 **achetée ou capturée** n'a pas
+ * d'ascendance et reste dans le vrac, donc la saisie à cent montures reste une
+ * saisie à deux chiffres. Seules montent en individus celles qui sont **nées**
+ * d'un croisement assez haut — et elles se comptent sur les doigts.
+ *
+ * Ce sont précisément les bébés hors cible d'un croisement de haute génération :
+ * ceux que `creditOffTarget` décrivait comme « des couleurs de génération 2 dont
+ * on ne fera rien ».
+ */
+export const tracksIndividually = (
+  generation: number,
+  /** Générations des deux parents, ou `null` pour une monture sans ascendance. */
+  parentGenerations: [number, number] | null = null
+): boolean => Math.max(generation, ...(parentGenerations ?? [])) >= INDIVIDUAL_TRACKING_FROM;
 
 /** Les effectifs d'une couleur en vrac, pour les générations basses. */
 export type BulkStock = {

@@ -22,6 +22,15 @@
  * que tout parent est d'une génération strictement inférieure à son enfant. Le
  * graphe est donc acyclique et un simple parcours par génération croissante
  * suffit : quand on traite une couleur, ses parents ont déjà leur coût.
+ *
+ * **Ce que ce parcours ne peut pas voir.** La cible d'un croisement n'est pas
+ * une propriété de la recette mais du couple : le jeu vise « génération maximale
+ * de toute la généalogie + 1 », si bien que deux gen 2 à ascendance gen 3 visent
+ * la gen 4 sans qu'aucune recette ne le dise. Voir `pairing.ts`, qui porte la
+ * règle et le relevé. Les coûts ci-dessous restent donc **des majorants** : les
+ * routes qu'ils chiffrent sont valides, mais un appariement mieux choisi peut
+ * être plus court. Les rendre optimaux demande d'abandonner ce parcours, ce qui
+ * n'est pas fait ici.
  */
 
 import { lineageValue } from './lineage';
@@ -198,21 +207,36 @@ const GENETONS_BY_GENERATION: Record<number, number> = {
 /**
  * Génétons rendus par un croisement, co-produit revendable de l'élevage.
  *
- * La règle du jeu est plus stricte que « l'enfant dépasse ses deux parents » :
- * il doit dépasser **toute la généalogie** des deux parents. Le contrôle ci-
- * dessous ne compare qu'aux parents directs, et c'est suffisant *pour les
- * recettes des arbres* : la génération y croît à chaque croisement, donc le
- * maximum d'une ascendance est toujours celui du parent lui-même. Vérifié sur
- * les 382 croisements des trois familles.
+ * Deux générations différentes entrent dans ce calcul, et les confondre était
+ * l'erreur :
  *
- * L'équivalence tomberait pour un croisement libre, hors recette, entre deux
- * montures dont l'ascendance porte une génération plus haute qu'elles.
+ * - **la validité** du croisement se juge sur toute la généalogie — l'enfant
+ *   doit dépasser l'ascendance entière, pas seulement ses deux parents ;
+ * - **la quantité** rendue suit la génération des **parents directs**.
+ *
+ * Les deux coïncident sur les recettes des arbres, où la génération croît à
+ * chaque croisement : le maximum d'une ascendance y est toujours celui du parent
+ * lui-même. Vérifié sur les 382 croisements des trois familles — d'où le défaut
+ * de `ancestryGeneration`, qui laisse ce calcul inchangé pour eux.
+ *
+ * Elles cessent de coïncider sur un croisement libre, et le relevé de l'issue
+ * #59 tranche : deux parents **gen 2** visant la **gen 4** — parce que leur
+ * ascendance porte une gen 3 — rendent **4 génétons**, soit 2 + 2. Ce sont bien
+ * les parents qui comptent, pas la cible, qui en aurait donné 8 + 8.
  */
 export const genetonsForCrossing = (
   childGeneration: number,
-  parentGenerations: [number, number]
+  parentGenerations: [number, number],
+  /**
+   * Génération la plus haute de toute l'ascendance du couple.
+   *
+   * Voir `pairTargetGeneration` : elle vaut le maximum des six cases que la
+   * fenêtre d'accouplement affiche. Par défaut celle des parents directs, ce qui
+   * est exact partout où le graphe de recettes s'applique.
+   */
+  ancestryGeneration = Math.max(...parentGenerations)
 ): number => {
-  if (parentGenerations.some((generation) => generation >= childGeneration)) return 0;
+  if (ancestryGeneration >= childGeneration) return 0;
   return parentGenerations.reduce(
     (total, generation) => total + (GENETONS_BY_GENERATION[generation] ?? 0),
     0
@@ -260,6 +284,12 @@ export const levelForMountXp = (points: number) => {
  *
  * La génération, donc, et **pas la couleur** : c'est le piège de cette formule.
  * Voir `lineageValue` pour ce que ça implique.
+ *
+ * Et la génération **visée**, quel que soit l'écart : deux parents niveau 61
+ * visant deux générations au-dessus d'eux — un raccourci d'ascendance, voir
+ * `pairTargetGeneration` — affichent 48,3 %, soit exactement
+ * `0,3 + 0,0015 × (61 + 61)`. Le saut ne coûte rien en probabilité, ce qui est
+ * précisément ce qui le rend intéressant.
  *
  * Deux parents niveau 200 plafonnent à 90 % — la certitude n'est pas atteignable
  * par le niveau seul (il y faudrait 233 niveaux par parent). Les Optimakina

@@ -29,7 +29,14 @@
  * | --- | --- | --- | --- | --- |
  * | simple | composés | 78,95 % | 10,53 % | 1, 2, 3, 7 |
  * | simple | simples | 45,45 % | 27,27 % | 1, 3, 7 |
- * | composé | simples | 15,63 % | 42,19 % | 4, 8 |
+ * | composé | simples | 15,63 % | 42,19 % | 4, 8, 59 |
+ *
+ * Le relevé 59 mérite d'être signalé à part : il porte sur un croisement dont la
+ * cible **saute deux générations** (voir `pairTargetGeneration`), et la
+ * répartition d'échec y est reproduite au centième — 42,19 % pour chacune des
+ * deux couleurs de grands-parents, 15,63 % pour la couleur composée du parent.
+ * Le raccourci de génération ne change donc rien à la loi ci-dessous : il déplace
+ * la cible, pas les poids.
  *
  * Le facteur 4,5 est le même dans les deux sens : qu'on compose le parent ou
  * qu'on compose les grands-parents, le rapport bascule d'autant. C'est ce qui

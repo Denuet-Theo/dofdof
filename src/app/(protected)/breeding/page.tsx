@@ -7,7 +7,7 @@ import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
-import { availableMoves } from '@/lib/dofus/breeding/next-move';
+import { buildLoadout } from '@/lib/dofus/breeding/loadout';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
@@ -249,6 +249,10 @@ const BreedingPage = () => {
    * classement trie. La marge isolée, elle, est négative par construction sur
    * toutes : l'afficher laissait croire que l'objectif ne servait à rien.
    */
+  // Sur la couleur suivie, c'est la part **saisie** qui vaut, pas le minimum
+  // calculé : le curseur ne servirait à rien s'il ne déplaçait pas la ligne
+  // qu'il concerne. Les autres gardent leur minimum, qui est ce sur quoi le
+  // classement les départage. Voir l'appel à ColorRow.
   const fundingShares = useMemo(() => {
     if (objective !== 'gen10_balanced') return new Map<string, number>();
     return new Map(
@@ -306,34 +310,38 @@ const BreedingPage = () => {
   ]);
 
   /**
-   * Les croisements lançables tout de suite, classés selon l'objectif courant.
+   * La fournée à charger : quoi lancer, combien, et quelles montures sortir.
    *
-   * Se calcule sur l'écurie et non sur un plan : c'est le point de tout
-   * l'exercice. Voir `next-move.ts` — un arbre figé décrit un parc qui n'existe
-   * plus dès la troisième naissance, alors que cette liste se relit à chaque
-   * saisie.
+   * Se calcule sur l'écurie et non sur un plan — c'est le point de tout
+   * l'exercice. Un arbre figé décrit un parc qui n'existe plus dès la troisième
+   * naissance ; cette liste-là se relit à chaque saisie. Voir `loadout.ts`.
    */
-  const moves = useMemo(() => {
-    if (!tree) return [];
-
+  const loadout = useMemo(() => {
     const byId = new Map(rows.map((row) => [row.colorId, row]));
     const topGeneration = rows.reduce((top, row) => Math.max(top, row.generation), 0);
+    const colors = tree?.colors ?? [];
 
-    return availableMoves(stable, objective, {
-      colors: tree.colors,
-      generations: new Map(tree.colors.map((color) => [color.id, color.generation])),
-      costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
-      valueOf: (colorId) => byId.get(colorId)?.estimate.bestExitValue ?? 0,
-      fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
-      // La durée d'un cycle de fécondité suffit à départager : la montée en
-      // niveau se glisse en grande partie dans les emplacements libres du
-      // cycle, et ce qui dépasse ne dépend pas du couple qu'on compare.
-      batchHours: supplies?.cycleHours ?? 0,
-      slots: ENCLOS_SLOTS,
-      recycleSteriles: settings.recycle_steriles,
-      topGeneration,
-    });
-  }, [tree, rows, stable, objective, supplies, settings.recycle_steriles]);
+    return buildLoadout(
+      stable,
+      objective,
+      {
+        colors,
+        generations: new Map(colors.map((color) => [color.id, color.generation])),
+        costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
+        valueOf: (colorId) => byId.get(colorId)?.estimate.bestExitValue ?? 0,
+        fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
+        // La durée d'un cycle de fécondité suffit à départager : la montée en
+        // niveau se glisse en grande partie dans les emplacements libres du
+        // cycle, et ce qui dépasse ne dépend pas du couple qu'on compare.
+        batchHours: supplies?.cycleHours ?? 0,
+        slots: ENCLOS_SLOTS,
+        recycleSteriles: settings.recycle_steriles,
+        topGeneration,
+      },
+      Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
+      nameOf
+    );
+  }, [tree, rows, stable, objective, supplies, settings.recycle_steriles, settings.enclos_count, nameOf]);
 
   /**
    * Les clonages à faire, et ce qu'ils rendent.
@@ -416,101 +424,6 @@ const BreedingPage = () => {
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
       />
-
-      {/* Le prochain coup vient avant les fournées, et ce n'est pas un détail de
-          mise en page : un croisement qui saute une génération rend inutile une
-          partie du plan qu'on s'apprêtait à charger. Le voir après aurait
-          consommé les montures qui le portent. Le panneau disparaît de lui-même
-          quand l'écurie ne permet aucun croisement. */}
-      <BreedingNextMove moves={moves} clonings={clonings} objective={objective} nameOf={nameOf} />
-
-      {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
-          d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
-          qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
-      {selectedColorId && (
-        <div className="glass rounded-2xl px-5 py-4 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-dark-200">
-              Prochaines fournées — {nameOf(selectedColorId)}
-            </span>
-            <span className="text-xs text-dark-500">
-              les montures à charger, et ce qui en est né
-            </span>
-          </div>
-          <BreedingBatches
-            batches={batches}
-            nameOf={nameOf}
-            individuals={stable.individuals}
-            // Les couleurs brutes de la famille, et non les lignes de l'écran :
-            // la popin a besoin des recettes pour nommer la couleur que la
-            // recombinaison des deux lignées donnera. Voir `matingOutcomes`.
-            colors={tree?.colors ?? []}
-            onRecord={recordBirths}
-          />
-        </div>
-      )}
-
-      {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
-          pans entiers du résultat valent zéro et il vaut mieux le voir. */}
-      <div className="glass rounded-2xl px-5 py-4 flex flex-wrap gap-x-8 gap-y-2 text-xs">
-        <span className="flex items-center gap-2 text-dark-400">
-          <Info size={13} className="text-dark-500" />
-          Couleurs tarifées : <strong className="text-dark-200">{priced}/{rows.length}</strong>
-        </span>
-        <span className="text-dark-400">
-          Généton :{' '}
-          <strong className="text-dark-200">
-            {genetonValuation
-              ? `${Math.round(genetonValuation.valuePerGeneton).toLocaleString('fr-FR')} kamas`
-              : 'prix des parchemins manquants'}
-          </strong>
-        </span>
-        {tree && (
-          <span className="text-dark-400">
-            {tree.sacrificeItem.name} :{' '}
-            <strong className="text-dark-200">
-              {sacrificePrice > 0
-                ? `${sacrificePrice.toLocaleString('fr-FR')} kamas`
-                : 'prix manquant'}
-            </strong>
-          </span>
-        )}
-        <span className="text-dark-400">
-          Cycle de fécondité :{' '}
-          <strong className="text-dark-200">
-            {supplies?.fuelCostPerCycle != null
-              ? `${Math.round(supplies.fuelCostPerCycle).toLocaleString('fr-FR')} kamas / monture`
-              : 'carburants non tarifés'}
-            {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
-          </strong>
-        </span>
-        {supplies?.levelUpHours != null && (
-          <span className="text-dark-400">
-            Montée au niveau 200 :{' '}
-            <strong className="text-dark-200">
-              {formatHours(supplies.levelUpHours)}
-              {supplies.mangeoireFuel && ` · ${supplies.mangeoireFuel}`}
-            </strong>
-          </span>
-        )}
-        <span className="text-dark-400">
-          Capture :{' '}
-          <strong className="text-dark-200">
-            {supplies?.capture
-              ? `${Math.round(supplies.capture.costPerMount).toLocaleString('fr-FR')} kamas (${supplies.capture.net.captures}×)`
-              : 'filets non tarifés'}
-          </strong>
-        </span>
-      </div>
-
-      {/* Ce qui manque se dit, plutôt que de disparaître dans un zéro. */}
-      {supplies && supplies.missingGauges.length > 0 && (
-        <p className="text-[11px] text-amber-400/80">
-          Aucun carburant tarifé pour {supplies.missingGauges.join(', ')} — ces jauges sont
-          chiffrées au prix relevé par défaut. Renseigne les carburants pour coller au
-          cours du jour et au palier que tu utilises vraiment.
-        </p>
-      )}
 
       {/* Objectifs : le classement, replié derrière ce qu'on vise. La question
           « combien j'en veux » vient avant « laquelle », puisqu'elle change la
@@ -688,26 +601,6 @@ const BreedingPage = () => {
 
             {/* Trois états distincts, et les confondre était le défaut : aucune
                 route du tout, une route trop chère, ou rien à signaler. */}
-            {/* Un plan suivi masque le classement, si bien que changer
-                d'objectif ne montrait plus rien : les boutons restaient
-                cliquables et paraissaient inertes. On dit donc ce que le nouvel
-                objectif recommanderait, et on laisse basculer d'un clic. */}
-            {project.current && recommended && recommended.colorId !== selectedColorId && (
-              <p className="text-[11px] text-dark-400 flex flex-wrap items-baseline gap-x-1">
-                <span>
-                  Cet objectif recommanderait plutôt{' '}
-                  <strong className="text-dark-100">{recommended.name}</strong>.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => project.select(recommended.colorId, targetCount, objective)}
-                  className="text-kamas hover:underline cursor-pointer"
-                >
-                  Suivre celle-là à la place
-                </button>
-              </p>
-            )}
-
             {!project.current && !recommendation && (
               <p className="text-[11px] text-amber-400/80">
                 Aucune route chiffrable pour cet objectif. Il manque des prix de
@@ -797,7 +690,11 @@ const BreedingPage = () => {
                     generationOf={generationOf}
                     stockBySex={stockBySex}
                     onSaveBulk={saveBulkStock}
-                    fundingShare={fundingShares.get(row.colorId) ?? null}
+                    fundingShare={
+                      row.colorId === selectedColorId && split
+                        ? funderPercent / 100
+                        : (fundingShares.get(row.colorId) ?? null)
+                    }
                     enclosCount={settings.enclos_count}
                     targetCount={targetCount}
                     waves={row.colorId === selectedColorId ? waves : null}
@@ -812,6 +709,102 @@ const BreedingPage = () => {
           </div>
         )}
       </div>
+
+      {/* Le prochain coup vient avant les fournées, et ce n'est pas un détail de
+          mise en page : un croisement qui saute une génération rend inutile une
+          partie du plan qu'on s'apprêtait à charger. Le voir après aurait
+          consommé les montures qui le portent. Le panneau disparaît de lui-même
+          quand l'écurie ne permet aucun croisement. */}
+      <BreedingNextMove loadout={loadout} clonings={clonings} objective={objective} nameOf={nameOf} />
+
+      {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
+          d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
+          qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
+      {selectedColorId && (
+        <div className="glass rounded-2xl px-5 py-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-dark-200">
+              Prochaines fournées — {nameOf(selectedColorId)}
+            </span>
+            <span className="text-xs text-dark-500">
+              les montures à charger, et ce qui en est né
+            </span>
+          </div>
+          <BreedingBatches
+            batches={batches}
+            nameOf={nameOf}
+            individuals={stable.individuals}
+            // Les couleurs brutes de la famille, et non les lignes de l'écran :
+            // la popin a besoin des recettes pour nommer la couleur que la
+            // recombinaison des deux lignées donnera. Voir `matingOutcomes`.
+            colors={tree?.colors ?? []}
+            onRecord={recordBirths}
+          />
+        </div>
+      )}
+
+      {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
+          pans entiers du résultat valent zéro et il vaut mieux le voir. */}
+      <div className="glass rounded-2xl px-5 py-4 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+        <span className="flex items-center gap-2 text-dark-400">
+          <Info size={13} className="text-dark-500" />
+          Couleurs tarifées : <strong className="text-dark-200">{priced}/{rows.length}</strong>
+        </span>
+        <span className="text-dark-400">
+          Généton :{' '}
+          <strong className="text-dark-200">
+            {genetonValuation
+              ? `${Math.round(genetonValuation.valuePerGeneton).toLocaleString('fr-FR')} kamas`
+              : 'prix des parchemins manquants'}
+          </strong>
+        </span>
+        {tree && (
+          <span className="text-dark-400">
+            {tree.sacrificeItem.name} :{' '}
+            <strong className="text-dark-200">
+              {sacrificePrice > 0
+                ? `${sacrificePrice.toLocaleString('fr-FR')} kamas`
+                : 'prix manquant'}
+            </strong>
+          </span>
+        )}
+        <span className="text-dark-400">
+          Cycle de fécondité :{' '}
+          <strong className="text-dark-200">
+            {supplies?.fuelCostPerCycle != null
+              ? `${Math.round(supplies.fuelCostPerCycle).toLocaleString('fr-FR')} kamas / monture`
+              : 'carburants non tarifés'}
+            {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
+          </strong>
+        </span>
+        {supplies?.levelUpHours != null && (
+          <span className="text-dark-400">
+            Montée au niveau 200 :{' '}
+            <strong className="text-dark-200">
+              {formatHours(supplies.levelUpHours)}
+              {supplies.mangeoireFuel && ` · ${supplies.mangeoireFuel}`}
+            </strong>
+          </span>
+        )}
+        <span className="text-dark-400">
+          Capture :{' '}
+          <strong className="text-dark-200">
+            {supplies?.capture
+              ? `${Math.round(supplies.capture.costPerMount).toLocaleString('fr-FR')} kamas (${supplies.capture.net.captures}×)`
+              : 'filets non tarifés'}
+          </strong>
+        </span>
+      </div>
+
+      {/* Ce qui manque se dit, plutôt que de disparaître dans un zéro. */}
+      {supplies && supplies.missingGauges.length > 0 && (
+        <p className="text-[11px] text-amber-400/80">
+          Aucun carburant tarifé pour {supplies.missingGauges.join(', ')} — ces jauges sont
+          chiffrées au prix relevé par défaut. Renseigne les carburants pour coller au
+          cours du jour et au palier que tu utilises vraiment.
+        </p>
+      )}
+
     </div>
   );
 };

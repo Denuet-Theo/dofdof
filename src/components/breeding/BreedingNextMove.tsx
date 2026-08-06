@@ -94,12 +94,25 @@ const BreedingNextMove = ({ loadout, clonings, objective, nameOf }: Props) => {
               )}
             </span>
 
-            <span
-              className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-              title={`Ce couple vise la génération ${line.move.targetGeneration} : la plus haute de toute sa généalogie, plus un.`}
-            >
-              GEN. {line.move.targetGeneration}
-            </span>
+            {/* Une cible sans couleur n'est pas une cible : aucune couleur de
+                la génération visée ne se compose de ces deux lignées. Le
+                croisement reste faisable — c'est le cas de la purification — mais
+                ce qu'il rend n'est pas modélisé, et l'annoncer serait mentir. */}
+            {line.move.targetColors.length === 0 ? (
+              <span
+                className="px-1.5 py-0.5 rounded-lg bg-dark-700/60 text-dark-400 text-[10px] font-semibold"
+                title="Aucune couleur de la génération visée ne se compose de ces deux lignées : le jeu bascule alors dans un régime que le modèle ne couvre pas encore (relevé #68). Le croisement reste faisable — c'est ce qu'on fait pour purifier une lignée — mais on ne sait pas dire ce qu'il rend."
+              >
+                ISSUES INCONNUES
+              </span>
+            ) : (
+              <span
+                className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+                title={`Ce couple vise la génération ${line.move.targetGeneration} : la plus haute de toute sa généalogie, plus un.`}
+              >
+                GEN. {line.move.targetGeneration}
+              </span>
+            )}
             {line.move.leap > 0 && (
               <span
                 className="text-[10px] text-profit/80"

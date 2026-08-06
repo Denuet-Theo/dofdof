@@ -125,6 +125,14 @@ const scoreOf = (move: Omit<Move, 'score'>, objective: ObjectiveId): number => {
     return move.enclosHours > 0 ? (move.expectedValue - move.cost) / move.enclosHours : -Infinity;
   }
 
+  // Une cible sans couleur n'est pas une cible. La recombinaison des deux
+  // lignées doit **nommer** une couleur de la génération visée, sinon le
+  // croisement ne peut rien produire à ce rang, quelle que soit sa probabilité
+  // affichée — et la politique s'acharnait dessus. Trouvé en simulant :
+  // `simulatePolicy` n'atteignait jamais la génération 10, parce que le
+  // classement retenait des croisements que rien ne pouvait faire aboutir.
+  if (move.targetColors.length === 0) return -Infinity;
+
   // Monter au-dessus du plafond de la famille n'existe pas, et `pairOutlook`
   // l'a déjà écarté. Reste que gagner une génération qu'on tient déjà ne fait
   // pas avancer : c'est le cas d'un croisement qu'on ne monte pas pour monter.

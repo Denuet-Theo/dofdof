@@ -193,6 +193,34 @@ const compositionIndex = (colors: BreedingColor[]): Map<string, string> => {
 };
 
 /**
+ * Les index de composition déjà construits, par catalogue et par génération.
+ *
+ * Sans ce cache, chaque évaluation de couple refiltrait les 226 couleurs et
+ * reconstruisait son index — négligeable sur un couple, ruineux dès qu'on en
+ * compare des milliers. La simulation de la politique en évalue des millions et
+ * n'aboutissait pas ; l'écran, lui, en évaluait déjà assez pour ramer sur une
+ * grosse écurie.
+ *
+ * Clé faible sur le tableau de couleurs : il vient de `trees.json` et ne change
+ * pas de la session, mais rien n'oblige l'appelant à le garantir.
+ */
+const indexCache = new WeakMap<BreedingColor[], Map<number, Map<string, string>>>();
+
+const compositionIndexAt = (colors: BreedingColor[], generation: number) => {
+  let byGeneration = indexCache.get(colors);
+  if (!byGeneration) {
+    byGeneration = new Map();
+    indexCache.set(colors, byGeneration);
+  }
+  let index = byGeneration.get(generation);
+  if (!index) {
+    index = compositionIndex(colors.filter((color) => color.generation === generation));
+    byGeneration.set(generation, index);
+  }
+  return index;
+};
+
+/**
  * Les couleurs que le croisement peut rendre à la génération visée.
  *
  * Le mécanisme est celui que `lineage.ts` appelle **recombinaison croisée** :
@@ -216,7 +244,7 @@ export const pairTargetColors = (
   colors: BreedingColor[],
   targetGeneration: number
 ): TargetColor[] => {
-  const index = compositionIndex(colors.filter((color) => color.generation === targetGeneration));
+  const index = compositionIndexAt(colors, targetGeneration);
   if (index.size === 0) return [];
 
   const left = lineageDistribution(male.colorId, male.parents);

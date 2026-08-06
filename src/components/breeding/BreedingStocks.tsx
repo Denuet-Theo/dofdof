@@ -297,8 +297,14 @@ const BreedingStocks = ({
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
               {mounts.map((row) => {
                 const counts = stockBySex.get(row.colorId) ?? { males: 0, females: 0 };
-                const tracked = row.generation >= INDIVIDUAL_TRACKING_FROM;
                 const owned = individualsOf.get(row.colorId) ?? [];
+                // Le compteur cède la place au suivi individuel dès la
+                // génération 3. En deçà, il reste — une gen 1 ou 2 s'achète en
+                // volume — mais la liste des individus s'affiche quand même :
+                // une basse génération née d'un croisement haut est suivie une
+                // par une, parce que son ascendance relève la cible de ses
+                // propres accouplements. Voir `tracksIndividually`.
+                const tracked = row.generation >= INDIVIDUAL_TRACKING_FROM;
 
                 return (
                   <div key={row.colorId} className="px-3 py-1.5 rounded-xl hover:bg-dark-800/40">
@@ -355,7 +361,7 @@ const BreedingStocks = ({
                     {/* Le détail des individus : leur niveau décide du taux de
                         réussite de leurs accouplements, et leur fertilité de leur
                         disponibilité tout court. */}
-                    {tracked && owned.length > 0 && (
+                    {owned.length > 0 && (
                       <div className="mt-1.5 ml-3 pl-3 border-l border-dark-700/40 space-y-1">
                         {owned.map((mount) => (
                           <div key={mount.id} className="flex items-center gap-2">

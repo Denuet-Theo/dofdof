@@ -6,6 +6,7 @@ import ColorRow from '@/components/breeding/ColorRow';
 import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
+import BreedingShortcuts from '@/components/breeding/BreedingShortcuts';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
@@ -74,6 +75,7 @@ const BreedingPage = () => {
     saveFuelPrice,
     stable,
     stockBySex,
+    shortcuts,
     itemStock,
     ownedGaugePoints,
     loading,
@@ -354,6 +356,13 @@ const BreedingPage = () => {
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
       />
+
+      {/* Les raccourcis viennent avant les fournées, et ce n'est pas un détail
+          de mise en page : un couple qui saute une génération rend inutile une
+          partie du plan qu'on s'apprêtait à charger. Le voir après aurait
+          consommé les montures qui le portent. Le panneau disparaît de lui-même
+          quand l'écurie n'en porte aucun. */}
+      <BreedingShortcuts shortcuts={shortcuts} nameOf={nameOf} />
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

@@ -42,12 +42,13 @@ import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   stableBySex,
-  INDIVIDUAL_TRACKING_FROM,
+  tracksIndividually,
   type Individual,
   type Pairing,
   type Sex,
   type Stable,
 } from '@/lib/dofus/breeding/stable';
+import { stableShortcuts, type Shortcut } from '@/lib/dofus/breeding/pairing';
 
 /**
  * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
@@ -314,6 +315,20 @@ export const useBreeding = (
       ),
     [stockBySex]
   );
+
+  /**
+   * Les raccourcis de génération que l'écurie porte en l'état.
+   *
+   * Ne dépend d'aucun prix ni d'aucun plan : c'est une lecture de la généalogie
+   * des montures en main, et elle vaut quel que soit l'objectif suivi. Voir
+   * `pairing.ts` — deux gen 2 à ascendance gen 3 visent la gen 4, et rien dans
+   * le graphe de recettes ne le dit.
+   */
+  const shortcuts = useMemo<Shortcut[]>(() => {
+    if (!tree) return [];
+    const generations = new Map(tree.colors.map((color) => [color.id, color.generation]));
+    return stableShortcuts(stable, tree.colors, generations);
+  }, [tree, stable]);
 
   /** Prix nu d'un item, pour les co-produits qu'on ne fait que revendre. */
   const priceOf = useCallback(
@@ -646,11 +661,32 @@ export const useBreeding = (
   /**
    * Enregistre le nombre de montures d'une couleur en écurie.
    *
+   * Le compteur saisi est un **total**, alors que la base ne stocke que le vrac.
+   * Les deux ne coïncidaient plus depuis qu'une gen 1 ou 2 peut être suivie
+   * individuellement — voir `tracksIndividually` : une couleur peut porter à la
+   * fois trois montures en vrac et une née d'un croisement haut. Écrire le total
+   * tel quel compterait cette dernière deux fois, une fois dans le vrac et une
+   * fois comme individu.
+   *
+   * On retranche donc les individus avant d'écrire. Saisir moins que ce qu'ils
+   * représentent vide le vrac sans les toucher : une monture suivie se retire
+   * dans la liste de l'écurie, où on la voit, pas par un compteur qui ne dit pas
+   * laquelle.
+   *
    * L'état local part devant : le classement entier se recalcule à chaque
    * saisie, et l'attendre du réseau rendrait la frappe poussive.
    */
   const saveBulkStock = useCallback(
-    async (colorId: string, males: number, females: number) => {
+    async (colorId: string, totalMales: number, totalFemales: number) => {
+      const tracked = stable.individuals.filter(
+        (mount) => mount.colorId === colorId && mount.fertile
+      );
+      const trackedMales = tracked.filter((mount) => mount.sex === 'M').length;
+      const trackedFemales = tracked.length - trackedMales;
+
+      const males = Math.max(0, totalMales - trackedMales);
+      const females = Math.max(0, totalFemales - trackedFemales);
+
       setStable((current) => {
         const bulk = new Map(current.bulk);
         if (males > 0 || females > 0) bulk.set(colorId, { males, females });
@@ -668,7 +704,7 @@ export const useBreeding = (
 
       if (saveError) console.error('[breeding] monture non enregistrée:', saveError);
     },
-    [family]
+    [family, stable.individuals]
   );
 
   /**
@@ -791,7 +827,16 @@ export const useBreeding = (
 
       for (const entry of entries) {
         const generation = generations.get(entry.colorId) ?? 1;
-        if (generation < INDIVIDUAL_TRACKING_FROM) {
+        // Le seuil se juge sur l'ascendance et non sur la couleur née. Un bébé
+        // hors cible est d'une génération basse mais garde la généalogie de ses
+        // parents : une gen 2 née d'une Amande gen 3 vise la gen 4 à son tour.
+        // La ranger dans le vrac effaçait ce raccourci — voir `pairing.ts`.
+        const tracked = tracksIndividually(generation, [
+          generations.get(entry.male.colorId) ?? 1,
+          generations.get(entry.female.colorId) ?? 1,
+        ]);
+
+        if (!tracked) {
           const born = bulkBorn.get(entry.colorId) ?? { males: 0, females: 0 };
           if (entry.sex === 'M') born.males += 1;
           else born.females += 1;
@@ -997,6 +1042,7 @@ export const useBreeding = (
     mountStock,
     itemStock,
     ownedGaugePoints,
+    shortcuts,
     saveBulkStock,
     addIndividual,
     updateIndividual,

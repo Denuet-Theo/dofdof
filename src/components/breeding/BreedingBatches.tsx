@@ -1,58 +1,104 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, Layers, TriangleAlert } from 'lucide-react';
+import { Layers, TriangleAlert } from 'lucide-react';
 import Button from '@/components/ui/Button';
+import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
+import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { Batch } from '@/lib/dofus/breeding/batches';
-import type { Sex } from '@/lib/dofus/breeding/stable';
+import type { Individual, Pairing, Sex } from '@/lib/dofus/breeding/stable';
 import type { BirthEntry } from '@/lib/hooks/useBreeding';
 
 /**
- * Les montures à charger dans l'enclos, nommément — puis ce qui en est né.
+ * Les montures à charger dans l'enclos — en **lots**, pas en couples.
  *
  * Le plan dit combien d'accouplements ; devant l'enclos la question est « je
- * mets lesquelles ». C'est tout l'écart que ce panneau comble.
+ * mets lesquelles ». Elle se répondait couple par couple, dix lignes
+ * « ♂ Doré × ♀ Ébène » pour dix accouplements. Or l'enclos ne se charge pas par
+ * couples : on y dépose vingt montures, et le jeu apparie. Ce qu'il faut lire
+ * est donc **ce qu'on sort de l'écurie** — « ♂ Doré Anonyme × 10 » — et non un
+ * appariement que personne ne compose à la main.
  *
- * Deux fournées et non une, parce que c'est ce qui permet de **relancer sans
- * avoir fait les accouplements** : un cycle de fécondité dure des heures, et si
- * la liste suivante n'apparaît qu'une fois les naissances saisies, l'enclos
- * reste vide le temps qu'on revienne. La seconde est provisoire et le dit — elle
- * suppose des naissances qui n'ont pas eu lieu.
+ * Les lots se distinguent par couleur, sexe **et nom**. Le nom n'est pas un
+ * ornement : depuis #59, deux montures de même couleur ne se valent pas selon
+ * leur ascendance, et le nom est la seule chose qui les sépare dans l'écurie du
+ * jeu. Confondre « ♂ Doré Anonyme » et « ♂ Doré G9 AMB-DOR » dans un même lot
+ * ferait charger la mauvaise — celle qui ne porte pas le raccourci.
  *
- * La saisie porte sur la **couleur née**, pas sur « réussi / raté » : un
- * accouplement rend toujours un bébé, et un raté est une couleur comme une
- * autre. Proposer une case à cocher laisserait croire qu'une tentative peut ne
- * rien donner, et perdrait la monture réellement obtenue.
+ * La saisie des naissances, elle, passe par une popin : voir
+ * `BreedingBirthDialog`.
  */
 
 type Props = {
   batches: Batch[];
   nameOf: (colorId: string) => string;
-  /** Les couleurs saisissables comme résultat, triées pour la liste déroulante. */
-  colors: { colorId: string; name: string; generation: number }[];
+  /** Les montures suivies, pour nommer les lots et retrouver les ascendances. */
+  individuals: Individual[];
+  /** Les couleurs de la famille, pour calculer les issues d'un accouplement. */
+  colors: BreedingColor[];
   onRecord: (entries: BirthEntry[]) => Promise<void>;
 };
 
-/** Ce que l'éleveur déclare pour un couple donné, avant enregistrement. */
-type Draft = { colorId: string; sex: Sex };
+/** Un lot à sortir de l'écurie : même couleur, même sexe, même nom. */
+type Load = {
+  colorId: string;
+  sex: Sex;
+  /** Le nom porté en jeu, « Anonyme » compris — c'est ce qu'on lit sur place. */
+  name: string;
+  count: number;
+  /** Les identifiants courts, quand les montures sont suivies une par une. */
+  ids: string[];
+};
 
-const BreedingBatches = ({ batches, nameOf, colors, onRecord }: Props) => {
-  const [drafts, setDrafts] = useState<Record<number, Draft>>({});
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+const BreedingBatches = ({ batches, nameOf, individuals, colors, onRecord }: Props) => {
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const first = batches[0] ?? null;
-
-  /** Le résultat par défaut d'un couple : la couleur que le plan vise. */
-  const draftFor = (index: number): Draft => {
-    const couple = first?.couples[index];
-    return drafts[index] ?? { colorId: couple?.targetColorId ?? '', sex: 'M' };
-  };
-
-  const sorted = useMemo(
-    () => [...colors].sort((a, b) => a.generation - b.generation || a.name.localeCompare(b.name)),
-    [colors]
+  const nameById = useMemo(
+    () => new Map(individuals.map((mount) => [mount.id, mount.name ?? ANONYMOUS_NAME])),
+    [individuals]
   );
+
+  /**
+   * Les montures d'une fournée regroupées en lots.
+   *
+   * On compte les **côtés** de couple et non les couples : une même monture ne
+   * peut servir qu'une fois, donc chaque côté est une monture distincte à sortir
+   * de l'écurie.
+   */
+  const loadsOf = (couples: Batch['couples']): Load[] => {
+    const byKind = new Map<string, Load>();
+
+    const take = (side: Pairing, sex: Sex) => {
+      const name = side.mountId ? (nameById.get(side.mountId) ?? ANONYMOUS_NAME) : ANONYMOUS_NAME;
+      const key = `${side.colorId}|${sex}|${name}`;
+      const load = byKind.get(key);
+      if (load) {
+        load.count += 1;
+        if (side.mountId) load.ids.push(side.mountId.slice(0, 6));
+        return;
+      }
+      byKind.set(key, {
+        colorId: side.colorId,
+        sex,
+        name,
+        count: 1,
+        ids: side.mountId ? [side.mountId.slice(0, 6)] : [],
+      });
+    };
+
+    for (const couple of couples) {
+      take(couple.male, 'M');
+      take(couple.female, 'F');
+    }
+
+    return [...byKind.values()].sort(
+      (a, b) =>
+        // Les mâles devant, puis les gros lots : c'est l'ordre dans lequel on
+        // vide l'écurie.
+        a.sex.localeCompare(b.sex) || b.count - a.count || a.colorId.localeCompare(b.colorId)
+    );
+  };
 
   if (batches.length === 0) {
     return (
@@ -63,12 +109,7 @@ const BreedingBatches = ({ batches, nameOf, colors, onRecord }: Props) => {
     );
   }
 
-  const label = (side: { colorId: string; mountId: string | null }, sex: Sex) =>
-    `${sex === 'M' ? '♂' : '♀'} ${nameOf(side.colorId)}${
-      // Les gen 1-2 sont interchangeables et n'ont pas d'identifiant : les
-      // nommer n'apporterait rien, il suffit d'en prendre une du tas.
-      side.mountId ? ` · ${side.mountId.slice(0, 6)}` : ''
-    }`;
+  const first = batches[0];
 
   return (
     <div className="space-y-5">
@@ -76,9 +117,7 @@ const BreedingBatches = ({ batches, nameOf, colors, onRecord }: Props) => {
         <div key={batch.index} className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Layers size={14} className="text-kamas" />
-            <span className="text-xs font-semibold text-dark-200">
-              Fournée {batch.index}
-            </span>
+            <span className="text-xs font-semibold text-dark-200">Fournée {batch.index}</span>
             <span className="text-[11px] text-dark-500">
               {batch.couples.length} accouplement{batch.couples.length > 1 ? 's' : ''} ·{' '}
               {batch.used}/{batch.capacity} places
@@ -101,65 +140,36 @@ const BreedingBatches = ({ batches, nameOf, colors, onRecord }: Props) => {
           )}
 
           <div className="space-y-1 pl-5">
-            {batch.couples.map((couple, index) => (
+            {loadsOf(batch.couples).map((load) => (
               <div
-                key={`${batch.index}-${index}`}
+                key={`${batch.index}-${load.colorId}-${load.sex}-${load.name}`}
                 className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
                   bg-dark-800/40 text-xs"
               >
-                <span className="text-dark-200 tabular-nums w-6 shrink-0 text-dark-500">
-                  {index + 1}.
+                <span className="text-dark-400 w-4 shrink-0">
+                  {load.sex === 'M' ? '♂' : '♀'}
                 </span>
-                <span className="text-dark-200">{label(couple.male, 'M')}</span>
-                <span className="text-dark-600">×</span>
-                <span className="text-dark-200">{label(couple.female, 'F')}</span>
-                <span className="text-[10px] text-dark-500 ml-1">
-                  → vise {nameOf(couple.targetColorId)}
-                </span>
-
-                {/* La saisie ne s'ouvre que sur la première : les suivantes
-                    supposent des naissances qui n'ont pas eu lieu, donc il n'y a
-                    rien à y déclarer. */}
-                {!batch.provisional && (
-                  <span className="flex items-center gap-1.5 ml-auto">
-                    <select
-                      value={draftFor(index).colorId}
-                      onChange={(event) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [index]: { ...draftFor(index), colorId: event.target.value },
-                        }))
-                      }
-                      className="px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
-                        text-dark-200 text-[11px] hover:border-dark-500 focus:border-kamas/50
-                        cursor-pointer max-w-[170px]"
-                    >
-                      {sorted.map((color) => (
-                        <option key={color.colorId} value={color.colorId}>
-                          {color.name} (gen {color.generation})
-                        </option>
-                      ))}
-                    </select>
-                    {(['M', 'F'] as const).map((sex) => (
-                      <button
-                        key={sex}
-                        type="button"
-                        onClick={() =>
-                          setDrafts((current) => ({
-                            ...current,
-                            [index]: { ...draftFor(index), sex },
-                          }))
-                        }
-                        className={`px-2 py-1 rounded-lg text-[11px] border transition-all
-                          cursor-pointer ${
-                            draftFor(index).sex === sex
-                              ? 'bg-kamas/15 border-kamas/40 text-kamas'
-                              : 'bg-dark-800/80 border-dark-600/50 text-dark-400 hover:border-dark-500'
-                          }`}
-                      >
-                        {sex === 'M' ? '♂' : '♀'}
-                      </button>
-                    ))}
+                <span className="text-dark-200">{nameOf(load.colorId)}</span>
+                <code
+                  className={`text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 ${
+                    load.name === ANONYMOUS_NAME ? 'text-dark-500' : 'text-kamas'
+                  }`}
+                  title={
+                    load.name === ANONYMOUS_NAME
+                      ? 'Montures non renommées : interchangeables, prends-en dans le tas.'
+                      : 'Cherche ce nom dans l’écurie du jeu — ces montures-là ne sont pas interchangeables.'
+                  }
+                >
+                  {load.name}
+                </code>
+                <span className="text-dark-300 font-semibold tabular-nums">× {load.count}</span>
+                {load.ids.length > 0 && (
+                  <span
+                    className="text-[10px] text-dark-600 truncate"
+                    title={`Identifiants : ${load.ids.join(', ')}`}
+                  >
+                    {load.ids.slice(0, 4).join(' · ')}
+                    {load.ids.length > 4 && ` +${load.ids.length - 4}`}
                   </span>
                 )}
               </div>
@@ -168,38 +178,25 @@ const BreedingBatches = ({ batches, nameOf, colors, onRecord }: Props) => {
         </div>
       ))}
 
-      {first && (
-        <div className="flex flex-wrap items-center gap-3 pl-5">
-          <Button
-            size="sm"
-            disabled={saving}
-            onClick={async () => {
-              setSaving(true);
-              await onRecord(
-                first.couples.map((couple, index) => ({
-                  male: couple.male,
-                  female: couple.female,
-                  ...draftFor(index),
-                }))
-              );
-              setDrafts({});
-              setSaving(false);
-              setSaved(true);
-              setTimeout(() => setSaved(false), 2500);
-            }}
-          >
-            {saving ? 'Enregistrement…' : `Saisir les ${first.couples.length} naissances`}
-          </Button>
-          {saved && (
-            <span className="flex items-center gap-1 text-xs text-profit">
-              <Check size={13} /> Écurie à jour — la fournée suivante est prête
-            </span>
-          )}
-          <span className="text-[10px] text-dark-600">
-            Les deux parents passent stériles, les bébés entrent en écurie.
-          </span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3 pl-5">
+        <Button size="sm" onClick={() => setDialogOpen(true)}>
+          Saisir les naissances
+        </Button>
+        <span className="text-[10px] text-dark-600">
+          Les deux parents passent stériles, les bébés entrent en écurie — avec le nom à leur
+          donner en jeu.
+        </span>
+      </div>
+
+      <BreedingBirthDialog
+        isOpen={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        couples={first.couples}
+        individuals={individuals}
+        colors={colors}
+        nameOf={nameOf}
+        onRecord={onRecord}
+      />
     </div>
   );
 };

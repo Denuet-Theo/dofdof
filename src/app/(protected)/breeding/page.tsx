@@ -380,11 +380,11 @@ const BreedingPage = () => {
           <BreedingBatches
             batches={batches}
             nameOf={nameOf}
-            colors={rows.map((row) => ({
-              colorId: row.colorId,
-              name: row.name,
-              generation: row.generation,
-            }))}
+            individuals={stable.individuals}
+            // Les couleurs brutes de la famille, et non les lignes de l'écran :
+            // la popin a besoin des recettes pour nommer la couleur que la
+            // recombinaison des deux lignées donnera. Voir `matingOutcomes`.
+            colors={tree?.colors ?? []}
             onRecord={recordBirths}
           />
         </div>

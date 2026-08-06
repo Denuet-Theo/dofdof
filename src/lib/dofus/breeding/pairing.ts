@@ -1,5 +1,5 @@
 import { genetonsForCrossing, targetGenerationRate, type BreedingColor } from './costs';
-import { lineageDistribution } from './lineage';
+import { lineageDistribution, LINEAGE_SHARE } from './lineage';
 import type { Individual, Sex, Stable } from './stable';
 
 /**
@@ -321,6 +321,86 @@ export type MateGroup = {
    */
   sample: Mate;
   count: number;
+};
+
+/** Une couleur que l'accouplement peut rendre, et avec quelle probabilité. */
+export type MatingOutcome = {
+  colorId: string;
+  probability: number;
+  /**
+   * `target` pour la génération visée, `other` pour ce que rend une tentative
+   * qui la manque. Le jeu les sépare de la même façon — « Génération cible » et
+   * « Autres » — et la distinction compte : seule la première rend des génétons.
+   */
+  kind: 'target' | 'other';
+};
+
+/**
+ * Ce que l'accouplement peut donner, dans la forme où le jeu l'affiche.
+ *
+ * C'est la fenêtre d'accouplement reconstituée, et elle l'est **exactement** sur
+ * le relevé #59 : 48,3 % sur Doré-Amande, puis 21,81 % / 21,81 % / 8,08 % sur
+ * Amande, Doré et Ébène-Orchidée. Rien de nouveau n'est calculé ici — la masse
+ * de réussite vient de `targetGenerationRate`, le reste de `lineageDistribution`
+ * partagé moitié-moitié entre les deux lignées, ce que `lineageValue` faisait
+ * déjà pour chiffrer. Seule la présentation change : des couleurs et des
+ * probabilités plutôt qu'une valeur en kamas.
+ *
+ * ## La part qui est une approximation
+ *
+ * Quand **plusieurs** couleurs occupent la génération visée, le jeu ne les
+ * donne pas à parts égales : deux parents niveau 69 affichaient
+ * 40,02 % + 5,34 % + 5,34 % pour trois couleurs cibles, et non trois fois
+ * 16,68 %. Le partage retenu ici suit les poids de la recombinaison, qui
+ * reproduisent l'écart de rang mais pas forcément sa valeur. Le **total** de la
+ * ligne « Génération cible », lui, est exact — c'est celui de la formule.
+ *
+ * Sans conséquence pour ce à quoi cette liste sert : saisir ce qui est né. On
+ * clique sur la couleur obtenue, pas sur sa probabilité.
+ */
+export const matingOutcomes = (
+  male: Mate,
+  female: Mate,
+  colors: BreedingColor[],
+  generations: Map<string, number>
+): MatingOutcome[] => {
+  const outlook = pairOutlook(male, female, colors, generations);
+  if (!outlook) return [];
+
+  const outcomes = new Map<string, MatingOutcome>();
+  const add = (colorId: string, probability: number, kind: MatingOutcome['kind']) => {
+    const current = outcomes.get(colorId);
+    if (current) current.probability += probability;
+    else outcomes.set(colorId, { colorId, probability, kind });
+  };
+
+  const totalWeight = outlook.targetColors.reduce((sum, color) => sum + color.weight, 0);
+  for (const color of outlook.targetColors) {
+    add(
+      color.colorId,
+      outlook.successRate * (totalWeight > 0 ? color.weight / totalWeight : 1 / outlook.targetColors.length),
+      'target'
+    );
+  }
+
+  // La masse d'échec se partage exactement moitié-moitié entre les deux lignées,
+  // et les parts se normalisent à l'intérieur de chacune. Voir `lineage.ts`.
+  const failureMass = 1 - outlook.successRate;
+  for (const mate of [male, female]) {
+    const distribution = lineageDistribution(mate.colorId, mate.parents);
+    for (const [colorId, share] of distribution) {
+      add(colorId, LINEAGE_SHARE * share * failureMass, 'other');
+    }
+  }
+
+  return [...outcomes.values()].sort(
+    (a, b) =>
+      // La cible d'abord, quoi qu'elle pèse : c'est elle qu'on vient chercher, et
+      // c'est le classement du jeu.
+      Number(b.kind === 'target') - Number(a.kind === 'target') ||
+      b.probability - a.probability ||
+      a.colorId.localeCompare(b.colorId)
+  );
 };
 
 /**

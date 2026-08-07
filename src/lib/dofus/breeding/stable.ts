@@ -63,12 +63,42 @@ export const INDIVIDUAL_TRACKING_FROM = 3;
  * Ce sont précisément les bébés hors cible d'un croisement de haute génération :
  * ceux que `creditOffTarget` décrivait comme « des couleurs de génération 2 dont
  * on ne fera rien ».
+ *
+ * ## Le seuil seul ratait le bas de l'arbre
+ *
+ * `>= 3` sur toute la généalogie disait bien l'intention, mais il laissait passer
+ * le cas le plus fréquent de tous. Un **Doré gen 1 né d'un Roux manqué** porte
+ * `[Doré-Pourpre, Doré-Orchidée]` : son maximum vaut 2, donc le vrac l'avalait et
+ * son ascendance était perdue à la saisie.
+ *
+ * Or cette monture-là vise la **gen 3**. Deux d'entre elles rendent un Roux à
+ * 50,1 % **sans consommer un seul gen 2** — et les ratés rendent encore 10,5 % de
+ * Doré-Pourpre et de Doré-Orchidée. Mesuré sur dix fournées de cinquante places :
+ * 26 de ces montures naissent, et les garder porte la production de 31 à
+ * 36 Roux — **+16 % à croisements identiques**.
+ *
+ * D'où un critère en deux temps. Le seuil reste, pour les hautes générations. À
+ * quoi s'ajoute le raccourci **où qu'il se produise** : dès que l'ascendance
+ * dépasse la couleur elle-même, la monture n'est pas interchangeable avec ses
+ * semblables, et la ranger au vrac revient à jeter ce qui la distingue.
+ *
+ * Le piège à connaître, parce qu'il annule tout le gain : ces montures doivent
+ * être appariées **entre elles**. Un Doré `[Doré-Pourpre, Doré-Orchidée]` croisé
+ * avec un Doré capturé ne vise plus rien du tout — 89,47 % de Doré, zéro géneton.
+ * Il faut les deux côtés pour que le raccourci existe.
  */
 export const tracksIndividually = (
   generation: number,
   /** Générations des deux parents, ou `null` pour une monture sans ascendance. */
   parentGenerations: [number, number] | null = null
-): boolean => Math.max(generation, ...(parentGenerations ?? [])) >= INDIVIDUAL_TRACKING_FROM;
+): boolean => {
+  const ancestry = parentGenerations ?? [];
+  // Le raccourci, quelle que soit la hauteur où il se produit : une monture dont
+  // l'ascendance dépasse sa propre couleur vise au-dessus de ce que sa couleur
+  // annonce, donc elle n'est pas interchangeable avec ses semblables.
+  if (Math.max(0, ...ancestry) > generation) return true;
+  return Math.max(generation, ...ancestry) >= INDIVIDUAL_TRACKING_FROM;
+};
 
 /** Les effectifs d'une couleur en vrac, pour les générations basses. */
 export type BulkStock = {

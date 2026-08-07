@@ -312,7 +312,14 @@ export const useBreeding = (
   const mountStock = useMemo(
     () =>
       new Map(
-        [...stockBySex].map(([colorId, { males, females }]) => [colorId, males + females] as const)
+        [...stockBySex].map(
+          ([colorId, { males, females }]) =>
+            // Une couleur dont l'écurie ne tient qu'un sexe ne fait aucun couple :
+            // la créditer figerait le plan sur une étape qu'il croit faite. Voir
+            // `breedableStock`, dont c'est la règle — appliquée ici sur les
+            // effectifs déjà agrégés plutôt qu'en reparcourant l'écurie.
+            [colorId, males > 0 && females > 0 ? males + females : 0] as const
+        )
       ),
     [stockBySex]
   );

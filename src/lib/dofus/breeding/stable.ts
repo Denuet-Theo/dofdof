@@ -63,12 +63,58 @@ export const INDIVIDUAL_TRACKING_FROM = 3;
  * Ce sont précisément les bébés hors cible d'un croisement de haute génération :
  * ceux que `creditOffTarget` décrivait comme « des couleurs de génération 2 dont
  * on ne fera rien ».
+ *
+ * ## Pourquoi le seuil a fini par sauter
+ *
+ * Le critère s'est resserré deux fois, et les deux fois il ratait la même chose.
+ * `>= 3` sur toute la généalogie ratait le **Doré gen 1 né d'un Roux manqué**, qui
+ * porte `[Doré-Pourpre, Doré-Orchidée]` et vise la gen 3. Ajouter « l'ascendance
+ * dépasse la couleur » rattrapait celui-là — mais **il ne peut pas naître**, parce
+ * que ses parents, deux gen 2 nées de gen 1, partent eux-mêmes au vrac.
+ *
+ * Or le vrac n'enregistre aucune ascendance. Une monture de vrac est donc traitée
+ * comme achetée : `lineageDistribution` lui donne sa moitié entière, et son raté
+ * ne peut rendre **que sa propre couleur**. Le raccourci ne s'amorce jamais. Le
+ * verrou était toujours un cran plus bas que le correctif.
+ *
+ * D'où la règle actuelle, qui n'a plus de seuil du tout du côté des naissances :
+ * **toute monture née garde son ascendance**. Seules les montures **achetées ou
+ * capturées** vont au vrac — elles n'ont réellement pas de généalogie, et ce sont
+ * elles qu'on possède par centaines, donc la saisie en volume reste une saisie à
+ * deux chiffres.
+ *
+ * Mesuré sur dix fournées de cinquante places, parc plein et budget identique de
+ * 250 croisements, 24 graines : **10,13 Roux contre 13,75**, soit +3,63
+ * (t = 4,44), et 388 550 kamas par Roux au lieu de 525 279 — **26 % moins cher**.
+ * L'écart tient entièrement aux 12,2 croisements hors recette par partie que
+ * `driftSignals` peut alors proposer, contre **zéro** quand les gen 2 perdent leur
+ * ascendance.
+ *
+ * Le piège à connaître, parce qu'il annule tout le gain : ces montures doivent
+ * être appariées **entre elles**. Un Doré `[Doré-Pourpre, Doré-Orchidée]` croisé
+ * avec un Doré capturé ne vise plus rien du tout — 89,47 % de Doré, zéro géneton.
+ * Il faut les deux côtés pour que le raccourci existe.
+ *
+ * C'est aussi ce qui rend `driftSignals` capable de les voir : il ne lit que
+ * `individuals`, donc une monture laissée au vrac n'est signalée nulle part et
+ * personne ne songe à la réserver.
+ *
+ * Ce que ça coûte, et c'est assumé : l'écurie affiche une ligne par monture née.
+ * C'est le prix de la seule information qui distingue deux montures de même
+ * couleur, et que rien d'autre ne rattrape une fois perdue.
  */
 export const tracksIndividually = (
   generation: number,
   /** Générations des deux parents, ou `null` pour une monture sans ascendance. */
   parentGenerations: [number, number] | null = null
-): boolean => Math.max(generation, ...(parentGenerations ?? [])) >= INDIVIDUAL_TRACKING_FROM;
+): boolean => {
+  // Née chez nous : on connaît ses parents, donc elle vaut d'être suivie. C'est
+  // cette ascendance-là qui décide de ce que ses propres accouplements viseront,
+  // et le vrac est précisément ce qui l'efface.
+  if (parentGenerations !== null) return true;
+  // Achetée ou capturée : pas de généalogie à perdre, le compteur suffit.
+  return generation >= INDIVIDUAL_TRACKING_FROM;
+};
 
 /** Les effectifs d'une couleur en vrac, pour les générations basses. */
 export type BulkStock = {
@@ -127,6 +173,18 @@ export type Stable = {
 export const emptyStable = (): Stable => ({ bulk: new Map(), individuals: [] });
 
 /**
+ * Une écurie de travail, qu'on peut consommer sans toucher à la vraie.
+ *
+ * Tout ce qui projette — la fournée à charger, les fournées suivantes, une
+ * partie simulée — avance en dépensant des montures. Le faire sur l'écurie
+ * réelle effacerait le parc de l'éleveur à chaque rendu.
+ */
+export const copyStable = (stable: Stable): Stable => ({
+  bulk: new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }])),
+  individuals: stable.individuals.map((mount) => ({ ...mount })),
+});
+
+/**
  * Mâles et femelles **fertiles** d'une couleur, vrac et individus confondus.
  *
  * Les stériles sont écartées ici et non chez l'appelant : elles ne sont pas une
@@ -172,6 +230,61 @@ export const stableBySex = (stable: Stable): Map<string, BulkStock> => {
     if (mount.fertile) bump(mount.colorId, mount.sex, 1);
   }
 
+  return counts;
+};
+
+/**
+ * Le stock qu'un plan peut déduire de ses besoins : ce qui **s'apparie**.
+ *
+ * `breedingPlan` compte des exemplaires et ignore les sexes — c'est légitime en
+ * régime stationnaire, où les naissances tombent moitié-moitié. Mais une écurie
+ * réelle dévie de ce partage, et une couleur dont on ne tient qu'un sexe ne fait
+ * **aucun** couple. La compter en stock fige le plan sur une étape qu'il croit
+ * faite : il n'en produit plus, l'appariement n'aboutit pas, et rien ne rattrape
+ * puisque rien ne le signale.
+ *
+ * Mesuré en simulant : la route s'arrêtait en génération 4 dans vingt parties
+ * sur vingt, sur des couleurs de génération 2 tenues à trois mâles et zéro
+ * femelle.
+ *
+ * On ne crédite donc une couleur que si l'écurie en porte des deux
+ * sexes — et alors en entier, parce que les deux orientations d'un croisement
+ * s'utilisent aussi bien l'une que l'autre.
+ *
+ * ## « Les deux sexes présents » ne suffisait pas
+ *
+ * Le compte restait trop généreux dès que le déséquilibre penchait du même côté
+ * des deux parents d'une recette. Neuf mâles et une femelle de Doré-Pourpre face
+ * à huit mâles et deux femelles de Doré-Orchidée : **vingt exemplaires annoncés,
+ * trois couples formables**. Le plan se croyait approvisionné, **supprimait
+ * l'étape** qui produit ces couleurs, et laissait des places d'enclos vides sans
+ * rien signaler — puisque de son point de vue rien ne manquait. Relevé sur une
+ * route complète vers la gen 10 : 36 fournées sur 119 à l'enclos incomplet.
+ *
+ * On compte donc des **paires** : `2 × min(mâles, femelles)`. C'est ce qui
+ * s'apparie à coup sûr, quelle que soit la recette. Sous-estimer est sans danger
+ * — le plan produit un peu trop, le surplus reste en écurie et se recrédite à la
+ * fournée suivante, où `min` remonte. Surestimer ne se rattrape jamais : le plan
+ * cesse de produire l'étape et rien ne le lui redemande.
+ *
+ * Le premier arbitrage avait retenu l'inverse, sur une mesure en kamas qui
+ * donnait le comptage en paires 13 % plus cher. Cette mesure était aveugle : le
+ * coût d'un croisement compte les parents et le carburant, et **une place vide ne
+ * coûte rien** dans ce modèle. Or elle coûte une fournée, qui se paie pleine ou
+ * non. L'unité qui tranche est donc la fournée, pas le kama.
+ *
+ * `keepWhole` est la couleur **visée**, qu'on possède au lieu de la consommer :
+ * elle se compte en entier, son sexe n'y fait rien.
+ */
+export const breedableStock = (
+  stable: Stable,
+  keepWhole: string | null = null
+): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const [colorId, { males, females }] of stableBySex(stable)) {
+    const usable = colorId === keepWhole || (males > 0 && females > 0) ? males + females : 0;
+    if (usable > 0) counts.set(colorId, usable);
+  }
   return counts;
 };
 
@@ -232,6 +345,29 @@ export type Couple = {
   targetColorId: string;
   male: Pairing;
   female: Pairing;
+};
+
+/**
+ * Retire d'une écurie de travail les montures que ces couples mobilisent.
+ *
+ * Un accouplement rend ses deux parents **stériles**, définitivement : la
+ * monture reste en écurie, elle ne s'accouple plus. C'est pourquoi on ne la
+ * supprime pas — il lui reste le clonage et l'extraction, et les deux comptent.
+ */
+export const consumeCouples = (stable: Stable, couples: Couple[]) => {
+  for (const couple of couples) {
+    for (const side of [couple.male, couple.female]) {
+      if (side.mountId) {
+        const mount = stable.individuals.find((candidate) => candidate.id === side.mountId);
+        if (mount) mount.fertile = false;
+        continue;
+      }
+      const bulk = stable.bulk.get(side.colorId);
+      if (!bulk) continue;
+      if (side.sex === 'M') bulk.males = Math.max(0, bulk.males - 1);
+      else bulk.females = Math.max(0, bulk.females - 1);
+    }
+  }
 };
 
 /**

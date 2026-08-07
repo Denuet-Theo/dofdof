@@ -1,6 +1,7 @@
 import type { BreedingPlan } from './costs';
+import { planCouples } from './loadout';
 import {
-  formCouples,
+  copyStable,
   splitBySex,
   tracksIndividually,
   type Couple,
@@ -48,30 +49,6 @@ export type Batch = {
    * Gratuits, mais sans eux la fournée n'a pas ses montures.
    */
   clonings: { colorId: string; count: number }[];
-};
-
-/** Une écurie de travail, qu'on peut consommer sans toucher à la vraie. */
-const cloneStable = (stable: Stable): Stable => ({
-  bulk: new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }])),
-  individuals: stable.individuals.map((mount) => ({ ...mount })),
-});
-
-/** Retire de l'écurie de travail les montures que ces couples mobilisent. */
-const consume = (stable: Stable, couples: Couple[]) => {
-  for (const couple of couples) {
-    for (const side of [couple.male, couple.female]) {
-      if (side.mountId) {
-        const mount = stable.individuals.find((candidate) => candidate.id === side.mountId);
-        // Un accouplement rend ses deux parents stériles, définitivement.
-        if (mount) mount.fertile = false;
-        continue;
-      }
-      const bulk = stable.bulk.get(side.colorId);
-      if (!bulk) continue;
-      if (side.sex === 'M') bulk.males = Math.max(0, bulk.males - 1);
-      else bulk.females = Math.max(0, bulk.females - 1);
-    }
-  }
 };
 
 /**
@@ -187,6 +164,24 @@ export type BatchOptions = {
   recycleSteriles: boolean;
   /** Génération d'une couleur, pour savoir où ranger les bébés attendus. */
   generationOf: (colorId: string) => number;
+  /**
+   * Les montures à ne pas charger, comme pour `buildLoadout` : celles que
+   * `driftSignals` a repérées comme portant plus haut que leur couleur.
+   *
+   * La réserve ne valait que pour la fournée à charger, et l'oubli se voyait à
+   * l'écran : le prochain coup gardait la monture, les fournées suivantes la
+   * dépensaient. Deux panneaux, deux consignes opposées sur la même gen 1 — et
+   * c'est celle des fournées qui gagnait, puisqu'elle nommait la monture.
+   *
+   * `formCouples` sert les individus avant le vrac et les plus bas niveau
+   * devant. Pour une couleur de génération basse, un individu n'existe **que**
+   * s'il porte un raccourci — voir `tracksIndividually` — donc cette règle ne
+   * s'active exactement que là où elle est fausse : sur huit Doré de vrac et
+   * deux Doré nés d'un Ambre gen 9 manqué, ce sont les deux porteurs qui partent
+   * les premiers, sur l'étape la plus basse du plan. L'accouplement les rend
+   * stériles, et le raccourci n'existe plus.
+   */
+  reserved?: Iterable<string>;
 };
 
 /**
@@ -200,11 +195,18 @@ export type BatchOptions = {
 export const nextBatches = (
   plan: BreedingPlan,
   stable: Stable,
-  { capacity, count = 2, recycleSteriles, generationOf }: BatchOptions
+  { capacity, count = 2, recycleSteriles, generationOf, reserved = [] }: BatchOptions
 ): Batch[] => {
   if (capacity < 2) return [];
 
-  const working = cloneStable(stable);
+  const working = copyStable(stable);
+  // Retirées de l'écurie de travail plutôt que filtrées à l'appariement : une
+  // monture réservée ne doit peser sur aucune des fournées projetées, ni sur les
+  // clonages qu'elles décident.
+  const held = new Set(reserved);
+  if (held.size > 0) {
+    working.individuals = working.individuals.filter((mount) => !held.has(mount.id));
+  }
   const batches: Batch[] = [];
   /**
    * Clonages décidés à la fin d'une fournée, à rattacher à la **suivante** :
@@ -219,25 +221,14 @@ export const nextBatches = (
   const sterile = new Map<string, number>();
 
   for (let index = 0; index < count; index += 1) {
-    const couples: Couple[] = [];
-    let used = 0;
+    // Le remplissage est celui de la fournée à charger, et c'est le même code :
+    // deux panneaux qui descendraient les étapes chacun à sa façon finiraient
+    // par conseiller deux choses différentes sur le même écran.
+    const { couples, used } = planCouples(plan, working, capacity, remaining);
 
-    for (const step of plan.steps) {
-      if (used + 2 > capacity) break;
-      const left = remaining.get(step.colorId) ?? 0;
-      if (left <= 0) continue;
-
-      const room = Math.floor((capacity - used) / 2);
-      const formed = formCouples(working, step.colorId, step.recipe, Math.min(left, room));
-      if (formed.length === 0) continue;
-
-      consume(working, formed);
-      couples.push(...formed);
-      used += formed.length * 2;
-      remaining.set(step.colorId, left - formed.length);
-
-      for (const parent of step.recipe) {
-        sterile.set(parent, (sterile.get(parent) ?? 0) + formed.length);
+    for (const couple of couples) {
+      for (const side of [couple.male, couple.female]) {
+        sterile.set(side.colorId, (sterile.get(side.colorId) ?? 0) + 1);
       }
     }
 

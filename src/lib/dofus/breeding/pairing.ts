@@ -1,5 +1,5 @@
 import { genetonsForCrossing, targetGenerationRate, type BreedingColor } from './costs';
-import { lineageDistribution, LINEAGE_SHARE } from './lineage';
+import { lineageDistribution } from './lineage';
 import type { Individual, Sex, Stable } from './stable';
 
 /**
@@ -221,6 +221,30 @@ const compositionIndexAt = (colors: BreedingColor[], generation: number) => {
 };
 
 /**
+ * Le même index, **toutes générations confondues**.
+ *
+ * La cible ne se lit qu'à une génération, mais l'échec, lui, produit des
+ * recombinaisons à toutes les générations en dessous — voir `matingOutcomes`. Il
+ * faut donc pouvoir demander « quelle couleur nomment ces deux teintes » sans
+ * savoir d'avance à quelle génération répondre.
+ *
+ * Le « premier arrivé » de `compositionIndex` ne tranche jamais rien ici :
+ * vérifié sur les trois familles, aucune paire de teintes ne nomme deux couleurs
+ * différentes — 63 clés pour la dragodinde, 162 pour le muldo, 157 pour le
+ * volkorne, zéro collision.
+ */
+const anyGenerationIndexCache = new WeakMap<BreedingColor[], Map<string, string>>();
+
+const compositionIndexAnywhere = (colors: BreedingColor[]) => {
+  let index = anyGenerationIndexCache.get(colors);
+  if (!index) {
+    index = compositionIndex(colors);
+    anyGenerationIndexCache.set(colors, index);
+  }
+  return index;
+};
+
+/**
  * Les couleurs que le croisement peut rendre à la génération visée.
  *
  * Le mécanisme est celui que `lineage.ts` appelle **recombinaison croisée** :
@@ -289,10 +313,15 @@ export type PairOutlook = {
  * 2. **La cible dépasse la génération la plus haute de la famille.** Deux
  *    montures dont l'ascendance porte déjà une gen 10 ne visent pas une gen 11 :
  *    elle n'existe pas. Il n'y a alors plus aucune génération à gagner, et le
- *    jeu bascule dans le régime que `lineage.ts` appelle la **recopie** — la
- *    masse se répartit sur les cases survivantes, toutes lignées confondues.
- *    C'est un croisement qu'on ne monte pas volontairement, donc pas un
- *    raccourci.
+ *    jeu bascule dans le régime que `lineage.ts` appelle la **recopie**.
+ *
+ * Ce second cas n'est pas la seule porte vers la recopie, et c'est même la plus
+ * rare. On y tombe bien plus souvent avec une cible parfaitement licite que
+ * **aucune paire ne nomme** : deux Indigo visent la gen 2, mais « Indigo et
+ * Indigo » n'est pas une couleur. `pairOutlook` répond alors normalement, avec
+ * une liste de cibles vide, et `matingOutcomes` rend les 100 % à l'ascendance.
+ * Refuser de répondre serait ici une faute : c'est exactement le croisement
+ * d'une purification.
  */
 /**
  * Ce qu'un couple vise, **hors niveaux** : tout sauf le taux de réussite.
@@ -345,18 +374,29 @@ const pairShape = (
     return null;
   }
 
+  const targetColors = pairTargetColors(male, female, colors, targetGeneration);
+
   const shape: PairShape = {
     targetGeneration,
     leap: targetGeneration - byRecipe,
     // L'ascendance décide de la **validité** du croisement, les parents de la
     // quantité : quatre génétons sur deux parents gen 2, quelle que soit la
     // génération visée. Voir `genetonsForCrossing`.
-    genetons: genetonsForCrossing(
-      targetGeneration,
-      [generations.get(male.colorId)!, generations.get(female.colorId)!],
-      targetGeneration - 1
-    ),
-    targetColors: pairTargetColors(male, female, colors, targetGeneration),
+    //
+    // Sauf quand la génération visée n'est nommée par aucune paire : le bébé naît
+    // alors forcément en dessous, et le jeu ne paie rien. Relevé sur deux Indigo
+    // capturés (issue #68), où la fenêtre annonce « Indigo 100 %, 0 géneton » —
+    // le jeu compte sur la génération que l'enfant **aura**, pas sur celle qu'on
+    // visait.
+    genetons:
+      targetColors.length === 0
+        ? 0
+        : genetonsForCrossing(
+            targetGeneration,
+            [generations.get(male.colorId)!, generations.get(female.colorId)!],
+            targetGeneration - 1
+          ),
+    targetColors,
   };
 
   byPair.set(key, shape);
@@ -416,25 +456,66 @@ export type MatingOutcome = {
 /**
  * Ce que l'accouplement peut donner, dans la forme où le jeu l'affiche.
  *
- * C'est la fenêtre d'accouplement reconstituée, et elle l'est **exactement** sur
- * le relevé #59 : 48,3 % sur Doré-Amande, puis 21,81 % / 21,81 % / 8,08 % sur
- * Amande, Doré et Ébène-Orchidée. Rien de nouveau n'est calculé ici — la masse
- * de réussite vient de `targetGenerationRate`, le reste de `lineageDistribution`
- * partagé moitié-moitié entre les deux lignées, ce que `lineageValue` faisait
- * déjà pour chiffrer. Seule la présentation change : des couleurs et des
- * probabilités plutôt qu'une valeur en kamas.
+ * C'est la fenêtre d'accouplement reconstituée, et elle l'est **au centième sur
+ * les huit fenêtres relevées par l'issue #68** — couleurs, probabilités et
+ * partage cible/autres compris. Ces huit-là couvrent ce que les relevés
+ * précédents laissaient ouvert : des parents composés comme simples, avec et
+ * sans ascendance, une à quatre couleurs cibles, un saut de deux générations, et
+ * le cas où il n'y a rien à gagner.
  *
- * ## La part qui est une approximation
+ * ## Ce que la cible prend
  *
- * Quand **plusieurs** couleurs occupent la génération visée, le jeu ne les
- * donne pas à parts égales : deux parents niveau 69 affichaient
- * 40,02 % + 5,34 % + 5,34 % pour trois couleurs cibles, et non trois fois
- * 16,68 %. Le partage retenu ici suit les poids de la recombinaison, qui
- * reproduisent l'écart de rang mais pas forcément sa valeur. Le **total** de la
- * ligne « Génération cible », lui, est exact — c'est celui de la formule.
+ * `targetGenerationRate` donne le **total** de la ligne « Génération cible », et
+ * les poids de la recombinaison en donnent le **partage**. Ce partage était
+ * annoncé ici comme une approximation ; il ne l'est pas. Sur le relevé à trois
+ * couleurs — 33,06 % / 12,40 % / 4,65 % — les poids valent 64 / 24 / 9, et le
+ * rapport tombe juste aux trois chiffres. Sur celui à quatre, de même. Le
+ * contre-exemple qui fondait la réserve (40,02 % + 5,34 % + 5,34 %) s'y range
+ * aussi : ce sont les poids 225 / 30 / 30 d'une lignée à parent simple et
+ * grands-parents composés.
  *
- * Sans conséquence pour ce à quoi cette liste sert : saisir ce qui est né. On
- * clique sur la couleur obtenue, pas sur sa probabilité.
+ * ## Ce que l'échec prend, et pourquoi ce n'est pas moitié-moitié
+ *
+ * On lisait l'échec comme un partage 50/50 entre les deux lignées. C'est le cas
+ * particulier d'une loi plus large, et il ne se voyait pas parce que les relevés
+ * dont on disposait tombaient tous dedans. La masse d'échec se répartit entre
+ * **deux sortes d'issues** :
+ *
+ * 1. **Une couleur de l'ascendance**, tirée dans une lignée. Chaque lignée pèse
+ *    **1**, et les parts se normalisent à l'intérieur (voir `lineage.ts`).
+ * 2. **Une recombinaison croisée** — une teinte prise à gauche, l'autre à
+ *    droite — qui nomme une couleur d'une génération **en dessous** de la cible.
+ *    Chacune pèse le produit des deux parts.
+ *
+ * Le tout se normalise sur `2 + w`, où `w` est la somme des poids des
+ * recombinaisons retenues. Quand aucune n'aboutit — le cas de tous les relevés
+ * antérieurs — `w` vaut zéro, le diviseur retombe à 2, et on retrouve exactement
+ * le partage moitié-moitié. C'est pourquoi l'erreur est restée invisible : elle
+ * ne se manifeste que lorsque les deux lignées portent des teintes qui se
+ * composent **sans atteindre la cible**.
+ *
+ * Le relevé qui tranche : Doré [Amande gen 3, Doré] × Orchidée [Ébène,
+ * Orchidée], cible gen 4. Les quatre recombinaisons donnent deux couleurs gen 4
+ * — la cible — et deux couleurs gen 2, Doré-Orchidée et Doré-Ébène, qui pèsent
+ * ensemble 88/121. Le jeu les affiche à 9,68 % et 3,63 %, et rabaisse d'autant
+ * les couleurs simples : 13,31 % au lieu des 18,15 % que le partage 50/50
+ * prédisait. Diviseur `2 + 88/121`, et les six lignes tombent au centième.
+ *
+ * ## Quand il n'y a rien à gagner
+ *
+ * Deux Indigo capturés visent la gen 2, mais aucune couleur ne s'appelle
+ * « Indigo et Indigo » : la cible est vide. Le jeu ne perd pas cette masse pour
+ * autant — il affiche **Indigo 100 %**, et zéro géneton. C'est le régime que
+ * `lineage.ts` appelle la **recopie**, et il n'a rien d'un cas dégénéré : c'est
+ * exactement ce que fait une purification, puisque purifier consiste à croiser
+ * une couleur avec elle-même. Le bébé né de ce croisement porte bien
+ * `[Indigo, Indigo]` en généalogie — relevé sur la monture obtenue, ce qui
+ * confirme que la purification concentre réellement la lignée.
+ *
+ * On annulait ici la masse de réussite sans la rendre. La liste ne sommait plus
+ * à 1 — 69,7 % sur deux Indigo du vrac — et `drawOutcome` versait tout le manque
+ * sur sa **dernière** ligne, faute de mieux : la simulation créditait donc 30 %
+ * de ces croisements à la couleur la **moins** probable de l'ascendance.
  */
 export const matingOutcomes = (
   male: Mate,
@@ -452,23 +533,49 @@ export const matingOutcomes = (
     else outcomes.set(colorId, { colorId, probability, kind });
   };
 
+  // Sans couleur à la génération visée, il n'y a pas de réussite possible : toute
+  // la masse revient à la recopie.
+  const targetMass = outlook.targetColors.length > 0 ? outlook.successRate : 0;
   const totalWeight = outlook.targetColors.reduce((sum, color) => sum + color.weight, 0);
   for (const color of outlook.targetColors) {
     add(
       color.colorId,
-      outlook.successRate * (totalWeight > 0 ? color.weight / totalWeight : 1 / outlook.targetColors.length),
+      targetMass * (totalWeight > 0 ? color.weight / totalWeight : 1 / outlook.targetColors.length),
       'target'
     );
   }
 
-  // La masse d'échec se partage exactement moitié-moitié entre les deux lignées,
-  // et les parts se normalisent à l'intérieur de chacune. Voir `lineage.ts`.
-  const failureMass = 1 - outlook.successRate;
-  for (const mate of [male, female]) {
-    const distribution = lineageDistribution(mate.colorId, mate.parents);
-    for (const [colorId, share] of distribution) {
-      add(colorId, LINEAGE_SHARE * share * failureMass, 'other');
+  const lineages = [
+    lineageDistribution(male.colorId, male.parents),
+    lineageDistribution(female.colorId, female.parents),
+  ];
+
+  // Les recombinaisons qui nomment une couleur **ailleurs** qu'à la génération
+  // visée. Celles qui la nomment sont la réussite, déjà comptée ci-dessus ; et
+  // aucune ne peut la dépasser, la cible valant par construction le maximum de
+  // l'ascendance plus un.
+  const index = compositionIndexAnywhere(colors);
+  const crossings = new Map<string, number>();
+  let crossingWeight = 0;
+  for (const [colorA, shareA] of lineages[0]) {
+    for (const [colorB, shareB] of lineages[1]) {
+      const colorId = index.get([colorA, colorB].sort().join('+'));
+      if (!colorId || generations.get(colorId) === outlook.targetGeneration) continue;
+      const weight = shareA * shareB;
+      crossings.set(colorId, (crossings.get(colorId) ?? 0) + weight);
+      crossingWeight += weight;
     }
+  }
+
+  const failureMass = 1 - targetMass;
+  const total = lineages.length + crossingWeight;
+  for (const distribution of lineages) {
+    for (const [colorId, share] of distribution) {
+      add(colorId, (share / total) * failureMass, 'other');
+    }
+  }
+  for (const [colorId, weight] of crossings) {
+    add(colorId, (weight / total) * failureMass, 'other');
   }
 
   return [...outcomes.values()].sort(

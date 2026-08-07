@@ -105,9 +105,10 @@ const BreedingBirthDialog = ({
    *
    * Les deux **orientations** se rangent ensemble : « ♂ Ébène × ♀ Orchidée » et
    * « ♂ Orchidée × ♀ Ébène » sont des montures différentes mais le même
-   * croisement. Les issues n'en dépendent pas — la masse d'échec se partage
-   * moitié-moitié entre les deux lignées, sans égard au sexe — et le nom non
-   * plus, depuis qu'il range ses deux codes. Les séparer doublait l'écran pour
+   * croisement. Les issues n'en dépendent pas — `matingOutcomes` est symétrique
+   * d'un bout à l'autre, les recombinaisons croisées comprises, puisqu'une paire
+   * de teintes se lit triée — et le nom non plus, depuis qu'il range ses deux
+   * codes. Les séparer doublait l'écran pour
    * afficher deux fois la même chose.
    */
   const groups = useMemo(() => {

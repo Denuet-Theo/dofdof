@@ -71,18 +71,29 @@
  *
  * ## Ce que ceci ne décrit pas
  *
- * **Les recombinaisons croisées.** Quand les deux lignées portent des couleurs
- * composées **différentes**, le bébé peut sortir avec une couleur qui n'est dans
- * aucune des deux généalogies — un composant pris à gauche, l'autre à droite.
- * Sur le relevé 4, cela emporte 26 % de la masse d'échec. Le modèle ci-dessous
- * ne les produit pas : il surestime donc les couleurs de l'ascendance quand ce
- * cas se présente. Les croisements d'un plan propre n'y tombent qu'en génération
- * paire.
+ * **Les recombinaisons croisées.** Quand les deux lignées portent des teintes
+ * qui se composent, le bébé peut sortir avec une couleur qui n'est dans aucune
+ * des deux généalogies — un composant pris à gauche, l'autre à droite. Sur le
+ * relevé 4, cela emporte 26 % de la masse d'échec.
  *
- * **Le régime « recopie ».** Quand aucune génération n'est à gagner, le jeu ne
- * partage plus par lignée : la masse restante se répartit sur les cases
- * survivantes, toutes lignées confondues. Mesuré au centième sur le relevé 6.
- * Ce régime décrit un appariement qu'on ne monte pas volontairement.
+ * Leur loi est **connue depuis l'issue #68** et `matingOutcomes` l'applique :
+ * chaque lignée pèse 1, chaque recombinaison qui nomme une couleur sous la cible
+ * pèse le produit des deux parts, et le tout se normalise sur `2 + w`. Les
+ * fonctions ci-dessous, elles, ne la produisent pas — et ne le peuvent pas :
+ * `lineageValue` ne voit qu'**une** lignée à la fois, là où une recombinaison
+ * naît de la rencontre des deux. Le chiffrage de `costs.ts` surestime donc les
+ * couleurs de l'ascendance dès que ce cas se présente ; c'est un chantier à
+ * part, qui demande de chiffrer un croisement plutôt qu'une lignée.
+ *
+ * **Le régime « recopie ».** Quand aucune génération n'est à gagner, la masse de
+ * réussite n'a nulle part où aller et retombe entièrement sur les cases de
+ * l'ascendance. Mesuré au centième sur le relevé 6, puis confirmé par #68 sur
+ * deux Indigo capturés — la fenêtre annonce Indigo 100 %, et zéro géneton.
+ *
+ * On y voyait « un appariement qu'on ne monte pas volontairement ». C'est
+ * l'inverse : **c'est la purification**. Croiser une couleur avec elle-même n'a
+ * par définition aucune génération à gagner, donc tout ce que l'outil conseille
+ * sur la concentration des lignées repose sur ce régime-là.
  */
 
 /** Poids de position : le parent pèse 5, chaque grand-parent 3. */
@@ -133,7 +144,16 @@ export const isComposite = (colorId: string) =>
 export const slotWeight = (position: number, colorId: string) =>
   position * (isComposite(colorId) ? COMPOSITE_FACTOR : 1);
 
-/** Part de la masse d'échec qui revient à chaque lignée. */
+/**
+ * Part de la masse d'échec qui revient à chaque lignée, **hors recombinaison
+ * croisée**.
+ *
+ * Les deux lignées pèsent 1 chacune, d'où la moitié quand elles sont seules en
+ * lice. Elles ne le sont pas toujours : voir `matingOutcomes`, qui divise par
+ * `2 + w`. Cette constante reste juste pour `lineageValue`, qui chiffre une
+ * lignée sans connaître celle d'en face — et fausse d'autant, comme dit plus
+ * haut.
+ */
 export const LINEAGE_SHARE = 0.5;
 
 /** Une case d'ascendance : sa couleur, et ce qu'elle coûterait à se procurer. */
@@ -150,6 +170,12 @@ export type LineageSlot = {
  * si bien que leurs poids se cumulent sur une seule entrée. La lignée cesse de
  * s'éparpiller — et comme la couleur cible obtenue suit les poids de la lignée
  * d'en face, le tirage se concentre au lieu de se diluer.
+ *
+ * Ce raisonnement se lisait sur les poids seuls ; il est **vérifié en jeu**
+ * depuis l'issue #68. Deux Indigo capturés, sans généalogie affichée ni d'un
+ * côté ni de l'autre, rendent un Indigo dont la fiche d'étable porte bien
+ * `[Indigo, Indigo]`. C'est ce qui donne sa valeur à la purification : le bébé
+ * ne se contente pas de reprendre la couleur, il en fait une lignée pure.
  *
  * Purifier une génération **impaire** est doublement gagnant : ces couleurs sont
  * simples, donc déjà de poids plein, et concentrer leur lignée porte la part

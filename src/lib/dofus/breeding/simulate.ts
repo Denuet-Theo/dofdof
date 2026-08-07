@@ -447,6 +447,59 @@ const playOnce = (
     const batch = planCouples(plan, stable, capacity - used);
     blocked = [...new Set(batch.blocked.flatMap((entry) => entry.missing))];
 
+    /**
+     * Les places qui restent, comblées en capturant les feuilles qui bloquent.
+     *
+     * Le diagnostic, relevé sur une route complète : les fournées incomplètes ne
+     * le sont ni parce que le plan est vide ni parce qu'il demande trop peu — il
+     * réclamait dix-neuf étapes — mais parce que **les gen 1 sont épuisées**.
+     * `ebene_orchidee <- orchidee`, `dore_orchidee <- orchidee`, sur une écurie
+     * qui ne portait plus que quatre Doré. Le plan bloque en cascade jusqu'en
+     * haut, et les trois quarts du parc restent vides.
+     *
+     * Le rachat général ne s'en occupait pas : il ne se déclenche que sur une
+     * fournée *entièrement* vide, or il en restait deux couples. Et l'élargir a
+     * été essayé — il rachète alors toute la liste du plan, hautes générations
+     * comprises, ce qui revenait 22 % plus cher.
+     *
+     * On ne capture donc que ce qui bloque **et** se capture : les feuilles de
+     * génération 1, par paires, ce qui est toujours possible et bon marché. Une
+     * capture n'est pas un accouplement : elle ne compte pas au budget de
+     * croisements, seulement en kamas.
+     */
+    for (let appoint = 0; appoint < 4; appoint += 1) {
+      if (used + batch.used + 2 > capacity) break;
+
+      const feuilles = [...new Set(batch.blocked.flatMap((entry) => entry.missing))].filter(
+        (colorId) => (context.generations.get(colorId) ?? 9) === 1
+      );
+      if (feuilles.length === 0) break;
+
+      for (const colorId of feuilles) {
+        const unite = Math.max(context.costOf(colorId), 0);
+        for (const sex of ['M', 'F'] as Sex[]) {
+          store(stable, colorId, null, sex, context.generations, serial++);
+          cost += unite;
+        }
+      }
+
+      const appointBatch = planCouples(plan, stable, capacity - used - batch.used);
+      if (appointBatch.couples.length === 0) break;
+      batch.couples.push(...appointBatch.couples);
+      batch.used += appointBatch.used;
+      batch.blocked = appointBatch.blocked;
+      blocked = [...new Set(appointBatch.blocked.flatMap((entry) => entry.missing))];
+    }
+
+    // Le rachat ne se déclenche que sur une fournée **entièrement** vide, si bien
+    // qu'un seul couple formé suffit à le bloquer : l'enclos peut tourner à deux
+    // accouplements sur vingt-cinq places sans que rien ne le signale.
+    //
+    // Racheter dès qu'il reste de la place a été essayé et mesuré : la gen 10
+    // revenait **22 % plus cher**, parce qu'on capture alors des gen 1 en
+    // permanence là où l'ancien seuil n'achetait qu'au blocage. Le comportement
+    // reste donc celui-ci, faute d'une règle qui remplisse l'enclos sans acheter
+    // à tout va.
     if (batch.couples.length === 0 && used === 0) {
       // Rien à charger : on réarme les stériles, puis on rachète ce que le plan
       // demande. Un éleveur fait exactement cela, et l'ignorer ferait échouer des

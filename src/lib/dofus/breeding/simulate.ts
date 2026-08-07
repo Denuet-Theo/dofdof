@@ -1,5 +1,6 @@
 import { matingOutcomes, type Mate } from './pairing';
-import { availableMoves, type MoveContext } from './next-move';
+import { availableMoves, type Move, type MoveContext } from './next-move';
+import { plannedMove, type PlanContext } from './plan-move';
 import { cloneOptions, type CloneContext } from './cloning';
 import { carriedGeneration } from './naming';
 import { tracksIndividually, type Individual, type Sex, type Stable } from './stable';
@@ -58,6 +59,11 @@ export type SimulationContext = MoveContext &
     starterCost: number;
     /** Les couleurs de génération 1 qu'on rachète — plusieurs, pour varier les lignées. */
     starterColorIds: string[];
+    /**
+     * De quoi recalculer le plan sur le stock courant. Requis par la politique
+     * `'plan'`, ignoré par le glouton. Voir `plan-move.ts`.
+     */
+    planFor?: PlanContext['planFor'];
   };
 
 export type SimulationOptions = {
@@ -67,6 +73,14 @@ export type SimulationOptions = {
   /** Garde-fou : au-delà, la partie est déclarée non aboutie. */
   maxCrossings?: number;
   seed?: number;
+  /**
+   * Qui choisit le coup suivant.
+   *
+   * `'greedy'` par défaut — la politique en place, dont on mesure le
+   * remplaçant. `'plan'` suit les étapes de `breedingPlan`. Voir #85 : les deux
+   * cohabitent le temps de savoir laquelle gagne, et rien n'est supprimé avant.
+   */
+  policy?: 'greedy' | 'plan';
 };
 
 /**
@@ -92,6 +106,16 @@ export type RunOutcome = {
   enclosHours: number;
   /** La plus haute génération réellement obtenue. */
   top: number;
+  /**
+   * Croisements lancés dont la cible dépassait ce que la recette annonçait —
+   * le raccourci de #59, lu par `pairTargetGeneration` sur l'ascendance.
+   *
+   * Mesuré parce que #85 en fait un cas marginal, « de l'opportunisme, pas du
+   * routage », qu'on signalerait plutôt que de le planifier. S'il s'avère que
+   * la montée passe majoritairement par là, ce n'est pas un cas marginal : c'est
+   * le moteur, et un routage par l'arbre ne peut structurellement pas le voir.
+   */
+  leaps: number;
   stall: StallDiagnosis | null;
 };
 
@@ -106,6 +130,8 @@ export type SimulationResult = {
   enclosHours: Distribution;
   /** La génération atteinte, sur **toutes** les parties : c'est là qu'on voit caler. */
   top: Distribution;
+  /** Croisements passés par le raccourci de #59. Voir `RunOutcome.leaps`. */
+  leaps: Distribution;
   /**
    * Les couleurs qui manquaient le plus souvent au moment du blocage, les plus
    * fréquentes devant. C'est la liste qui dit ce que la politique aurait dû
@@ -289,28 +315,57 @@ const recycle = (stable: Stable, context: SimulationContext, random: () => numbe
  */
 const CLONE_THRESHOLD = 12;
 
+/**
+ * Le coup suivant, selon la politique mesurée.
+ *
+ * Les deux se comparent ici et nulle part ailleurs, ce qui est tout l'objet de
+ * la manœuvre : `'greedy'` classe les croisements possibles et prend le
+ * meilleur, `'plan'` descend les étapes de `breedingPlan` et prend la première
+ * réalisable. Même écurie, même graine, même barème de coûts — seul le choix du
+ * coup change.
+ *
+ * `'plan'` sans `planFor` retomberait silencieusement sur le glouton et
+ * rendrait une mesure fausse au lieu d'une erreur : on préfère l'erreur.
+ */
+const nextMoveOf = (
+  stable: Stable,
+  objective: ObjectiveId,
+  context: SimulationContext,
+  { policy = 'greedy' }: SimulationOptions
+): Move | null => {
+  if (policy === 'plan') {
+    if (!context.planFor) {
+      throw new Error("La politique 'plan' demande un `planFor` dans le contexte.");
+    }
+    return plannedMove(stable, { ...context, planFor: context.planFor });
+  }
+  return availableMoves(stable, objective, context, 1)[0] ?? null;
+};
+
 /** Une partie : on joue la politique jusqu'à la génération visée, ou jusqu'au budget. */
 const playOnce = (
   start: Stable,
   context: SimulationContext,
-  { targetGeneration, objective, maxCrossings = 300 }: SimulationOptions,
+  options: SimulationOptions,
   random: () => number
 ): RunOutcome => {
+  const { targetGeneration, objective, maxCrossings = 300 } = options;
   const stable = copyStable(start);
   let cost = 0;
   let enclosHours = 0;
   let crossings = 0;
   let serial = 0;
   let top = 0;
+  let leaps = 0;
 
   while (crossings < maxCrossings) {
     if (stable.individuals.filter((mount) => !mount.fertile).length >= CLONE_THRESHOLD) {
       recycle(stable, context, random);
     }
 
-    const moves = availableMoves(stable, objective, context, 1);
+    const next = nextMoveOf(stable, objective, context, options);
 
-    if (moves.length === 0) {
+    if (!next) {
       recycle(stable, context, random);
       // Plus rien d'accouplable : on rachète de quoi repartir, ce qu'un éleveur
       // fait. L'ignorer ferait échouer des parties qui n'échouent pas.
@@ -325,7 +380,8 @@ const playOnce = (
       continue;
     }
 
-    const move = moves[0];
+    const move = next;
+    if (move.leap > 0) leaps += 1;
     cost += move.cost;
     enclosHours += move.enclosHours;
     crossings += 1;
@@ -351,7 +407,7 @@ const playOnce = (
     const generation = context.generations.get(colorId) ?? 0;
     top = Math.max(top, generation);
     if (generation >= targetGeneration) {
-      return { reached: true, crossings, cost, enclosHours, top, stall: null };
+      return { reached: true, crossings, cost, enclosHours, top, leaps, stall: null };
     }
   }
 
@@ -362,6 +418,7 @@ const playOnce = (
     cost,
     enclosHours,
     top,
+    leaps,
     stall: {
       frontier,
       missing: missingForFrontier(stable, frontier, context),
@@ -403,6 +460,7 @@ export const simulatePolicy = (
     crossings: distribution(reached.map((result) => result.crossings)),
     enclosHours: distribution(reached.map((result) => result.enclosHours)),
     top: distribution(results.map((result) => result.top)),
+    leaps: distribution(results.map((result) => result.leaps)),
     missing: [...missingCounts]
       .map(([colorId, count]) => ({ colorId, runs: count }))
       .sort((a, b) => b.runs - a.runs),

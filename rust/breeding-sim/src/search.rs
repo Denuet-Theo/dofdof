@@ -99,6 +99,24 @@ enum Action {
     SacrificeSterile(usize),
 }
 
+/// Les réglages uniformes d'une fournée, décidés hors de la recherche.
+#[derive(Clone, Copy, Debug)]
+pub struct Strategy {
+    pub band: usize,
+    pub level: u16,
+    pub optimakina_from: u8,
+}
+
+impl Default for Strategy {
+    fn default() -> Self {
+        Self {
+            band: 0,
+            level: 0,
+            optimakina_from: 11,
+        }
+    }
+}
+
 pub struct SearchConfig {
     /// Mutations tirées par fournée.
     pub iterations: usize,
@@ -117,7 +135,7 @@ pub struct Searcher {
     /// signatures reviennent sans cesse d'une fournée à l'autre — même
     /// raisonnement que le `shapeCache` du TypeScript, et sans lui la recherche
     /// passe son temps à recalculer des lignées.
-    cache: HashMap<(MateSignature, MateSignature), Option<Arc<PairDelta>>>,
+    cache: HashMap<(MateSignature, MateSignature, u16, u8), Option<Arc<PairDelta>>>,
     pub config: SearchConfig,
 }
 
@@ -133,6 +151,9 @@ struct State {
     fertile_free: Vec<usize>,
     sterile_free: Vec<usize>,
     crossings: usize,
+    /// Les Optimakina engagées, suivies à part : leur prix dépend du rang visé
+    /// par chaque croisement, donc il ne se déduit pas du nombre de places.
+    optimakina_cost: i64,
 }
 
 #[derive(Clone, Copy)]
@@ -156,23 +177,45 @@ impl Searcher {
         economy: &Economy,
         male: &Mate,
         female: &Mate,
+        strategy: Strategy,
     ) -> Option<Arc<PairDelta>> {
-        let key = ((male.color, male.parents), (female.color, female.parents));
+        // Le niveau et le seuil d'Optimakina entrent dans la clé : ils changent
+        // le taux, donc la distribution, donc tout ce que le delta porte.
+        let key = (
+            (male.color, male.parents),
+            (female.color, female.parents),
+            strategy.level,
+            strategy.optimakina_from,
+        );
         if let Some(hit) = self.cache.get(&key) {
             return hit.clone();
         }
-        let computed = PairDelta::of(catalog, economy, male, female).map(Arc::new);
+        let computed = PairDelta::of(
+            catalog,
+            economy,
+            male,
+            female,
+            strategy.level,
+            strategy.optimakina_from,
+        )
+        .map(Arc::new);
         self.cache.insert(key, computed.clone());
         computed
     }
 
     /// Compose la fournée que la fonction de valeur préfère.
-    pub fn plan(&mut self, view: &BatchView<'_>, rng: &mut Rng, value: &dyn ValueFn) -> BatchPlan {
+    pub fn plan(
+        &mut self,
+        view: &BatchView<'_>,
+        rng: &mut Rng,
+        value: &dyn ValueFn,
+        strategy: Strategy,
+    ) -> BatchPlan {
         let catalog = view.catalog;
         let economy = view.economy;
 
         let (fertile, sterile) = partition(catalog, economy, view.stable);
-        let candidates = self.candidates(catalog, economy, &fertile);
+        let candidates = self.candidates(catalog, economy, &fertile, strategy);
         if candidates.is_empty() && sterile.is_empty() {
             return BatchPlan::default();
         }
@@ -183,6 +226,7 @@ impl Searcher {
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),
             crossings: 0,
+            optimakina_cost: 0,
         };
         let mut best = value.value(&state.census, catalog, economy);
 
@@ -193,7 +237,7 @@ impl Searcher {
             };
 
             mutation.apply(&mut state, &candidates, &fertile, &sterile, economy);
-            let scored = if feasible(&state, economy) {
+            let scored = if feasible(&state, economy, strategy) {
                 value.value(&state.census, catalog, economy)
             } else {
                 f64::NEG_INFINITY
@@ -206,7 +250,14 @@ impl Searcher {
             }
         }
 
-        materialise(&state, &candidates, &fertile, &sterile, view.stable.len())
+        materialise(
+            &state,
+            &candidates,
+            &fertile,
+            &sterile,
+            view.stable.len(),
+            strategy,
+        )
     }
 
     fn candidates(
@@ -214,6 +265,7 @@ impl Searcher {
         catalog: &Catalog,
         economy: &Economy,
         fertile: &[Group],
+        strategy: Strategy,
     ) -> Vec<Candidate> {
         let mate_of = |group: &Group| Mate {
             color: group.color,
@@ -280,7 +332,7 @@ impl Searcher {
 
         let mut out = Vec::with_capacity(pairs.len());
         for (male_side, female_side, male, female) in pairs {
-            if let Some(delta) = self.delta(catalog, economy, &male, &female) {
+            if let Some(delta) = self.delta(catalog, economy, &male, &female, strategy) {
                 out.push(Candidate {
                     male: male_side,
                     female: female_side,
@@ -371,6 +423,7 @@ fn apply_effects(
             }
             state.census.apply_crossing(&candidate.delta);
             state.crossings += 1;
+            state.optimakina_cost += candidate.delta.optimakina_cost;
         }
         Action::Clone(a, b) => {
             state.sterile_free[a] -= 1;
@@ -418,6 +471,7 @@ fn revert_effects(
                 }
             }
             state.crossings -= 1;
+            state.optimakina_cost -= candidate.delta.optimakina_cost;
         }
         Action::Clone(a, b) => {
             state.sterile_free[a] += 1;
@@ -442,12 +496,19 @@ fn revert_effects(
     }
 }
 
-fn feasible(state: &State, economy: &Economy) -> bool {
+fn feasible(state: &State, economy: &Economy, strategy: Strategy) -> bool {
     if state.crossings > economy.crossings_per_batch {
         return false;
     }
+    let level = if strategy.level == 0 {
+        economy.mount_level
+    } else {
+        strategy.level
+    };
+    // La fournée ne se paie que si elle porte un croisement — jauges et
+    // Mangeoire comprises, puisque c'est l'enclos qu'on nourrit.
     let batch = if state.crossings > 0 {
-        economy.batch_cost as f64
+        (economy.batch_cost_for(strategy.band, level) + state.optimakina_cost) as f64
     } else {
         0.0
     };
@@ -603,8 +664,13 @@ fn materialise(
     fertile: &[Group],
     sterile: &[Group],
     stable_len: usize,
+    strategy: Strategy,
 ) -> BatchPlan {
-    let mut plan = BatchPlan::default();
+    let mut plan = BatchPlan {
+        band: strategy.band,
+        level: strategy.level,
+        ..Default::default()
+    };
 
     // La recherche a raisonné sur des compteurs ; on rattache ici des montures
     // concrètes. Toutes les membres d'un groupe sont interchangeables par
@@ -630,6 +696,7 @@ fn materialise(
                 let female = take(candidate.female, Sex::Female, &mut plan);
                 if let (Some(male), Some(female)) = (male, female) {
                     plan.crossings.push([male, female]);
+                    plan.optimakina.push(candidate.delta.optimakina_cost > 0);
                 }
             }
             Action::Clone(a, b) => {
@@ -662,21 +729,38 @@ fn materialise(
 pub struct Searching<V: ValueFn> {
     pub searcher: Searcher,
     pub value: V,
+    /// Les trois réglages uniformes de la fournée. Ils viennent du génome, pas
+    /// de la recherche : voir `breeding-neat`, `Genome`.
+    pub band: usize,
+    pub level: u16,
+    /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
+    pub optimakina_from: u8,
 }
 
 impl<V: ValueFn> Searching<V> {
     pub fn new(value: V) -> Self {
-        Self {
-            searcher: Searcher::default(),
-            value,
-        }
+        Self::with_iterations(value, SearchConfig::default().iterations)
     }
 
     pub fn with_iterations(value: V, iterations: usize) -> Self {
         Self {
             searcher: Searcher::new(SearchConfig { iterations }),
             value,
+            // Par défaut : la bande la moins chère, le niveau de l'économie,
+            // aucune Optimakina. C'est ce qui garde la valeur myope comparable
+            // aux mesures publiées avant que les leviers existent.
+            band: 0,
+            level: 0,
+            optimakina_from: 11,
         }
+    }
+
+    /// Fixe les trois réglages stratégiques.
+    pub fn with_strategy(mut self, band: usize, level: u16, optimakina_from: u8) -> Self {
+        self.band = band.min(3);
+        self.level = level;
+        self.optimakina_from = optimakina_from;
+        self
     }
 }
 
@@ -686,7 +770,16 @@ impl<V: ValueFn> crate::economy::Policy for Searching<V> {
     }
     fn plan(&mut self, view: &BatchView<'_>, rng: &mut Rng) -> BatchPlan {
         let value = &self.value;
-        self.searcher.plan(view, rng, value)
+        let strategy = Strategy {
+            band: self.band,
+            level: if self.level == 0 {
+                view.economy.mount_level
+            } else {
+                self.level
+            },
+            optimakina_from: self.optimakina_from,
+        };
+        self.searcher.plan(view, rng, value, strategy)
     }
 }
 
@@ -704,10 +797,7 @@ mod tests {
             let outcome = play(
                 &catalog,
                 &economy,
-                &mut Searching {
-                    searcher: Searcher::default(),
-                    value: Myopic,
-                },
+                &mut Searching::new(Myopic),
                 seed,
             );
             assert_eq!(
@@ -726,10 +816,7 @@ mod tests {
         let searched = play(
             &catalog,
             &economy,
-            &mut Searching {
-                searcher: Searcher::default(),
-                value: Myopic,
-            },
+            &mut Searching::new(Myopic),
             3,
         )
         .score;
@@ -749,7 +836,7 @@ mod tests {
         let mut searcher = Searcher::new(SearchConfig { iterations: 0 });
 
         let (fertile, sterile) = partition(&catalog, &economy, &stable);
-        let candidates = searcher.candidates(&catalog, &economy, &fertile);
+        let candidates = searcher.candidates(&catalog, &economy, &fertile, Strategy::default());
         assert!(!candidates.is_empty());
 
         let mut state = State {
@@ -758,6 +845,7 @@ mod tests {
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),
             crossings: 0,
+            optimakina_cost: 0,
         };
         let before = state.census.features(&catalog, &economy);
         let free_before = state.fertile_free.clone();

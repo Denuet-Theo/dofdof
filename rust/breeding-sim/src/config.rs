@@ -38,6 +38,11 @@ pub struct FuelBand {
     pub hours_per_batch: f64,
     /// `None` tant que le prix n'est pas relevé.
     pub price_per_point: Option<f64>,
+    /// Prix au point des jauges de sérénité (Baffeur/Caresseur) et de
+    /// statistiques (Foudroyeur/Dragofesse). Un cycle en demande 15 010 des
+    /// premières et 60 000 des secondes, par enclos — d'où deux prix et non un.
+    pub serenity_per_point: Option<f64>,
+    pub stats_per_point: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -162,6 +167,7 @@ impl Prices {
             ) as i64,
             top_value: get(&["valeurs", "gen10"], default.top_value as f64) as i64,
             mount_level: get(&["montures", "niveau"], f64::from(default.mount_level)) as u16,
+            ..default
         };
 
         let mut optimakina = BTreeMap::new();
@@ -201,8 +207,41 @@ impl Prices {
                         &format!("prix du point de jauge (bande {cap})"),
                         &mut missing,
                     ),
+                    serenity_per_point: number(band, &["prix_par_point_serenite"])
+                        .filter(|value| *value >= 0.0),
+                    stats_per_point: number(band, &["prix_par_point_stats"])
+                        .filter(|value| *value >= 0.0),
                 });
             }
+        }
+
+        // Les quatre leviers, reversés dans l'économie. Tant qu'un prix manque,
+        // `levers_active()` reste faux et le simulateur retombe sur le forfait
+        // à plat — les mesures publiées avant restent alors comparables.
+        let mut economy = economy;
+        economy.horizon_hours = match horizon {
+            Horizon::Hours(hours) => Some(f64::from(hours)),
+            Horizon::Batches(_) => None,
+        };
+        economy.overhead_hours = overhead_hours;
+        economy.enclos_per_batch = (places / slots_per_enclos.max(1)).max(1);
+        economy.mangeoire_per_point = mangeoire.unwrap_or(0.0);
+        economy.mangeoire_per_mount = root
+            .get("mangeoire")
+            .and_then(|table| table.get("par_monture"))
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
+        economy.optimakina_bonus = get(&["optimakina", "bonus"], 0.1);
+        for (generation, price) in &optimakina {
+            economy.optimakina[usize::from(*generation).min(10)] = *price;
+        }
+        for (index, band) in fuel.iter().take(4).enumerate() {
+            economy.bands[index] = crate::economy::Band {
+                cap: band.cap,
+                hours: band.hours_per_batch,
+                serenity_per_point: band.serenity_per_point.unwrap_or(0.0),
+                stats_per_point: band.stats_per_point.unwrap_or(0.0),
+            };
         }
 
         Ok(Self {
@@ -350,17 +389,21 @@ prix_par_point = 0.02
 
     #[test]
     fn l_horizon_se_lit_dans_le_fichier() {
+        // Le fichier livré compte en temps mural : c'est la vitesse de jauge qui
+        // décide combien de fournées on joue, et c'est tout l'enjeu du levier.
         let prices = Prices::load_default().expect("chargement");
-        assert_eq!(prices.horizon, Horizon::Batches(100));
+        assert_eq!(prices.horizon, Horizon::Hours(300));
+        assert_eq!(prices.economy.horizon_hours, Some(300.0));
 
-        let en_heures = Prices::parse("[partie]\nmode = \"heures\"\nheures = 2084\n")
+        let en_tours = Prices::parse("[partie]\nmode = \"fournees\"\nfournees = 100\n")
             .expect("parse");
-        assert_eq!(en_heures.horizon, Horizon::Hours(2084));
+        assert_eq!(en_tours.horizon, Horizon::Batches(100));
+        assert_eq!(en_tours.economy.horizon_hours, None);
         // Et le fichier livré porte bien le budget réel.
         assert_eq!(
             Prices::load_default().expect("chargement").horizon,
-            Horizon::Batches(100),
-            "le mode reste \"fournees\" tant que la durée de fournée est fixe"
+            Horizon::Hours(300),
+            "le budget est désormais un temps mural"
         );
     }
 }

@@ -16,6 +16,7 @@
 
 use breeding_neat::neat::{Connection, Genome, Network};
 use breeding_sim::baseline::{Greedy, Objective};
+use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, Policy, RunOutcome, play};
 use breeding_sim::encode::Census;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
@@ -59,6 +60,12 @@ fn load(path: &str) -> Result<Genome, String> {
     Ok(Genome {
         hidden,
         connections,
+        // Les réglages stratégiques du champion. Absents d'un fichier écrit
+        // avant qu'ils existent : on retombe alors sur l'économie simplifiée,
+        // ce qui rejoue exactement les mesures d'alors.
+        band: root["band"].as_u64().unwrap_or(0) as usize,
+        level: root["level"].as_u64().unwrap_or(0) as u16,
+        optimakina_from: root["optimakina_from"].as_u64().unwrap_or(11) as u8,
     })
 }
 
@@ -74,7 +81,14 @@ fn median(values: &mut [f64]) -> f64 {
 
 fn run(label: &str, make: impl Fn() -> Box<dyn Policy> + Sync) -> (String, Vec<RunOutcome>) {
     let catalog = muldo();
-    let economy = Economy::default();
+    let economy = Prices::load_default()
+        .map(|prices| prices.economy)
+        .unwrap_or_else(|error| {
+            // Mesurer sur une économie différente de celle du fichier serait pire
+            // que ne pas mesurer : on s'arrête.
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
     let outcomes = SEEDS
         .collect::<Vec<u32>>()
         .par_iter()
@@ -110,12 +124,23 @@ fn main() {
     // donc on le joue à part.
     {
         let catalog = muldo();
-        let economy = Economy::default();
+        let economy = Prices::load_default()
+        .map(|prices| prices.economy)
+        .unwrap_or_else(|error| {
+            // Mesurer sur une économie différente de celle du fichier serait pire
+            // que ne pas mesurer : on s'arrête.
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
         let outcomes = SEEDS
             .collect::<Vec<u32>>()
             .par_iter()
             .map(|&seed| {
-                let mut policy = Searching::new(NetValue(&network));
+                let mut policy = Searching::new(NetValue(&network)).with_strategy(
+                    genome.band,
+                    genome.level,
+                    genome.optimakina_from,
+                );
                 play(&catalog, &economy, &mut policy, seed)
             })
             .collect();

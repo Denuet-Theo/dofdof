@@ -216,9 +216,31 @@ pub fn pair_outlook(catalog: &Catalog, male: &Mate, female: &Mate) -> Option<Pai
 ///   retombe entièrement sur l'ascendance — le régime « recopie ». On annulait
 ///   autrefois cette masse sans la rendre, et la liste ne sommait plus à 1.
 pub fn mating_outcomes(catalog: &Catalog, male: &Mate, female: &Mate) -> Vec<MatingOutcome> {
-    let Some(outlook) = pair_outlook(catalog, male, female) else {
+    mating_outcomes_at(catalog, male, female, None)
+}
+
+/// Le même calcul, avec un **taux imposé**.
+///
+/// Le taux ne dépend plus seulement des niveaux dès qu'on modélise la Mangeoire
+/// et l'Optimakina : c'est l'enclos qu'on nourrit, pas la monture, et le bonus
+/// s'achète au croisement. La forme de la distribution, elle, ne change pas —
+/// seule la masse qui revient à la cible bouge.
+///
+/// `None` retombe sur le taux lu sur les niveaux, ce qui garde `mating_outcomes`
+/// et la porte de parité inchangés.
+pub fn mating_outcomes_at(
+    catalog: &Catalog,
+    male: &Mate,
+    female: &Mate,
+    rate: Option<f64>,
+) -> Vec<MatingOutcome> {
+    let Some(mut outlook) = pair_outlook(catalog, male, female) else {
         return Vec::new();
     };
+    if let Some(rate) = rate {
+        outlook.success_rate = rate.clamp(0.0, 1.0);
+    }
+    let outlook = outlook;
 
     let mut outcomes: Vec<MatingOutcome> = Vec::new();
     // Le `kind` n'est posé qu'à la première insertion : une couleur vue en cible

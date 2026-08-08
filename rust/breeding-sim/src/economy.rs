@@ -74,9 +74,35 @@
 //! générateur — c'est la contrainte posée par le mainteneur, et elle est tenue
 //! par le type : `BatchView` ne porte ni l'un ni l'autre.
 
-use crate::pairing::{mating_outcomes, pair_outlook};
+use crate::pairing::{Mate, mating_outcomes_at, pair_outlook, pair_target_generation};
 use crate::stable::{Mount, Sex, Stable};
 use crate::trees::{Catalog, ColorId};
+
+/// Une bande de jauge : ce qu'elle coûte au point, et ce qu'elle fait gagner.
+///
+/// Le débit dépend de la bande où on tient la jauge, et chaque bande exige un
+/// carburant dont le plafond l'atteint. Aller vite coûte cher **et** non
+/// linéairement : les dix premières heures gagnées valent 5 400 kamas l'heure,
+/// la dernière heure et demie en vaut 512 000.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Band {
+    pub cap: i64,
+    /// Heures de remplissage, hors manipulation entre fournées.
+    pub hours: f64,
+    pub serenity_per_point: f64,
+    pub stats_per_point: f64,
+}
+
+/// Points de Mangeoire pour atteindre un niveau : `3,795 × niveau^2,329`.
+///
+/// Porté de `mountXpForLevel`. Niveau 67 → 67 700 points, niveau 200 → 867 900 :
+/// treize fois plus pour faire passer la réussite de 50,1 % à 90 %.
+#[inline]
+pub fn mount_xp_for_level(level: u16) -> f64 {
+    3.795 * f64::from(level).powf(2.329)
+}
+
+pub const MAX_MOUNT_LEVEL: u16 = 200;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Economy {
@@ -94,9 +120,29 @@ pub struct Economy {
     pub amber_per_generation: i64,
     /// Ce que vaut une gen 10, n'importe laquelle des cinquante.
     pub top_value: i64,
-    /// Toutes les montures sont à ce niveau. Le taux de réussite en découle et
-    /// vaut donc 50,1 % partout, ce qui **isole la question de l'appariement**.
+    /// Niveau par défaut, quand la politique n'en choisit pas.
     pub mount_level: u16,
+
+    // --- les quatre leviers ------------------------------------------------
+    /// Budget en heures. `None` = horizon en nombre de fournées.
+    pub horizon_hours: Option<f64>,
+    /// Manipulation incompressible entre deux fournées. Plancher dur sur la
+    /// cadence : le carburant ne l'achète jamais.
+    pub overhead_hours: f64,
+    pub bands: [Band; 4],
+    /// Kamas par point de Mangeoire.
+    pub mangeoire_per_point: f64,
+    /// La Mangeoire se remplit-elle par monture ou par enclos ? Facteur dix sur
+    /// le levier le plus lourd des quatre — voir `economy.toml`.
+    pub mangeoire_per_mount: bool,
+    /// Prix d'une Optimakina par génération visée. Indice 0 et 1 inutilisés.
+    pub optimakina: [i64; 11],
+    /// Ce qu'elle ajoute au taux de réussite.
+    pub optimakina_bonus: f64,
+    /// Points de jauge d'un cycle de fécondité, par enclos.
+    pub cycle_serenity_points: f64,
+    pub cycle_stat_points: f64,
+    pub enclos_per_batch: usize,
 }
 
 impl Default for Economy {
@@ -112,6 +158,18 @@ impl Default for Economy {
             amber_per_generation: 20_000,
             top_value: 500_000,
             mount_level: 67,
+            // Par défaut, l'économie simplifiée : forfait à plat, aucun levier.
+            // `Prices::load` remplit tout ça depuis `economy.toml`.
+            horizon_hours: None,
+            overhead_hours: 0.0,
+            bands: [Band::default(); 4],
+            mangeoire_per_point: 0.0,
+            mangeoire_per_mount: false,
+            optimakina: [0; 11],
+            optimakina_bonus: 0.1,
+            cycle_serenity_points: 15_010.0,
+            cycle_stat_points: 60_000.0,
+            enclos_per_batch: 5,
         }
     }
 }
@@ -124,6 +182,71 @@ impl Economy {
     #[inline]
     pub fn value_of(&self, catalog: &Catalog, color: ColorId) -> i64 {
         self.value_at_generation(catalog.generation(color), catalog.top_generation())
+    }
+
+    /// Les quatre leviers sont-ils chiffrés ?
+    ///
+    /// Faux tant que `economy.toml` n'a pas donné les prix : on retombe alors
+    /// sur le forfait à plat et le niveau fixe, et les mesures publiées avant
+    /// restent comparables.
+    #[inline]
+    pub fn levers_active(&self) -> bool {
+        self.bands[0].hours > 0.0 && self.mangeoire_per_point > 0.0
+    }
+
+    /// Ce que coûtent les jauges de fécondité d'une fournée, à cette bande.
+    #[inline]
+    pub fn gauge_cost(&self, band: usize) -> i64 {
+        let band = self.bands[band.min(3)];
+        ((self.cycle_serenity_points * band.serenity_per_point
+            + self.cycle_stat_points * band.stats_per_point)
+            * self.enclos_per_batch as f64) as i64
+    }
+
+    /// Ce que coûte de porter les montures de la fournée à ce niveau.
+    ///
+    /// La Mangeoire se facture par enclos comme les autres jauges, sauf si
+    /// `mangeoire_per_mount` — auquel cas c'est dix fois plus cher, et le levier
+    /// « niveau » devient probablement décoratif.
+    #[inline]
+    pub fn feed_cost(&self, level: u16) -> i64 {
+        let units = if self.mangeoire_per_mount {
+            (self.crossings_per_batch * 2) as f64
+        } else {
+            self.enclos_per_batch as f64
+        };
+        (mount_xp_for_level(level) * self.mangeoire_per_point * units) as i64
+    }
+
+    /// Le prix d'une fournée, tout compris hors achats et Optimakina.
+    #[inline]
+    pub fn batch_cost_for(&self, band: usize, level: u16) -> i64 {
+        if self.levers_active() {
+            self.gauge_cost(band) + self.feed_cost(level)
+        } else {
+            self.batch_cost
+        }
+    }
+
+    /// La durée d'une fournée à cette bande, manipulation comprise.
+    #[inline]
+    pub fn batch_hours(&self, band: usize) -> f64 {
+        if self.levers_active() {
+            self.bands[band.min(3)].hours + self.overhead_hours
+        } else {
+            self.bands[0].hours + self.overhead_hours
+        }
+    }
+
+    /// Le taux de réussite d'un croisement à ce niveau, Optimakina comprise.
+    ///
+    /// Les deux parents portent le même niveau : c'est l'enclos qu'on nourrit,
+    /// pas la monture. Le bonus s'ajoute avant le plafond à 1.
+    #[inline]
+    pub fn success_rate(&self, level: u16, optimakina: bool) -> f64 {
+        let base = 0.3 + 0.0015 * (2.0 * f64::from(level));
+        let boosted = base + if optimakina { self.optimakina_bonus } else { 0.0 };
+        boosted.min(1.0)
     }
 
     /// Le même barème, lu sur le rang seul.
@@ -329,6 +452,16 @@ pub struct BatchPlan {
     /// Converties en kamas. Créditées **avant** les dépenses, pour qu'une
     /// fournée puisse se financer elle-même.
     pub sacrifices: Vec<usize>,
+
+    // --- les leviers, uniformes sur toute la fournée -----------------------
+    /// La bande de jauge, de 0 (lente et bon marché) à 3 (rapide et chère).
+    /// Uniforme sur les cinq enclos pour l'instant ; le réglage par enclos
+    /// viendra ensuite.
+    pub band: usize,
+    /// Le niveau auquel on nourrit les montures de la fournée.
+    pub level: u16,
+    /// Une Optimakina par croisement, en regard de `crossings`. Vide = aucune.
+    pub optimakina: Vec<bool>,
 }
 
 /// Ce que la politique voit pour décider. Volontairement pauvre.
@@ -345,7 +478,7 @@ pub trait Policy {
     fn plan(&mut self, view: &BatchView<'_>, rng: &mut Rng) -> BatchPlan;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RunOutcome {
     /// Le score : solde après la centième fournée, tout le reste liquidé.
     pub score: i64,
@@ -360,6 +493,10 @@ pub struct RunOutcome {
     /// La plus haute génération jamais obtenue.
     pub best_generation: u8,
     pub gen10_held: usize,
+    /// Heures consommées, quand l'horizon est un temps mural.
+    pub hours_used: f64,
+    /// Fournées réellement jouées, vides comprises.
+    pub batches_played: u32,
     /// Fournées où le plan a été refusé. Doit rester à zéro : une politique qui
     /// produit des plans infaisables est une politique qu'on mesure mal.
     pub infeasible_batches: u32,
@@ -433,9 +570,38 @@ fn apply(
         credit += economy.value_of(catalog, color);
     }
 
+    let level = if plan.level == 0 {
+        economy.mount_level
+    } else {
+        plan.level.min(MAX_MOUNT_LEVEL)
+    };
+
     let mut debit = plan.purchases.len() as i64 * economy.starter_price;
     if !plan.crossings.is_empty() {
-        debit += economy.batch_cost;
+        debit += economy.batch_cost_for(plan.band, level);
+        // Une Optimakina se paie au croisement, au prix de la génération visée.
+        // Les indices sont encore virtuels ici — les achats ne sont pas posés —
+        // d'où la résolution explicite.
+        let resolve = |index: usize| -> Mate {
+            if index < base {
+                stable.mounts[index].mate()
+            } else {
+                Mate {
+                    color: plan.purchases[index - base].0,
+                    level,
+                    parents: None,
+                }
+            }
+        };
+        for (slot, &[male, female]) in plan.crossings.iter().enumerate() {
+            if !plan.optimakina.get(slot).copied().unwrap_or(false) {
+                continue;
+            }
+            check(male)?;
+            check(female)?;
+            let target = pair_target_generation(catalog, &resolve(male), &resolve(female));
+            debit += economy.optimakina[usize::from(target).min(10)];
+        }
     }
     if *kamas + credit < debit {
         return Err(Rejected::Unaffordable {
@@ -525,9 +691,10 @@ fn apply(
         stable.mounts[male].fertile = false;
         stable.mounts[female].fertile = false;
 
-        let outcomes = mating_outcomes(catalog, &m, &f);
-        let slot = slot as u32;
-        let mut roll = draws.at(batch_index, slot, purpose::OUTCOME);
+        let rate = economy.success_rate(level, plan.optimakina.get(slot).copied().unwrap_or(false));
+        let outcomes = mating_outcomes_at(catalog, &m, &f, Some(rate));
+        let slot_index = slot as u32;
+        let mut roll = draws.at(batch_index, slot_index, purpose::OUTCOME);
         let mut color = outcomes[outcomes.len() - 1].color;
         for outcome in &outcomes {
             if roll < outcome.probability {
@@ -540,12 +707,12 @@ fn apply(
         best_generation = best_generation.max(catalog.generation(color));
         births.push(Mount {
             color,
-            sex: if draws.coin(batch_index, slot, purpose::SEX) {
+            sex: if draws.coin(batch_index, slot_index, purpose::SEX) {
                 Sex::Male
             } else {
                 Sex::Female
             },
-            level: economy.mount_level,
+            level,
             fertile: true,
             parents: Some([m.color, f.color]),
         });
@@ -599,9 +766,21 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
         infeasible_batches: 0,
+        hours_used: 0.0,
+        batches_played: 0,
     };
 
-    for batch_index in 0..economy.batches {
+    // L'horizon est soit un nombre de tours, soit un temps mural. Dans le second
+    // cas c'est la **politique** qui décide combien de fournées elle joue, en
+    // choisissant leur vitesse : quatre fois plus de tours pour onze fois le
+    // prix du tour. Le garde-fou à 5 000 existe pour qu'une politique qui ne
+    // fait rien ne tourne pas indéfiniment.
+    let mut elapsed = 0.0f64;
+    let mut batch_index = 0u32;
+    while match economy.horizon_hours {
+        Some(budget) => elapsed < budget && batch_index < 5_000,
+        None => batch_index < economy.batches,
+    } {
         let plan = {
             let view = BatchView {
                 catalog,
@@ -629,6 +808,11 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                 outcome.best_generation = outcome.best_generation.max(batch.best_generation);
                 if batch.crossings > 0 {
                     outcome.batches_paid += 1;
+                    // Une fournée qui tourne prend le temps de son remplissage
+                    // de jauge ; une fournée vide ne coûte que la manipulation.
+                    elapsed += economy.batch_hours(plan.band);
+                } else {
+                    elapsed += economy.overhead_hours;
                 }
             }
             Err(_) => {
@@ -637,9 +821,13 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                 // remonté pour qu'une politique bancale se voie au lieu de
                 // passer pour prudente.
                 outcome.infeasible_batches += 1;
+                elapsed += economy.overhead_hours;
             }
         }
+        batch_index += 1;
     }
+    outcome.hours_used = elapsed;
+    outcome.batches_played = batch_index;
 
     outcome.balance_before_liquidation = kamas;
     outcome.liquidation = stable

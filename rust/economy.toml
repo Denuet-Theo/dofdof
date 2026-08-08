@@ -46,7 +46,7 @@ generation_maximale_du_pool = 9
 #
 # C'est "heures" qui a été retenu, mais le mode "fournees" reste jouable pour
 # rejouer les mesures publiées avant ce changement.
-mode = "fournees"
+mode = "heures"
 fournees = 100
 
 # Budget en heures, quand `mode = "heures"`.

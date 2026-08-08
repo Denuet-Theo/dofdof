@@ -36,7 +36,7 @@
 //! candidat qui l'emploie.
 
 use crate::economy::Economy;
-use crate::pairing::{Mate, mating_outcomes};
+use crate::pairing::{Mate, mating_outcomes_at, pair_target_generation};
 use crate::stable::{Sex, Stable};
 use crate::trees::{Catalog, ColorId};
 
@@ -205,11 +205,35 @@ pub struct PairDelta {
     pub births: Vec<(ColorId, f64, usize)>,
     /// Ce que la naissance vaut en espérance, à la liquidation.
     pub expected_value: f64,
+    /// La génération visée, et ce que coûte l'Optimakina qui va avec — zéro si
+    /// la stratégie n'en achète pas à ce rang.
+    pub target_generation: u8,
+    pub optimakina_cost: i64,
 }
 
 impl PairDelta {
-    pub fn of(catalog: &Catalog, economy: &Economy, male: &Mate, female: &Mate) -> Option<Self> {
-        let outcomes = mating_outcomes(catalog, male, female);
+    /// `level` et `optimakina_from` viennent de la stratégie de la fournée :
+    /// c'est l'enclos qu'on nourrit, pas la monture, et le bonus s'achète au
+    /// croisement en fonction du rang visé.
+    pub fn of(
+        catalog: &Catalog,
+        economy: &Economy,
+        male: &Mate,
+        female: &Mate,
+        level: u16,
+        optimakina_from: u8,
+    ) -> Option<Self> {
+        let target_generation = pair_target_generation(catalog, male, female);
+        let with_optimakina =
+            target_generation >= optimakina_from && target_generation <= catalog.top_generation();
+        let optimakina_cost = if with_optimakina {
+            economy.optimakina[usize::from(target_generation).min(10)]
+        } else {
+            0
+        };
+        let rate = economy.success_rate(level, with_optimakina);
+
+        let outcomes = mating_outcomes_at(catalog, male, female, Some(rate));
         if outcomes.is_empty() {
             return None;
         }
@@ -241,6 +265,8 @@ impl PairDelta {
             female_color: female.color,
             births,
             expected_value,
+            target_generation,
+            optimakina_cost,
         })
     }
 }
@@ -438,7 +464,7 @@ mod tests {
             .iter()
             .find(|g| g.sex == Sex::Female)
             .expect("une femelle");
-        let delta = PairDelta::of(&catalog, &economy, &male.sample, &female.sample)
+        let delta = PairDelta::of(&catalog, &economy, &male.sample, &female.sample, economy.mount_level, 11)
             .expect("un croisement possible");
 
         census.apply_crossing(&delta);
@@ -470,7 +496,7 @@ mod tests {
             .iter()
             .find(|g| g.sex == Sex::Female)
             .expect("une femelle");
-        let delta = PairDelta::of(&catalog, &economy, &male.sample, &female.sample).expect("ok");
+        let delta = PairDelta::of(&catalog, &economy, &male.sample, &female.sample, economy.mount_level, 11).expect("ok");
 
         census.apply_crossing(&delta);
         assert!(

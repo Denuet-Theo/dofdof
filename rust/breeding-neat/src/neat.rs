@@ -97,6 +97,27 @@ pub struct Genome {
     /// Identifiants des nœuds cachés. Entrées, biais et sortie sont implicites.
     pub hidden: Vec<usize>,
     pub connections: Vec<Connection>,
+
+    // --- les réglages stratégiques -----------------------------------------
+    //
+    // Ils sont **dans le génome et non dans la recherche**, et c'est le seul
+    // moyen de les décider sans montrer le temps écoulé à la politique.
+    //
+    // Une bande rapide ne se justifie que par les fournées supplémentaires
+    // qu'elle laisse jouer — un bénéfice qui n'apparaît nulle part dans
+    // l'écurie que la fournée laisse derrière elle. Une recherche guidée par la
+    // valeur d'état prendrait donc toujours la bande la moins chère. Il
+    // faudrait lui montrer le temps restant, ce qui revient à lui donner le
+    // numéro de tour — précisément ce qui est interdit.
+    //
+    // L'évolution, elle, note sur le **score final**, qui compte les heures.
+    // Elle peut donc arbitrer sans que la politique ait rien vu.
+    /// Bande de jauge, 0 (lente, bon marché) à 3 (rapide, chère).
+    pub band: usize,
+    /// Niveau auquel nourrir les montures. Décide du taux de réussite.
+    pub level: u16,
+    /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
+    pub optimakina_from: u8,
 }
 
 /// Le registre des innovations, partagé par toute la population.
@@ -144,7 +165,23 @@ impl Innovations {
     }
 }
 
+/// Le niveau maximal d'une monture.
+pub const MAX_LEVEL: u16 = 200;
+
+/// Déplace `value` d'au plus `step`, dans un sens ou dans l'autre, borné.
+///
+/// Le pas est tiré dans `[1, step]` plutôt que fixé : un pas constant sur le
+/// niveau ne visiterait qu'un réseau de valeurs espacées de dix, et l'optimum
+/// tomberait entre deux.
+fn nudge(value: i64, step: i64, low: i64, high: i64, rng: &mut Rng) -> i64 {
+    let magnitude = 1 + rng.range(step.max(1) as usize) as i64;
+    let delta = if rng.f64() < 0.5 { -magnitude } else { magnitude };
+    (value + delta).clamp(low, high)
+}
+
 pub struct Config {
+    /// Probabilité de toucher à la bande, au niveau ou au seuil d'Optimakina.
+    pub strategy_mutation: f64,
     pub weight_mutation: f64,
     pub weight_perturbation: f64,
     pub perturbation_power: f64,
@@ -166,6 +203,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            strategy_mutation: 0.35,
             weight_mutation: 0.8,
             weight_perturbation: 0.9,
             perturbation_power: 0.5,
@@ -203,10 +241,41 @@ impl Genome {
         Self {
             hidden: Vec::new(),
             connections,
+            // On part au milieu plutôt qu'à un extrême : l'évolution doit
+            // pouvoir descendre comme monter dès la première génération.
+            band: rng.range(4),
+            level: 1 + rng.range(MAX_LEVEL as usize) as u16,
+            optimakina_from: 2 + rng.range(10) as u8,
         }
     }
 
     pub fn mutate(&mut self, config: &Config, innovations: &mut Innovations, rng: &mut Rng) {
+        // Les réglages stratégiques bougent par petits pas la plupart du temps,
+        // et par saut de temps en temps : un optimum local sur la bande coûte
+        // très cher, et un pas de un ne le franchit jamais.
+        if rng.f64() < config.strategy_mutation {
+            match rng.range(3) {
+                0 => {
+                    // Un saut franc de temps en temps : les quatre bandes sont
+                    // séparées par des facteurs de prix énormes, et un optimum
+                    // local ne se franchit pas d'un cran.
+                    self.band = if rng.f64() < 0.7 {
+                        nudge(self.band as i64, 1, 0, 3, rng) as usize
+                    } else {
+                        rng.range(4)
+                    }
+                }
+                1 => {
+                    let step = if rng.f64() < 0.7 { 10 } else { 60 };
+                    self.level =
+                        nudge(i64::from(self.level), step, 1, i64::from(MAX_LEVEL), rng) as u16
+                }
+                _ => {
+                    self.optimakina_from =
+                        nudge(i64::from(self.optimakina_from), 1, 2, 11, rng) as u8
+                }
+            }
+        }
         if rng.f64() < config.weight_mutation {
             for connection in &mut self.connections {
                 if rng.f64() < config.weight_perturbation {
@@ -394,9 +463,19 @@ impl Genome {
             }
         }
 
+        // Les réglages stratégiques suivent le meilleur parent, sauf tirage :
+        // ce sont trois nombres, pas une topologie, et les mélanger au hasard
+        // détruirait des combinaisons qui ne valent que prises ensemble — une
+        // bande rapide sans le niveau qui va avec ne vaut rien.
+        fn pick<T>(better: T, worse: T, rng: &mut Rng) -> T {
+            if rng.f64() < 0.75 { better } else { worse }
+        }
         Genome {
             hidden,
             connections,
+            band: pick(better.band, worse.band, rng),
+            level: pick(better.level, worse.level, rng),
+            optimakina_from: pick(better.optimakina_from, worse.optimakina_from, rng),
         }
     }
 

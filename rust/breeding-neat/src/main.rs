@@ -34,6 +34,7 @@ use breeding_neat::neat;
 use std::time::Instant;
 
 use breeding_sim::baseline::{Greedy, Objective};
+use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, NeverBreeds, play};
 use breeding_sim::encode::{Census, FEATURES};
 use breeding_sim::search::{Myopic, Searching, ValueFn};
@@ -108,7 +109,8 @@ fn fitness(
     let total: f64 = seeds
         .iter()
         .map(|&seed| {
-            let mut policy = Searching::with_iterations(NetValue(&network), iterations);
+            let mut policy = Searching::with_iterations(NetValue(&network), iterations)
+                .with_strategy(genome.band, genome.level, genome.optimakina_from);
             play(catalog, economy, &mut policy, seed).score as f64
         })
         .sum();
@@ -135,7 +137,14 @@ fn millions(kamas: f64) -> String {
 fn main() {
     let options = Options::parse();
     let catalog = muldo();
-    let economy = Economy::default();
+    let economy = Prices::load_default()
+        .map(|prices| prices.economy)
+        .unwrap_or_else(|error| {
+            // Mesurer sur une économie différente de celle du fichier serait pire
+            // que ne pas mesurer : on s'arrête.
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
     let config = Config {
         population: options.population,
         ..Config::default()
@@ -377,7 +386,8 @@ fn main() {
         .collect::<Vec<u32>>()
         .par_iter()
         .map(|&seed| {
-            let mut policy = Searching::with_iterations(NetValue(&network), options.iterations);
+            let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
+                .with_strategy(best.band, best.level, best.optimakina_from);
             play(&catalog, &economy, &mut policy, seed).score as f64
         })
         .collect();
@@ -411,6 +421,9 @@ fn main() {
             "from": c.from, "to": c.to, "weight": c.weight,
             "enabled": c.enabled, "innovation": c.innovation,
         })).collect::<Vec<_>>(),
+        "band": best.band,
+        "level": best.level,
+        "optimakina_from": best.optimakina_from,
         "training_score": training_score,
         "test_median": evolved_median,
         "generations": generation,

@@ -635,6 +635,12 @@ impl Policy for Greedy {
             clonings,
             crossings,
             sacrifices,
+            // Le glouton ne règle aucun levier : bande la moins chère, niveau par
+            // défaut, aucune Optimakina. C'est ce qui le garde comparable aux
+            // mesures publiées avant que les leviers existent.
+            band: 0,
+            level: view.economy.mount_level,
+            optimakina: Vec::new(),
         }
     }
 }

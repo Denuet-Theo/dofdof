@@ -37,15 +37,30 @@
 //! l'ordonnancement, et c'est ce que la première version ratait — elle traitait
 //! les conditions de sérénité comme des portes d'entrée qu'on franchit une fois.
 //!
-//! Le Foudroyeur ne tourne qu'entre −5000 et −1, donc la première stat est
-//! forcément celle du côté positif. Et surtout : **franchir zéro couperait la
-//! première stat en cours de route**, donc la descente doit s'arrêter à +2000 et
-//! attendre. On descend en deux temps.
+//! Les fenêtres, confirmées par le mainteneur :
+//!
+//! | jauge | fenêtre de sérénité |
+//! | --- | --- |
+//! | Foudroyeur | `[-5000, -1]` |
+//! | Dragofesse | `[+1, +5000]` — la miroir |
+//! | Abreuvoir | `[-2000, +2000]` |
+//!
+//! La première stat est donc forcément celle du côté où l'on est monté. Et
+//! surtout : **franchir zéro couperait cette première stat en cours de route**,
+//! donc la descente doit s'arrêter à +2000 et attendre. On descend en deux temps.
 //!
 //! Ce qui sauve l'affaire, c'est que **−1 ouvre les deux dernières jauges à la
 //! fois** : il est dans `[-2000, +2000]` pour l'Abreuvoir et dans `[-5000, -1]`
-//! pour le Foudroyeur. La sérénité ne bouge que si on la pousse, donc on s'y gare
-//! et les deux tournent ensemble.
+//! pour le Foudroyeur. On s'y gare et les deux tournent ensemble. Sans cette
+//! coïncidence des fenêtres, la fournée serait bien plus longue.
+//!
+//! ## Mettre une jauge en pause est gratuit
+//!
+//! Confirmé aussi, et tout le modèle en dépend : cesser de nourrir une jauge
+//! fige sa progression sans rien perdre, et elle ne se vide pas toute seule. La
+//! sérénité est donc une **position qu'on choisit**, pas une course qu'il
+//! faudrait mener d'un trait — sans quoi il n'y aurait pas d'ordonnancement à
+//! optimiser, juste une somme à subir.
 //!
 //! ## Les 10 000 points vont sur la moins chère
 //!

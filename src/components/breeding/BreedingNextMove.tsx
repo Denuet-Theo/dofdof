@@ -1,8 +1,7 @@
 'use client';
 
-import { Compass, Dna, Flag, ShoppingCart, Sparkles } from 'lucide-react';
+import { Compass, Dna, Flag, ShoppingCart } from 'lucide-react';
 import type { Loadout } from '@/lib/dofus/breeding/loadout';
-import type { DriftSignal } from '@/lib/dofus/breeding/drift';
 import type { CloneOption } from '@/lib/dofus/breeding/cloning';
 
 /**
@@ -12,22 +11,20 @@ import type { CloneOption } from '@/lib/dofus/breeding/cloning';
  * lance**, **ce qui bloque**, **ce que je sors de l'écurie**. C'est la séquence
  * dans laquelle la question se pose en jeu.
  *
- * Ce que la liste montre n'est plus un classement d'appariements libres mais les
- * **étapes du plan** que l'écurie permet de lancer. La route se calcule sur
- * l'arbre des recettes une bonne fois — parents avant enfants, multiplicités
- * comprises — au lieu de se redeviner à chaque coup. L'écran n'a donc plus de
- * critère propre : il n'y a plus qu'une route, celle du plan suivi, et plus
- * d'objectif à afficher ici puisque c'est le choix de la couleur qui le porte.
+ * Ce que la liste montre est le **classement des croisements que l'écurie
+ * permet**, et non les étapes du plan : mesuré, l'arbre coûte 2,6 fois plus cher
+ * et met 2,5 fois plus de fournées pour atteindre la gen 10. Voir `loadout.ts`
+ * pour le tableau complet.
  *
- * Le seul endroit où l'écurie peut battre le plan est le raccourci de #59, que
- * l'arbre ne saura jamais exprimer. On le **signale** au lieu de le planifier :
- * c'est de l'opportunisme, et l'éleveur en décide.
+ * Il n'y a donc plus de panneau « hors recette » séparé. Il existait parce que
+ * l'arbre ne sait pas voir le raccourci de #59 — le classement, lui, le voit :
+ * `pairOutlook` lit l'ascendance. Les croisements qui en profitent sont dans la
+ * liste, marqués en vert. Les afficher deux fois reviendrait à conseiller de
+ * garder une monture et de la charger dans la même fournée.
  */
 
 type Props = {
   loadout: Loadout;
-  /** Les occasions hors recette que l'écurie porte. Voir `drift.ts`. */
-  drift: DriftSignal[];
   clonings: CloneOption[];
   nameOf: (colorId: string) => string;
 };
@@ -35,13 +32,8 @@ type Props = {
 /** Les identifiants courts des montures désignées, pour les retrouver en jeu. */
 const shortIds = (ids: string[]) => ids.map((id) => id.slice(0, 6)).join(' · ');
 
-const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
-  if (
-    loadout.lines.length === 0 &&
-    loadout.blocked.length === 0 &&
-    clonings.length === 0 &&
-    drift.length === 0
-  ) {
+const BreedingNextMove = ({ loadout, clonings, nameOf }: Props) => {
+  if (loadout.lines.length === 0 && loadout.blocked.length === 0 && clonings.length === 0) {
     return null;
   }
 
@@ -51,8 +43,8 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
         <Compass size={15} className="text-kamas" />
         <span className="text-sm font-semibold text-dark-200">La fournée à charger</span>
         <span className="text-xs text-dark-500">
-          les étapes du plan {nameOf(loadout.targetColorId)}
-          {' que l’écurie permet de lancer'}
+          {'ce que l’écurie permet de mieux lancer vers '}
+          {nameOf(loadout.targetColorId)}
         </span>
         <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
           {loadout.crossings} accouplements · {loadout.used}/{loadout.slots} places
@@ -69,7 +61,7 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
           </span>
           <span className="text-dark-500">
             {loadout.blocked.length === 0
-              ? ' — toutes les étapes réalisables sont chargées'
+              ? ' — le plan ne réclame plus rien qui manque'
               : ` — ${loadout.blocked.length} étape${loadout.blocked.length > 1 ? 's' : ''} du plan attend${loadout.blocked.length > 1 ? 'ent' : ''} ses parents`}
           </span>
         </div>
@@ -80,7 +72,7 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
         <div className="space-y-1">
           {loadout.lines.map((line, index) => (
             <div
-              key={`${line.step.colorId}-${line.male.colorId}-${line.female.colorId}-${index}`}
+              key={`${line.move.targetGeneration}-${line.male.colorId}-${line.female.colorId}-${index}`}
               className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
                 ${index === 0 ? 'bg-kamas/10' : 'bg-dark-800/40'}`}
             >
@@ -102,19 +94,27 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
               </span>
 
               <span
-                className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-                title={`Étape du plan : produire ${nameOf(line.step.colorId)}, de génération ${line.step.generation}.`}
+                className={`px-1.5 py-0.5 rounded-lg text-[10px] font-semibold ${
+                  line.move.leap > 0 ? 'bg-profit/20 text-profit' : 'bg-kamas/15 text-kamas'
+                }`}
+                title={
+                  line.move.leap > 0
+                    ? `Raccourci : l'ascendance de ces deux-là vise la génération ${line.move.targetGeneration}, quand la recette n'annoncerait que ${line.move.targetGeneration - line.move.leap}.`
+                    : `Ce croisement vise la génération ${line.move.targetGeneration}.`
+                }
               >
-                GEN. {line.step.generation}
+                GEN. {line.move.targetGeneration}
               </span>
               <span
                 className="text-[10px] text-dark-500 tabular-nums"
-                title={`Taux de la génération cible, parents montés au niveau ${line.step.parentLevel}.`}
+                title={`Taux de la génération cible, aux niveaux réels des deux parents (${line.move.male.level} et ${line.move.female.level}).`}
               >
-                {(line.step.successRate * 100).toFixed(0)} %
+                {(line.move.successRate * 100).toFixed(0)} %
               </span>
               <span className="text-[10px] text-dark-600 truncate">
-                → {nameOf(line.step.colorId)}
+                {line.move.targetColors.length > 0
+                  ? `→ ${line.move.targetColors.map((target) => nameOf(target.colorId)).slice(0, 2).join(' ou ')}`
+                  : '→ purification'}
               </span>
             </div>
           ))}
@@ -128,7 +128,8 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
       {loadout.blocked.length > 0 && (
         <div className="space-y-1 pt-1 border-t border-dark-700/40">
           <p className="text-[11px] text-dark-400">
-            Étapes en attente de leurs parents — c&apos;est là que la route s&apos;arrête
+            Ce que le plan réclame encore et que l&apos;écurie ne fournit pas — à aller
+            chercher, la fournée ci-dessus n&apos;y mène pas
           </p>
           <div className="space-y-1">
             {loadout.blocked.slice(0, 4).map(({ step, missing }) => (
@@ -167,53 +168,6 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* La dérive : ce que l'arbre ne peut pas voir. Une monture dont
-          l'ascendance porte plus haut que sa couleur n'est dans aucune recette,
-          donc aucun plan ne la proposera jamais. On le dit, on ne le planifie
-          pas. */}
-      {drift.length > 0 && (
-        <div className="space-y-1 pt-1 border-t border-dark-700/40">
-          <div className="flex flex-wrap items-center gap-2">
-            <Sparkles size={13} className="text-profit" />
-            <span className="text-xs font-semibold text-dark-200">Hors recette</span>
-            <span className="text-[11px] text-dark-500">
-              l&apos;arbre ne sait pas les voir : à vous de décider
-            </span>
-          </div>
-          {drift.map((signal) => (
-            <div
-              key={signal.mount.id}
-              className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
-                bg-profit/10 text-xs"
-            >
-              <span className="text-dark-200">
-                {signal.mount.sex === 'M' ? '♂' : '♀'} {nameOf(signal.mount.colorId)}
-                <span className="text-dark-500"> · {signal.mount.id.slice(0, 6)}</span>
-              </span>
-              <span
-                className="px-1.5 py-0.5 rounded-lg bg-dark-700/60 text-dark-300 text-[10px] font-semibold"
-                title="Cette monture traîne dans son ascendance une génération plus haute que sa propre couleur : c'est elle qui décide de ce que ses accouplements visent."
-              >
-                porte G{signal.carried}
-              </span>
-              <span className="text-dark-600">+</span>
-              <span className="text-dark-300">
-                {signal.partner.sex === 'M' ? '♂' : '♀'} {nameOf(signal.partner.colorId)}
-              </span>
-              <span
-                className="px-1.5 py-0.5 rounded-lg bg-profit/20 text-profit text-[10px] font-semibold"
-                title={`Aucune recette ne porte ce croisement : elle annoncerait la génération ${signal.targetGeneration - signal.leap}.`}
-              >
-                VISE GEN. {signal.targetGeneration}
-              </span>
-              <span className="text-[10px] text-dark-500 tabular-nums">
-                {(signal.successRate * 100).toFixed(0)} %
-              </span>
-            </div>
-          ))}
         </div>
       )}
 
@@ -328,9 +282,8 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
       )}
 
       <p className="text-[10px] text-dark-600">
-        Un accouplement occupe deux places. Les taux sont ceux du plan, qui suppose les parents
-        montés au niveau qu&apos;il annonce — monter les parents est le levier le moins cher de
-        la fournée.
+        Un accouplement occupe deux places. Les taux sont ceux des montures désignées, à leur
+        niveau réel — monter les parents reste le levier le moins cher de la fournée.
       </p>
     </div>
   );

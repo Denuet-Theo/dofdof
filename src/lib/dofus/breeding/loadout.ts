@@ -1,4 +1,5 @@
-import { BULK_MATE_LEVEL, matingOutcomes, type Mate } from './pairing';
+import { matingOutcomes, mateSignature, type Mate } from './pairing';
+import { availableMoves, type Move, type MoveContext } from './next-move';
 import { carriedGeneration, mountName } from './naming';
 import { stableFrontier } from './drift';
 import {
@@ -8,64 +9,67 @@ import {
   formCouples,
   tracksIndividually,
   type Couple,
+  type Pairing,
   type Sex,
   type Stable,
 } from './stable';
-import type { BreedingColor, BreedingPlan, BreedingPurchase, BreedingStep } from './costs';
+import type { ObjectiveId } from './objectives';
+import type { BreedingPlan, BreedingPurchase, BreedingStep } from './costs';
 
 /**
- * La fournée à charger : les **étapes du plan** que l'écurie permet de lancer
- * maintenant.
+ * La fournée à charger : les **croisements les mieux classés** que l'écurie
+ * permet de lancer maintenant, jusqu'à saturer les places.
  *
- * La route ne se devine pas coup par coup, elle se calcule. `breedingPlan`
- * parcourt l'arbre des recettes et rend le chemin le moins cher en régime
- * stationnaire — multiplicités comprises, tentatives par taux de réussite,
- * recyclage par clonage, étapes triées parents avant enfants. C'est exact, c'est
- * sans heuristique, et c'est écrit depuis longtemps.
+ * ## Pourquoi le classement et non les étapes du plan
  *
- * Ce module ne fait donc qu'une chose : **descendre les étapes du plan et
- * former les couples que l'écurie permet**, jusqu'à saturer les places. Ce qui
- * ne peut pas se former se signale au lieu de se contourner.
+ * #89 avait remplacé le classement par une descente des étapes de
+ * `breedingPlan`, au motif que l'arbre calcule la route au lieu de la deviner.
+ * L'argument est juste et le résultat était faux : mesuré sur `main`, aux prix
+ * réels, écurie et graines identiques, budget non contraignant.
  *
- * ## Ce qui a été retiré, et pourquoi
+ * | cible | route par l'arbre | classement | fournées |
+ * | --- | --- | --- | --- |
+ * | gen 3 `roux` | 0,5 M | 0,8 M | 6 → 3 |
+ * | gen 5 `ivoire` | 4,6 M | 5,1 M | 13 → 11 |
+ * | gen 7 `prune` | 25,4 M | **13,8 M** | 39 → 21 |
+ * | gen 9 `ambre` | 44,7 M | **26,3 M** | 58 → 34 |
+ * | gen 10 `ambre_doré` | 77,0 M | **29,2 M** | 89 → 36 |
  *
- * Ce fichier alimentait un glouton à un coup d'avance (`next-move.ts`) qui
- * classait des appariements libres selon l'objectif courant. Cinq défauts
- * trouvés le 6 août venaient tous de ce classement, aucun d'ailleurs : des
- * croisements qui ne pouvaient jamais atteindre leur cible (#76), un glouton qui
- * ne montait jamais (#78), le blocage du partenaire manquant (#80), une pénalité
- * finie qui asséchait l'écurie (#83), une règle de réserve retirée faute de
- * tenir (#83). Chaque greffe re-dérivait péniblement ce que l'arbre sait déjà :
- * la frontière, le besoin transitif, l'amortissement par profondeur.
+ * 12 graines × 10 parties, 100 % d'aboutissement partout, 12 graines sur 12 dans
+ * le même sens à chaque ligne. Au-dessus de la gen 5, le classement ne gagne pas
+ * un arbitrage : il **domine**, moins cher *et* moins de fournées.
  *
- * L'allocation, elle, reste — c'est la seule partie qui valait. Elle est
- * simplement alimentée par les étapes du plan plutôt que par un classement.
+ * La cause n'est pas le raccourci de #59 — 23 % des croisements des deux côtés,
+ * mesuré. C'est que les multiplicités du plan sont comptées en régime
+ * stationnaire : dès qu'une étape haute est bloquée, et elle l'est presque
+ * toujours, les étapes basses réclament assez d'accouplements pour manger les
+ * cinquante places. La route dépense cinq fois plus de croisements pour arriver
+ * au même endroit deux fois plus tard.
  *
- * ## La limite, assumée
+ * ## Ce que l'arbre garde
  *
- * L'arbre suppose « parent de génération strictement inférieure à l'enfant ». Il
- * ne saura donc jamais exprimer le raccourci de #59, et reste un **majorant**
- * sur les routes qui en profitent. Le raccourci se traite là où il est, en
- * signalement : voir `drift.ts`.
+ * Tout le chiffrage, et le **diagnostic** : ce que le plan réclame encore, ce qui
+ * lui manque, ce qu'il vaut mieux acheter qu'élever. Ce sont deux questions
+ * distinctes — « qu'est-ce que je lance » et « où la route s'arrête » — et
+ * l'écran les présente séparément. Seule la première repasse au classement.
+ *
+ * ## Ce qui reste vrai des reproches de #89
+ *
+ * Les cinq défauts du 6 août étaient bien dans le classement (#76, #78, #80,
+ * #83) et ils y sont corrigés. La leçon n'était pas « le classement est
+ * indéfendable » mais « un changement de `scoreOf` n'est jamais local » : ils ont
+ * tous été trouvés en simulant. D'où l'interrupteur de politique conservé dans
+ * `simulate.ts`, qui permet de rejouer les deux à volonté.
  */
 
-/** Ce que la fournée a besoin de savoir du catalogue et des tarifs. */
-export type LoadoutContext = {
-  colors: BreedingColor[];
-  generations: Map<string, number>;
-  /** Ce qu'une couleur coûterait à se procurer, pour chiffrer ce qu'on consomme. */
-  costOf: (colorId: string) => number;
-  /** Carburant d'un cycle de fécondité, par monture. Un accouplement en consomme deux. */
-  fuelCostPerCycle: number;
-  /** Heures d'une fournée d'enclos, et places d'un enclos. */
-  batchHours: number;
-  slots: number;
-  /**
-   * Le clonage rend la moitié de ce qu'on consomme, donc le coût net d'un parent
-   * est divisé par deux. Même règle qu'ailleurs.
-   */
-  recycleSteriles: boolean;
-};
+/**
+ * Ce que la fournée a besoin de savoir du catalogue et des tarifs.
+ *
+ * C'est exactement ce que `next-move.ts` demande pour classer : le classement et
+ * l'allocation lisent le même contexte, faute de quoi l'écran chiffrerait une
+ * chose et le classement en ordonnerait une autre.
+ */
+export type LoadoutContext = MoveContext;
 
 /** Un côté d'une ligne : la couleur à sortir, et les montures suivies s'il y en a. */
 export type LoadoutSide = {
@@ -77,10 +81,10 @@ export type LoadoutSide = {
   mountIds: string[];
 };
 
-/** Une ligne de la fournée : une étape du plan, son sens, et combien de fois. */
+/** Une ligne de la fournée : un croisement classé, son sens, et combien de fois. */
 export type LoadoutLine = {
-  /** L'étape du plan que cette ligne exécute : la cible, le taux, le niveau des parents. */
-  step: BreedingStep;
+  /** Le croisement que cette ligne exécute : ce qu'il vise, son taux, son score. */
+  move: Move;
   male: LoadoutSide;
   female: LoadoutSide;
   count: number;
@@ -246,6 +250,130 @@ export const planCouples = (
   return { couples, blocked, used };
 };
 
+/** Un croisement alloué : le coup classé, et les deux montures qui l'exécutent. */
+export type RankedPairing = { move: Move; male: Pairing; female: Pairing };
+
+/**
+ * Les croisements les mieux classés que l'écurie permet, à concurrence des
+ * places.
+ *
+ * L'allocation est celle qui a toujours valu — descendre les coups classés, les
+ * deux sens comptés, jusqu'à saturer le parc. Ce qui change par rapport à #89
+ * est seulement ce qui l'alimente : un classement d'appariements réels plutôt
+ * que les étapes d'un arbre.
+ *
+ * Elle vit ici et non dans `next-move.ts` parce que **la simulation et l'écran
+ * doivent en partager une seule copie** : deux allocations divergentes
+ * mesureraient autre chose que ce qu'on conseille, et c'est précisément le
+ * défaut qui a rendu les chiffres de #88 ininterprétables.
+ *
+ * L'écurie passée en argument est **consommée**, comme pour `planCouples`.
+ */
+export const rankedCouples = (
+  stable: Stable,
+  objective: ObjectiveId,
+  context: LoadoutContext,
+  capacity: number
+): { pairings: RankedPairing[]; used: number } => {
+  if (capacity < 2) return { pairings: [], used: 0 };
+
+  /**
+   * Les montures libres, par ascendance et par sexe, chacune nommée.
+   *
+   * Le vrac n'a pas d'individu à désigner : il entre comme des jetons sans
+   * identifiant, que `consumeCouples` décomptera du compteur de couleur.
+   */
+  const pool = new Map<string, (string | null)[]>();
+  const push = (mate: Mate, id: string | null) => {
+    const key = `${mateSignature(mate)}|${mate.sex}`;
+    const slot = pool.get(key) ?? [];
+    slot.push(id);
+    pool.set(key, slot);
+  };
+
+  for (const mount of stable.individuals) {
+    if (!mount.fertile) continue;
+    push(
+      {
+        id: mount.id,
+        colorId: mount.colorId,
+        sex: mount.sex,
+        level: mount.level,
+        parents: mount.parents,
+      },
+      mount.id
+    );
+  }
+  for (const [colorId, counts] of stable.bulk) {
+    for (const [sex, howMany] of [
+      ['M', counts.males],
+      ['F', counts.females],
+    ] as [Sex, number][]) {
+      for (let index = 0; index < howMany; index += 1) {
+        push({ id: null, colorId, sex, level: 1, parents: null }, null);
+      }
+    }
+  }
+
+  /**
+   * Assez de coups pour remplir n'importe quel parc.
+   *
+   * Le plafond n'est pas cosmétique, il **est** la politique : à 5 coups la
+   * montée vers la gen 10 revient à 15,5 M en 235 fournées, à 40 coups 18,3 M en
+   * 101 fournées, à 400 coups 29,2 M en 36 fournées. Écrémer est moins cher en
+   * kamas et six fois plus long en calendrier. On remplit l'enclos — une fournée
+   * dure le même temps qu'elle soit pleine ou non, et c'est la règle de la
+   * maison.
+   */
+  const ranked = availableMoves(stable, objective, context, 400);
+
+  const take = (mate: Mate, sex: Sex) => pool.get(`${mateSignature(mate)}|${sex}`)?.pop();
+  const give = (mate: Mate, sex: Sex, id: string | null) => {
+    pool.get(`${mateSignature(mate)}|${sex}`)?.push(id);
+  };
+
+  const pairings: RankedPairing[] = [];
+  let used = 0;
+
+  for (const move of ranked) {
+    // Les deux sens du même croisement sont deux couples distincts : ce sont des
+    // montures différentes à sortir, même si le résultat est identique.
+    const orientations: [Mate, Mate][] = [
+      [move.male, move.female],
+      [move.female, move.male],
+    ];
+
+    for (const [first, second] of orientations) {
+      while (used + 2 <= capacity) {
+        const maleId = take(first, 'M');
+        if (maleId === undefined) break;
+        const femaleId = take(second, 'F');
+        if (femaleId === undefined) {
+          // Sans partenaire, la première reste disponible pour l'autre sens.
+          give(first, 'M', maleId);
+          break;
+        }
+
+        pairings.push({
+          move,
+          male: { colorId: first.colorId, sex: 'M', mountId: maleId },
+          female: { colorId: second.colorId, sex: 'F', mountId: femaleId },
+        });
+        used += 2;
+      }
+    }
+
+    if (used + 2 > capacity) break;
+  }
+
+  consumeCouples(
+    stable,
+    pairings.map(({ male, female }) => ({ targetColorId: male.colorId, male, female }))
+  );
+
+  return { pairings, used };
+};
+
 /**
  * Les noms possibles pour les poulains d'une étape.
  *
@@ -255,35 +383,24 @@ export const planCouples = (
  * leur correspond, pour que l'écran dise combien en préparer.
  */
 const namesFor = (
-  step: BreedingStep,
+  move: Move,
   context: LoadoutContext,
   nameOf: (colorId: string) => string
 ): LoadoutLine['names'] => {
-  const [first, second] = step.recipe;
+  const parents: [string, string] = [move.male.colorId, move.female.colorId];
   const parentGenerations: [number, number] = [
-    context.generations.get(first) ?? 1,
-    context.generations.get(second) ?? 1,
+    context.generations.get(parents[0]) ?? 1,
+    context.generations.get(parents[1]) ?? 1,
   ];
 
-  // Deux montures nues, tirées de la recette : le plan raisonne sur des couleurs
-  // et non sur des individus, et c'est bien la recette qui décide du nom.
-  const male: Mate = {
-    id: null,
-    colorId: first,
-    sex: 'M',
-    level: BULK_MATE_LEVEL,
-    parents: null,
-  };
-  const female: Mate = { ...male, colorId: second, sex: 'F' };
-
   const byName = new Map<string, { name: string; colorId: string; probability: number }>();
-  for (const outcome of matingOutcomes(male, female, context.colors, context.generations)) {
+  for (const outcome of matingOutcomes(move.male, move.female, context.colors, context.generations)) {
     const generation = context.generations.get(outcome.colorId) ?? 1;
     if (!tracksIndividually(generation, parentGenerations)) continue;
 
     const name = mountName(carriedGeneration(generation, parentGenerations), [
-      nameOf(first),
-      nameOf(second),
+      nameOf(parents[0]),
+      nameOf(parents[1]),
     ]);
     const current = byName.get(name);
     if (current) current.probability += outcome.probability;
@@ -322,56 +439,46 @@ export const buildLoadout = (
   plan: BreedingPlan,
   targetColorId: string,
   stable: Stable,
+  objective: ObjectiveId,
   context: LoadoutContext,
   capacity: number,
-  nameOf: (colorId: string) => string,
-  /**
-   * Les montures à ne pas charger : celles que `driftSignals` a repérées comme
-   * portant plus haut que leur couleur.
-   *
-   * Sans cette réserve, la fournée les dépense en premier — `formCouples` sert
-   * les individus avant le vrac, et les plus bas niveau devant, ce qui désigne
-   * exactement une gen 1 née d'un croisement gen 9. L'écran proposait alors la
-   * même monture deux fois : « garde-la, elle vise la gen 10 » d'un côté, et
-   * « charge-la sur cette gen 2 » de l'autre.
-   */
-  reserved: Iterable<string> = []
+  nameOf: (colorId: string) => string
 ): Loadout => {
   const working = copyStable(stable);
-  const held = new Set(reserved);
-  if (held.size > 0) {
-    working.individuals = working.individuals.filter((mount) => !held.has(mount.id));
-  }
-
-  const { couples, blocked, used } = planCouples(plan, working, capacity);
-
-  const stepByColor = new Map(plan.steps.map((step) => [step.colorId, step]));
+  const { pairings, used } = rankedCouples(working, objective, context, capacity);
 
   /**
-   * Les couples repliés en lignes. Deux au plus par étape : la recette fixe les
-   * deux couleurs, et seul le sens varie.
+   * Où la route s'arrête, lu sur l'arbre — et sur une écurie **intacte**.
+   *
+   * C'est une question différente de « qu'est-ce que je lance » : elle demande
+   * ce que le plan réclame encore et ce qui lui manque pour l'obtenir. La poser
+   * sur l'écurie déjà vidée par la fournée ferait passer pour un manque ce qui
+   * n'est qu'une place prise.
+   */
+  const { blocked } = planCouples(plan, copyStable(stable), capacity);
+
+  /**
+   * Les couples repliés en lignes. Deux au plus par coup classé : les deux
+   * ascendances sont fixées, et seul le sens varie.
    */
   const byLine = new Map<string, LoadoutLine>();
-  for (const couple of couples) {
-    const step = stepByColor.get(couple.targetColorId);
-    if (!step) continue;
-
-    const key = `${couple.targetColorId}|${couple.male.colorId}|${couple.female.colorId}`;
+  for (const { move, male, female } of pairings) {
+    const key = `${mateSignature(move.male)}|${mateSignature(move.female)}|${male.colorId}`;
     const line =
       byLine.get(key) ??
       ({
-        step,
-        male: { colorId: couple.male.colorId, mountIds: [] },
-        female: { colorId: couple.female.colorId, mountIds: [] },
+        move,
+        male: { colorId: male.colorId, mountIds: [] },
+        female: { colorId: female.colorId, mountIds: [] },
         count: 0,
-        cost: crossingCost([couple.male.colorId, couple.female.colorId], context),
+        cost: crossingCost([male.colorId, female.colorId], context),
         enclosHours: crossingHours(context),
-        names: namesFor(step, context, nameOf),
+        names: namesFor(move, context, nameOf),
       } satisfies LoadoutLine);
 
     line.count += 1;
-    if (couple.male.mountId) line.male.mountIds.push(couple.male.mountId);
-    if (couple.female.mountId) line.female.mountIds.push(couple.female.mountId);
+    if (male.mountId) line.male.mountIds.push(male.mountId);
+    if (female.mountId) line.female.mountIds.push(female.mountId);
     byLine.set(key, line);
   }
 
@@ -379,16 +486,16 @@ export const buildLoadout = (
   // partent ensemble, donc l'ordre n'est pas celui de l'exécution — c'est celui
   // de la lecture, et ce qu'on vient lire est jusqu'où la fournée porte.
   const lines = [...byLine.values()].sort(
-    (a, b) => b.step.generation - a.step.generation || b.count - a.count
+    (a, b) => b.move.targetGeneration - a.move.targetGeneration || b.count - a.count
   );
 
   /** Ce qu'il faut sortir, agrégé par couleur et par sexe. */
   const pulled = new Map<string, { males: number; females: number }>();
-  for (const couple of couples) {
+  for (const { male, female } of pairings) {
     for (const [side, sex] of [
-      [couple.male, 'M'],
-      [couple.female, 'F'],
-    ] as [Couple['male'], Sex][]) {
+      [male, 'M'],
+      [female, 'F'],
+    ] as [Pairing, Sex][]) {
       const current = pulled.get(side.colorId) ?? { males: 0, females: 0 };
       if (sex === 'M') current.males += 1;
       else current.females += 1;

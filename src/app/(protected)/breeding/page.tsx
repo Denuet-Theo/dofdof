@@ -8,7 +8,6 @@ import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
-import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import Button from '@/components/ui/Button';
@@ -286,31 +285,33 @@ const BreedingPage = () => {
   }, [candidates, objective, pricedOnly, selectedColorId, rows]);
 
   /**
-   * Les occasions que l'arbre ne peut pas exprimer.
+   * De quoi classer et chiffrer un croisement, partagé par la fournée à charger
+   * et par les fournées suivantes.
    *
-   * Une monture dont l'ascendance porte plus haut que sa couleur — le raccourci
-   * de #59 — n'est dans aucune recette, donc aucun plan ne la proposera. Elle se
-   * signale, elle ne se planifie pas : c'est de l'opportunisme, et l'éleveur en
-   * décide. Voir `drift.ts`.
-   *
-   * Se calcule **avant** les deux, qui doivent savoir ne pas les dépenser : le
-   * prochain coup comme les fournées suivantes. Une seule des deux réservait, et
-   * l'écran donnait alors deux consignes contraires sur la même monture.
+   * Un seul contexte pour les deux : deux copies divergeraient, et l'écran
+   * afficherait un coût dans un panneau et un autre dans le suivant.
    */
-  const drift = useMemo(() => {
+  const moveContext = useMemo(() => {
     const colors = tree?.colors ?? [];
-    if (colors.length === 0) return [];
-    return driftSignals(stable, {
+    const byId = new Map(rows.map((row) => [row.colorId, row]));
+    return {
       colors,
       generations: new Map(colors.map((color) => [color.id, color.generation])),
-    });
-  }, [tree, stable]);
-
-  /** Les montures signalées, que ni la fournée ni les suivantes ne doivent charger. */
-  const reserved = useMemo(() => drift.map((signal) => signal.mount.id), [drift]);
+      costOf: (colorId: string) => byId.get(colorId)?.estimate.cost ?? 0,
+      valueOf: (colorId: string) => byId.get(colorId)?.estimate.bestExitValue ?? 0,
+      fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
+      // La durée d'un cycle de fécondité suffit à chiffrer : la montée en niveau
+      // se glisse en grande partie dans les emplacements libres du cycle, et ce
+      // qui dépasse ne dépend pas de l'étape.
+      batchHours: supplies?.cycleHours ?? 0,
+      slots: ENCLOS_SLOTS,
+      recycleSteriles: settings.recycle_steriles,
+      topGeneration: colors.reduce((top, color) => Math.max(top, color.generation), 0),
+    };
+  }, [tree, rows, supplies, settings.recycle_steriles]);
 
   /**
-   * Les deux prochaines fournées du plan suivi, montures nommées.
+   * Les deux prochaines fournées, montures nommées.
    *
    * Ne se calcule que pour le plan suivi : c'est une consigne d'action, pas une
    * comparaison, et l'établir pour les 120 couleurs n'aurait ni sens ni intérêt.
@@ -319,12 +320,13 @@ const BreedingPage = () => {
     const target = rows.find((row) => row.colorId === selectedColorId);
     if (!target?.planned) return [];
 
-    return nextBatches(target.planned.plan, stable, {
+    return nextBatches(stable, {
       capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
       count: 2,
       recycleSteriles: settings.recycle_steriles,
       generationOf,
-      reserved,
+      objective,
+      context: moveContext,
     });
   }, [
     rows,
@@ -333,7 +335,8 @@ const BreedingPage = () => {
     settings.enclos_count,
     settings.recycle_steriles,
     generationOf,
-    reserved,
+    objective,
+    moveContext,
   ]);
 
   /**
@@ -354,50 +357,34 @@ const BreedingPage = () => {
   }, [selectedColorId, recommended, sorted]);
 
   /**
-   * La fournée à charger : les étapes du plan que l'écurie permet de lancer.
+   * La fournée à charger : les croisements les mieux classés que l'écurie
+   * permet, jusqu'à remplir le parc.
    *
-   * La route se calcule sur l'arbre des recettes une bonne fois, parents avant
-   * enfants — elle ne se redevine plus coup par coup. Ce qui change à chaque
-   * saisie de naissance est ce que l'écurie **permet** d'en lancer, et le plan
-   * lui-même se reprend sur le stock. Voir `loadout.ts`.
+   * Le plan reste, mais pour le **diagnostic** : ce qu'il réclame encore et ce
+   * qui lui manque. Ce qu'on lance vient du classement — mesuré 2,6 fois moins
+   * cher et 2,5 fois moins de fournées vers la gen 10. Voir `loadout.ts`.
    */
   const loadout = useMemo(() => {
     const target = rows.find((row) => row.colorId === routedColorId);
     if (!target?.planned || !routedColorId) return null;
 
-    const byId = new Map(rows.map((row) => [row.colorId, row]));
-    const colors = tree?.colors ?? [];
-
     return buildLoadout(
       target.planned.plan,
       routedColorId,
       stable,
-      {
-        colors,
-        generations: new Map(colors.map((color) => [color.id, color.generation])),
-        costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
-        fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
-        // La durée d'un cycle de fécondité suffit à chiffrer : la montée en
-        // niveau se glisse en grande partie dans les emplacements libres du
-        // cycle, et ce qui dépasse ne dépend pas de l'étape.
-        batchHours: supplies?.cycleHours ?? 0,
-        slots: ENCLOS_SLOTS,
-        recycleSteriles: settings.recycle_steriles,
-      },
+      objective,
+      moveContext,
       Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
-      nameOf,
-      reserved
+      nameOf
     );
   }, [
-    tree,
     rows,
     routedColorId,
     stable,
-    supplies,
-    settings.recycle_steriles,
+    objective,
+    moveContext,
     settings.enclos_count,
     nameOf,
-    reserved,
   ]);
 
   /**
@@ -768,13 +755,10 @@ const BreedingPage = () => {
       </div>
 
       {/* La fournée vient avant les lots, et ce n'est pas un détail de mise en
-          page : un croisement hors recette rend inutile une partie du plan qu'on
-          s'apprêtait à charger. Le voir après aurait consommé les montures qui
-          le portent. Le panneau disparaît de lui-même tant qu'aucune couleur
+          page : c'est elle qui désigne les montures, les lots ne font que les
+          regrouper. Le panneau disparaît de lui-même tant qu'aucune couleur
           n'est planifiable. */}
-      {loadout && (
-        <BreedingNextMove loadout={loadout} drift={drift} clonings={clonings} nameOf={nameOf} />
-      )}
+      {loadout && <BreedingNextMove loadout={loadout} clonings={clonings} nameOf={nameOf} />}
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

@@ -1,5 +1,6 @@
-import type { BreedingPlan } from './costs';
-import { planCouples } from './loadout';
+import { rankedCouples, type LoadoutContext } from './loadout';
+import type { Move } from './next-move';
+import type { ObjectiveId } from './objectives';
 import {
   copyStable,
   splitBySex,
@@ -67,14 +68,22 @@ const addExpectedBirths = (
   generation: number,
   crossings: number,
   successRate: number,
-  seed: number
+  seed: number,
+  /**
+   * Les deux couleurs parentes, quand on les connaît.
+   *
+   * Elles ne sont pas décoratives : c'est l'ascendance qui décide de ce que les
+   * accouplements de la monture viseront, et le classement la lit. Une naissance
+   * projetée sans parents se retrouve rangée en vrac et proposée comme une gen 1
+   * quelconque — ce qui rendait la seconde fournée systématiquement fausse.
+   */
+  parents: [string, string] | null = null,
+  parentGenerations: [number, number] | null = null
 ) => {
   const born = Math.floor(crossings * successRate);
   if (born <= 0) return;
 
-  // Sans ascendance à projeter, le seuil retombe sur la seule génération — mais
-  // il se lit au même endroit que partout ailleurs.
-  if (!tracksIndividually(generation)) {
+  if (!tracksIndividually(generation, parentGenerations)) {
     const bulk = stable.bulk.get(colorId) ?? { males: 0, females: 0 };
     const { males, females } = splitBySex(born);
     stable.bulk.set(colorId, { males: bulk.males + males, females: bulk.females + females });
@@ -94,7 +103,7 @@ const addExpectedBirths = (
       sex: index % 2 === 0 ? 'M' : 'F',
       level: 1,
       fertile: true,
-      parents: null,
+      parents,
     };
     stable.individuals.push(projected);
   }
@@ -164,49 +173,25 @@ export type BatchOptions = {
   recycleSteriles: boolean;
   /** Génération d'une couleur, pour savoir où ranger les bébés attendus. */
   generationOf: (colorId: string) => number;
-  /**
-   * Les montures à ne pas charger, comme pour `buildLoadout` : celles que
-   * `driftSignals` a repérées comme portant plus haut que leur couleur.
-   *
-   * La réserve ne valait que pour la fournée à charger, et l'oubli se voyait à
-   * l'écran : le prochain coup gardait la monture, les fournées suivantes la
-   * dépensaient. Deux panneaux, deux consignes opposées sur la même gen 1 — et
-   * c'est celle des fournées qui gagnait, puisqu'elle nommait la monture.
-   *
-   * `formCouples` sert les individus avant le vrac et les plus bas niveau
-   * devant. Pour une couleur de génération basse, un individu n'existe **que**
-   * s'il porte un raccourci — voir `tracksIndividually` — donc cette règle ne
-   * s'active exactement que là où elle est fausse : sur huit Doré de vrac et
-   * deux Doré nés d'un Ambre gen 9 manqué, ce sont les deux porteurs qui partent
-   * les premiers, sur l'étape la plus basse du plan. L'accouplement les rend
-   * stériles, et le raccourci n'existe plus.
-   */
-  reserved?: Iterable<string>;
+  /** L'objectif sur lequel classer, et de quoi chiffrer. Voir `loadout.ts`. */
+  objective: ObjectiveId;
+  context: LoadoutContext;
 };
 
 /**
  * Les prochaines fournées, montures nommées.
  *
- * Les étapes du plan arrivent triées parents avant enfants, et cet ordre est
- * aussi celui du temps : on ne peut pas accoupler une génération avant que la
- * précédente soit née. Une fournée se remplit donc en descendant les étapes
- * jusqu'à saturer le parc.
+ * Le remplissage est celui de la fournée à charger, et c'est **le même appel** :
+ * deux panneaux qui rempliraient chacun à sa façon finiraient par conseiller
+ * deux choses différentes sur le même écran, ce qui est arrivé.
  */
 export const nextBatches = (
-  plan: BreedingPlan,
   stable: Stable,
-  { capacity, count = 2, recycleSteriles, generationOf, reserved = [] }: BatchOptions
+  { capacity, count = 2, recycleSteriles, generationOf, objective, context }: BatchOptions
 ): Batch[] => {
   if (capacity < 2) return [];
 
   const working = copyStable(stable);
-  // Retirées de l'écurie de travail plutôt que filtrées à l'appariement : une
-  // monture réservée ne doit peser sur aucune des fournées projetées, ni sur les
-  // clonages qu'elles décident.
-  const held = new Set(reserved);
-  if (held.size > 0) {
-    working.individuals = working.individuals.filter((mount) => !held.has(mount.id));
-  }
   const batches: Batch[] = [];
   /**
    * Clonages décidés à la fin d'une fournée, à rattacher à la **suivante** :
@@ -215,16 +200,16 @@ export const nextBatches = (
    * fuirait d'un plan à l'autre.
    */
   const pendingClonings: { colorId: string; count: number }[] = [];
-  /** Ce qu'il reste à produire par couleur, décrémenté au fil des fournées. */
-  const remaining = new Map(plan.steps.map((step) => [step.colorId, step.attempts]));
   /** Stériles en attente d'appairage, par couleur. */
   const sterile = new Map<string, number>();
 
   for (let index = 0; index < count; index += 1) {
-    // Le remplissage est celui de la fournée à charger, et c'est le même code :
-    // deux panneaux qui descendraient les étapes chacun à sa façon finiraient
-    // par conseiller deux choses différentes sur le même écran.
-    const { couples, used } = planCouples(plan, working, capacity, remaining);
+    const { pairings, used } = rankedCouples(working, objective, context, capacity);
+    const couples: Couple[] = pairings.map(({ move, male, female }) => ({
+      targetColorId: move.targetColors[0]?.colorId ?? male.colorId,
+      male,
+      female,
+    }));
 
     for (const couple of couples) {
       for (const side of [couple.male, couple.female]) {
@@ -252,15 +237,28 @@ export const nextBatches = (
     const isLast = index === count - 1;
     if (isLast) break;
 
-    for (const step of plan.steps) {
-      const done = step.attempts - (remaining.get(step.colorId) ?? 0);
+    /**
+     * Les naissances attendues, une entrée par croisement lancé.
+     *
+     * On projette la couleur cible la plus probable du coup, avec **ses deux
+     * parents** : c'est l'ascendance qui décide de ce que la monture visera à son
+     * tour, et la fournée suivante se classe dessus.
+     */
+    const launched = new Map<Move, number>();
+    for (const { move } of pairings) launched.set(move, (launched.get(move) ?? 0) + 1);
+
+    for (const [move, crossings] of launched) {
+      const target = move.targetColors[0];
+      if (!target) continue;
       addExpectedBirths(
         working,
-        step.colorId,
-        generationOf(step.colorId),
-        done,
-        step.successRate,
-        index
+        target.colorId,
+        generationOf(target.colorId),
+        crossings,
+        move.successRate,
+        index,
+        [move.male.colorId, move.female.colorId],
+        [generationOf(move.male.colorId), generationOf(move.female.colorId)]
       );
     }
 

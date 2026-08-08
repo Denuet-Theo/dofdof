@@ -303,54 +303,80 @@ impl Census {
         self.headcount -= 1.0;
     }
 
-    /// Un gen 1 anonyme entre au parc.
-    pub fn apply_purchase(&mut self, color: ColorId, sex: Sex, price: i64) {
+    /// Un gen 1 anonyme entre au parc. `sign` vaut `-1.0` pour défaire.
+    pub fn purchase(&mut self, color: ColorId, sex: Sex, price: i64, sign: f64) {
         match sex {
-            Sex::Male => self.fertile_males[1] += 1.0,
-            Sex::Female => self.fertile_females[1] += 1.0,
+            Sex::Male => self.fertile_males[1] += sign,
+            Sex::Female => self.fertile_females[1] += sign,
         }
-        self.carried[1] += 1.0;
-        self.held[color as usize] += 1.0;
-        self.headcount += 1.0;
-        self.kamas -= price as f64;
+        self.carried[1] += sign;
+        self.held[color as usize] += sign;
+        self.headcount += sign;
+        self.kamas -= sign * price as f64;
     }
 
-    /// Une monture part en ambre.
-    pub fn apply_sacrifice(
+    /// Une monture part en ambre. `sign` vaut `-1.0` pour défaire.
+    pub fn sacrifice(
         &mut self,
         generation: usize,
         carried: usize,
         color: ColorId,
         sex: Option<Sex>,
         value: i64,
+        sign: f64,
     ) {
         match sex {
             Some(Sex::Male) => {
-                self.fertile_males[generation] -= 1.0;
-                self.carried[carried] -= 1.0;
-                self.held[color as usize] -= 1.0;
+                self.fertile_males[generation] -= sign;
+                self.carried[carried] -= sign;
+                self.held[color as usize] -= sign;
             }
             Some(Sex::Female) => {
-                self.fertile_females[generation] -= 1.0;
-                self.carried[carried] -= 1.0;
-                self.held[color as usize] -= 1.0;
+                self.fertile_females[generation] -= sign;
+                self.carried[carried] -= sign;
+                self.held[color as usize] -= sign;
             }
-            None => self.steriles[generation] -= 1.0,
+            None => self.steriles[generation] -= sign,
         }
-        self.headcount -= 1.0;
-        self.kamas += value as f64;
+        self.headcount -= sign;
+        self.kamas += sign * value as f64;
     }
 
-    /// Un clonage : deux stériles entrent, une féconde ressort.
-    pub fn apply_cloning(&mut self, generation: usize, carried: usize, color: ColorId) {
-        self.steriles[generation] -= 2.0;
-        // Le sexe du survivant est connu de l'appelant, mais à ce niveau de
-        // résumé on répartit : la recherche ne choisit pas le sexe d'un clone.
-        self.fertile_males[generation] += 0.5;
-        self.fertile_females[generation] += 0.5;
-        self.carried[carried] += 1.0;
-        self.held[color as usize] += 1.0;
-        self.headcount -= 1.0;
+    /// Un clonage : deux stériles entrent, une féconde ressort. `sign` vaut
+    /// `-1.0` pour défaire.
+    pub fn cloning(&mut self, generation: usize, carried: usize, color: ColorId, sign: f64) {
+        self.steriles[generation] -= 2.0 * sign;
+        // Le sexe du survivant n'est pas choisi par la recherche : à ce niveau
+        // de résumé on répartit une demi-monture de chaque côté.
+        self.fertile_males[generation] += 0.5 * sign;
+        self.fertile_females[generation] += 0.5 * sign;
+        self.carried[carried] += sign;
+        self.held[color as usize] += sign;
+        self.headcount -= sign;
+    }
+
+    /// Ce que l'écurie rendrait si on la liquidait maintenant, solde compris.
+    ///
+    /// C'est **exactement la fonction de score** de la partie, évaluée sur
+    /// l'état attendu. Elle sert de fonction de valeur myope : celle qui ne voit
+    /// que ce que la fournée rapporte tout de suite, sans rien accorder à ce
+    /// qu'elle prépare. C'est le point de comparaison honnête pour la valeur
+    /// apprise — si le réseau ne la bat pas, il n'a rien appris que l'arithmétique
+    /// ne donnait déjà.
+    pub fn expected_score(&self, economy: &Economy, top_generation: u8) -> f64 {
+        let mut total = self.kamas;
+        for generation in 1..=MAX_GENERATION {
+            let heads = self.fertile_males[generation]
+                + self.fertile_females[generation]
+                + self.steriles[generation];
+            total += heads * economy.value_at_generation(generation as u8, top_generation) as f64;
+        }
+        total
+    }
+
+    #[inline]
+    pub fn kamas(&self) -> f64 {
+        self.kamas
     }
 
     #[inline]

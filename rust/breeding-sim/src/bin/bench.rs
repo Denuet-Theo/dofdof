@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::economy::{Economy, NeverBreeds, Policy, RunOutcome, play};
+use breeding_sim::search::{Myopic, Searching};
 use breeding_sim::trees::muldo;
 
 const SEEDS: u32 = 200;
@@ -88,6 +89,9 @@ fn main() {
         }),
         measure("glouton / profit", || {
             Box::new(Greedy::new(Objective::Profit))
+        }),
+        measure("recherche / valeur myope", || {
+            Box::new(Searching::new(Myopic))
         }),
     ];
 

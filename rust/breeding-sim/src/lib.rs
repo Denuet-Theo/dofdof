@@ -32,6 +32,7 @@ pub mod economy;
 pub mod encode;
 pub mod lineage;
 pub mod pairing;
+pub mod search;
 pub mod stable;
 pub mod trees;
 

@@ -47,3 +47,4 @@ next-env.d.ts
 # c'est un workspace de binaires, et une mesure ne se rejoue qu'à dépendances
 # identiques.
 /rust/target/
+/rust/champion.json

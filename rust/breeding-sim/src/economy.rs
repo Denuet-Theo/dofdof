@@ -123,8 +123,16 @@ impl Economy {
     /// est entre les deux rend son rang en ambre.
     #[inline]
     pub fn value_of(&self, catalog: &Catalog, color: ColorId) -> i64 {
-        let generation = catalog.generation(color);
-        if generation >= catalog.top_generation() {
+        self.value_at_generation(catalog.generation(color), catalog.top_generation())
+    }
+
+    /// Le même barème, lu sur le rang seul.
+    ///
+    /// Le recensement de `encode.rs` ne garde que des comptes par génération :
+    /// il n'a plus de couleur sous la main pour repasser par `value_of`.
+    #[inline]
+    pub fn value_at_generation(&self, generation: u8, top_generation: u8) -> i64 {
+        if generation >= top_generation {
             self.top_value
         } else if generation <= 1 {
             0

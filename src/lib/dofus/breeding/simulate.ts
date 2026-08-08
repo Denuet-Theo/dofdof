@@ -1,8 +1,15 @@
 import { breedingPlan, type BreedingEstimate, type BreedingPlan } from './costs';
-import { crossingCost, crossingHours, planCouples, type LoadoutContext } from './loadout';
-import { matingOutcomes, BULK_MATE_LEVEL, type Mate } from './pairing';
+import {
+  crossingCost,
+  crossingHours,
+  planCouples,
+  rankedCouples,
+  type LoadoutContext,
+} from './loadout';
+import { matingOutcomes, pairOutlook, BULK_MATE_LEVEL, type Mate } from './pairing';
 import { cloneOptions, type CloneContext } from './cloning';
 import { driftSignals, stableFrontier } from './drift';
+import type { ObjectiveId } from './objectives';
 import {
   breedableStock,
   copyStable,
@@ -23,11 +30,10 @@ import {
  * tombent comme ils veulent, et les parents effectivement en main ne sont pas
  * ceux que l'étape supposait.
  *
- * D'où cette simulation, qui joue ce que l'écran conseille : **reprendre le plan
- * sur le stock à chaque fournée, charger les étapes que l'écurie permet,
- * racheter ce que le plan réclame quand plus rien ne se forme**. C'est la
- * politique entière, sans heuristique à régler — ce qui est précisément
- * l'intérêt de router par l'arbre.
+ * D'où cette simulation, qui joue ce que l'écran conseille : **classer les
+ * croisements que l'écurie permet, remplir le parc avec les meilleurs, racheter
+ * quand plus rien ne s'accouple**. Et qui sait rejouer les deux politiques
+ * concurrentes sur la même écurie, ce qui est le seul moyen d'en préférer une.
  *
  * ## Ce module sert à mesurer, pas à conseiller
  *
@@ -73,6 +79,16 @@ export type SimulationContext = LoadoutContext &
      */
     estimates: Map<string, BreedingEstimate>;
     genetonValue?: number;
+    /**
+     * Ce qu'une couleur rapporte, et la génération que la famille plafonne.
+     * Requis par la politique `'greedy'` seule, qui score sur les deux. Voir
+     * `next-move.ts`.
+     */
+    valueOf?: (colorId: string) => number;
+    topGeneration?: number;
+    /** Ce que le glouton rachète quand plus rien ne s'accouple : des gen 1, par paires. */
+    starterColorIds?: string[];
+    starterCost?: number;
   };
 
 export type SimulationOptions = {
@@ -83,6 +99,22 @@ export type SimulationOptions = {
   /** Garde-fou : au-delà, la partie est déclarée non aboutie. */
   maxCrossings?: number;
   seed?: number;
+  /**
+   * Qui remplit la fournée. `'greedy'` par défaut : c'est ce qui est livré.
+   *
+   * | valeur | ce qu'elle joue |
+   * | --- | --- |
+   * | `'greedy'` | le classement de `next-move.ts`, alloué par `rankedCouples` |
+   * | `'plan'` | les étapes de `breedingPlan`, capture des feuilles comprise |
+   * | `'hybrid'` | le plan d'abord, le classement sur les places qui restent |
+   *
+   * Les trois restent pour que le prochain qui voudra changer de politique la
+   * mesure au lieu de l'argumenter — c'est ce qui a manqué à #85 et #89. Chiffres
+   * de la comparaison dans `loadout.ts`.
+   */
+  policy?: 'greedy' | 'plan' | 'hybrid';
+  /** L'objectif sur lequel classer. Ignoré par `'plan'`. */
+  objective?: ObjectiveId;
 };
 
 /**
@@ -107,6 +139,13 @@ export type RunOutcome = {
   enclosHours: number;
   /** La plus haute génération réellement obtenue. */
   top: number;
+  /** Fournées lancées, et places occupées en moyenne sur `slots`. Voir #89. */
+  batches: number;
+  /** Croisements passés par le raccourci de #59 : la cible dépasse la recette. */
+  leaps: number;
+  /** Montures encore en écurie à la fin — ce que la route laisse derrière elle. */
+  left: number;
+  occupancy: number;
   stall: StallDiagnosis | null;
 };
 
@@ -121,6 +160,11 @@ export type SimulationResult = {
   enclosHours: Distribution;
   /** La génération atteinte, sur **toutes** les parties : c'est là qu'on voit caler. */
   top: Distribution;
+  /** Fournées lancées, et places occupées par fournée. Voir `RunOutcome`. */
+  batches: Distribution;
+  leaps: Distribution;
+  left: Distribution;
+  occupancy: Distribution;
   /**
    * Les couleurs qui manquaient le plus souvent au moment du blocage, les plus
    * fréquentes devant. C'est la liste qui dit ce que le plan réclamait et que
@@ -341,11 +385,22 @@ const buyWhatIsMissing = (
  */
 const CLONE_THRESHOLD = 12;
 
+/** Tout ce que l'écurie porte encore, vrac et individus confondus. */
+const mountsLeft = (stable: Stable): number =>
+  stable.individuals.length +
+  [...stable.bulk.values()].reduce((total, counts) => total + counts.males + counts.females, 0);
+
 /** Une partie : on suit le plan jusqu'à la génération visée, ou jusqu'au budget. */
 const playOnce = (
   start: Stable,
   context: SimulationContext,
-  { targetColorId, targetGeneration, maxCrossings = 300 }: SimulationOptions,
+  {
+    targetColorId,
+    targetGeneration,
+    maxCrossings = 300,
+    policy = 'greedy',
+    objective = 'gen10_balanced',
+  }: SimulationOptions,
   random: () => number
 ): RunOutcome => {
   const stable = copyStable(start);
@@ -355,6 +410,9 @@ const playOnce = (
   let crossings = 0;
   let serial = 0;
   let top = 0;
+  let batches = 0;
+  let leaps = 0;
+  let places = 0;
 
   /** Le dernier diagnostic, gardé pour dire où la partie a calé. */
   let blocked: string[] = [];
@@ -366,6 +424,8 @@ const playOnce = (
    */
   const breed = (male: Mate, female: Mate): number | null => {
     cost += crossingCost([male.colorId, female.colorId], context);
+    // Le raccourci de #59 : la cible du couple dépasse ce que la recette annonce.
+    if ((pairOutlook(male, female, context.colors, context.generations)?.leap ?? 0) > 0) leaps += 1;
     enclosHours += crossingHours(context);
     crossings += 1;
 
@@ -389,6 +449,56 @@ const playOnce = (
   while (crossings < maxCrossings) {
     if (stable.individuals.filter((mount) => !mount.fertile).length >= CLONE_THRESHOLD) {
       recycle(stable, context, random);
+    }
+
+    /**
+     * Le glouton, pour la mesure de #87 — et il s'arrête là.
+     *
+     * Pas de bloc de dérive : `pairOutlook` lit déjà l'ascendance, donc le
+     * raccourci de #59 est **dans** son classement. Le lui ajouter en plus le
+     * ferait jouer deux fois. Pas de capture de feuilles non plus : il n'a pas
+     * d'arbre à lire pour savoir laquelle bloque, il rachète des gen 1 quand plus
+     * rien ne s'accouple, comme il le faisait avant #89.
+     */
+    if (policy === 'greedy') {
+      if (context.valueOf === undefined || context.topGeneration === undefined) {
+        throw new Error("La politique 'greedy' demande `valueOf` et `topGeneration`.");
+      }
+      const greedy = rankedCouples(
+        stable,
+        objective,
+        { ...context, valueOf: context.valueOf, topGeneration: context.topGeneration },
+        capacity
+      );
+
+      if (greedy.pairings.length === 0) {
+        recycle(stable, context, random);
+        const starters = context.starterColorIds ?? [];
+        if (starters.length === 0) break;
+        const colorId = starters[serial % starters.length];
+        const bulk = stable.bulk.get(colorId) ?? { males: 0, females: 0 };
+        bulk.males += 1;
+        bulk.females += 1;
+        stable.bulk.set(colorId, bulk);
+        cost += 2 * (context.starterCost ?? 0);
+        serial += 1;
+        // Une tournée d'achat compte au budget, comme du côté du plan.
+        crossings += 1;
+        continue;
+      }
+
+      batches += 1;
+      places += greedy.used;
+
+      for (const couple of greedy.pairings) {
+        const generation = breed(mateOf(stable, couple.male), mateOf(stable, couple.female));
+        if (generation === null) continue;
+        top = Math.max(top, generation);
+        if (generation >= targetGeneration) {
+          return { reached: true, crossings, cost, enclosHours, top, batches, leaps, left: mountsLeft(stable), occupancy: batches > 0 ? places / batches : 0, stall: null };
+        }
+      }
+      continue;
     }
 
     let used = 0;
@@ -428,7 +538,7 @@ const playOnce = (
       if (generation === null) continue;
       top = Math.max(top, generation);
       if (generation >= targetGeneration) {
-        return { reached: true, crossings, cost, enclosHours, top, stall: null };
+        return { reached: true, crossings, cost, enclosHours, top, batches, leaps, left: mountsLeft(stable), occupancy: batches > 0 ? places / batches : 0, stall: null };
       }
     }
 
@@ -491,6 +601,32 @@ const playOnce = (
       blocked = [...new Set(appointBatch.blocked.flatMap((entry) => entry.missing))];
     }
 
+    /**
+     * L'hybride : le plan garde la main, le classement prend ce qui reste.
+     *
+     * Les places libres d'une fournée du plan sont exactement celles que
+     * `planCouples` renonce à combler — toute étape encore réclamée y est
+     * bloquée. Le classement, lui, ne raisonne pas par étapes : il regarde les
+     * montures en main. C'est donc là qu'il a quelque chose à dire, et nulle part
+     * ailleurs.
+     */
+    if (policy === 'hybrid' && context.valueOf && context.topGeneration !== undefined) {
+      const reste = rankedCouples(
+        stable,
+        objective,
+        { ...context, valueOf: context.valueOf, topGeneration: context.topGeneration },
+        capacity - used - batch.used
+      );
+      batch.couples.push(
+        ...reste.pairings.map(({ move, male, female }) => ({
+          targetColorId: move.targetColors[0]?.colorId ?? male.colorId,
+          male,
+          female,
+        }))
+      );
+      batch.used += reste.used;
+    }
+
     // Le rachat ne se déclenche que sur une fournée **entièrement** vide, si bien
     // qu'un seul couple formé suffit à le bloquer : l'enclos peut tourner à deux
     // accouplements sur vingt-cinq places sans que rien ne le signale.
@@ -515,12 +651,15 @@ const playOnce = (
       continue;
     }
 
+    batches += 1;
+    places += used + batch.used;
+
     for (const couple of batch.couples) {
       const generation = breed(mateOf(stable, couple.male), mateOf(stable, couple.female));
       if (generation === null) continue;
       top = Math.max(top, generation);
       if (generation >= targetGeneration) {
-        return { reached: true, crossings, cost, enclosHours, top, stall: null };
+        return { reached: true, crossings, cost, enclosHours, top, batches, leaps, left: mountsLeft(stable), occupancy: batches > 0 ? places / batches : 0, stall: null };
       }
     }
   }
@@ -531,6 +670,10 @@ const playOnce = (
     cost,
     enclosHours,
     top,
+    batches,
+    leaps,
+    left: mountsLeft(stable),
+    occupancy: batches > 0 ? places / batches : 0,
     stall: { frontier: stableFrontier(stable, context.generations), missing: blocked, stepsLeft },
   };
 };
@@ -568,6 +711,10 @@ export const simulatePolicy = (
     crossings: distribution(reached.map((result) => result.crossings)),
     enclosHours: distribution(reached.map((result) => result.enclosHours)),
     top: distribution(results.map((result) => result.top)),
+    batches: distribution(reached.map((result) => result.batches)),
+    leaps: distribution(reached.map((result) => result.leaps)),
+    left: distribution(reached.map((result) => result.left)),
+    occupancy: distribution(reached.map((result) => result.occupancy)),
     missing: [...missingCounts]
       .map(([colorId, count]) => ({ colorId, runs: count }))
       .sort((a, b) => b.runs - a.runs),

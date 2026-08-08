@@ -382,23 +382,41 @@ mod tests {
     #[test]
     fn le_fichier_livre_n_a_plus_de_trou() {
         let prices = Prices::load_default().expect("chargement");
-        assert_eq!(prices.fuel.len(), 4, "les quatre bandes de jauge");
-        assert!(prices.mangeoire_per_point.is_some());
-        assert!(prices.fuel.iter().all(|band| band.price_per_point.is_some()));
         assert_eq!(prices.report_gaps(), None);
+        assert!(prices.mangeoire_per_point.is_some());
 
-        // Et les bandes sont ordonnées du lent et bon marché au rapide et cher.
-        // C'est **l'arbitrage lui-même** : s'il s'inversait, le levier
-        // « vitesse » n'aurait plus de sens et personne ne s'en apercevrait.
-        for pair in prices.fuel.windows(2) {
-            assert!(pair[0].cap < pair[1].cap);
-            assert!(pair[0].hours_per_batch > pair[1].hours_per_batch);
-            assert!(
-                pair[0].price_per_point.unwrap() < pair[1].price_per_point.unwrap(),
-                "aller plus vite doit coûter plus cher : {:?}",
-                pair
-            );
+        // Six jauges, quatre bandes, tout renseigné. La bande se choisit jauge
+        // par jauge, d'où une table et non une liste de bandes.
+        assert!(prices.economy.per_gauge_prices());
+        for (gauge, row) in prices.economy.gauge_prices.iter().enumerate() {
+            for (band, price) in row.iter().enumerate() {
+                assert!(
+                    *price > 0.0,
+                    "jauge {gauge}, bande {band} : prix manquant"
+                );
+            }
         }
+        assert_eq!(prices.economy.band_rates, [1.0, 2.0, 3.0, 4.0]);
+    }
+
+    /// L'Abreuvoir est **moins cher en bande 1 qu'en bande 0** tout en allant
+    /// deux fois plus vite : sa bande basse est strictement dominée.
+    ///
+    /// Ce test existe parce que c'est le seul gain que le modèle à bande unique
+    /// ne pouvait pas exprimer, et parce qu'il sert de contrôle sur la politique
+    /// évoluée : si elle laisse l'Abreuvoir en bande 0, c'est que la mutation
+    /// par jauge n'explore pas.
+    #[test]
+    fn la_bande_basse_de_l_abreuvoir_est_dominee() {
+        use crate::schedule::ABREUVOIR;
+        let prices = Prices::load_default().expect("chargement");
+        let row = prices.economy.gauge_prices[ABREUVOIR];
+        assert!(
+            row[1] < row[0],
+            "bande 1 à {} devrait être moins chère que la bande 0 à {}",
+            row[1],
+            row[0]
+        );
     }
 
     /// Mais la machinerie qui annonce les trous doit rester vivante — sans quoi

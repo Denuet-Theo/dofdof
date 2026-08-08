@@ -162,11 +162,19 @@ fn main() {
         .map(|_| Genome::minimal(&mut innovations, &mut rng))
         .collect();
     let mut species: Vec<Species> = Vec::new();
+    // Le seuil s'ajuste pour tenir le nombre d'espèces visé. C'est ce qui rend
+    // la spéciation robuste à l'échelle de la distance, qui change à mesure que
+    // les génomes grossissent.
+    let mut threshold = config.compatibility_threshold;
 
     let started = Instant::now();
     let budget = options.minutes * 60.0;
     let mut generation = 0usize;
     let mut champion: Option<(Genome, f64)> = None;
+    // Le meilleur de chaque espèce à la dernière génération. C'est ce qu'on
+    // vient chercher en spéciant : les stratégies **alternatives**, pas
+    // seulement celle qui a gagné.
+    let mut survivors: Vec<(Genome, f64)> = Vec::new();
 
     while started.elapsed().as_secs_f64() < budget {
         // --- graines communes, tournantes ---------------------------------
@@ -197,7 +205,7 @@ fn main() {
         for (index, genome) in population.iter().enumerate() {
             let home = species
                 .iter()
-                .position(|s| genome.distance(&s.representative, &config) < config.compatibility_threshold);
+                .position(|s| genome.distance(&s.representative, &config) < threshold);
             match home {
                 Some(at) => species[at].members.push(index),
                 None => species.push(Species {
@@ -209,6 +217,18 @@ fn main() {
             }
         }
         species.retain(|s| !s.members.is_empty());
+
+        // Trop d'espèces : on relâche. Pas assez : on resserre.
+        //
+        // L'ajustement est **proportionnel à l'écart** et non à pas fixe. À pas
+        // fixe de 5 %, partir de 122 espèces pour en viser dix demandait une
+        // cinquantaine de générations — un huitième d'un entraînement d'une
+        // heure passé à se caler au lieu de chercher. Le facteur est borné pour
+        // que le seuil n'oscille pas.
+        if !species.is_empty() {
+            let ratio = species.len() as f64 / config.target_species.max(1) as f64;
+            threshold = (threshold * ratio.powf(0.3).clamp(0.75, 1.35)).max(0.02);
+        }
 
         for entry in &mut species {
             let best = entry
@@ -315,6 +335,24 @@ fn main() {
                 entry.representative = population[first].clone();
             }
         }
+        survivors = species
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .members
+                    .iter()
+                    .copied()
+                    .filter(|&index| scores[index].is_finite())
+                    .max_by(|&a, &b| {
+                        scores[a]
+                            .partial_cmp(&scores[b])
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|index| (population[index].clone(), scores[index]))
+            })
+            .collect();
+        survivors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
         population = next;
         generation += 1;
 
@@ -433,6 +471,37 @@ fn main() {
             "  une fournée : {cost} kamas, {hours:.2} h → {} fournées tenables",
             (economy.horizon_hours.unwrap_or(0.0) / hours.max(1e-9)) as u32
         );
+    }
+
+    // --- ce que les autres espèces ont trouvé ------------------------------
+    //
+    // Deux stratégies très différentes peuvent valoir presque autant, et c'est
+    // une information que le seul champion efface. On les montre.
+    if survivors.len() > 1 {
+        println!("
+--- les espèces, du meilleur au moins bon (fitness d'entraînement) ---");
+        println!(
+            "{:<10} {:<26} {:>7} {:>6} {:>9} {:>8}",
+            "fitness", "bandes", "niveau", "opti", "fournée", "durée"
+        );
+        for (genome, score) in survivors.iter().take(10) {
+            let (cost, hours) = economy.batch_plan(genome.bands, genome.level);
+            let bands: Vec<String> = genome.bands.iter().map(|b| b.to_string()).collect();
+            println!(
+                "{:<10} {:<26} {:>7} {:>6} {:>9} {:>7.2}h",
+                millions(*score),
+                bands.join(""),
+                genome.level,
+                if genome.optimakina_from > 10 {
+                    "—".to_string()
+                } else {
+                    genome.optimakina_from.to_string()
+                },
+                cost,
+                hours
+            );
+        }
+        println!("  (bandes dans l'ordre Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire)");
     }
 
     let path = "champion.json";

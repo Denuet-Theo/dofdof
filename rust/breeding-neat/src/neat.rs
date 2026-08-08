@@ -200,7 +200,19 @@ pub struct Config {
     pub c1: f64,
     pub c2: f64,
     pub c3: f64,
+    /// Poids de l'écart **stratégique** — bandes, niveau, seuil d'Optimakina.
+    pub c4: f64,
+    /// Seuil de compatibilité de départ. Il s'ajuste ensuite tout seul pour
+    /// tenir `target_species` : voir la boucle d'entraînement.
     pub compatibility_threshold: f64,
+    /// Combien d'espèces on cherche à maintenir.
+    ///
+    /// Un seuil fixe ne marche pas : il dépend de l'échelle de la distance, qui
+    /// dépend elle-même de la taille des génomes et donc du moment de
+    /// l'entraînement. Mesuré — à seuil 3,0 la population entière tenait dans
+    /// **une seule espèce** pendant 383 générations, ce qui revient à faire
+    /// tourner un GA ordinaire en croyant faire du NEAT.
+    pub target_species: usize,
     pub survival_threshold: f64,
     pub population: usize,
     /// Générations sans progrès avant qu'une espèce cesse d'être protégée.
@@ -221,7 +233,9 @@ impl Default for Config {
             c1: 1.0,
             c2: 1.0,
             c3: 0.4,
-            compatibility_threshold: 3.0,
+            c4: 1.0,
+            compatibility_threshold: 2.0,
+            target_species: 10,
             survival_threshold: 0.2,
             population: 128,
             stagnation: 20,
@@ -433,8 +447,28 @@ impl Genome {
         // `c1` et `c2` ne sont pas distingués ici : séparer excès et disjoints
         // demande un ordre global sur les innovations que rien n'exploite dans
         // la suite, et les deux coefficients valent la même chose par défaut.
-        (config.c1.max(config.c2)) * disjoint / size
-            + config.c3 * if matching > 0.0 { weight_gap / matching } else { 0.0 }
+        let topology = (config.c1.max(config.c2)) * disjoint / size
+            + config.c3 * if matching > 0.0 { weight_gap / matching } else { 0.0 };
+
+        // La **stratégie** compte dans la distance, et c'est le point qui
+        // manquait.
+        //
+        // Deux génomes de topologie voisine mais de bandes opposées ne jouent
+        // pas le même jeu du tout : l'un fait quarante fournées bon marché,
+        // l'autre quatorze coûteuses. Les faire concourir dans la même espèce,
+        // c'est laisser la mieux notée du moment écraser l'autre avant qu'elle
+        // ait été affinée — exactement ce que la spéciation existe pour
+        // empêcher. Sans ce terme, l'entraînement converge sur une stratégie
+        // unique et on ne voit jamais les alternatives.
+        let bands: f64 = (0..6)
+            .map(|gauge| (self.bands[gauge] as f64 - other.bands[gauge] as f64).abs())
+            .sum::<f64>()
+            / 6.0;
+        let level = (f64::from(self.level) - f64::from(other.level)).abs() / f64::from(MAX_LEVEL);
+        let optimakina =
+            (f64::from(self.optimakina_from) - f64::from(other.optimakina_from)).abs() / 10.0;
+
+        topology + config.c4 * (bands + 2.0 * level + optimakina)
     }
 
     /// Le croisement de deux génomes, le meilleur en premier.

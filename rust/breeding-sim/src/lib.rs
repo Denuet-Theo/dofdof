@@ -28,6 +28,7 @@
 //!   niveau ne demande qu'une ligne plus tard.
 
 pub mod baseline;
+pub mod config;
 pub mod economy;
 pub mod encode;
 pub mod lineage;

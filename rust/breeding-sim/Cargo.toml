@@ -13,3 +13,4 @@ version.workspace = true
 # script sera bloquée de la même façon.
 [dependencies]
 serde_json = "1"
+toml = "0.9"

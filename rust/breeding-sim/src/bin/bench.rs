@@ -17,6 +17,7 @@
 use std::time::Instant;
 
 use breeding_sim::baseline::{Greedy, Objective};
+use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, NeverBreeds, Policy, RunOutcome, play};
 use breeding_sim::search::{Myopic, Searching};
 use breeding_sim::trees::muldo;
@@ -54,9 +55,9 @@ struct Report {
     seconds_per_run: f64,
 }
 
-fn measure(name: &str, mut make: impl FnMut() -> Box<dyn Policy>) -> Report {
+fn measure(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy>) -> Report {
     let catalog = muldo();
-    let economy = Economy::default();
+    let economy = *economy;
 
     let start = Instant::now();
     let outcomes: Vec<RunOutcome> = (0..SEEDS)
@@ -75,22 +76,53 @@ fn measure(name: &str, mut make: impl FnMut() -> Box<dyn Policy>) -> Report {
 }
 
 fn main() {
-    println!("Économie : 10 M de départ, 100 fournées à 150 000, 25 croisements,");
-    println!("           pool de 100 muldos gen 2 à 9, gen 1 à 1 000, ambre à 20 000/rang,");
-    println!("           gen 10 à 500 000. {SEEDS} graines, identiques pour tous.\n");
+    // Les prix viennent de `rust/economy.toml`, pas du code : ils bougent, et
+    // une mesure ne vaut que si on peut la refaire avec ceux du jour.
+    let prices = match Prices::load_default() {
+        Ok(prices) => prices,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    let economy = prices.economy;
+
+    println!(
+        "Économie ({}) : {} M de départ, {} fournées à {} kamas, {} croisements,",
+        Prices::default_path().display(),
+        economy.starting_kamas / 1_000_000,
+        economy.batches,
+        economy.batch_cost,
+        economy.crossings_per_batch
+    );
+    println!(
+        "  pool de {} muldos gen {} à {}, gen 1 à {}, ambre à {}/rang, gen 10 à {}.",
+        economy.starting_pool,
+        economy.pool_generations.0,
+        economy.pool_generations.1,
+        economy.starter_price,
+        economy.amber_per_generation,
+        economy.top_value
+    );
+    println!("  {SEEDS} graines, identiques pour toutes les politiques.\n");
+
+    // Un chiffre publié sur une économie incomplète doit le dire lui-même.
+    if let Some(gaps) = prices.report_gaps() {
+        println!("⚠ {gaps}\n");
+    }
 
     let reports = vec![
-        measure("ne-rien-faire", || Box::new(NeverBreeds)),
-        measure("glouton / gen10_balanced", || {
+        measure("ne-rien-faire", &economy, || Box::new(NeverBreeds)),
+        measure("glouton / gen10_balanced", &economy, || {
             Box::new(Greedy::new(Objective::Gen10Balanced))
         }),
-        measure("glouton / gen10_profit", || {
+        measure("glouton / gen10_profit", &economy, || {
             Box::new(Greedy::new(Objective::Gen10Profit))
         }),
-        measure("glouton / profit", || {
+        measure("glouton / profit", &economy, || {
             Box::new(Greedy::new(Objective::Profit))
         }),
-        measure("recherche / valeur myope", || {
+        measure("recherche / valeur myope", &economy, || {
             Box::new(Searching::new(Myopic))
         }),
     ];

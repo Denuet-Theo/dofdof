@@ -777,8 +777,18 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
     // fait rien ne tourne pas indéfiniment.
     let mut elapsed = 0.0f64;
     let mut batch_index = 0u32;
+    // Une fournée entièrement vide ne change rien à l'écurie ni au solde, donc
+    // la suivante sera identique : la partie est finie, elle ne le sait pas.
+    //
+    // Sans cette garde, une politique inerte consomme les cinq minutes de
+    // manipulation et rejoue la recherche complète trois mille six cents fois
+    // pour arriver au bout des 300 heures. Mesuré : la première génération d'un
+    // entraînement, peuplée de réseaux aléatoires qui ne proposent rien,
+    // prenait 247 secondes au lieu de deux.
+    const IDLE_LIMIT: u32 = 3;
+    let mut idle = 0u32;
     while match economy.horizon_hours {
-        Some(budget) => elapsed < budget && batch_index < 5_000,
+        Some(budget) => elapsed < budget && idle < IDLE_LIMIT,
         None => batch_index < economy.batches,
     } {
         let plan = {
@@ -811,8 +821,16 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                     // Une fournée qui tourne prend le temps de son remplissage
                     // de jauge ; une fournée vide ne coûte que la manipulation.
                     elapsed += economy.batch_hours(plan.band);
+                    idle = 0;
                 } else {
                     elapsed += economy.overhead_hours;
+                    // Clonages et sacrifices changent l'écurie : la fournée
+                    // n'est inerte que si elle ne fait vraiment rien.
+                    if batch.clonings + batch.sacrifices + batch.purchases == 0 {
+                        idle += 1;
+                    } else {
+                        idle = 0;
+                    }
                 }
             }
             Err(_) => {
@@ -822,6 +840,7 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                 // passer pour prudente.
                 outcome.infeasible_batches += 1;
                 elapsed += economy.overhead_hours;
+                idle += 1;
             }
         }
         batch_index += 1;

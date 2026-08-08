@@ -196,23 +196,19 @@ prix_par_point = 0.5640
 prix_unite = 1_692
 points_par_unite = 3_000
 
-# ## Une question ouverte, et elle change tout d'un facteur dix
+# ## Par enclos, comme les autres jauges — confirmé par le mainteneur
 #
-# La jauge de Mangeoire est-elle **par monture** ou **par enclos** ?
+# Dix montures nourries ensemble coûtent ce que coûte une. Ça pesait un facteur
+# dix sur le levier le plus lourd des quatre, donc ça valait d'être demandé
+# plutôt que supposé :
 #
-# Toutes les autres jauges se remplissent au niveau de l'enclos : dix montures
-# préparées ensemble coûtent ce que coûte une. Si la Mangeoire suit la même
-# règle, monter dix montures au niveau 67 coûte 38 200 kamas ; si elle est
-# individuelle, elle en coûte 382 000.
+#   niveau  67 :  38 200 par enclos →   191 000 la fournée
+#   niveau 100 :  97 600            →   488 000
+#   niveau 200 : 489 500            → 2 447 000
 #
-#   par enclos  → niveau  67 :  38 200 par enclos,   191 000 la fournée
-#                 niveau 200 : 489 500 par enclos, 2 447 000 la fournée
-#   par monture → niveau  67 : 382 000 la fournée
-#                 niveau 200 : 4 894 000 la fournée
-#
-# `false` = par enclos, comme les autres jauges. À corriger si c'est faux : le
-# levier « niveau » est le plus lourd des quatre, et un facteur dix sur son prix
-# décide s'il est jouable ou décoratif.
+# À comparer aux 115 000 de jauge en bande basse : nourrir coûte déjà plus cher
+# que faire tourner l'enclos, et monter au niveau 200 coûte vingt fois la jauge.
+# C'est ce qui rend l'arbitrage réel plutôt que théorique.
 par_monture = false
 
 # ---------------------------------------------------------------------------

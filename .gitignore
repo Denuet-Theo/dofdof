@@ -42,3 +42,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# rust — le simulateur de politique d'élevage. `Cargo.lock` est versionné :
+# c'est un workspace de binaires, et une mesure ne se rejoue qu'à dépendances
+# identiques.
+/rust/target/

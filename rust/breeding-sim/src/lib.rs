@@ -29,6 +29,7 @@
 
 pub mod baseline;
 pub mod economy;
+pub mod encode;
 pub mod lineage;
 pub mod pairing;
 pub mod stable;

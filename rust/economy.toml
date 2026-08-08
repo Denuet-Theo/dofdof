@@ -51,10 +51,30 @@ fournees = 100
 
 # Budget en heures, quand `mode = "heures"`.
 #
-# 2 084 h ≈ 87 jours, soit les 100 fournées actuelles jouées en bande basse de
-# jauge (20 h 50 chacune). En bande haute la même durée en laisserait jouer
-# 400 — c'est tout l'enjeu du levier.
-heures = 2084
+# 300 h, soit une trentaine de jours à une dizaine d'heures de jeu par jour.
+#
+# ## Ce que ce chiffre fait au problème
+#
+# Les 2 084 h qu'il remplaçait étaient les 100 fournées actuelles jouées en
+# bande basse. À ce budget-là, la vitesse ne servait presque à rien : on avait
+# le temps de tout faire lentement. À 300 h, elle devient **la** décision.
+#
+#   bande  40 000 → 20 h 55 la fournée →  14 fournées, à   115 000 pièce
+#   bande  70 000 → 10 h 30            →  28 fournées, à   171 000
+#   bande  90 000 →  7 h 02            →  42 fournées, à   402 000
+#   bande 100 000 →  5 h 17            →  56 fournées, à 1 294 000
+#
+# (durées jauge + les 5 minutes incompressibles de `[fournee]`)
+#
+# Quatre fois plus de tours pour onze fois le prix du tour. Et surtout :
+# quatorze fournées ne suffisent probablement pas à monter jusqu'à la gen 10,
+# alors que cinquante-sept, oui. La question cesse d'être « combien ça coûte »
+# pour devenir « est-ce que j'ai le temps ».
+#
+# C'est aussi ce qui devrait renverser la stratégie trouvée par NEAT sur
+# l'économie simplifiée : elle gagnait par le débit pur, en remplissant cent
+# fournées bon marché. Il n'y en aura plus cent.
+heures = 300
 
 # ---------------------------------------------------------------------------
 [fournee]
@@ -64,6 +84,16 @@ heures = 2084
 # niveau de l'enclos (10 places), d'où les cinq groupes indépendants.
 places = 50
 places_par_enclos = 10
+
+# Le temps de manipulation entre deux fournées : sortir, trier, réaccoupler.
+# Incompressible, quel que soit le carburant.
+#
+# C'est un **plancher sur la cadence**. À 5 minutes, une fournée ne peut pas
+# descendre sous 5 min quoi qu'on paie, donc l'accélération par le carburant
+# butera toujours dessus. Aux durées actuelles (5 h à 21 h) l'effet est faible —
+# il retire une demi-fournée sur les 57 de la bande haute — mais il est réel et
+# il grandit à mesure qu'on accélère.
+minutes_entre_fournees = 5
 
 # Prix à plat d'une fournée, dès qu'elle porte au moins un croisement.
 #
@@ -159,53 +189,99 @@ bonus = 0.10
 # Treize fois plus de points pour 1,8 fois le taux : c'est le levier le plus
 # lourd des quatre, et son prix décide s'il vaut quoi que ce soit.
 #
-# INCONNU — donner soit `prix_par_point`, soit le couple
-# `prix_unite` / `points_par_unite` de la nourriture utilisée.
-prix_par_point = -1
-prix_unite = -1
-points_par_unite = -1
+# Meilleur rapport trouvé à l'HDV : Extrait de Mangeoire niveau 25, 3 000 points
+# pour 1 692 kamas. Les bandes hautes coûtent 3,5 à 8 fois plus cher au point,
+# et elles ne servent qu'à aller vite — voir les blocs [[carburant]].
+prix_par_point = 0.5640
+prix_unite = 1_692
+points_par_unite = 3_000
+
+# ## Une question ouverte, et elle change tout d'un facteur dix
+#
+# La jauge de Mangeoire est-elle **par monture** ou **par enclos** ?
+#
+# Toutes les autres jauges se remplissent au niveau de l'enclos : dix montures
+# préparées ensemble coûtent ce que coûte une. Si la Mangeoire suit la même
+# règle, monter dix montures au niveau 67 coûte 38 200 kamas ; si elle est
+# individuelle, elle en coûte 382 000.
+#
+#   par enclos  → niveau  67 :  38 200 par enclos,   191 000 la fournée
+#                 niveau 200 : 489 500 par enclos, 2 447 000 la fournée
+#   par monture → niveau  67 : 382 000 la fournée
+#                 niveau 200 : 4 894 000 la fournée
+#
+# `false` = par enclos, comme les autres jauges. À corriger si c'est faux : le
+# levier « niveau » est le plus lourd des quatre, et un facteur dix sur son prix
+# décide s'il est jouable ou décoratif.
+par_monture = false
 
 # ---------------------------------------------------------------------------
-[[carburant]]
+# [[carburant]] — les quatre bandes de jauge
 # ---------------------------------------------------------------------------
 #
-# Un cycle de fécondité coûte 75 010 points de jauge, transférés au niveau de
-# l'enclos : dix montures préparées ensemble coûtent ce qu'en coûte une.
+# Un cycle de fécondité coûte 75 010 points, transférés au niveau de l'enclos :
+# dix montures préparées ensemble coûtent ce que coûte une. Le détail des
+# étapes (relevé en jeu, voir enclos.ts) : 10 000 puis 5 010 points de sérénité
+# (Baffeur/Caresseur), et 60 000 points de statistiques (Foudroyeur/Dragofesse).
 #
 # Le débit dépend de la bande où on tient la jauge, et chaque bande exige un
-# carburant dont le plafond l'atteint. C'est le levier « temps » : un facteur 4
-# sur la durée d'une fournée.
+# carburant dont le plafond l'atteint. Les Élixirs n'ont pas de clause « sans
+# dépasser » : leur plafond est donc 100 000, et ce sont eux la bande haute.
 #
-# INCONNU — remplir `prix_par_point`, ou le couple `prix_unite` /
-# `points_par_unite`.
+# Prix par point = meilleur rapport trouvé à l'HDV pour cette jauge et ce
+# plafond, prix moyens relevés le 2026-08-08, croisés avec les points de
+# recharge lus sur DofusDB (120 carburants, tous appariés).
+#
+# ## Le levier « vitesse » est très loin d'être linéaire
+#
+#   40 000 → 70 000 :  +56 000 kamas pour 10 h 25 gagnées →   5 400 k/h
+#   70 000 → 90 000 : +231 000 kamas pour  3 h 28 gagnées →  66 600 k/h
+#   90 000 → 100 000: +892 000 kamas pour  1 h 44 gagnées → 512 000 k/h
+#
+# Le premier palier est probablement rentable, le dernier sûrement pas. À la
+# recherche de trancher.
 
-cap = 40_000
+[[carburant]]
+cap = 40000
 points_par_seconde = 1
 heures_par_fournee = 20.84
-prix_par_point = -1
-prix_unite = -1
-points_par_unite = -1
+# Baffeur niv 35 / Caresseur niv 45 / Foudroyeur niv 45 / Dragofesse niv 45
+prix_par_point_serenite = 0.0277
+prix_par_point_stats = 0.3761
+prix_par_point_mangeoire = 0.564
+# coût jauge d'une fournée de 5 enclos : 114 910 kamas
+prix_par_point = 0.3064  # moyenne pondérée, pour le chargeur
 
 [[carburant]]
-cap = 70_000
+cap = 70000
 points_par_seconde = 2
 heures_par_fournee = 10.42
-prix_par_point = -1
-prix_unite = -1
-points_par_unite = -1
+# Baffeur niv 85 / Caresseur niv 75 / Foudroyeur niv 75 / Dragofesse niv 75
+prix_par_point_serenite = 0.0969
+prix_par_point_stats = 0.5464
+prix_par_point_mangeoire = 1.9646
+# coût jauge d'une fournée de 5 enclos : 171 190 kamas
+prix_par_point = 0.4565  # moyenne pondérée, pour le chargeur
 
 [[carburant]]
-cap = 90_000
+cap = 90000
 points_par_seconde = 3
 heures_par_fournee = 6.95
-prix_par_point = -1
-prix_unite = -1
-points_par_unite = -1
+# Baffeur niv 145 / Caresseur niv 105 / Foudroyeur niv 145 / Dragofesse niv 125
+prix_par_point_serenite = 0.5756
+prix_par_point_stats = 1.1965
+prix_par_point_mangeoire = 1.9505
+# coût jauge d'une fournée de 5 enclos : 402 150 kamas
+prix_par_point = 1.0723  # moyenne pondérée, pour le chargeur
 
 [[carburant]]
-cap = 100_000
+cap = 100000
 points_par_seconde = 4
 heures_par_fournee = 5.21
-prix_par_point = -1
-prix_unite = -1
-points_par_unite = -1
+# Élixirs, sans clause de plafond : ce sont eux la bande haute
+prix_par_point_serenite = 2.3149
+prix_par_point_stats = 3.7334
+prix_par_point_mangeoire = 4.6515
+# coût jauge d'une fournée de 5 enclos : 1 293 755 kamas
+prix_par_point = 3.4495  # moyenne pondérée, pour le chargeur
+

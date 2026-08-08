@@ -46,6 +46,9 @@ pub struct Prices {
     pub economy: Economy,
     pub horizon: Horizon,
     pub slots_per_enclos: usize,
+    /// Manipulation incompressible entre deux fournées, en heures. Plancher dur
+    /// sur la cadence : accélérer le carburant butera toujours dessus.
+    pub overhead_hours: f64,
     /// Prix d'une Optimakina par génération visée.
     pub optimakina: BTreeMap<u8, i64>,
     /// Ce qu'elle ajoute au taux, en points.
@@ -133,6 +136,7 @@ impl Prices {
 
         let places = get(&["fournee", "places"], 50.0) as usize;
         let slots_per_enclos = get(&["fournee", "places_par_enclos"], 10.0) as usize;
+        let overhead_hours = get(&["fournee", "minutes_entre_fournees"], 0.0) / 60.0;
 
         let economy = Economy {
             starting_kamas: get(&["partie", "kamas_de_depart"], default.starting_kamas as f64)
@@ -172,9 +176,17 @@ impl Prices {
             missing.push("prix des Optimakina".into());
         }
 
-        let mangeoire = root
-            .get("mangeoire")
-            .and_then(|table| price_per_point(table, "prix du point de Mangeoire", &mut missing));
+        // Une section absente est un trou comme un autre : sans ce `unwrap_or`,
+        // supprimer `[mangeoire]` du fichier ferait disparaître le prix **et**
+        // l'avertissement, et la mesure tournerait en silence sur une économie
+        // amputée.
+        let mangeoire = match root.get("mangeoire") {
+            Some(table) => price_per_point(table, "prix du point de Mangeoire", &mut missing),
+            None => {
+                missing.push("prix du point de Mangeoire".into());
+                None
+            }
+        };
 
         let mut fuel = Vec::new();
         if let Some(bands) = root.get("carburant").and_then(toml::Value::as_array) {
@@ -197,6 +209,7 @@ impl Prices {
             economy,
             horizon,
             slots_per_enclos,
+            overhead_hours,
             optimakina,
             optimakina_bonus: get(&["optimakina", "bonus"], 0.1),
             mangeoire_per_point: mangeoire,
@@ -240,6 +253,8 @@ mod tests {
         assert_eq!(prices.economy.starter_price, 1_000);
         assert_eq!(prices.economy.mount_level, 67);
         assert_eq!(prices.slots_per_enclos, 10);
+        // Les cinq minutes incompressibles entre deux fournées.
+        assert!((prices.overhead_hours - 5.0 / 60.0).abs() < 1e-12);
     }
 
     #[test]
@@ -274,18 +289,40 @@ mod tests {
         assert!((prices.optimakina_bonus - 0.10).abs() < 1e-12);
     }
 
-    /// Les trous doivent se voir. Aujourd'hui la Mangeoire et les quatre bandes
-    /// de carburant manquent, donc cinq trous.
+    /// Le fichier livré est complet : les quatre bandes et la Mangeoire ont
+    /// leur prix, relevés à l'HDV le 2026-08-08 et croisés avec les points de
+    /// recharge de DofusDB.
     #[test]
-    fn ce_qui_manque_est_annonce() {
+    fn le_fichier_livre_n_a_plus_de_trou() {
         let prices = Prices::load_default().expect("chargement");
         assert_eq!(prices.fuel.len(), 4, "les quatre bandes de jauge");
-        assert!(prices.mangeoire_per_point.is_none());
-        assert!(prices.fuel.iter().all(|band| band.price_per_point.is_none()));
+        assert!(prices.mangeoire_per_point.is_some());
+        assert!(prices.fuel.iter().all(|band| band.price_per_point.is_some()));
+        assert_eq!(prices.report_gaps(), None);
 
-        let report = prices.report_gaps().expect("il manque des prix");
-        assert!(report.contains("Mangeoire"));
-        assert!(report.contains("economy.toml"));
+        // Et les bandes sont ordonnées du lent et bon marché au rapide et cher.
+        // C'est **l'arbitrage lui-même** : s'il s'inversait, le levier
+        // « vitesse » n'aurait plus de sens et personne ne s'en apercevrait.
+        for pair in prices.fuel.windows(2) {
+            assert!(pair[0].cap < pair[1].cap);
+            assert!(pair[0].hours_per_batch > pair[1].hours_per_batch);
+            assert!(
+                pair[0].price_per_point.unwrap() < pair[1].price_per_point.unwrap(),
+                "aller plus vite doit coûter plus cher : {:?}",
+                pair
+            );
+        }
+    }
+
+    /// Mais la machinerie qui annonce les trous doit rester vivante — sans quoi
+    /// le jour où un prix disparaîtra du fichier, la mesure se fera en silence
+    /// sur une économie incomplète.
+    #[test]
+    fn un_prix_absent_est_toujours_annonce() {
+        let prices = Prices::parse("[partie]\nkamas_de_depart = 10000000\n").expect("parse");
+        let report = prices.report_gaps().expect("tout manque, donc ça se dit");
+        assert!(report.contains("Mangeoire"), "{report}");
+        assert!(report.contains("economy.toml"), "{report}");
     }
 
     /// Et dès qu'un prix est renseigné, il cesse d'être annoncé manquant —
@@ -319,5 +356,11 @@ prix_par_point = 0.02
         let en_heures = Prices::parse("[partie]\nmode = \"heures\"\nheures = 2084\n")
             .expect("parse");
         assert_eq!(en_heures.horizon, Horizon::Hours(2084));
+        // Et le fichier livré porte bien le budget réel.
+        assert_eq!(
+            Prices::load_default().expect("chargement").horizon,
+            Horizon::Batches(100),
+            "le mode reste \"fournees\" tant que la durée de fournée est fixe"
+        );
     }
 }

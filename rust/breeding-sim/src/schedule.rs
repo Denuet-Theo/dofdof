@@ -31,9 +31,21 @@
 //! Total 75 001, à comparer aux 75 010 de `CYCLE_POINTS` dans `enclos.ts` : le
 //! découpage est le bon.
 //!
-//! Le Foudroyeur ne tourne qu'en sérénité négative, ce qui fixe l'ordre des deux
-//! stats — Dragofesse d'abord si l'on monte vers +5000, Foudroyeur après le
-//! passage à zéro.
+//! ## Une jauge hors de sa fenêtre s'arrête
+//!
+//! Elle ne ralentit pas : elle s'arrête. C'est ce qui contraint réellement
+//! l'ordonnancement, et c'est ce que la première version ratait — elle traitait
+//! les conditions de sérénité comme des portes d'entrée qu'on franchit une fois.
+//!
+//! Le Foudroyeur ne tourne qu'entre −5000 et −1, donc la première stat est
+//! forcément celle du côté positif. Et surtout : **franchir zéro couperait la
+//! première stat en cours de route**, donc la descente doit s'arrêter à +2000 et
+//! attendre. On descend en deux temps.
+//!
+//! Ce qui sauve l'affaire, c'est que **−1 ouvre les deux dernières jauges à la
+//! fois** : il est dans `[-2000, +2000]` pour l'Abreuvoir et dans `[-5000, -1]`
+//! pour le Foudroyeur. La sérénité ne bouge que si on la pousse, donc on s'y gare
+//! et les deux tournent ensemble.
 //!
 //! ## Les 10 000 points vont sur la moins chère
 //!
@@ -45,7 +57,7 @@
 //! ## L'ordonnanceur est glouton, et il le dit
 //!
 //! À chaque place qui se libère, on lance la tâche prête la plus longue. C'est
-//! l'heuristique LPT, elle n'est pas optimale, et sur six tâches l'écart à
+//! l'heuristique LPT, elle n'est pas optimale, et sur sept tâches l'écart à
 //! l'optimum est petit. Ce qui compte davantage est qu'elle soit **déterministe**
 //! et lisible : une durée de fournée qui dépendrait d'un ordre de parcours
 //! rendrait deux mesures incomparables.
@@ -79,11 +91,13 @@ pub const STAT_POINTS: f64 = 20_000.0;
 /// Points de descente au bout desquels la sérénité entre dans `[-2000, +2000]`
 /// et libère l'Abreuvoir.
 const ABREUVOIR_GATE: f64 = 3_000.0;
-/// Points de descente au bout desquels on passe de l'autre côté de zéro.
-const ZERO_CROSSING: f64 = 5_000.0;
 
 /// Deux jauges à la fois, Mangeoire comprise.
 pub const PARALLEL_SLOTS: usize = 2;
+
+/// Les tâches d'un cycle. Sept et non six : la descente de sérénité est coupée
+/// en deux, parce qu'une jauge hors de sa fenêtre s'arrête au lieu de ralentir.
+const TASKS: usize = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Schedule {
@@ -120,8 +134,20 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
         (CARESSEUR, BAFFEUR)
     };
 
-    // Indices : 0 montée, 1 Mangeoire, 2 descente, 3 première stat,
-    // 4 Abreuvoir, 5 seconde stat.
+    // Indices : 0 montée, 1 Mangeoire, 2 descente jusqu'à la fenêtre de
+    // l'Abreuvoir, 3 première stat, 4 Abreuvoir, 5 passage de zéro,
+    // 6 seconde stat.
+    //
+    // La descente est **coupée en deux** parce qu'une jauge hors de sa fenêtre
+    // ne ralentit pas : elle s'arrête. La première stat ne tourne qu'en sérénité
+    // positive, donc franchir zéro avant qu'elle ait fini la couperait net —
+    // d'où l'attente. On peut en revanche descendre jusqu'à +2000 sans risque,
+    // ce qui ouvre l'Abreuvoir pendant que la première stat tourne encore.
+    //
+    // Une fois garé à −1, tout reste ouvert : −1 est à la fois dans
+    // `[-2000, +2000]` pour l'Abreuvoir et dans `[-5000, -1]` pour le
+    // Foudroyeur. La sérénité ne bouge que si on la pousse, donc les deux
+    // dernières stats tournent ensemble sans rien casser.
     let tasks = [
         Task {
             gauge: climber,
@@ -135,7 +161,7 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
         },
         Task {
             gauge: returner,
-            points: SERENITY_RETURN,
+            points: ABREUVOIR_GATE,
             after: Some((0, SERENITY_CLIMB)),
         },
         Task {
@@ -149,11 +175,16 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
             after: Some((2, ABREUVOIR_GATE)),
         },
         Task {
-            // Le Foudroyeur ne tourne qu'en sérénité négative : il vient donc
-            // forcément après le passage à zéro.
+            // Franchir zéro coupe la première stat : on attend qu'elle ait fini.
+            gauge: returner,
+            points: SERENITY_RETURN - ABREUVOIR_GATE,
+            after: Some((3, STAT_POINTS)),
+        },
+        Task {
+            // Le Foudroyeur ne tourne qu'en sérénité négative.
             gauge: FOUDROYEUR,
             points: STAT_POINTS,
-            after: Some((2, ZERO_CROSSING)),
+            after: Some((5, SERENITY_RETURN - ABREUVOIR_GATE)),
         },
     ];
 
@@ -171,21 +202,21 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
 }
 
 /// Simule l'ordonnancement à deux places et rend la durée en secondes.
-fn makespan(tasks: &[Task; 6], rate: &impl Fn(usize) -> f64) -> f64 {
+fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> f64 {
     let duration = |task: &Task| {
         let rate = rate(task.gauge);
         if rate > 0.0 { task.points / rate } else { 0.0 }
     };
 
-    let mut started = [f64::INFINITY; 6];
-    let mut finished = [f64::INFINITY; 6];
+    let mut started = [f64::INFINITY; TASKS];
+    let mut finished = [f64::INFINITY; TASKS];
     let mut running: Vec<(usize, f64)> = Vec::with_capacity(PARALLEL_SLOTS);
-    let mut pending: Vec<usize> = (0..6).filter(|&i| tasks[i].points > 0.0).collect();
+    let mut pending: Vec<usize> = (0..TASKS).filter(|&i| tasks[i].points > 0.0).collect();
     let mut now = 0.0f64;
 
     // Le moment où une tâche devient lançable : soit tout de suite, soit quand
     // celle qui la précède a franchi son seuil de progression.
-    let ready_at = |task: &Task, started: &[f64; 6], rate: &dyn Fn(usize) -> f64| match task.after {
+    let ready_at = |task: &Task, started: &[f64; TASKS], rate: &dyn Fn(usize) -> f64| match task.after {
         None => Some(0.0),
         Some((predecessor, progress)) => {
             let start = started[predecessor];
@@ -204,7 +235,7 @@ fn makespan(tasks: &[Task; 6], rate: &impl Fn(usize) -> f64) -> f64 {
     let mut guard = 0;
     while !pending.is_empty() || !running.is_empty() {
         guard += 1;
-        assert!(guard < 64, "l'ordonnancement doit converger en six tâches");
+        assert!(guard < 64, "l'ordonnancement doit converger");
 
         // Ce qui est lançable maintenant, la plus longue d'abord (LPT).
         let mut launchable: Vec<usize> = pending

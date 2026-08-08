@@ -1,0 +1,154 @@
+//! La porte de l'étape 1 : le nombre à battre, et ce qu'une partie coûte.
+//!
+//! ```sh
+//! cargo run --release -p breeding-sim --bin bench
+//! ```
+//!
+//! Publie, sur les mêmes graines pour toutes les politiques :
+//!
+//! - le **plancher** « ne rien faire », qui garde le capital et liquide le pool.
+//!   Toute politique qui ne le bat pas détruit de la valeur ;
+//! - le **glouton**, la politique actuelle, sur ses trois objectifs ;
+//! - le **temps CPU par partie**, qui dimensionne l'étape 3.
+//!
+//! Une médiane seule mentirait : quand un tirage peut raccourcir la route de
+//! plusieurs générations, la dispersion *est* l'information. D'où les déciles.
+
+use std::time::Instant;
+
+use breeding_sim::baseline::{Greedy, Objective};
+use breeding_sim::economy::{Economy, NeverBreeds, Policy, RunOutcome, play};
+use breeding_sim::trees::muldo;
+
+const SEEDS: u32 = 200;
+
+struct Distribution {
+    median: f64,
+    p10: f64,
+    p90: f64,
+    mean: f64,
+}
+
+fn distribution(values: &mut [f64]) -> Distribution {
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let at = |q: f64| {
+        let index = ((values.len() - 1) as f64 * q).round() as usize;
+        values[index]
+    };
+    Distribution {
+        median: at(0.5),
+        p10: at(0.1),
+        p90: at(0.9),
+        mean: values.iter().sum::<f64>() / values.len() as f64,
+    }
+}
+
+fn millions(kamas: f64) -> String {
+    format!("{:>8.2} M", kamas / 1_000_000.0)
+}
+
+struct Report {
+    name: String,
+    outcomes: Vec<RunOutcome>,
+    seconds_per_run: f64,
+}
+
+fn measure(name: &str, mut make: impl FnMut() -> Box<dyn Policy>) -> Report {
+    let catalog = muldo();
+    let economy = Economy::default();
+
+    let start = Instant::now();
+    let outcomes: Vec<RunOutcome> = (0..SEEDS)
+        .map(|seed| {
+            let mut policy = make();
+            play(&catalog, &economy, policy.as_mut(), seed)
+        })
+        .collect();
+    let elapsed = start.elapsed().as_secs_f64();
+
+    Report {
+        name: name.to_string(),
+        outcomes,
+        seconds_per_run: elapsed / f64::from(SEEDS),
+    }
+}
+
+fn main() {
+    println!("Économie : 10 M de départ, 100 fournées à 150 000, 25 croisements,");
+    println!("           pool de 100 muldos gen 2 à 9, gen 1 à 1 000, ambre à 20 000/rang,");
+    println!("           gen 10 à 500 000. {SEEDS} graines, identiques pour tous.\n");
+
+    let reports = vec![
+        measure("ne-rien-faire", || Box::new(NeverBreeds)),
+        measure("glouton / gen10_balanced", || {
+            Box::new(Greedy::new(Objective::Gen10Balanced))
+        }),
+        measure("glouton / gen10_profit", || {
+            Box::new(Greedy::new(Objective::Gen10Profit))
+        }),
+        measure("glouton / profit", || {
+            Box::new(Greedy::new(Objective::Profit))
+        }),
+    ];
+
+    println!(
+        "{:<26} {:>11} {:>11} {:>11} {:>11}",
+        "politique", "p10", "médiane", "p90", "moyenne"
+    );
+    println!("{}", "-".repeat(74));
+    for report in &reports {
+        let mut scores: Vec<f64> = report.outcomes.iter().map(|o| o.score as f64).collect();
+        let d = distribution(&mut scores);
+        println!(
+            "{:<26} {:>11} {:>11} {:>11} {:>11}",
+            report.name,
+            millions(d.p10),
+            millions(d.median),
+            millions(d.p90),
+            millions(d.mean)
+        );
+    }
+
+    println!("\n{:<26} {:>9} {:>9} {:>9} {:>9} {:>9} {:>10}",
+        "politique", "crois.", "fournées", "gen max", "gen10", "sacrif.", "µs/partie");
+    println!("{}", "-".repeat(84));
+    for report in &reports {
+        let mean = |f: fn(&RunOutcome) -> f64| -> f64 {
+            report.outcomes.iter().map(f).sum::<f64>() / report.outcomes.len() as f64
+        };
+        let infeasible: u32 = report.outcomes.iter().map(|o| o.infeasible_batches).sum();
+        println!(
+            "{:<26} {:>9.0} {:>9.0} {:>9.2} {:>9.2} {:>9.0} {:>10.0}",
+            report.name,
+            mean(|o| o.crossings as f64),
+            mean(|o| f64::from(o.batches_paid)),
+            mean(|o| f64::from(o.best_generation)),
+            mean(|o| o.gen10_held as f64),
+            mean(|o| o.sacrifices as f64),
+            report.seconds_per_run * 1e6,
+        );
+        if infeasible > 0 {
+            println!(
+                "  ⚠ {infeasible} fournées refusées au total — la politique propose des plans \
+                 que le moteur écarte, donc elle est mesurée sur des tours perdus."
+            );
+        }
+    }
+
+    // Le plancher est la seule comparaison qui ait un sens absolu.
+    let floor = {
+        let mut scores: Vec<f64> = reports[0].outcomes.iter().map(|o| o.score as f64).collect();
+        distribution(&mut scores).median
+    };
+    println!("\nÉcart à « ne rien faire » (médiane) :");
+    for report in reports.iter().skip(1) {
+        let mut scores: Vec<f64> = report.outcomes.iter().map(|o| o.score as f64).collect();
+        let median = distribution(&mut scores).median;
+        println!(
+            "  {:<26} {:+10.2} M  ({:+.0} %)",
+            report.name,
+            (median - floor) / 1_000_000.0,
+            (median - floor) / floor * 100.0
+        );
+    }
+}

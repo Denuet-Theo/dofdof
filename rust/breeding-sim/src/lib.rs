@@ -27,8 +27,11 @@
 //!   50,1 % partout. On garde le champ pour que rendre le prix fonction du
 //!   niveau ne demande qu'une ligne plus tard.
 
+pub mod baseline;
+pub mod economy;
 pub mod lineage;
 pub mod pairing;
+pub mod stable;
 pub mod trees;
 
 pub use trees::{Catalog, ColorId};

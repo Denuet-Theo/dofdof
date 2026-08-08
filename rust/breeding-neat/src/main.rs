@@ -413,6 +413,27 @@ fn main() {
         (evolved_median - myopic_median) / myopic_median * 100.0
     );
 
+    println!(
+        "  stratégie : bande {} ({:.1} h la fournée, {} fournées tenables), niveau {} \
+         ({:.1} % de réussite), Optimakina {}",
+        best.band,
+        economy.batch_hours(best.band),
+        (economy.horizon_hours.unwrap_or(0.0) / economy.batch_hours(best.band).max(1e-9)) as u32,
+        best.level,
+        economy.success_rate(best.level, false) * 100.0,
+        if best.optimakina_from > 10 {
+            "jamais".to_string()
+        } else {
+            format!("à partir de la gen {}", best.optimakina_from)
+        }
+    );
+    println!(
+        "  une fournée coûte {} (jauge) + {} (mangeoire) = {}",
+        economy.gauge_cost(best.band),
+        economy.feed_cost(best.level),
+        economy.batch_cost_for(best.band, best.level)
+    );
+
     let path = "champion.json";
     let json = serde_json::json!({
         "features": FEATURES,

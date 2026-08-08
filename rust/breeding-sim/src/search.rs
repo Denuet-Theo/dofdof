@@ -102,7 +102,7 @@ enum Action {
 /// Les réglages uniformes d'une fournée, décidés hors de la recherche.
 #[derive(Clone, Copy, Debug)]
 pub struct Strategy {
-    pub band: usize,
+    pub bands: [usize; 6],
     pub level: u16,
     pub optimakina_from: u8,
 }
@@ -110,7 +110,7 @@ pub struct Strategy {
 impl Default for Strategy {
     fn default() -> Self {
         Self {
-            band: 0,
+            bands: [0; 6],
             level: 0,
             optimakina_from: 11,
         }
@@ -508,7 +508,7 @@ fn feasible(state: &State, economy: &Economy, strategy: Strategy) -> bool {
     // La fournée ne se paie que si elle porte un croisement — jauges et
     // Mangeoire comprises, puisque c'est l'enclos qu'on nourrit.
     let batch = if state.crossings > 0 {
-        (economy.batch_cost_for(strategy.band, level) + state.optimakina_cost) as f64
+        (economy.batch_cost_for(strategy.bands, level) + state.optimakina_cost) as f64
     } else {
         0.0
     };
@@ -667,7 +667,7 @@ fn materialise(
     strategy: Strategy,
 ) -> BatchPlan {
     let mut plan = BatchPlan {
-        band: strategy.band,
+        bands: strategy.bands,
         level: strategy.level,
         ..Default::default()
     };
@@ -731,7 +731,7 @@ pub struct Searching<V: ValueFn> {
     pub value: V,
     /// Les trois réglages uniformes de la fournée. Ils viennent du génome, pas
     /// de la recherche : voir `breeding-neat`, `Genome`.
-    pub band: usize,
+    pub bands: [usize; 6],
     pub level: u16,
     /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
     pub optimakina_from: u8,
@@ -749,15 +749,16 @@ impl<V: ValueFn> Searching<V> {
             // Par défaut : la bande la moins chère, le niveau de l'économie,
             // aucune Optimakina. C'est ce qui garde la valeur myope comparable
             // aux mesures publiées avant que les leviers existent.
-            band: 0,
+            bands: [0; 6],
             level: 0,
             optimakina_from: 11,
         }
     }
 
-    /// Fixe les trois réglages stratégiques.
-    pub fn with_strategy(mut self, band: usize, level: u16, optimakina_from: u8) -> Self {
-        self.band = band.min(3);
+    /// Fixe les réglages stratégiques : une bande par jauge, le niveau, le
+    /// seuil d'Optimakina.
+    pub fn with_strategy(mut self, bands: [usize; 6], level: u16, optimakina_from: u8) -> Self {
+        self.bands = bands.map(|band| band.min(3));
         self.level = level;
         self.optimakina_from = optimakina_from;
         self
@@ -771,7 +772,7 @@ impl<V: ValueFn> crate::economy::Policy for Searching<V> {
     fn plan(&mut self, view: &BatchView<'_>, rng: &mut Rng) -> BatchPlan {
         let value = &self.value;
         let strategy = Strategy {
-            band: self.band,
+            bands: self.bands,
             level: if self.level == 0 {
                 view.economy.mount_level
             } else {

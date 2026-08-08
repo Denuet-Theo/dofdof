@@ -112,8 +112,15 @@ pub struct Genome {
     //
     // L'évolution, elle, note sur le **score final**, qui compte les heures.
     // Elle peut donc arbitrer sans que la politique ait rien vu.
-    /// Bande de jauge, 0 (lente, bon marché) à 3 (rapide, chère).
-    pub band: usize,
+    /// La bande de chacune des six jauges — Baffeur, Caresseur, Foudroyeur,
+    /// Dragofesse, Abreuvoir, Mangeoire — de 0 (lente, bon marché) à 3.
+    ///
+    /// Six réglages et non un : la bande se choisit jauge par jauge, donc on
+    /// peut payer cher ce qui est sur le chemin critique et laisser le reste au
+    /// tarif du bas. C'est le gain qu'une bande unique pour tout l'enclos ne
+    /// pouvait pas voir — l'Abreuvoir, par exemple, est moins cher en bande 1
+    /// qu'en bande 0 tout en allant deux fois plus vite.
+    pub bands: [usize; 6],
     /// Niveau auquel nourrir les montures. Décide du taux de réussite.
     pub level: u16,
     /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
@@ -243,7 +250,7 @@ impl Genome {
             connections,
             // On part au milieu plutôt qu'à un extrême : l'évolution doit
             // pouvoir descendre comme monter dès la première génération.
-            band: rng.range(4),
+            bands: std::array::from_fn(|_| rng.range(4)),
             level: 1 + rng.range(MAX_LEVEL as usize) as u16,
             optimakina_from: 2 + rng.range(10) as u8,
         }
@@ -256,11 +263,14 @@ impl Genome {
         if rng.f64() < config.strategy_mutation {
             match rng.range(3) {
                 0 => {
-                    // Un saut franc de temps en temps : les quatre bandes sont
-                    // séparées par des facteurs de prix énormes, et un optimum
-                    // local ne se franchit pas d'un cran.
-                    self.band = if rng.f64() < 0.7 {
-                        nudge(self.band as i64, 1, 0, 3, rng) as usize
+                    // Une jauge à la fois : muter les six d'un coup ferait
+                    // perdre en bloc une combinaison qui ne vaut que prise
+                    // ensemble. Saut franc de temps en temps, parce que les
+                    // bandes sont séparées par des facteurs de prix énormes et
+                    // qu'un optimum local ne se franchit pas d'un cran.
+                    let gauge = rng.range(6);
+                    self.bands[gauge] = if rng.f64() < 0.7 {
+                        nudge(self.bands[gauge] as i64, 1, 0, 3, rng) as usize
                     } else {
                         rng.range(4)
                     }
@@ -473,7 +483,9 @@ impl Genome {
         Genome {
             hidden,
             connections,
-            band: pick(better.band, worse.band, rng),
+            // Chaque jauge se tire indépendamment : deux parents peuvent avoir
+            // trouvé chacun un bon réglage sur des jauges différentes.
+            bands: std::array::from_fn(|g| pick(better.bands[g], worse.bands[g], rng)),
             level: pick(better.level, worse.level, rng),
             optimakina_from: pick(better.optimakina_from, worse.optimakina_from, rng),
         }

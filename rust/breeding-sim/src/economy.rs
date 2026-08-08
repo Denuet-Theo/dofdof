@@ -143,6 +143,17 @@ pub struct Economy {
     pub cycle_serenity_points: f64,
     pub cycle_stat_points: f64,
     pub enclos_per_batch: usize,
+
+    /// Débit de chaque bande, en points par seconde. Les paliers du jeu :
+    /// 1 pt/s en bande basse, 4 en bande haute.
+    pub band_rates: [f64; 4],
+    /// Prix du point, par jauge et par bande. Six jauges — voir
+    /// `schedule::GAUGE_NAMES` pour l'ordre — et quatre bandes.
+    ///
+    /// C'est une **table** et non un prix unique parce que la bande se choisit
+    /// jauge par jauge : on peut payer cher le Foudroyeur qui est sur le chemin
+    /// critique et laisser le Baffeur au tarif du bas.
+    pub gauge_prices: [[f64; 4]; 6],
 }
 
 impl Default for Economy {
@@ -170,6 +181,8 @@ impl Default for Economy {
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
             enclos_per_batch: 5,
+            band_rates: [1.0, 2.0, 3.0, 4.0],
+            gauge_prices: [[0.0; 4]; 6],
         }
     }
 }
@@ -184,6 +197,24 @@ impl Economy {
         self.value_at_generation(catalog.generation(color), catalog.top_generation())
     }
 
+    /// Le débit d'une bande, en points par seconde.
+    #[inline]
+    pub fn band_rate(&self, band: usize) -> f64 {
+        self.band_rates[band.min(3)]
+    }
+
+    /// Le prix du point pour une jauge à une bande donnée.
+    #[inline]
+    pub fn gauge_price(&self, gauge: usize, band: usize) -> f64 {
+        self.gauge_prices[gauge.min(5)][band.min(3)]
+    }
+
+    /// Les prix par jauge sont-ils renseignés ? Sans eux, pas d'ordonnancement.
+    #[inline]
+    pub fn per_gauge_prices(&self) -> bool {
+        self.gauge_prices.iter().all(|row| row.iter().any(|p| *p > 0.0))
+    }
+
     /// Les quatre leviers sont-ils chiffrés ?
     ///
     /// Faux tant que `economy.toml` n'a pas donné les prix : on retombe alors
@@ -194,48 +225,33 @@ impl Economy {
         self.bands[0].hours > 0.0 && self.mangeoire_per_point > 0.0
     }
 
-    /// Ce que coûtent les jauges de fécondité d'une fournée, à cette bande.
-    #[inline]
-    pub fn gauge_cost(&self, band: usize) -> i64 {
-        let band = self.bands[band.min(3)];
-        ((self.cycle_serenity_points * band.serenity_per_point
-            + self.cycle_stat_points * band.stats_per_point)
-            * self.enclos_per_batch as f64) as i64
-    }
-
-    /// Ce que coûte de porter les montures de la fournée à ce niveau.
+    /// Le coût et la durée d'une fournée, ordonnancement compris.
     ///
-    /// La Mangeoire se facture par enclos comme les autres jauges, sauf si
-    /// `mangeoire_per_mount` — auquel cas c'est dix fois plus cher, et le levier
-    /// « niveau » devient probablement décoratif.
-    #[inline]
-    pub fn feed_cost(&self, level: u16) -> i64 {
-        let units = if self.mangeoire_per_mount {
-            (self.crossings_per_batch * 2) as f64
-        } else {
-            self.enclos_per_batch as f64
-        };
-        (mount_xp_for_level(level) * self.mangeoire_per_point * units) as i64
+    /// Passe par `schedule` : la durée est un makespan sur deux places, pas une
+    /// division, et la Mangeoire y occupe une place — donc le niveau d'XP coûte
+    /// des heures autant que des kamas.
+    pub fn batch_plan(&self, bands: [usize; 6], level: u16) -> (i64, f64) {
+        if !self.per_gauge_prices() {
+            // Pas de prix par jauge : on retombe sur le forfait à plat et sur
+            // la durée de la bande la plus lente, ce qui rejoue les mesures
+            // publiées avant l'ordonnanceur.
+            return (self.batch_cost, self.bands[0].hours + self.overhead_hours);
+        }
+        let plan = crate::schedule::schedule(self, bands, mount_xp_for_level(level));
+        (
+            (plan.cost_per_enclos * self.enclos_per_batch as f64) as i64,
+            plan.hours + self.overhead_hours,
+        )
     }
 
-    /// Le prix d'une fournée, tout compris hors achats et Optimakina.
     #[inline]
-    pub fn batch_cost_for(&self, band: usize, level: u16) -> i64 {
-        if self.levers_active() {
-            self.gauge_cost(band) + self.feed_cost(level)
-        } else {
-            self.batch_cost
-        }
+    pub fn batch_cost_for(&self, bands: [usize; 6], level: u16) -> i64 {
+        self.batch_plan(bands, level).0
     }
 
-    /// La durée d'une fournée à cette bande, manipulation comprise.
     #[inline]
-    pub fn batch_hours(&self, band: usize) -> f64 {
-        if self.levers_active() {
-            self.bands[band.min(3)].hours + self.overhead_hours
-        } else {
-            self.bands[0].hours + self.overhead_hours
-        }
+    pub fn batch_hours(&self, bands: [usize; 6], level: u16) -> f64 {
+        self.batch_plan(bands, level).1
     }
 
     /// Le taux de réussite d'un croisement à ce niveau, Optimakina comprise.
@@ -454,10 +470,10 @@ pub struct BatchPlan {
     pub sacrifices: Vec<usize>,
 
     // --- les leviers, uniformes sur toute la fournée -----------------------
-    /// La bande de jauge, de 0 (lente et bon marché) à 3 (rapide et chère).
-    /// Uniforme sur les cinq enclos pour l'instant ; le réglage par enclos
-    /// viendra ensuite.
-    pub band: usize,
+    /// La bande de chaque jauge, de 0 (lente et bon marché) à 3 (rapide et
+    /// chère). Six jauges — voir `schedule::GAUGE_NAMES`. Uniforme sur les cinq
+    /// enclos pour l'instant ; le réglage par enclos viendra ensuite.
+    pub bands: [usize; 6],
     /// Le niveau auquel on nourrit les montures de la fournée.
     pub level: u16,
     /// Une Optimakina par croisement, en regard de `crossings`. Vide = aucune.
@@ -578,7 +594,7 @@ fn apply(
 
     let mut debit = plan.purchases.len() as i64 * economy.starter_price;
     if !plan.crossings.is_empty() {
-        debit += economy.batch_cost_for(plan.band, level);
+        debit += economy.batch_cost_for(plan.bands, level);
         // Une Optimakina se paie au croisement, au prix de la génération visée.
         // Les indices sont encore virtuels ici — les achats ne sont pas posés —
         // d'où la résolution explicite.
@@ -820,7 +836,10 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                     outcome.batches_paid += 1;
                     // Une fournée qui tourne prend le temps de son remplissage
                     // de jauge ; une fournée vide ne coûte que la manipulation.
-                    elapsed += economy.batch_hours(plan.band);
+                    elapsed += economy.batch_hours(
+                        plan.bands,
+                        if plan.level == 0 { economy.mount_level } else { plan.level },
+                    );
                     idle = 0;
                 } else {
                     elapsed += economy.overhead_hours;

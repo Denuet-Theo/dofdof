@@ -194,6 +194,49 @@ impl Prices {
             }
         };
 
+        // La table de prix par jauge : six jauges, quatre bandes. C'est elle
+        // qui permet de payer cher le chemin critique et rien d'autre.
+        let gauge_names = [
+            "baffeur",
+            "caresseur",
+            "foudroyeur",
+            "dragofesse",
+            "abreuvoir",
+            "mangeoire",
+        ];
+        let mut gauge_prices = [[0.0f64; 4]; 6];
+        for (index, name) in gauge_names.iter().enumerate() {
+            match root
+                .get("carburant")
+                .and_then(|table| table.get(name))
+                .and_then(toml::Value::as_array)
+            {
+                Some(row) if row.len() >= 4 => {
+                    for band in 0..4 {
+                        gauge_prices[index][band] = row[band].as_float().unwrap_or_else(|| {
+                            row[band].as_integer().unwrap_or(0) as f64
+                        });
+                    }
+                }
+                _ => missing.push(format!("prix par bande de la jauge {name}")),
+            }
+        }
+        let mut band_rates = [1.0, 2.0, 3.0, 4.0];
+        if let Some(rates) = root
+            .get("carburant")
+            .and_then(|table| table.get("points_par_seconde"))
+            .and_then(toml::Value::as_array)
+            && rates.len() >= 4
+        {
+            for band in 0..4 {
+                band_rates[band] = rates[band]
+                    .as_integer()
+                    .map(|value| value as f64)
+                    .or_else(|| rates[band].as_float())
+                    .unwrap_or(band_rates[band]);
+            }
+        }
+
         let mut fuel = Vec::new();
         if let Some(bands) = root.get("carburant").and_then(toml::Value::as_array) {
             for band in bands {
@@ -232,6 +275,11 @@ impl Prices {
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
         economy.optimakina_bonus = get(&["optimakina", "bonus"], 0.1);
+        economy.gauge_prices = gauge_prices;
+        economy.band_rates = band_rates;
+        economy.cycle_serenity_points =
+            get(&["cycle", "montee_serenite"], 10_000.0) + get(&["cycle", "descente_serenite"], 5_001.0);
+        economy.cycle_stat_points = 3.0 * get(&["cycle", "points_par_stat"], 20_000.0);
         for (generation, price) in &optimakina {
             economy.optimakina[usize::from(*generation).min(10)] = *price;
         }

@@ -212,72 +212,73 @@ points_par_unite = 3_000
 par_monture = false
 
 # ---------------------------------------------------------------------------
-# [[carburant]] — les quatre bandes de jauge
+[carburant]
 # ---------------------------------------------------------------------------
 #
-# Un cycle de fécondité coûte 75 010 points, transférés au niveau de l'enclos :
-# dix montures préparées ensemble coûtent ce que coûte une. Le détail des
-# étapes (relevé en jeu, voir enclos.ts) : 10 000 puis 5 010 points de sérénité
-# (Baffeur/Caresseur), et 60 000 points de statistiques (Foudroyeur/Dragofesse).
+# ## La bande se choisit JAUGE PAR JAUGE
 #
-# Le débit dépend de la bande où on tient la jauge, et chaque bande exige un
-# carburant dont le plafond l'atteint. Les Élixirs n'ont pas de clause « sans
-# dépasser » : leur plafond est donc 100 000, et ce sont eux la bande haute.
+# C'est ce qui rend l'optimisation intéressante : on peut payer cher ce qui est
+# sur le chemin critique et laisser le reste au tarif du bas. Chaque jauge a son
+# propre débit et son propre prix au point.
 #
-# Prix par point = meilleur rapport trouvé à l'HDV pour cette jauge et ce
-# plafond, prix moyens relevés le 2026-08-08, croisés avec les points de
-# recharge lus sur DofusDB (120 carburants, tous appariés).
+#   bande 0 (plafond  40 000) → 1 point/seconde
+#   bande 1 (plafond  70 000) → 2
+#   bande 2 (plafond  90 000) → 3
+#   bande 3 (plafond 100 000) → 4   — les Élixirs, sans clause de plafond
 #
-# ## Le levier « vitesse » est très loin d'être linéaire
+# ## L'ordonnancement, relevé en jeu
 #
-#   40 000 → 70 000 :  +56 000 kamas pour 10 h 25 gagnées →   5 400 k/h
-#   70 000 → 90 000 : +231 000 kamas pour  3 h 28 gagnées →  66 600 k/h
-#   90 000 → 100 000: +892 000 kamas pour  1 h 44 gagnées → 512 000 k/h
+# La sérénité va de −5000 à +5000 et commande tout le reste :
 #
-# Le premier palier est probablement rentable, le dernier sûrement pas. À la
-# recherche de trancher.
+#   1. amener toute la fournée à un extrême (±5000)  — 10 000 points
+#      pendant ce temps, seule la Mangeoire peut tourner
+#   2. sérénité au bout → lancer la 1re stat          — 20 000
+#   3. redescendre la sérénité vers 0                 —  5 001
+#   4. entre −2000 et +2000 → lancer l'Abreuvoir      — 20 000
+#   5. de l'autre côté de 0 → lancer la 2e stat       — 20 000
+#
+# Total 75 001, contre 75 010 dans enclos.ts : le découpage est le bon.
+# Le Foudroyeur ne tourne qu'en sérénité négative, ce qui fixe l'ordre des
+# stats. **Deux jauges au plus tournent en parallèle, Mangeoire comprise** —
+# donc un niveau d'XP élevé bloque une place et rallonge la fournée.
+#
+# ## À lire dans la table
+#
+# L'Abreuvoir est **moins cher en bande 1 qu'en bande 0** tout en allant deux
+# fois plus vite : sa bande basse est strictement dominée. Un modèle à bande
+# unique pour tout l'enclos ne pouvait pas voir ce gain-là.
+#
+# Prix moyens de l'HDV relevés le 2026-08-08, croisés avec les points de
+# recharge de DofusDB (120 carburants, tous appariés). Fiables à ~10 % près
+# selon le jour de la semaine, d'après le mainteneur.
 
-[[carburant]]
-cap = 40000
-points_par_seconde = 1
-heures_par_fournee = 20.84
-# Baffeur niv 35 / Caresseur niv 45 / Foudroyeur niv 45 / Dragofesse niv 45
-prix_par_point_serenite = 0.0277
-prix_par_point_stats = 0.3761
-prix_par_point_mangeoire = 0.564
-# coût jauge d'une fournée de 5 enclos : 114 910 kamas
-prix_par_point = 0.3064  # moyenne pondérée, pour le chargeur
+points_par_seconde = [1, 2, 3, 4]
 
-[[carburant]]
-cap = 70000
-points_par_seconde = 2
-heures_par_fournee = 10.42
-# Baffeur niv 85 / Caresseur niv 75 / Foudroyeur niv 75 / Dragofesse niv 75
-prix_par_point_serenite = 0.0969
-prix_par_point_stats = 0.5464
-prix_par_point_mangeoire = 1.9646
-# coût jauge d'une fournée de 5 enclos : 171 190 kamas
-prix_par_point = 0.4565  # moyenne pondérée, pour le chargeur
+# baffeur : bandes 0 à 3, en kamas par point
+baffeur = [0.0152, 0.0803, 0.1796, 2.0503]
 
-[[carburant]]
-cap = 90000
-points_par_seconde = 3
-heures_par_fournee = 6.95
-# Baffeur niv 145 / Caresseur niv 105 / Foudroyeur niv 145 / Dragofesse niv 125
-prix_par_point_serenite = 0.5756
-prix_par_point_stats = 1.1965
-prix_par_point_mangeoire = 1.9505
-# coût jauge d'une fournée de 5 enclos : 402 150 kamas
-prix_par_point = 1.0723  # moyenne pondérée, pour le chargeur
+# caresseur : bandes 0 à 3, en kamas par point
+caresseur = [0.0526, 0.13, 1.366, 2.843]
 
-[[carburant]]
-cap = 100000
-points_par_seconde = 4
-heures_par_fournee = 5.21
-# Élixirs, sans clause de plafond : ce sont eux la bande haute
-prix_par_point_serenite = 2.3149
-prix_par_point_stats = 3.7334
-prix_par_point_mangeoire = 4.6515
-# coût jauge d'une fournée de 5 enclos : 1 293 755 kamas
-prix_par_point = 3.4495  # moyenne pondérée, pour le chargeur
+# foudroyeur : bandes 0 à 3, en kamas par point
+foudroyeur = [0.442, 0.542, 0.842, 5.279]
 
+# dragofesse : bandes 0 à 3, en kamas par point
+dragofesse = [0.3102, 0.5507, 1.551, 2.1877]
+
+# abreuvoir : bandes 0 à 3, en kamas par point
+abreuvoir = [1.2588, 1.0775, 1.8337, 3.549]
+
+# mangeoire : bandes 0 à 3, en kamas par point
+mangeoire = [0.564, 1.9646, 1.9505, 4.6515]
+
+# ---------------------------------------------------------------------------
+[cycle]
+# ---------------------------------------------------------------------------
+#
+# Les points d'un cycle de fécondité, par enclos.
+montee_serenite = 10_000
+descente_serenite = 5_001
+points_par_stat = 20_000
+# Deux jauges au plus à la fois, Mangeoire comprise.
+places_paralleles = 2

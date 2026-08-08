@@ -638,7 +638,7 @@ impl Policy for Greedy {
             // Le glouton ne règle aucun levier : bande la moins chère, niveau par
             // défaut, aucune Optimakina. C'est ce qui le garde comparable aux
             // mesures publiées avant que les leviers existent.
-            band: 0,
+            bands: [0; 6],
             level: view.economy.mount_level,
             optimakina: Vec::new(),
         }

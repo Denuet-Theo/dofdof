@@ -63,7 +63,15 @@ fn load(path: &str) -> Result<Genome, String> {
         // Les réglages stratégiques du champion. Absents d'un fichier écrit
         // avant qu'ils existent : on retombe alors sur l'économie simplifiée,
         // ce qui rejoue exactement les mesures d'alors.
-        band: root["band"].as_u64().unwrap_or(0) as usize,
+        bands: {
+            let mut bands = [0usize; 6];
+            if let Some(list) = root["bands"].as_array() {
+                for (index, value) in list.iter().take(6).enumerate() {
+                    bands[index] = value.as_u64().unwrap_or(0) as usize;
+                }
+            }
+            bands
+        },
         level: root["level"].as_u64().unwrap_or(0) as u16,
         optimakina_from: root["optimakina_from"].as_u64().unwrap_or(11) as u8,
     })
@@ -136,11 +144,7 @@ fn main() {
             .collect::<Vec<u32>>()
             .par_iter()
             .map(|&seed| {
-                let mut policy = Searching::new(NetValue(&network)).with_strategy(
-                    genome.band,
-                    genome.level,
-                    genome.optimakina_from,
-                );
+                let mut policy = Searching::new(NetValue(&network)).with_strategy(genome.bands, genome.level, genome.optimakina_from);
                 play(&catalog, &economy, &mut policy, seed)
             })
             .collect();

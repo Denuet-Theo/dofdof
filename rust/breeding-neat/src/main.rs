@@ -29,7 +29,7 @@
 //! dispersion. Si ce n'est pas le cas, on l'écrit : un résultat négatif mesuré
 //! vaut mieux que la treizième intuition.
 
-mod neat;
+use breeding_neat::neat;
 
 use std::time::Instant;
 

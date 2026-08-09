@@ -42,8 +42,10 @@ import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   stableBySex,
+  statusFlags,
   tracksIndividually,
   type Individual,
+  type MountStatus,
   type Pairing,
   type Sex,
   type Stable,
@@ -259,6 +261,10 @@ export const useBreeding = (
             sex: row.sex,
             level: row.level,
             fertile: row.fertile,
+            // `?? false` et non `row.pregnant` nu : la colonne date de la
+            // migration 20260809190000, et une base non migrée rendrait
+            // `undefined`, qui vaut « féconde inconnue » plutôt que « stérile ».
+            pregnant: row.pregnant ?? false,
             // Les deux couleurs vont ensemble ou pas du tout : une ascendance à
             // moitié connue ne se distingue pas d'une monture achetée, et la
             // traiter comme telle vaut mieux que d'inventer le parent manquant.
@@ -750,6 +756,8 @@ export const useBreeding = (
       sex: Sex;
       level?: number;
       parents?: [string, string] | null;
+      /** Fertile, féconde ou stérile — voir `mountStatus`. Fertile par défaut. */
+      status?: MountStatus;
     }) => {
       const supabase = createClient();
       const { data, error: saveError } = await supabase
@@ -757,12 +765,13 @@ export const useBreeding = (
         .insert({
           family,
           color_id: mount.colorId,
-          // Une monture ajoutée à la main est achetée ou capturée : elle n'a pas
-          // d'ascendance, donc rien à inscrire, donc « Anonyme » — qui est déjà
-          // son nom dans le jeu. En dicter un ferait renommer pour rien.
+          // Une monture sans ascendance est achetée ou capturée : elle n'a rien
+          // à inscrire, donc « Anonyme » — qui est déjà son nom dans le jeu. En
+          // dicter un ferait renommer pour rien.
           name: mount.parents ? nameForBirth(mount.colorId, mount.parents, mount.sex) : null,
           sex: mount.sex,
           level: mount.level ?? 1,
+          ...statusFlags(mount.status ?? 'fertile'),
           parent_a_color: mount.parents?.[0] ?? null,
           parent_b_color: mount.parents?.[1] ?? null,
         })
@@ -782,6 +791,7 @@ export const useBreeding = (
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
+        pregnant: row.pregnant ?? false,
         parents:
           row.parent_a_color && row.parent_b_color
             ? [row.parent_a_color, row.parent_b_color]
@@ -796,7 +806,7 @@ export const useBreeding = (
 
   /** Corrige une monture suivie : niveau, sexe ou fertilité. */
   const updateIndividual = useCallback(
-    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'name'>>) => {
+    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'pregnant' | 'name'>>) => {
       setStable((current) => ({
         ...current,
         individuals: current.individuals.map((mount) =>
@@ -916,7 +926,10 @@ export const useBreeding = (
         steriles.size > 0
           ? supabase
               .from('user_breeding_individuals')
-              .update({ fertile: false, updated_at: new Date().toISOString() })
+              // Stériles, et non plus fécondes : la naissance qu'on saisit est
+              // justement celle qu'elles attendaient. Une féconde qui a mis bas
+              // redevient clonable, ce que `pregnant` doit cesser d'interdire.
+              .update({ fertile: false, pregnant: false, updated_at: new Date().toISOString() })
               .in('id', [...steriles])
           : Promise.resolve({ error: null }),
         individualsBorn.length > 0
@@ -955,6 +968,7 @@ export const useBreeding = (
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
+        pregnant: row.pregnant ?? false,
         parents:
           row.parent_a_color && row.parent_b_color
             ? ([row.parent_a_color, row.parent_b_color] as [string, string])
@@ -965,7 +979,7 @@ export const useBreeding = (
         bulk: nextBulk,
         individuals: [
           ...current.individuals.map((mount) =>
-            steriles.has(mount.id) ? { ...mount, fertile: false } : mount
+            steriles.has(mount.id) ? { ...mount, fertile: false, pregnant: false } : mount
           ),
           ...added,
         ],

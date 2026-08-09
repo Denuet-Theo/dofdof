@@ -2,6 +2,7 @@ import type { BreedingPlan } from './costs';
 import { planCouples } from './loadout';
 import {
   copyStable,
+  isSterile,
   splitBySex,
   tracksIndividually,
   type Couple,
@@ -94,6 +95,7 @@ const addExpectedBirths = (
       sex: index % 2 === 0 ? 'M' : 'F',
       level: 1,
       fertile: true,
+      pregnant: false,
       parents: null,
     };
     stable.individuals.push(projected);
@@ -132,7 +134,9 @@ const applyClonings = (stable: Stable, colorId: string, count: number): number =
   /** Les stériles de cette couleur, groupés par ce que le clone conserverait. */
   const groups = new Map<string, Individual[]>();
   for (const mount of stable.individuals) {
-    if (mount.colorId !== colorId || mount.fertile) continue;
+    // `isSterile` et non `!fertile` : une féconde est indisponible elle aussi,
+    // mais elle porte — la cloner détruirait le poulain attendu.
+    if (mount.colorId !== colorId || !isSterile(mount)) continue;
     const key = `${(mount.parents ?? []).join('+')}|${mount.sex}`;
     const group = groups.get(key) ?? [];
     group.push(mount);

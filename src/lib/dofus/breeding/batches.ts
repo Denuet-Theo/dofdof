@@ -95,7 +95,7 @@ const addExpectedBirths = (
       sex: index % 2 === 0 ? 'M' : 'F',
       level: 1,
       fertile: true,
-      pregnant: false,
+      cycled: false,
       parents: null,
     };
     stable.individuals.push(projected);
@@ -134,8 +134,6 @@ const applyClonings = (stable: Stable, colorId: string, count: number): number =
   /** Les stériles de cette couleur, groupés par ce que le clone conserverait. */
   const groups = new Map<string, Individual[]>();
   for (const mount of stable.individuals) {
-    // `isSterile` et non `!fertile` : une féconde est indisponible elle aussi,
-    // mais elle porte — la cloner détruirait le poulain attendu.
     if (mount.colorId !== colorId || !isSterile(mount)) continue;
     const key = `${(mount.parents ?? []).join('+')}|${mount.sex}`;
     const group = groups.get(key) ?? [];

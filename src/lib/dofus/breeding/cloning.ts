@@ -85,9 +85,6 @@ export type CloneContext = {
 /** Les stériles suivies individuellement, valorisées par ce qu'elles permettent. */
 export const sterileMounts = (stable: Stable, context: CloneContext): SterileMount[] =>
   stable.individuals
-    // Les stériles seulement : une féconde est indisponible pour la même raison
-    // apparente — elle ne s'accouple pas — mais elle porte, et la cloner
-    // reviendrait à recommander de perdre le poulain qu'on attend.
     .filter((mount: Individual) => isSterile(mount))
     .map((mount) => {
       const generation = context.generations.get(mount.colorId) ?? 1;

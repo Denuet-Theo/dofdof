@@ -149,14 +149,17 @@ export type Individual = {
   /**
    * `false` dès que la monture a servi de parent. Une stérile ne s'accouple
    * plus ; elle ne vaut plus que par le clonage ou l'extraction.
+   *
+   * Vrai pour une **fertile comme pour une féconde** : les deux peuvent encore
+   * s'accoupler, et c'est bien la question que ce champ pose partout où il est
+   * lu.
    */
   fertile: boolean;
   /**
-   * Accouplée et en gestation. Indisponible comme une stérile — d'où
-   * `fertile: false` en même temps — mais un poulain arrive, donc elle ne se
-   * clone pas. Voir `mountStatus`.
+   * Le cycle de fécondité est déjà payé : la monture est « féconde » au sens du
+   * jeu. Voir `mountStatus`.
    */
-  pregnant: boolean;
+  cycled: boolean;
   /** Les deux ascendants directs, ou `null` pour une monture achetée ou capturée. */
   parents: [string, string] | null;
 };
@@ -164,12 +167,20 @@ export type Individual = {
 /**
  * L'état d'une monture, tel que le jeu le nomme.
  *
- * Trois valeurs, et la distinction entre les deux dernières n'est pas
- * cosmétique : `sterileMounts` propose au clonage tout ce qui n'est pas fertile,
- * et cloner une féconde consomme la monture avant qu'elle ait mis bas. Le calcul
- * continue de lire `fertile` — « puis-je la charger dans une fournée » — et seuls
- * le clonage et l'écran ont besoin de savoir laquelle des deux indisponibilités
- * c'est.
+ * ```
+ * fertile --(cycle de jauges)--> féconde --(accouplement)--> stérile
+ * ```
+ *
+ * Les deux premiers sont **disponibles** : ils s'accouplent tous les deux. Ce
+ * qui les sépare est le cycle de fécondité — sérénité alignée, stats montées à
+ * l'extrême, voir `CYCLE_STEPS` — qu'une féconde a déjà payé et qu'une fertile
+ * devra payer avant de servir. Une féconde qui n'est pas accouplée le reste ;
+ * elle ne retombe pas fertile.
+ *
+ * Il n'y a **pas de gestation** : un mâle fécond, une femelle féconde, un clic,
+ * les deux parents passent stériles et le poulain est en écurie. Le confondre
+ * avec une grossesse a coûté une migration — voir 20260809210000, qui la
+ * répare, et le défaut qu'elle décrit.
  */
 export type MountStatus = 'fertile' | 'feconde' | 'sterile';
 
@@ -179,32 +190,32 @@ export const MOUNT_STATUS_LABEL: Record<MountStatus, string> = {
   sterile: 'Stérile',
 };
 
-export const mountStatus = (mount: Pick<Individual, 'fertile' | 'pregnant'>): MountStatus =>
-  mount.fertile ? 'fertile' : mount.pregnant ? 'feconde' : 'sterile';
+export const mountStatus = (mount: Pick<Individual, 'fertile' | 'cycled'>): MountStatus =>
+  mount.fertile ? (mount.cycled ? 'feconde' : 'fertile') : 'sterile';
 
 /**
  * Les deux booléens d'un état — le seul endroit où la traduction se fait.
  *
- * Quatre combinaisons pour trois états : « fertile et féconde » n'existe pas, et
- * la base le refuse aussi (voir la migration 20260809190000). Passer par cette
- * fonction plutôt que d'écrire les deux champs à la main est ce qui garantit
- * qu'on ne fabrique jamais la quatrième.
+ * Quatre combinaisons pour trois états : « stérile et cyclée » n'existe pas,
+ * puisque l'accouplement qui stérilise consomme justement le cycle. La base le
+ * refuse aussi (migration 20260809210000). Passer par cette fonction plutôt que
+ * d'écrire les deux champs à la main est ce qui garantit qu'on ne fabrique
+ * jamais la quatrième.
  */
-export const statusFlags = (status: MountStatus): { fertile: boolean; pregnant: boolean } => ({
-  fertile: status === 'fertile',
-  pregnant: status === 'feconde',
+export const statusFlags = (status: MountStatus): { fertile: boolean; cycled: boolean } => ({
+  fertile: status !== 'sterile',
+  cycled: status === 'feconde',
 });
 
 /**
- * Ce qu'on peut cloner : les stériles, et **elles seules**.
+ * Ce qu'on peut cloner : les stériles, et elles seules.
  *
- * Une féconde est indisponible au même titre, mais pour une raison opposée —
- * elle porte. Les mettre dans le même sac faisait proposer le clonage d'une
- * monture en gestation, c'est-à-dire recommander de perdre le poulain qu'on
- * attend.
+ * C'est exactement `!fertile` — une féconde n'est pas une monture empêchée, elle
+ * est prête — mais la fonction reste, parce que « stérile » est ce que le
+ * clonage cherche et que le lire en négation d'un autre état est ce qui a permis
+ * la confusion la première fois.
  */
-export const isSterile = (mount: Pick<Individual, 'fertile' | 'pregnant'>): boolean =>
-  !mount.fertile && !mount.pregnant;
+export const isSterile = (mount: Pick<Individual, 'fertile'>): boolean => !mount.fertile;
 
 /**
  * L'écurie complète : le vrac des générations basses et les individus des

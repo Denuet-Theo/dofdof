@@ -261,10 +261,10 @@ export const useBreeding = (
             sex: row.sex,
             level: row.level,
             fertile: row.fertile,
-            // `?? false` et non `row.pregnant` nu : la colonne date de la
-            // migration 20260809190000, et une base non migrée rendrait
-            // `undefined`, qui vaut « féconde inconnue » plutôt que « stérile ».
-            pregnant: row.pregnant ?? false,
+            // `?? false` et non le champ nu : la colonne date de la migration
+            // 20260809210000, et une base non migrée rendrait `undefined` — ce
+            // qui vaut « cycle inconnu », donc à repayer, le sens prudent.
+            cycled: row.cycled ?? false,
             // Les deux couleurs vont ensemble ou pas du tout : une ascendance à
             // moitié connue ne se distingue pas d'une monture achetée, et la
             // traiter comme telle vaut mieux que d'inventer le parent manquant.
@@ -791,7 +791,7 @@ export const useBreeding = (
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
-        pregnant: row.pregnant ?? false,
+        cycled: row.cycled ?? false,
         parents:
           row.parent_a_color && row.parent_b_color
             ? [row.parent_a_color, row.parent_b_color]
@@ -806,7 +806,7 @@ export const useBreeding = (
 
   /** Corrige une monture suivie : niveau, sexe ou fertilité. */
   const updateIndividual = useCallback(
-    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'pregnant' | 'name'>>) => {
+    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>) => {
       setStable((current) => ({
         ...current,
         individuals: current.individuals.map((mount) =>
@@ -926,10 +926,9 @@ export const useBreeding = (
         steriles.size > 0
           ? supabase
               .from('user_breeding_individuals')
-              // Stériles, et non plus fécondes : la naissance qu'on saisit est
-              // justement celle qu'elles attendaient. Une féconde qui a mis bas
-              // redevient clonable, ce que `pregnant` doit cesser d'interdire.
-              .update({ fertile: false, pregnant: false, updated_at: new Date().toISOString() })
+              // L'accouplement consomme les deux parents **et** leur cycle : une
+              // stérile n'est plus cyclée, elle n'a plus de jauges à porter.
+              .update({ fertile: false, cycled: false, updated_at: new Date().toISOString() })
               .in('id', [...steriles])
           : Promise.resolve({ error: null }),
         individualsBorn.length > 0
@@ -968,7 +967,7 @@ export const useBreeding = (
         sex: row.sex,
         level: row.level,
         fertile: row.fertile,
-        pregnant: row.pregnant ?? false,
+        cycled: row.cycled ?? false,
         parents:
           row.parent_a_color && row.parent_b_color
             ? ([row.parent_a_color, row.parent_b_color] as [string, string])
@@ -979,7 +978,7 @@ export const useBreeding = (
         bulk: nextBulk,
         individuals: [
           ...current.individuals.map((mount) =>
-            steriles.has(mount.id) ? { ...mount, fertile: false, pregnant: false } : mount
+            steriles.has(mount.id) ? { ...mount, fertile: false, cycled: false } : mount
           ),
           ...added,
         ],

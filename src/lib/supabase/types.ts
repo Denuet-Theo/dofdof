@@ -391,11 +391,11 @@ export type UserBreedingIndividual = {
   level: number;
   fertile: boolean;
   /**
-   * Accouplée et en gestation (migration 20260809190000). Va toujours avec
-   * `fertile = false`, et s'en distingue par ce qu'elle interdit : une féconde
-   * ne se clone pas, un poulain arrive. Voir `mountStatus`.
+   * Le cycle de fécondité est déjà payé (migration 20260809210000) : la monture
+   * est « féconde » au sens du jeu, donc prête à s'accoupler sans repasser par
+   * les jauges. Va avec `fertile = true`. Voir `mountStatus`.
    */
-  pregnant: boolean;
+  cycled: boolean;
   parent_a_color: string | null;
   parent_b_color: string | null;
   parent_a_id: string | null;
@@ -508,7 +508,7 @@ export interface Database {
           sex: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;
-          pregnant?: boolean;
+          cycled?: boolean;
           parent_a_color?: string | null;
           parent_b_color?: string | null;
           parent_a_id?: string | null;
@@ -522,7 +522,7 @@ export interface Database {
           sex?: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;
-          pregnant?: boolean;
+          cycled?: boolean;
           parent_a_color?: string | null;
           parent_b_color?: string | null;
           parent_a_id?: string | null;

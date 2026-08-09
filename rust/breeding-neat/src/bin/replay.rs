@@ -46,7 +46,24 @@ impl ValueFn for NetValue<'_> {
 
 fn load(path: &str) -> Result<Genome, String> {
     let json = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    let root: Value = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
+    let parsed: Value = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
+
+    // `finalists.json` est un tableau ; un troisième argument choisit le rang.
+    // C'est ce qui permet de rejouer une stratégie alternative et de comparer
+    // les **comportements** et pas seulement les scores.
+    let root = match parsed.as_array() {
+        Some(list) => {
+            let rank = std::env::args()
+                .nth(3)
+                .and_then(|arg| arg.parse::<usize>().ok())
+                .unwrap_or(1)
+                .saturating_sub(1);
+            list.get(rank)
+                .cloned()
+                .ok_or_else(|| format!("{path}: pas de finaliste au rang {}", rank + 1))?
+        }
+        None => parsed,
+    };
 
     let hidden = root["hidden"]
         .as_array()

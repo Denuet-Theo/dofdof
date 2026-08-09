@@ -578,6 +578,41 @@ fn main() {
         );
     }
 
+    // Tous les finalistes sur disque, pas seulement le vainqueur.
+    //
+    // La table ci-dessus ne montre que l'unité 0 et aucun comportement, alors
+    // que c'est précisément la comparaison qu'on vient chercher en spéciant :
+    // deux stratégies très différentes peuvent valoir presque autant, et le seul
+    // champion efface cette information. Les garder permet de les rejouer.
+    let finalists_json: Vec<serde_json::Value> = judged
+        .iter()
+        .map(|(index, validated)| {
+            let (genome, training) = &finalists[*index];
+            serde_json::json!({
+                "hidden": genome.hidden,
+                "connections": genome.connections.iter().map(|c| serde_json::json!({
+                    "from": c.from, "to": c.to, "weight": c.weight,
+                    "enabled": c.enabled, "innovation": c.innovation,
+                })).collect::<Vec<_>>(),
+                "strategies": genome.strategies.iter().map(|s| serde_json::json!({
+                    "bands": s.bands.to_vec(),
+                    "level": s.level,
+                    "optimakina_from": s.optimakina_from,
+                })).collect::<Vec<_>>(),
+                "training_score": training,
+                "validation_score": validated,
+            })
+        })
+        .collect();
+    if std::fs::write(
+        "finalists.json",
+        serde_json::to_string_pretty(&serde_json::json!(finalists_json)).unwrap_or_default(),
+    )
+    .is_ok()
+    {
+        println!("{} finalistes écrits dans finalists.json", finalists_json.len());
+    }
+
     let path = "champion.json";
     let json = serde_json::json!({
         "features": FEATURES,

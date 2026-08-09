@@ -29,6 +29,24 @@ import {
 } from '@/lib/dofus/breeding/objectives';
 import { formatHours } from '@/lib/utils/date';
 
+/**
+ * Le panneau « Couleur visée » est-il affiché.
+ *
+ * À `false` : il répondait à « quelle couleur élever » alors que le modèle y
+ * répond déjà, deux panneaux plus haut, avec un plan chiffré et daté. Deux
+ * réponses concurrentes à la même question sur le même écran, et c'est la
+ * moins bonne qui occupait le plus de place — cent vingt lignes de classement,
+ * vitrine de l'heuristique que la recherche a précisément remplacée.
+ *
+ * Une constante et non une suppression, parce que le panneau porte encore trois
+ * choses qui servent : la saisie des prix de couleurs, la quantité visée, et le
+ * choix de la couleur suivie. Les décrocher demande de leur trouver un toit, ce
+ * qui est une décision de mise en page à part entière — voir l'issue. En
+ * attendant, tout le calcul reste branché et vivant : seule la vue est coupée,
+ * et la remettre est ce booléen.
+ */
+const SHOW_TARGET_COLOR_PANEL = false;
+
 const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'muldo', label: 'Muldos' },
   { id: 'dragodinde', label: 'Dragodindes' },
@@ -471,7 +489,7 @@ const BreedingPage = () => {
           question « combien j'en veux » vient avant « laquelle », puisqu'elle
           change la réponse — à trente exemplaires les fournées se remplissent et
           le palmarès n'est plus le même. */}
-      <div className="glass rounded-2xl">
+      <div className={`glass rounded-2xl ${SHOW_TARGET_COLOR_PANEL ? '' : 'hidden'}`}>
         <button
           type="button"
           onClick={() => setGoalsOpen((value) => !value)}

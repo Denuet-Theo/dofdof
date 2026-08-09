@@ -47,5 +47,10 @@ next-env.d.ts
 # c'est un workspace de binaires, et une mesure ne se rejoue qu'à dépendances
 # identiques.
 /rust/target/
-/rust/champion.json
-/rust/finalists.json
+/rust/champion*.json
+/rust/finalists*.json
+
+# L'état d'un entraînement en cours : 128 génomes et le registre d'innovations,
+# soit près d'un mégaoctet réécrit à chaque manche. C'est une sortie de calcul,
+# pas une source — et une reprise ne se partage pas, elle se relance.
+/rust/checkpoint*.json

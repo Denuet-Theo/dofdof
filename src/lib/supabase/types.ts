@@ -322,6 +322,30 @@ export type BreedingProject = {
 };
 
 /**
+ * La timeline d'exécution (migration 20260809160000) : le plan du modèle, et où
+ * l'on en est dedans.
+ *
+ * Le `plan` est du JSON brut, volontairement non typé ici : sa forme appartient
+ * à l'optimiseur, qui évolue plus vite que le schéma. `parsePlan` dans
+ * `lib/dofus/breeding/timeline.ts` le valide à la lecture, et c'est là qu'est le
+ * contrat.
+ *
+ * Les trois colonnes d'horloge tiennent la pause : temps de plan =
+ * `(paused_at ?? maintenant) − started_at − paused_seconds`.
+ */
+export type BreedingTimeline = {
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  plan: unknown;
+  started_at: string;
+  /** Instant de la pause en cours, ou null si la timeline tourne. */
+  paused_at: string | null;
+  /** Cumul des pauses **terminées**, en secondes. */
+  paused_seconds: number;
+  updated_at: string;
+};
+
+/**
  * Le vrac de l'écurie (migrations 20260804210000 puis 20260805120000) : les
  * générations 1 et 2, comptées **par sexe**. Ligne absente = zéro.
  *
@@ -426,6 +450,26 @@ export interface Database {
         Update: {
           target_count?: number;
           objective?: BreedingProject['objective'];
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      breeding_timeline: {
+        Row: BreedingTimeline;
+        Insert: {
+          user_id?: string;
+          family: BreedingTimeline['family'];
+          plan: unknown;
+          started_at?: string;
+          paused_at?: string | null;
+          paused_seconds?: number;
+          updated_at?: string;
+        };
+        Update: {
+          plan?: unknown;
+          started_at?: string;
+          paused_at?: string | null;
+          paused_seconds?: number;
           updated_at?: string;
         };
         Relationships: [];

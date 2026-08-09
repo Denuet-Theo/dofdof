@@ -14,6 +14,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { formatStamp } from '@/lib/utils/date';
+
+/** Constante de build : calculée une fois, hors du composant. */
+const buildStamp = formatStamp(process.env.NEXT_PUBLIC_APP_BUILD_DATE);
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -94,16 +98,13 @@ const Sidebar = () => {
           <LogOut size={18} />
           Déconnexion
         </button>
+        {/* L'estampille de build. Formatée dans un fuseau **figé** : sans ça
+            le serveur la rend en UTC et le navigateur en heure locale, les deux
+            textes diffèrent, et React casse l'hydratation de toute la page —
+            sur chaque écran, à chaque chargement. Voir `formatStamp`. */}
         <p className="px-4 pt-2 text-[10px] text-dark-600">
           {process.env.NEXT_PUBLIC_APP_COMMIT || 'dev'}
-          {process.env.NEXT_PUBLIC_APP_BUILD_DATE &&
-            ` · ${new Date(process.env.NEXT_PUBLIC_APP_BUILD_DATE).toLocaleString('fr-FR', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}`}
+          {buildStamp && ` · ${buildStamp}`}
         </p>
       </div>
     </aside>

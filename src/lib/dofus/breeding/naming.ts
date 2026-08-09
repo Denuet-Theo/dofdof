@@ -228,3 +228,55 @@ export const carriedGeneration = (
   ownGeneration: number,
   parentGenerations: [number, number] | null
 ): number => Math.max(ownGeneration, ...(parentGenerations ?? []));
+
+/**
+ * Un nom relu — l'inverse de `mountName`.
+ *
+ * Le nom n'est pas qu'une étiquette : il porte la couleur, le sexe et les deux
+ * parents, c'est-à-dire **tout ce que la base enregistre d'une monture** sauf
+ * son niveau et son état. Il se relit donc, et c'est ce qui permet de recharger
+ * une écurie entière depuis la liste du jeu plutôt que fiche par fiche.
+ *
+ * On rend des **codes** et non des couleurs : la table qui les traduit dépend de
+ * la famille, et ce module ne la connaît pas. L'appelant, qui a le catalogue,
+ * fait la correspondance — voir `colorCoder`, dont il suffit d'inverser la
+ * sortie sur les couleurs qu'il possède.
+ *
+ * La génération est rendue telle qu'écrite bien qu'elle soit **déductible** de
+ * la couleur et des parents. C'est exprès : la recalculer et la comparer est le
+ * seul contrôle disponible sur une ligne saisie à la main, et une divergence
+ * signale un nom retapé de travers plutôt qu'un nom dicté par l'outil.
+ */
+export type ParsedMountName = {
+  carriedGeneration: number;
+  colorCode: string;
+  sex: Sex;
+  /** Les deux codes de parents, dans l'ordre où le nom les porte — donc triés. */
+  parentCodes: [string, string];
+};
+
+/**
+ * `G4 DO M AM-DO` → ses quatre morceaux, ou `null` si la ligne n'est pas un nom.
+ *
+ * Tolère les espaces multiples et la casse : une liste recopiée depuis le jeu
+ * traverse un presse-papier, parfois un tableur, et se fait maltraiter en
+ * chemin. Ce qu'on ne tolère pas, c'est un nom **tronqué** — il ne désignerait
+ * plus une monture unique, et l'importer reviendrait à inventer.
+ */
+export const parseMountName = (raw: string): ParsedMountName | null => {
+  const match = raw
+    .trim()
+    .toUpperCase()
+    .match(/^G(\d{1,2})\s+([A-Z]+)\s+([MF])\s+([A-Z]+)-([A-Z]+)$/);
+  if (!match) return null;
+
+  const carriedGeneration = Number(match[1]);
+  if (!Number.isFinite(carriedGeneration) || carriedGeneration < 1) return null;
+
+  return {
+    carriedGeneration,
+    colorCode: match[2],
+    sex: match[3] as Sex,
+    parentCodes: [match[4], match[5]],
+  };
+};

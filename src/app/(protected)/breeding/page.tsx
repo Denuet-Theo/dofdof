@@ -22,9 +22,6 @@ import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
 import {
   OBJECTIVES,
-  combinedRate,
-  fundingSplit,
-  minimumFunderPercent,
   rankFor,
   recommendedFor,
   type Candidate,
@@ -53,8 +50,6 @@ const BreedingPage = () => {
    * et non un champ enfoui dans un plan.
    */
   const [draftCount, setDraftCount] = useState(1);
-  /** L'objectif tant qu'aucun plan n'est suivi — ensuite, c'est le projet qui le porte. */
-  const [draftObjective, setDraftObjective] = useState<ObjectiveId>('profit');
 
   const project = useBreedingProject(family);
   const timeline = useBreedingTimeline(family);
@@ -162,16 +157,21 @@ const BreedingPage = () => {
   }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
   /**
-   * Ce que le plan cherche. Porté par le projet quand il y en a un, sinon local :
-   * on doit pouvoir changer d'objectif **avant** d'avoir choisi une couleur,
-   * puisque c'est justement l'objectif qui la désigne.
+   * Ce que le plan cherche — et pourquoi on ne le demande plus.
+   *
+   * Le choix entre « rentabilité », « gen 10 à l'équilibre » et « gen 10 au
+   * moins cher » n'a de sens que face à **plusieurs générateurs** de plans,
+   * qu'on arbitre alors les uns contre les autres. Il n'y en a qu'un, et les
+   * autres optimisations sont encore à écrire : proposer un arbitrage entre une
+   * seule option, c'est faire croire à un levier qui n'en est pas un, et faire
+   * porter au lecteur la charge de comprendre trois critères pour n'en exercer
+   * aucun.
+   *
+   * Le sélecteur est donc retiré, pas la machinerie : `objectives.ts` et le
+   * partage de financement de `ColorRow` restent entiers, et rebrancher le choix
+   * sera un changement d'écran quand il y aura de quoi choisir.
    */
-  const objective = project.current?.objective ?? draftObjective;
-
-  const setObjective = (next: ObjectiveId) => {
-    if (project.current) project.setObjective(next);
-    else setDraftObjective(next);
-  };
+  const objective: ObjectiveId = 'profit';
 
   /** Les lignes réduites à ce dont un objectif a besoin pour les départager. */
   const candidates = useMemo<(Candidate & { row: BreedingRow })[]>(
@@ -213,58 +213,12 @@ const BreedingPage = () => {
 
   const recommended = recommendation?.item.row ?? null;
 
-  /**
-   * La répartition du parc qui tient l'équilibre, sur l'objectif qui la vise.
-   *
-   * Calculée sur la couleur **suivie** quand il y en a une, et sur la
-   * recommandation sinon : c'est une consigne d'exécution, donc elle doit
-   * parler du plan qu'on mène et pas de celui qu'on aurait pu mener.
-   */
-  const split = useMemo(() => {
-    if (objective !== 'gen10_balanced') return null;
-    const target = candidates.find(
-      (candidate) => candidate.colorId === (selectedColorId ?? recommended?.colorId)
-    );
-    return target ? fundingSplit(target, candidates) : null;
-  }, [objective, candidates, selectedColorId, recommended]);
-
-  /**
-   * La part imposée au financeur, quand on veut plus que l'équilibre.
-   *
-   * Rester à l'équilibre monte le plus vite possible sans perdre d'argent ;
-   * au-dessus, on avance moins vite mais on dégage une marge. C'est un
-   * arbitrage que seul l'éleveur peut faire, d'où un réglage plutôt qu'un
-   * arrondi imposé.
-   */
-  const [fundingBoost, setFundingBoost] = useState<number | null>(null);
-
-  const minFunderPercent = split ? minimumFunderPercent(split) : 0;
-  const funderPercent = Math.max(minFunderPercent, fundingBoost ?? 0);
-  /** Ce que le parc dégage à cette part, en kamas par heure d'enclos. */
-  const surplus = split ? combinedRate(split, funderPercent / 100) : 0;
-
-  /**
-   * La part de parc à financer, couleur par couleur, sous l'objectif
-   * d'équilibre.
-   *
-   * C'est le chiffre comparable d'une route à l'autre — une gen 10 à 15 % de
-   * financement vaut mieux qu'une à 40 % — et c'est celui sur lequel le
-   * classement trie. La marge isolée, elle, est négative par construction sur
-   * toutes : l'afficher laissait croire que l'objectif ne servait à rien.
-   */
-  // Sur la couleur suivie, c'est la part **saisie** qui vaut, pas le minimum
-  // calculé : le curseur ne servirait à rien s'il ne déplaçait pas la ligne
-  // qu'il concerne. Les autres gardent leur minimum, qui est ce sur quoi le
-  // classement les départage. Voir l'appel à ColorRow.
-  const fundingShares = useMemo(() => {
-    if (objective !== 'gen10_balanced') return new Map<string, number>();
-    return new Map(
-      candidates.flatMap((candidate) => {
-        const share = fundingSplit(candidate, candidates)?.funderShare;
-        return share === undefined ? [] : [[candidate.colorId, share] as const];
-      })
-    );
-  }, [objective, candidates]);
+  /* La répartition du parc qui tient l'équilibre — le curseur de financement et
+     les parts par couleur — vivait ici. Elle n'existait que sous l'objectif
+     « gen 10 à l'équilibre », qui ne peut plus être sélectionné : la garder
+     aurait laissé à l'écran une consigne qu'aucun réglage ne pouvait plus
+     atteindre. `fundingSplit`, `combinedRate` et `minimumFunderPercent` restent
+     dans `objectives.ts`, et `ColorRow` sait toujours afficher une part. */
 
   /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
   const shortfall =
@@ -512,10 +466,10 @@ const BreedingPage = () => {
         onSaveSettings={saveSettings}
       />
 
-      {/* Objectifs : le classement, replié derrière ce qu'on vise. La question
-          « combien j'en veux » vient avant « laquelle », puisqu'elle change la
-          réponse — à trente exemplaires les fournées se remplissent et le
-          palmarès n'est plus le même. */}
+      {/* La couleur visée : le classement, replié derrière ce qu'on cherche. La
+          question « combien j'en veux » vient avant « laquelle », puisqu'elle
+          change la réponse — à trente exemplaires les fournées se remplissent et
+          le palmarès n'est plus le même. */}
       <div className="glass rounded-2xl">
         <button
           type="button"
@@ -523,7 +477,7 @@ const BreedingPage = () => {
           className="w-full flex items-center gap-2 px-5 py-4 cursor-pointer text-left"
         >
           <Target size={16} className="text-kamas" />
-          <span className="text-sm font-semibold text-dark-200">Objectifs</span>
+          <span className="text-sm font-semibold text-dark-200">Couleur visée</span>
           <span className="text-xs text-dark-500 ml-2 truncate">
             {project.current
               ? `${project.current.target_count} × ${nameOf(project.current.target_color_id)}`
@@ -536,104 +490,15 @@ const BreedingPage = () => {
 
         {goalsOpen && (
           <div className="px-5 pb-5 pt-4 border-t border-dark-700/40 space-y-4">
-            {/* Ce qu'on cherche vient avant tout le reste : c'est ce qui décide
-                du gagnant, et les trois critères ne désignent pas la même
-                couleur. La marge horaire, seule, ne pouvait jamais recommander
-                une route vers la gen 10 — elle y perd toujours. */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {OBJECTIVES.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setObjective(option.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer border ${
-                      objective === option.id
-                        ? 'bg-kamas/15 border-kamas/40 text-kamas'
-                        : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-dark-500'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-dark-600">
-                {OBJECTIVES.find((option) => option.id === objective)?.hint}
-              </p>
-
-              {/* La consigne concrète de l'objectif d'équilibre : deux élevages
-                  menés de front, et la part du parc qui rend l'ensemble
-                  neutre. C'est ça, ne pas alterner. */}
-              {split && (
-                <div className="text-[11px] text-dark-300 space-y-1">
-                  <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                    <span className="text-dark-500">Consacrer</span>
-                    {/* Jamais en dessous du minimum : descendre sous l'équilibre
-                        ferait perdre de l'argent, ce que ce réglage est
-                        justement là pour éviter. Au-dessus, en revanche, c'est
-                        une marge de sécurité qu'on peut vouloir. */}
-                    <span className="inline-flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={minFunderPercent}
-                        max={100}
-                        value={String(funderPercent)}
-                        onChange={(event) =>
-                          setFundingBoost(
-                            Math.max(
-                              minFunderPercent,
-                              Math.min(100, Number(event.target.value) || minFunderPercent)
-                            )
-                          )
-                        }
-                        title={`Minimum ${minFunderPercent} % — en dessous, le parc perd de l'argent. Au-dessus, tu montes moins vite mais tu dégages une marge.`}
-                        className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
-                          border-dark-600/50 text-kamas text-[11px] text-right font-semibold
-                          transition-all hover:border-dark-500 focus:border-kamas/50"
-                      />
-                      <span className="text-kamas font-semibold">%</span>
-                    </span>
-                    <span className="text-dark-500">du parc à</span>
-                    <strong className="text-dark-100">{split.funder.row.name}</strong>
-                    <span className="text-dark-500">
-                      ({Math.round(split.funderRate).toLocaleString('fr-FR')} k/h), les
-                    </span>
-                    <strong className="text-kamas">{100 - funderPercent} %</strong>
-                    <span className="text-dark-500">
-                      restants à{' '}
-                      {selectedColorId ? nameOf(selectedColorId) : recommended?.name}. Les deux
-                      tournent en même temps — c&apos;est ce qui évite d&apos;alterner.
-                    </span>
-                  </p>
-                  <p className="text-[10px] text-dark-600">
-                    {surplus > 0.5 ? (
-                      <>
-                        Au-dessus du minimum de {minFunderPercent} % : le parc dégage{' '}
-                        <strong className="text-profit">
-                          +{Math.round(surplus).toLocaleString('fr-FR')} kamas / heure
-                        </strong>{' '}
-                        au lieu d&apos;être à zéro, et la montée avance d&apos;autant moins
-                        vite.
-                      </>
-                    ) : (
-                      <>
-                        À {minFunderPercent} %, le parc est exactement à l&apos;équilibre.
-                        Monte la part si tu préfères dégager une marge plutôt que d&apos;aller
-                        vite.
-                      </>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {objective === 'gen10_balanced' && !split && recommended && (
-                <p className="text-[11px] text-amber-400/80">
-                  Aucune couleur ne dégage de marge horaire positive : rien ne peut
-                  financer la montée, et le parc ne peut pas s&apos;équilibrer seul.
-                  Renseigne des prix de revente, ou décoche « ne jamais vendre ».
-                </p>
-              )}
-            </div>
+            {/* Le sélecteur d'objectif vivait ici, avec la consigne
+                d'équilibre qui en découlait. Voir `objective` plus haut : un
+                arbitrage entre trois critères suppose plusieurs générateurs de
+                plans à opposer, et il n'y en a qu'un. Le classement se lit donc
+                sur la rentabilité, dite une fois ci-dessous plutôt que choisie
+                à chaque visite. */}
+            <p className="text-[11px] text-dark-600">
+              {OBJECTIVES.find((option) => option.id === objective)?.hint}
+            </p>
 
             <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
               <label className="flex items-center gap-2">
@@ -777,11 +642,11 @@ const BreedingPage = () => {
                     generationOf={generationOf}
                     stockBySex={stockBySex}
                     onSaveBulk={saveBulkStock}
-                    fundingShare={
-                      row.colorId === selectedColorId && split
-                        ? funderPercent / 100
-                        : (fundingShares.get(row.colorId) ?? null)
-                    }
+                    // La part de parc à financer n'a de sens que sous
+                    // l'objectif d'équilibre, qui ne peut plus être choisi.
+                    // `ColorRow` sait toujours l'afficher, et la reprendra
+                    // quand il y aura un générateur qui la calcule.
+                    fundingShare={null}
                     enclosCount={settings.enclos_count}
                     targetCount={targetCount}
                     waves={row.colorId === selectedColorId ? waves : null}

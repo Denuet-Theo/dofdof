@@ -2,7 +2,7 @@
 
 import { Egg } from 'lucide-react';
 import CopyableText from '@/components/ui/CopyableText';
-import ItemCard from '@/components/ui/ItemCard';
+import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { Mate, MatingOutcome } from '@/lib/dofus/breeding/pairing';
 import type { Sex } from '@/lib/dofus/breeding/stable';
@@ -29,60 +29,6 @@ import type { Sex } from '@/lib/dofus/breeding/stable';
 /** Le glyphe du sexe, celui que le jeu pose en haut de chaque fiche. */
 const SEX_GLYPH: Record<Sex, string> = { M: '♂', F: '♀' };
 const SEX_LABEL: Record<Sex, string> = { M: 'Mâle', F: 'Femelle' };
-
-const GenBadge = ({ generation, target = false }: { generation: number; target?: boolean }) => (
-  <span
-    className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-tight ${
-      target ? 'bg-kamas/20 text-kamas' : 'bg-dark-700/70 text-dark-300'
-    }`}
-  >
-    GEN. {generation}
-  </span>
-);
-
-/**
- * La vignette d'une couleur : l'icône de son certificat, comme partout ailleurs
- * dans l'app.
- *
- * Repli sur le code deux lettres quand l'icône manque — le même code que celui
- * des noms de montures, donc rien à apprendre de plus. Ne se produit que si
- * `trees.json` n'a pas rattaché le certificat à la couleur.
- */
-const ColorChip = ({
-  name,
-  code,
-  icon,
-  size = 'md',
-}: {
-  name: string;
-  code: string;
-  icon: string | null;
-  size?: 'sm' | 'md' | 'lg';
-}) => {
-  if (icon) {
-    return (
-      <ItemCard.Icon
-        src={icon}
-        alt={name}
-        size={size === 'lg' ? 'md' : 'sm'}
-        scaleOnHover={false}
-        className="rounded-lg"
-      />
-    );
-  }
-
-  const boxes = { sm: 'w-8 h-8 text-[8px]', md: 'w-8 h-8 text-[9px]', lg: 'w-12 h-12 text-[10px]' };
-  return (
-    <span
-      className={`${boxes[size]} shrink-0 rounded-lg bg-gradient-to-br from-dark-700 to-dark-900
-        border border-dark-600/50 flex items-center justify-center font-bold tracking-tight
-        text-kamas/80`}
-      title={name}
-    >
-      {code}
-    </span>
-  );
-};
 
 type CardProps = {
   mate: Mate;

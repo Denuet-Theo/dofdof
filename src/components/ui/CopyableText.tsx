@@ -20,15 +20,25 @@ type Props = {
   /** Ce que l'infobulle dit, quand « Copier … » ne suffit pas. */
   title?: string;
   className?: string;
+  /**
+   * Averti quand la copie a réellement abouti.
+   *
+   * L'ajout d'une monture s'en sert comme d'un verrou : tant que le nom n'est
+   * pas dans le presse-papier, il n'a pas pu être collé dans le jeu, et
+   * enregistrer la monture reviendrait à noter une ascendance que rien ne
+   * permettra plus de retrouver en écurie.
+   */
+  onCopy?: () => void;
 };
 
-const CopyableText = ({ value, title, className = '' }: Props) => {
+const CopyableText = ({ value, title, className = '', onCopy }: Props) => {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
+      onCopy?.();
       setTimeout(() => setCopied(false), 1500);
     } catch (error) {
       console.error('Clipboard copy failed:', error);

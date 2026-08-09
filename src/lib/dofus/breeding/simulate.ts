@@ -207,6 +207,9 @@ const store = (
     sex,
     level: 1,
     fertile: true,
+    // La simulation ne modélise pas la gestation : un accouplement rend son
+    // résultat dans le même tour, donc aucune monture simulée ne porte jamais.
+    pregnant: false,
     parents,
   } satisfies Individual);
 };

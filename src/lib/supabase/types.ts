@@ -390,6 +390,12 @@ export type UserBreedingIndividual = {
   sex: 'M' | 'F';
   level: number;
   fertile: boolean;
+  /**
+   * Accouplée et en gestation (migration 20260809190000). Va toujours avec
+   * `fertile = false`, et s'en distingue par ce qu'elle interdit : une féconde
+   * ne se clone pas, un poulain arrive. Voir `mountStatus`.
+   */
+  pregnant: boolean;
   parent_a_color: string | null;
   parent_b_color: string | null;
   parent_a_id: string | null;
@@ -502,6 +508,7 @@ export interface Database {
           sex: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;
+          pregnant?: boolean;
           parent_a_color?: string | null;
           parent_b_color?: string | null;
           parent_a_id?: string | null;
@@ -515,6 +522,7 @@ export interface Database {
           sex?: UserBreedingIndividual['sex'];
           level?: number;
           fertile?: boolean;
+          pregnant?: boolean;
           parent_a_color?: string | null;
           parent_b_color?: string | null;
           parent_a_id?: string | null;

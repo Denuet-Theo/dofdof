@@ -1560,7 +1560,7 @@
         },
         {
           "at": 0.0,
-          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 5 enclos. Baffeur : 50 000 pts en bande 0 (1 k) · Caresseur : 25 005 pts en bande 0 (1 k) · Foudroyeur : 100 000 pts en bande 1 (54 k) · Dragofesse : 100 000 pts en bande 1 (55 k) · Abreuvoir : 100 000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102 183 pts, 58 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u0-t0-buy-fuel",
           "kind": "buy",
@@ -1577,7 +1577,7 @@
         },
         {
           "at": 0.0,
-          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 1 enclos. Baffeur : 10 000 pts en bande 1 (1 k) · Caresseur : 5 001 pts en bande 3 (14 k) · Foudroyeur : 20 000 pts en bande 1 (11 k) · Dragofesse : 20 000 pts en bande 0 (6 k) · Abreuvoir : 20 000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5 078 pts, 10 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u1-t1-buy-fuel",
           "kind": "buy",
@@ -1594,7 +1594,7 @@
         },
         {
           "at": 35301.0,
-          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 5 enclos. Baffeur : 50 000 pts en bande 0 (1 k) · Caresseur : 25 005 pts en bande 0 (1 k) · Foudroyeur : 100 000 pts en bande 1 (54 k) · Dragofesse : 100 000 pts en bande 1 (55 k) · Abreuvoir : 100 000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102 183 pts, 58 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u0-t2-buy-fuel",
           "kind": "buy",
@@ -1611,7 +1611,7 @@
         },
         {
           "at": 35800.0,
-          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 1 enclos. Baffeur : 10 000 pts en bande 1 (1 k) · Caresseur : 5 001 pts en bande 3 (14 k) · Foudroyeur : 20 000 pts en bande 1 (11 k) · Dragofesse : 20 000 pts en bande 0 (6 k) · Abreuvoir : 20 000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5 078 pts, 10 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u1-t3-buy-fuel",
           "kind": "buy",
@@ -1628,7 +1628,7 @@
         },
         {
           "at": 70602.0,
-          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 5 enclos. Baffeur : 50 000 pts en bande 0 (1 k) · Caresseur : 25 005 pts en bande 0 (1 k) · Foudroyeur : 100 000 pts en bande 1 (54 k) · Dragofesse : 100 000 pts en bande 1 (55 k) · Abreuvoir : 100 000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102 183 pts, 58 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u0-t4-buy-fuel",
           "kind": "buy",
@@ -1645,7 +1645,7 @@
         },
         {
           "at": 71601.0,
-          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "detail": "Pour 1 enclos. Baffeur : 10 000 pts en bande 1 (1 k) · Caresseur : 5 001 pts en bande 3 (14 k) · Foudroyeur : 20 000 pts en bande 1 (11 k) · Dragofesse : 20 000 pts en bande 0 (6 k) · Abreuvoir : 20 000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5 078 pts, 10 k). À avoir avant que les jauges partent.",
           "duration": 0,
           "id": "marche-u1-t5-buy-fuel",
           "kind": "buy",

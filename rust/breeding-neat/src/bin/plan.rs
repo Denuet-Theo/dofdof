@@ -186,6 +186,20 @@ fn kamas(value: f64) -> String {
     }
 }
 
+/// Un entier avec ses milliers séparés, comme partout ailleurs dans l'écran.
+/// « 102183 pts » se relit deux fois ; « 102 183 pts » se lit une.
+fn spaced(value: f64) -> String {
+    let digits = format!("{:.0}", value.max(0.0));
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push('\u{202f}');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 /// La liste de courses d'une fournée, datée de l'instant où il faut l'avoir.
 ///
 /// Deux lignes séparées et non une : les montures se cherchent une par une à
@@ -267,13 +281,15 @@ fn shopping_events(
         if gauge == MANGEOIRE && economy.mangeoire_points_per_unit > 0.0 {
             let units = (points / economy.mangeoire_points_per_unit).ceil();
             lines.push(format!(
-                "Mangeoire : {units:.0} Extrait(s) ({points:.0} pts, {})",
+                "Mangeoire : {units:.0} Extrait(s) ({} pts, {})",
+                spaced(points),
                 kamas(cost)
             ));
         } else {
             lines.push(format!(
-                "{} : {points:.0} pts en bande {} ({})",
+                "{} : {} pts en bande {} ({})",
                 GAUGE_NAMES[gauge],
+                spaced(points),
                 strategy.bands[gauge],
                 kamas(cost)
             ));

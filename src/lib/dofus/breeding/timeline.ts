@@ -261,7 +261,18 @@ export const allEvents = (plan: TimelinePlan): PlacedEvent[] =>
         trackLabel: track.label,
       }))
     )
-    .sort((a, b) => a.at - b.at || a.trackId.localeCompare(b.trackId));
+    .sort((a, b) => a.at - b.at || precedence(a) - precedence(b) || a.trackId.localeCompare(b.trackId));
+
+/**
+ * Ce qui passe devant, à égalité d'instant.
+ *
+ * Un achat est le **prérequis** du geste qui porte la même date : il faut les
+ * montures avant de charger l'enclos, le carburant avant que les jauges
+ * partent. Rangés par piste, les six « Charger l'enclos » se listaient d'abord
+ * et la course arrivait dessous — l'ordre exactement inverse de celui dans
+ * lequel on agit. Vu à l'écran, pas déduit.
+ */
+const precedence = (event: { kind: EventKind }) => (event.kind === 'buy' ? 0 : 1);
 
 /**
  * Ce que l'agenda égrène : les gestes à venir, dans la fenêtre.

@@ -897,7 +897,52 @@ fn apply(
 ///
 /// `seed` fixe l'écurie de départ et toutes les naissances : deux politiques
 /// jouées sur la même graine affrontent exactement le même jeu.
+/// Une fournée, telle qu'elle s'est réellement jouée.
+///
+/// Le score dit ce qu'une politique vaut ; il ne dit pas quoi faire mardi à
+/// 14 h. Pour émettre le plan que l'écran attend, il faut le déroulé — quelle
+/// unité, à quelle heure, avec combien de croisements et de clonages. C'est ce
+/// que la boucle calcule déjà et agrégeait aussitôt.
+#[derive(Clone, Copy, Debug)]
+pub struct Batch {
+    pub unit: usize,
+    /// Heures depuis le début de la partie.
+    pub at_hours: f64,
+    /// Durée du cycle, manipulation comprise.
+    pub hours: f64,
+    pub crossings: usize,
+    pub clonings: usize,
+    pub purchases: usize,
+    pub sacrifices: usize,
+    pub births: usize,
+}
+
 pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed: u32) -> RunOutcome {
+    run(catalog, economy, policy, seed, None)
+}
+
+/// La même partie, en gardant le déroulé fournée par fournée.
+///
+/// Séparé de `play` parce que la boucle d'entraînement en joue des centaines de
+/// milliers et n'a que faire du détail : elle passe `None` et ne paie rien.
+pub fn play_recorded(
+    catalog: &Catalog,
+    economy: &Economy,
+    policy: &mut dyn Policy,
+    seed: u32,
+) -> (RunOutcome, Vec<Batch>) {
+    let mut log = Vec::new();
+    let outcome = run(catalog, economy, policy, seed, Some(&mut log));
+    (outcome, log)
+}
+
+fn run(
+    catalog: &Catalog,
+    economy: &Economy,
+    policy: &mut dyn Policy,
+    seed: u32,
+    mut record: Option<&mut Vec<Batch>>,
+) -> RunOutcome {
     let draws = Draws::new(seed);
     // Le marché du jour, tiré avec la graine : il fait partie du monde.
     let drawn = economy.for_run(catalog, &draws);
@@ -994,6 +1039,27 @@ pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed:
                 outcome.sacrifices += applied.sacrifices;
                 outcome.genetons += applied.genetons;
                 outcome.best_generation = outcome.best_generation.max(applied.best_generation);
+
+                if let Some(log) = record.as_deref_mut() {
+                    // Une fournée sans croisement n'occupe pas l'enclos : elle ne
+                    // coûte que la manipulation, et c'est bien ce qu'on veut voir
+                    // sur la piste de l'écurie.
+                    let hours = if applied.crossings > 0 {
+                        economy.unit_load(unit, strategy).1
+                    } else {
+                        economy.overhead_hours.max(1e-6)
+                    };
+                    log.push(Batch {
+                        unit,
+                        at_hours: now,
+                        hours,
+                        crossings: applied.crossings,
+                        clonings: applied.clonings,
+                        purchases: applied.purchases,
+                        sacrifices: applied.sacrifices,
+                        births: applied.births.len(),
+                    });
+                }
 
                 if applied.crossings > 0 {
                     outcome.loads_paid += 1;

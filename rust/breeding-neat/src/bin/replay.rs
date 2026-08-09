@@ -14,15 +14,15 @@
 //! pas les scores mais les **comportements** : combien de croisements, combien
 //! d'achats, combien de gen 10, combien de couleurs distinctes en fin de partie.
 
-use breeding_neat::neat::{Connection, Genome, Network};
+use breeding_neat::champion;
+use breeding_neat::neat::Network;
 use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
-use breeding_sim::economy::{Economy, MAX_UNITS, Policy, RunOutcome, Strategy, play};
+use breeding_sim::economy::{Economy, Policy, RunOutcome, play};
 use breeding_sim::encode::Census;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
 use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
-use serde_json::Value;
 
 /// Par défaut les graines scellées. Un second argument déplace la plage, ce
 /// qui permet de rejouer sur des graines **du domaine d'entraînement** et de
@@ -44,71 +44,14 @@ impl ValueFn for NetValue<'_> {
     }
 }
 
-fn load(path: &str) -> Result<Genome, String> {
-    let json = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    let parsed: Value = serde_json::from_str(&json).map_err(|e| format!("{path}: {e}"))?;
-
-    // `finalists.json` est un tableau ; un troisième argument choisit le rang.
-    // C'est ce qui permet de rejouer une stratégie alternative et de comparer
-    // les **comportements** et pas seulement les scores.
-    let root = match parsed.as_array() {
-        Some(list) => {
-            let rank = std::env::args()
-                .nth(3)
-                .and_then(|arg| arg.parse::<usize>().ok())
-                .unwrap_or(1)
-                .saturating_sub(1);
-            list.get(rank)
-                .cloned()
-                .ok_or_else(|| format!("{path}: pas de finaliste au rang {}", rank + 1))?
-        }
-        None => parsed,
-    };
-
-    let hidden = root["hidden"]
-        .as_array()
-        .ok_or("`hidden` absent")?
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as usize))
-        .collect();
-    let connections = root["connections"]
-        .as_array()
-        .ok_or("`connections` absent")?
-        .iter()
-        .map(|c| Connection {
-            from: c["from"].as_u64().unwrap_or(0) as usize,
-            to: c["to"].as_u64().unwrap_or(0) as usize,
-            weight: c["weight"].as_f64().unwrap_or(0.0),
-            enabled: c["enabled"].as_bool().unwrap_or(false),
-            innovation: c["innovation"].as_u64().unwrap_or(0),
-        })
-        .collect();
-
-    Ok(Genome {
-        hidden,
-        connections,
-        // Les réglages stratégiques du champion. Absents d'un fichier écrit
-        // avant qu'ils existent : on retombe alors sur l'économie simplifiée,
-        // ce qui rejoue exactement les mesures d'alors.
-        strategies: {
-            // Une stratégie par unité. Un champion écrit avant qu'elles
-            // existent retombe sur le réglage neutre.
-            let mut strategies = [Strategy::default(); MAX_UNITS];
-            if let Some(list) = root["strategies"].as_array() {
-                for (unit, value) in list.iter().take(MAX_UNITS).enumerate() {
-                    if let Some(bands) = value["bands"].as_array() {
-                        for (gauge, band) in bands.iter().take(6).enumerate() {
-                            strategies[unit].bands[gauge] = band.as_u64().unwrap_or(0) as usize;
-                        }
-                    }
-                    strategies[unit].level = value["level"].as_u64().unwrap_or(0) as u16;
-                    strategies[unit].optimakina_from =
-                        value["optimakina_from"].as_u64().unwrap_or(11) as u8;
-                }
-            }
-            strategies
-        },
-    })
+/// Le rang à lire dans un `finalists.json`. C'est ce qui permet de rejouer une
+/// stratégie alternative et de comparer les **comportements** et pas seulement
+/// les scores.
+fn rank() -> usize {
+    std::env::args()
+        .nth(3)
+        .and_then(|arg| arg.parse::<usize>().ok())
+        .unwrap_or(1)
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> f64 {
@@ -143,7 +86,7 @@ fn run(label: &str, make: impl Fn() -> Box<dyn Policy> + Sync) -> (String, Vec<R
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or("champion.json".into());
-    let genome = match load(&path) {
+    let genome = match champion::load(&path, rank()) {
         Ok(genome) => genome,
         Err(error) => {
             eprintln!(

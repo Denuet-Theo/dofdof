@@ -46,6 +46,18 @@ use neat::{Config, Genome, Innovations, Network, Rng};
 /// Les graines réservées à la mesure finale. Jamais tirées à l'entraînement.
 const TEST_SEEDS: std::ops::Range<u32> = 900_000..900_200;
 
+/// Les graines de **départage**, disjointes des deux autres jeux.
+///
+/// L'entraînement tire dans `0..800_000` et le test scellé vit à 900_000 : ces
+/// cent-là ne sont donc ni apprises ni le juge final. Elles servent à choisir
+/// entre finalistes sans consommer le jeu de test — sélectionner sur les graines
+/// scellées reviendrait à les brûler, et le chiffre publié ne vaudrait plus
+/// rien.
+const VALIDATION_SEEDS: std::ops::Range<u32> = 800_000..800_100;
+
+/// Combien de candidats on retient par espèce avant le départage.
+const FINALISTS_PER_SPECIES: usize = 3;
+
 struct NetValue<'a>(&'a Network);
 
 impl ValueFn for NetValue<'_> {
@@ -337,18 +349,23 @@ fn main() {
         }
         survivors = species
             .iter()
-            .filter_map(|entry| {
-                entry
+            .flat_map(|entry| {
+                let mut ranked: Vec<usize> = entry
                     .members
                     .iter()
                     .copied()
                     .filter(|&index| scores[index].is_finite())
-                    .max_by(|&a, &b| {
-                        scores[a]
-                            .partial_cmp(&scores[b])
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
+                    .collect();
+                ranked.sort_by(|&a, &b| {
+                    scores[b]
+                        .partial_cmp(&scores[a])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                ranked
+                    .into_iter()
+                    .take(FINALISTS_PER_SPECIES)
                     .map(|index| (population[index].clone(), scores[index]))
+                    .collect::<Vec<_>>()
             })
             .collect();
         survivors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -373,11 +390,77 @@ fn main() {
         );
     }
 
-    // --- la porte : les graines scellées -----------------------------------
-    let Some((best, training_score)) = champion else {
-        println!("aucun champion — l'entraînement n'a pas tourné");
+    // --- le départage ------------------------------------------------------
+    //
+    // On ne sacre pas sur la fitness d'entraînement. Elle est le **maximum** de
+    // cent mille estimations bruitées — 834 générations de 128 génomes, chacune
+    // moyennée sur huit parties dont l'erreur type vaut près de deux millions —
+    // et prendre le plus haut de tant de tirages sélectionne la chance autant
+    // que la qualité. Mesuré : un champion annoncé à 52,49 M en valait 46 sur
+    // n'importe quelle plage de graines, y compris celles de son propre domaine
+    // d'entraînement. L'écart n'était pas du surapprentissage — les graines
+    // tournent, il n'y a rien à mémoriser — mais la malédiction du vainqueur.
+    //
+    // On rejoue donc les trois meilleurs de chaque espèce sur cent graines
+    // dédiées, et c'est ce second passage qui tranche. Le champion historique
+    // entre aussi dans la liste : il peut avoir disparu de la population.
+    let mut finalists: Vec<(Genome, f64)> = survivors.clone();
+    if let Some((genome, score)) = champion.clone() {
+        finalists.push((genome, score));
+    }
+    if finalists.is_empty() {
+        println!("aucun candidat — l'entraînement n'a pas tourné");
         return;
-    };
+    }
+
+    let validation: Vec<u32> = VALIDATION_SEEDS.collect();
+    let mut judged: Vec<(usize, f64)> = finalists
+        .par_iter()
+        .enumerate()
+        .map(|(index, (genome, _))| {
+            (
+                index,
+                fitness(&catalog, &economy, genome, &validation, options.iterations),
+            )
+        })
+        .collect();
+    judged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    println!(
+        "
+--- départage sur {} graines dédiées ({VALIDATION_SEEDS:?}) ---",
+        validation.len()
+    );
+    println!(
+        "{:>4} {:>11} {:>11} {:<9} {:>7} {:>6} {:>9}",
+        "rang", "entraîn.", "départage", "bandes", "niveau", "opti", "fournée"
+    );
+    for (rank, (index, score)) in judged.iter().take(12).enumerate() {
+        let (genome, training) = &finalists[*index];
+        let (cost, _) = economy.batch_plan(genome.bands, genome.level);
+        let bands: Vec<String> = genome.bands.iter().map(|b| b.to_string()).collect();
+        println!(
+            "{:>4} {:>11} {:>11} {:<9} {:>7} {:>6} {:>9}",
+            rank + 1,
+            millions(*training),
+            millions(*score),
+            bands.join(""),
+            genome.level,
+            if genome.optimakina_from > 10 {
+                "—".to_string()
+            } else {
+                genome.optimakina_from.to_string()
+            },
+            cost
+        );
+    }
+    println!("  (bandes dans l'ordre Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire)");
+
+    let (winner, validated) = judged[0];
+    let (best, training_score) = finalists[winner].clone();
+
+
+    // --- la porte : les graines scellées -----------------------------------
 
     println!("\n--- graines scellées ({} parties) ---", TEST_SEEDS.len());
     let network = Network::compile(&best);
@@ -473,37 +556,6 @@ fn main() {
         );
     }
 
-    // --- ce que les autres espèces ont trouvé ------------------------------
-    //
-    // Deux stratégies très différentes peuvent valoir presque autant, et c'est
-    // une information que le seul champion efface. On les montre.
-    if survivors.len() > 1 {
-        println!("
---- les espèces, du meilleur au moins bon (fitness d'entraînement) ---");
-        println!(
-            "{:<10} {:<26} {:>7} {:>6} {:>9} {:>8}",
-            "fitness", "bandes", "niveau", "opti", "fournée", "durée"
-        );
-        for (genome, score) in survivors.iter().take(10) {
-            let (cost, hours) = economy.batch_plan(genome.bands, genome.level);
-            let bands: Vec<String> = genome.bands.iter().map(|b| b.to_string()).collect();
-            println!(
-                "{:<10} {:<26} {:>7} {:>6} {:>9} {:>7.2}h",
-                millions(*score),
-                bands.join(""),
-                genome.level,
-                if genome.optimakina_from > 10 {
-                    "—".to_string()
-                } else {
-                    genome.optimakina_from.to_string()
-                },
-                cost,
-                hours
-            );
-        }
-        println!("  (bandes dans l'ordre Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire)");
-    }
-
     let path = "champion.json";
     let json = serde_json::json!({
         "features": FEATURES,
@@ -516,6 +568,7 @@ fn main() {
         "level": best.level,
         "optimakina_from": best.optimakina_from,
         "training_score": training_score,
+        "validation_score": validated,
         "test_median": evolved_median,
         "generations": generation,
     });

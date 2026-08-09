@@ -464,7 +464,7 @@ fn main() {
 
     println!("\n--- graines scellées ({} parties) ---", TEST_SEEDS.len());
     let network = Network::compile(&best);
-    let evaluate = |label: &str, scores: &mut Vec<f64>| {
+    let evaluate = |label: &str, scores: &mut Vec<f64>| -> f64 {
         let (p10, median, p90) = distribution(scores);
         println!(
             "{label:<28} p10 {:>9}  médiane {:>9}  p90 {:>9}",
@@ -479,20 +479,42 @@ fn main() {
         .clone()
         .map(|seed| play(&catalog, &economy, &mut NeverBreeds, seed).score as f64)
         .collect();
-    let mut greedy: Vec<f64> = TEST_SEEDS
-        .clone()
-        .collect::<Vec<u32>>()
-        .par_iter()
-        .map(|&seed| {
-            play(
-                &catalog,
-                &economy,
-                &mut Greedy::new(Objective::Gen10Balanced),
-                seed,
-            )
-            .score as f64
+    // Les **trois** objectifs du glouton, et c'est le meilleur qui sert de
+    // porte. Se comparer à `gen10_balanced` seul reviendrait à se féliciter
+    // d'avoir battu un adversaire handicapé : depuis que chaque couleur de
+    // gen 10 a son prix, `profit` — qui classe sur la valeur — passe devant lui
+    // de huit millions, parce qu'il vise les couleurs chères là où l'autre prend
+    // n'importe quelle gen 10.
+    let objectives = [
+        ("glouton / profit", Objective::Profit),
+        ("glouton / gen10_profit", Objective::Gen10Profit),
+        ("glouton / gen10_balanced", Objective::Gen10Balanced),
+    ];
+    let mut greedy_runs: Vec<(&str, Vec<f64>)> = objectives
+        .iter()
+        .map(|&(label, objective)| {
+            let scores: Vec<f64> = TEST_SEEDS
+                .clone()
+                .collect::<Vec<u32>>()
+                .par_iter()
+                .map(|&seed| {
+                    play(&catalog, &economy, &mut Greedy::new(objective), seed).score as f64
+                })
+                .collect();
+            (label, scores)
         })
         .collect();
+    // Le meilleur des trois, à la médiane.
+    greedy_runs.sort_by(|a, b| {
+        let median = |scores: &Vec<f64>| {
+            let mut sorted = scores.clone();
+            distribution(&mut sorted).1
+        };
+        median(&b.1)
+            .partial_cmp(&median(&a.1))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let (greedy_label, mut greedy) = greedy_runs.remove(0);
     let mut myopic: Vec<f64> = TEST_SEEDS
         .clone()
         .collect::<Vec<u32>>()
@@ -514,7 +536,10 @@ fn main() {
         .collect();
 
     evaluate("ne rien faire", &mut floor);
-    let greedy_median = evaluate("glouton (la baseline)", &mut greedy);
+    let greedy_median = evaluate(&format!("{greedy_label} (la baseline)"), &mut greedy);
+    for (label, scores) in &mut greedy_runs {
+        evaluate(&format!("  {label}"), scores);
+    }
     let myopic_median = evaluate("recherche / valeur myope", &mut myopic);
     let evolved_median = evaluate("recherche / valeur NEAT", &mut evolved);
 

@@ -365,6 +365,9 @@ const buildFamily = async ({
       // et qui se joint à `item_prices`. `null` si DofusDB ne le connaît pas.
       itemId: certificate?.id ?? null,
       itemName: certificate?.name?.fr ?? null,
+      // L'icône voyage avec l'item : la figer ici évite au client de retraverser
+      // le miroir du catalogue pour une donnée qui ne bouge jamais.
+      iconId: certificate?.iconId ?? null,
       recipes,
     };
   });

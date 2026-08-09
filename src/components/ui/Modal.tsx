@@ -9,7 +9,7 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 /**
@@ -57,6 +57,10 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
     sm: 'max-w-sm',
     md: 'max-w-md',
     lg: 'max-w-2xl',
+    // Deux fiches de monture côte à côte et une colonne centrale : en dessous de
+    // cette largeur, la fenêtre d'accouplement se replie en trois lignes et
+    // cesse de ressembler à ce qu'elle reproduit.
+    xl: 'max-w-4xl',
   };
 
   // Every card shell in the app is `.glass`, and a backdrop-filter makes an element the

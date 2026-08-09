@@ -11,7 +11,12 @@ import {
   type Sex,
 } from '@/lib/dofus/breeding/stable';
 import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage';
-import { ANONYMOUS_NAME, carriedGeneration, mountName } from '@/lib/dofus/breeding/naming';
+import {
+  ANONYMOUS_NAME,
+  carriedGeneration,
+  colorCoder,
+  mountName,
+} from '@/lib/dofus/breeding/naming';
 import type { DofusDBItem } from '@/lib/supabase/types';
 import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
@@ -108,6 +113,13 @@ const BreedingStocks = ({
     return (colorId: string) => names.get(colorId) ?? colorId;
   }, [rows]);
 
+  /**
+   * Le codeur de la famille, construit sur les lignes : elles portent toutes les
+   * couleurs de la famille, ce dont `colorCoder` a besoin pour garantir qu'aucun
+   * code n'en désigne deux.
+   */
+  const code = useMemo(() => colorCoder(rows), [rows]);
+
   const mounts = useMemo(() => {
     const needle = mountQuery.trim().toLowerCase();
     const total = (colorId: string) => {
@@ -149,13 +161,16 @@ const BreedingStocks = ({
    */
   const nameForIndividual = (mount: Individual): string | null =>
     mount.parents
-      ? mountName(
-          carriedGeneration(generationOfColor(mount.colorId), [
+      ? mountName({
+          carriedGeneration: carriedGeneration(generationOfColor(mount.colorId), [
             generationOfColor(mount.parents[0]),
             generationOfColor(mount.parents[1]),
           ]),
-          [nameOf(mount.parents[0]), nameOf(mount.parents[1])]
-        )
+          colorName: nameOf(mount.colorId),
+          sex: mount.sex,
+          parentNames: [nameOf(mount.parents[0]), nameOf(mount.parents[1])],
+          code,
+        })
       : null;
 
   /** Les individus d'une couleur, les fertiles devant puis par niveau. */

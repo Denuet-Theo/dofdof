@@ -2,12 +2,19 @@
 //!
 //! ## D'où elle vient
 //!
-//! De `next-move.ts` et `rankedCouples` (dans `loadout.ts`), qui vivent sur la
-//! branche **`measure/greedy-vs-route`** et non sur `main`. C'est une distinction
-//! qui compte : `main` livre encore la route pilotée par l'arbre (`planCouples`),
-//! et la branche mesurait le glouton contre elle. Le glouton gagnait largement —
-//! 29,2 M en 36 fournées contre 77,0 M en 89 pour la route, sur douze graines —
-//! donc c'est lui la vraie référence, même s'il n'est pas fusionné.
+//! De `next-move.ts` et `rankedCouples` (dans `loadout.ts`), qui vivent au
+//! commit **`1c99d35`** — la branche `measure/greedy-vs-route`, PR #90 — et non
+//! sur `main`. C'est une distinction qui compte : `main` livre encore la route
+//! pilotée par l'arbre (`planCouples`), et la branche mesurait le glouton contre
+//! elle. Le glouton gagnait largement — pour atteindre `ambre_doré`, 29,2 M en
+//! 36 fournées contre 77,0 M en 89 pour la route, sur douze graines — donc c'est
+//! lui la vraie référence, même s'il n'est pas fusionné.
+//!
+//! Le **SHA** et pas seulement le nom de branche, parce que cette branche est
+//! destinée à être fermée : son contenu est déjà remplacé, mais il reste la
+//! seule source contre laquelle vérifier ce portage. Si elle disparaît,
+//! `git fetch origin pull/90/head` la ramène — GitHub garde la référence d'une
+//! PR même après suppression de la branche.
 //!
 //! Porter la route aurait demandé `breedingPlan` et l'essentiel des 1 652 lignes
 //! de `costs.ts`, que cette économie remplace de toute façon.

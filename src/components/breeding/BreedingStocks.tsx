@@ -25,7 +25,7 @@ import {
 } from '@/lib/dofus/breeding/naming';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { DofusDBItem } from '@/lib/supabase/types';
-import type { DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
+import type { AddResult, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -80,7 +80,7 @@ type Props = {
     level?: number;
     parents?: [string, string] | null;
     status?: MountStatus;
-  }) => Promise<Individual | null>;
+  }) => Promise<AddResult>;
   onUpdateIndividual: (
     id: string,
     patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>

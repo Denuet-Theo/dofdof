@@ -53,6 +53,16 @@ import {
 import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
 
 /**
+ * Ce qu'une insertion de monture a donné.
+ *
+ * Un `null` ne suffisait pas. L'assistant en déduisait « ça n'a pas marché » et
+ * restait sur son étape sans rien afficher : l'éleveur cliquait, rien ne bougeait,
+ * et rien ne disait pourquoi. Sur une saisie de cent trente montures, c'est un
+ * silence qui coûte une soirée.
+ */
+export type AddResult = { ok: true; mount: Individual } | { ok: false; message: string };
+
+/**
  * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
  *
  * Un accouplement produit **toujours** un bébé — les 30 à 90 % portent sur sa
@@ -780,7 +790,14 @@ export const useBreeding = (
 
       if (saveError || !data) {
         console.error('[breeding] individu non enregistré:', saveError);
-        return null;
+        // Le message de la base et non un texte à nous : une colonne absente,
+        // une contrainte violée ou une session expirée demandent trois gestes
+        // différents, et seul PostgREST sait lequel. Le résumer en « échec »
+        // rendrait l'écran aussi muet qu'avant.
+        return {
+          ok: false as const,
+          message: saveError?.message ?? 'La base n’a rien renvoyé.',
+        };
       }
 
       const row = data as UserBreedingIndividual;
@@ -799,7 +816,7 @@ export const useBreeding = (
       };
 
       setStable((current) => ({ ...current, individuals: [...current.individuals, added] }));
-      return added;
+      return { ok: true as const, mount: added };
     },
     [family, nameForBirth]
   );

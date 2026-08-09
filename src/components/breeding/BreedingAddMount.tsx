@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowLeft, Check, Search } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Search } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
@@ -13,12 +13,8 @@ import {
   colorCoder,
   mountName,
 } from '@/lib/dofus/breeding/naming';
-import {
-  MOUNT_STATUS_LABEL,
-  type Individual,
-  type MountStatus,
-  type Sex,
-} from '@/lib/dofus/breeding/stable';
+import { MOUNT_STATUS_LABEL, type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
+import type { AddResult } from '@/lib/hooks/useBreeding';
 
 /**
  * Ajouter une monture à l'écurie, dans l'ordre où on la lit en jeu.
@@ -64,7 +60,7 @@ type Props = {
     level: number;
     status: MountStatus;
     parents: [string, string] | null;
-  }) => Promise<Individual | null>;
+  }) => Promise<AddResult>;
 };
 
 type Step = 'generation' | 'color' | 'traits' | 'parents' | 'name';
@@ -103,6 +99,8 @@ const BreedingAddMount = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const [query, setQuery] = useState('');
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** Ce que la base a refusé, dit à l'écran plutôt qu'en console. */
+  const [problem, setProblem] = useState<string | null>(null);
   /** Ce qui a été ajouté sans fermer la fenêtre — le compteur d'une session de saisie. */
   const [added, setAdded] = useState<{ name: string; colorName: string; sex: Sex }[]>([]);
 
@@ -218,9 +216,16 @@ const BreedingAddMount = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const save = async () => {
     if (!colorId || !sex) return;
     setSaving(true);
-    const mount = await onAdd({ colorId, sex, level, status, parents: parentPair });
+    setProblem(null);
+    const result = await onAdd({ colorId, sex, level, status, parents: parentPair });
     setSaving(false);
-    if (!mount) return;
+    if (!result.ok) {
+      // Le bouton restait sans effet et l'assistant sur son étape : on pouvait
+      // recommencer cent trente fois sans jamais rien enregistrer, et sans que
+      // rien à l'écran le dise. C'est arrivé.
+      setProblem(result.message);
+      return;
+    }
     setAdded((current) => [
       ...current,
       { name: computedName, colorName: nameOf(colorId), sex },
@@ -548,6 +553,19 @@ const BreedingAddMount = ({ isOpen, onClose, colors, onAdd }: Props) => {
                 Sans ascendance, cette monture reste « Anonyme » dans le jeu — et c&apos;est
                 exact : elle ne fera jamais viser plus haut que sa couleur, donc elle n&apos;a
                 rien à annoncer.
+              </p>
+            )}
+
+            {/* Ce que la base a refusé. Le message brut de PostgREST, parce
+                qu'une colonne absente, une contrainte violée et une session
+                expirée demandent trois gestes différents — et que le résumer en
+                « échec » rendrait l'écran aussi muet qu'avant. */}
+            {problem && (
+              <p className="flex items-start gap-1.5 px-3 py-2 rounded-xl bg-loss/10 text-[11px] text-loss">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  <strong>Rien n’a été enregistré.</strong> {problem}
+                </span>
               </p>
             )}
 

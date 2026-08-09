@@ -286,6 +286,10 @@ impl Prices {
             net(get(&["genetons", "prix_unitaire_min"], 0.0)),
             net(get(&["genetons", "prix_unitaire_max"], 0.0)),
         );
+        economy.top_value_range = (
+            get(&["valeurs", "gen10_min"], economy.top_value as f64) as i64,
+            get(&["valeurs", "gen10_max"], economy.top_value as f64) as i64,
+        );
         economy.amber_range = (
             get(&["valeurs", "ambre_min"], economy.amber_per_generation as f64) as i64,
             get(&["valeurs", "ambre_max"], economy.amber_per_generation as f64) as i64,

@@ -203,7 +203,7 @@ impl Searcher {
         }
 
         let mut state = State {
-            census: Census::of(catalog, view.stable, view.kamas),
+            census: Census::of(catalog, economy, view.stable, view.kamas),
             actions: Vec::new(),
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),
@@ -404,7 +404,7 @@ fn apply_effects(
             state.sterile_free[a] -= 1;
             state.sterile_free[b] -= 1;
             let g = &sterile[a];
-            state.census.cloning(g.generation, g.carried, g.color, 1.0);
+            state.census.cloning(g.generation, g.carried, g.color, g.value, 1.0);
         }
         Action::SacrificeFertile(group) => {
             state.fertile_free[group] -= 1;
@@ -452,7 +452,7 @@ fn revert_effects(
             state.sterile_free[a] += 1;
             state.sterile_free[b] += 1;
             let g = &sterile[a];
-            state.census.cloning(g.generation, g.carried, g.color, -1.0);
+            state.census.cloning(g.generation, g.carried, g.color, g.value, -1.0);
         }
         Action::SacrificeFertile(group) => {
             state.fertile_free[group] += 1;
@@ -793,7 +793,7 @@ mod tests {
         assert!(!candidates.is_empty());
 
         let mut state = State {
-            census: Census::of(&catalog, &stable, 10_000_000),
+            census: Census::of(&catalog, &economy, &stable, 10_000_000),
             actions: Vec::new(),
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),

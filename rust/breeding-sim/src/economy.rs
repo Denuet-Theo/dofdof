@@ -121,6 +121,9 @@ pub fn genetons_for_crossing(male_generation: u8, female_generation: u8, names_t
 /// déjà ce qu'un humain peut suivre.
 pub const MAX_UNITS: usize = 4;
 
+/// Plafond de couleurs par famille. Le muldo en compte 120.
+pub const MAX_COLORS: usize = 128;
+
 /// Le réglage d'une unité : six bandes de jauge, un niveau, un seuil
 /// d'Optimakina.
 ///
@@ -188,6 +191,15 @@ pub struct Economy {
     /// un seul point de prix serait franchement mauvaise à l'autre bout.
     pub amber_range: (i64, i64),
     pub geneton_range: (f64, f64),
+    pub top_value_range: (i64, i64),
+    /// Le prix de **chaque** couleur de génération 10, tiré par partie.
+    ///
+    /// Les cinquante ne valent pas la même chose : certaines tournent autour de
+    /// 300 000, d'autres autour d'un million, sans rapport avec la génération des
+    /// parents — c'est la méta et l'abondance qui décident. Quelle gen 10 on
+    /// produit compte donc autant que d'en produire une, ce que le modèle
+    /// ignorait complètement en les traitant comme un rang unique.
+    pub top_values: [i64; MAX_COLORS],
     pub cycle_serenity_points: f64,
     pub cycle_stat_points: f64,
     pub band_rates: [f64; 4],
@@ -220,6 +232,8 @@ impl Default for Economy {
             geneton_value: 0.0,
             amber_range: (20_000, 20_000),
             geneton_range: (0.0, 0.0),
+            top_value_range: (500_000, 500_000),
+            top_values: [0; MAX_COLORS],
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
             band_rates: [1.0, 2.0, 3.0, 4.0],
@@ -229,11 +243,33 @@ impl Default for Economy {
 }
 
 impl Economy {
+    /// Le milieu de chaque plage, qui sert de référence pour normaliser les
+    /// entrées du réseau : un prix au milieu de sa fourchette vaut 1.
+    #[inline]
+    pub fn price_references(&self) -> (f64, f64, f64) {
+        let mid = |low: f64, high: f64, fallback: f64| {
+            if high > low { (low + high) / 2.0 } else { fallback.max(1.0) }
+        };
+        (
+            mid(
+                self.amber_range.0 as f64,
+                self.amber_range.1 as f64,
+                self.amber_per_generation as f64,
+            ),
+            mid(self.geneton_range.0, self.geneton_range.1, self.geneton_value),
+            mid(
+                self.top_value_range.0 as f64,
+                self.top_value_range.1 as f64,
+                self.top_value as f64,
+            ),
+        )
+    }
+
     /// L'économie d'une partie, prix du jour tirés.
     ///
     /// Les prix font partie du **monde** et non de la politique : deux
     /// politiques comparées sur la même graine affrontent le même marché.
-    pub fn for_run(&self, draws: &Draws) -> Self {
+    pub fn for_run(&self, catalog: &Catalog, draws: &Draws) -> Self {
         let mut economy = *self;
         let pick = |purpose: u32, low: f64, high: f64| -> f64 {
             if high <= low {
@@ -247,6 +283,21 @@ impl Economy {
         let (low, high) = self.geneton_range;
         if high > 0.0 {
             economy.geneton_value = pick(purpose::PRICE_GENETON, low, high);
+        }
+        let (low, high) = self.top_value_range;
+        economy.top_value = pick(purpose::PRICE_TOP, low as f64, high as f64).round() as i64;
+
+        // Un prix par couleur de gen 10, tiré indépendamment : c'est ce qui rend
+        // le **choix de la couleur** stratégique et pas seulement celui du rang.
+        for color in 0..catalog.len().min(MAX_COLORS) {
+            economy.top_values[color] = if catalog.generation(color as ColorId)
+                >= catalog.top_generation()
+            {
+                let draw = draws.at(POOL_COORD, color as u32, purpose::PRICE_COLOR);
+                (low as f64 + draw * (high - low) as f64).round() as i64
+            } else {
+                0
+            };
         }
         economy
     }
@@ -300,7 +351,13 @@ impl Economy {
     /// Ce qu'une monture rend à la conversion.
     #[inline]
     pub fn value_of(&self, catalog: &Catalog, color: ColorId) -> i64 {
-        self.value_at_generation(catalog.generation(color), catalog.top_generation())
+        let generation = catalog.generation(color);
+        if generation >= catalog.top_generation() {
+            // Le prix de la couleur si on l'a tiré, sinon le prix de référence.
+            let priced = self.top_values[usize::from(color).min(MAX_COLORS - 1)];
+            return if priced > 0 { priced } else { self.top_value };
+        }
+        self.value_at_generation(generation, catalog.top_generation())
     }
 
     /// Le même barème, lu sur le rang seul — le recensement de `encode.rs` n'a
@@ -391,6 +448,8 @@ mod purpose {
     pub const POOL_SEX: u32 = 6;
     pub const PRICE_AMBER: u32 = 7;
     pub const PRICE_GENETON: u32 = 8;
+    pub const PRICE_TOP: u32 = 9;
+    pub const PRICE_COLOR: u32 = 10;
 }
 
 /// La coordonnée réservée à l'amorçage, hors des chargements.
@@ -841,7 +900,7 @@ fn apply(
 pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed: u32) -> RunOutcome {
     let draws = Draws::new(seed);
     // Le marché du jour, tiré avec la graine : il fait partie du monde.
-    let drawn = economy.for_run(&draws);
+    let drawn = economy.for_run(catalog, &draws);
     let economy = &drawn;
     let mut stable = starting_stable(catalog, economy, &draws);
     let mut kamas = economy.starting_kamas;

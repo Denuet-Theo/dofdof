@@ -164,8 +164,15 @@ gen1 = 0
 ambre_min = 11_000
 ambre_max = 30_000
 
-# La gen 10 se vend au lieu de s'extraire. N'importe laquelle des 50 couleurs.
+# La gen 10 se vend au lieu de s'extraire. N'importe laquelle des 50 couleurs,
+# au niveau 0 — c'est ainsi qu'elle naît et qu'on la revend.
+#
+# Elle oscille entre 300 000 et 1 000 000, soit un facteur 3,3 : c'est la plus
+# volatile des trois. Le rapport entre ce prix et celui de l'ambre décide s'il
+# faut monter jusqu'au bout ou encaisser en génération 9.
 gen10 = 500_000
+gen10_min = 300_000
+gen10_max = 1_000_000
 
 # ---------------------------------------------------------------------------
 [genetons]

@@ -44,7 +44,7 @@ use crate::trees::{Catalog, ColorId};
 pub const MAX_GENERATION: usize = 10;
 
 /// La taille du vecteur d'entrée. Fixe, c'est ce que NEAT exige.
-pub const FEATURES: usize = 50;
+pub const FEATURES: usize = 54;
 
 const FERTILE_MALES: usize = 0;
 const FERTILE_FEMALES: usize = 10;
@@ -56,6 +56,26 @@ const FRONTIER: usize = 46;
 const DISTINCT: usize = 47;
 const HEADCOUNT: usize = 48;
 const KAMAS: usize = 49;
+/// Le marché du jour : ambre, géneton, gen 10. Normalisés sur le milieu de leur
+/// fourchette, donc autour de 1.
+///
+/// Sans eux la politique ne distingue pas une semaine où l'ambre est à 11 000
+/// d'une où il est à 30 000 : elle apprendrait un compromis moyen et se
+/// tromperait aux deux extrêmes. Et les trois ne sont pas redondants — le
+/// rapport gen 10 sur ambre décide s'il faut monter jusqu'au bout ou encaisser
+/// en génération 9, celui du géneton sur l'ambre décide si croiser haut paie.
+const PRICE_AMBER: usize = 50;
+const PRICE_GENETON: usize = 51;
+const PRICE_TOP: usize = 52;
+/// Ce que l'écurie vaut à la liquidation, aux prix du jour et **couleur par
+/// couleur**.
+///
+/// Une seule entrée là où il en aurait fallu cinquante : les gen 10 ne valent
+/// pas toutes pareil, mais le réseau n'a pas besoin de connaître le prix de
+/// chacune — il lui suffit de savoir ce que son écurie vaut. La recherche, elle,
+/// vise les couleurs chères d'elle-même, puisqu'elle maximise la valeur de
+/// l'écurie attendue.
+const LIQUIDATION: usize = 53;
 
 /// Le recensement d'une écurie, en comptes bruts et fractionnaires.
 #[derive(Clone, Debug)]
@@ -72,6 +92,9 @@ pub struct Census {
     held: Vec<f64>,
     headcount: f64,
     kamas: f64,
+    /// Suivie en incrémental et **exacte** : sommer par génération écraserait
+    /// les cinquante prix de gen 10 en un seul.
+    liquidation: f64,
     /// La génération de chaque couleur, recopiée à plat.
     ///
     /// Sans elle, chaque naissance appliquée referait une indirection dans le
@@ -81,7 +104,7 @@ pub struct Census {
 }
 
 impl Census {
-    pub fn of(catalog: &Catalog, stable: &Stable, kamas: i64) -> Self {
+    pub fn of(catalog: &Catalog, economy: &Economy, stable: &Stable, kamas: i64) -> Self {
         let mut census = Self {
             fertile_males: [0.0; MAX_GENERATION + 1],
             fertile_females: [0.0; MAX_GENERATION + 1],
@@ -90,6 +113,7 @@ impl Census {
             held: vec![0.0; catalog.len()],
             headcount: 0.0,
             kamas: kamas as f64,
+            liquidation: 0.0,
             generations: (0..catalog.len() as ColorId)
                 .map(|color| catalog.generation(color))
                 .collect(),
@@ -98,6 +122,7 @@ impl Census {
         for mount in &stable.mounts {
             let generation = catalog.generation(mount.color) as usize;
             census.headcount += 1.0;
+            census.liquidation += economy.value_of(catalog, mount.color) as f64;
             if !mount.fertile {
                 census.steriles[generation] += 1.0;
                 continue;
@@ -183,6 +208,12 @@ impl Census {
         // Normalisé sur le capital de départ : l'échelle reste lisible et une
         // partie qui a triplé sa mise se lit « 3 ».
         out[KAMAS] = self.kamas / economy.starting_kamas.max(1) as f64;
+
+        let (amber, geneton, top) = economy.price_references();
+        out[PRICE_AMBER] = economy.amber_per_generation as f64 / amber;
+        out[PRICE_GENETON] = economy.geneton_value / geneton.max(1e-9);
+        out[PRICE_TOP] = economy.top_value as f64 / top;
+        out[LIQUIDATION] = self.liquidation / economy.starting_kamas.max(1) as f64;
 
         out
     }
@@ -324,6 +355,7 @@ impl Census {
         }
         self.headcount += 1.0;
         self.kamas += delta.geneton_kamas;
+        self.liquidation += delta.expected_value;
     }
 
     /// Le pendant exact, pour que la recherche locale puisse défaire un coup
@@ -347,6 +379,7 @@ impl Census {
         }
         self.headcount -= 1.0;
         self.kamas -= delta.geneton_kamas;
+        self.liquidation -= delta.expected_value;
     }
 
     /// Un gen 1 anonyme entre au parc. `sign` vaut `-1.0` pour défaire.
@@ -386,11 +419,19 @@ impl Census {
         }
         self.headcount -= sign;
         self.kamas += sign * value as f64;
+        self.liquidation -= sign * value as f64;
     }
 
     /// Un clonage : deux stériles entrent, une féconde ressort. `sign` vaut
     /// `-1.0` pour défaire.
-    pub fn cloning(&mut self, generation: usize, carried: usize, color: ColorId, sign: f64) {
+    pub fn cloning(
+        &mut self,
+        generation: usize,
+        carried: usize,
+        color: ColorId,
+        value: i64,
+        sign: f64,
+    ) {
         self.steriles[generation] -= 2.0 * sign;
         // Le sexe du survivant n'est pas choisi par la recherche : à ce niveau
         // de résumé on répartit une demi-monture de chaque côté.
@@ -399,6 +440,8 @@ impl Census {
         self.carried[carried] += sign;
         self.held[color as usize] += sign;
         self.headcount -= sign;
+        // Le clonage consomme deux stériles et en rend un : une monture part.
+        self.liquidation -= sign * value as f64;
     }
 
     /// Ce que l'écurie rendrait si on la liquidait maintenant, solde compris.
@@ -409,15 +452,8 @@ impl Census {
     /// qu'elle prépare. C'est le point de comparaison honnête pour la valeur
     /// apprise — si le réseau ne la bat pas, il n'a rien appris que l'arithmétique
     /// ne donnait déjà.
-    pub fn expected_score(&self, economy: &Economy, top_generation: u8) -> f64 {
-        let mut total = self.kamas;
-        for generation in 1..=MAX_GENERATION {
-            let heads = self.fertile_males[generation]
-                + self.fertile_females[generation]
-                + self.steriles[generation];
-            total += heads * economy.value_at_generation(generation as u8, top_generation) as f64;
-        }
-        total
+    pub fn expected_score(&self, _economy: &Economy, _top_generation: u8) -> f64 {
+        self.kamas + self.liquidation
     }
 
     #[inline]
@@ -442,7 +478,7 @@ mod tests {
         let catalog = muldo();
         let economy = Economy::default();
         let stable = starting_stable(&catalog, &economy, &Draws::new(3));
-        let census = Census::of(&catalog, &stable, 10_000_000);
+        let census = Census::of(&catalog, &economy, &stable, 10_000_000);
 
         assert_eq!(census.headcount, 100.0);
         assert_eq!(census.frontier(), stable.frontier(&catalog) as usize);
@@ -458,7 +494,7 @@ mod tests {
         let catalog = muldo();
         let economy = Economy::default();
         let stable = starting_stable(&catalog, &economy, &Draws::new(8));
-        let census = Census::of(&catalog, &stable, 10_000_000);
+        let census = Census::of(&catalog, &economy, &stable, 10_000_000);
         let features = census.features(&catalog, &economy);
 
         let next: f64 = features[READY_NEXT..READY_NEXT + 3].iter().sum();
@@ -475,7 +511,7 @@ mod tests {
         let catalog = muldo();
         let economy = Economy::default();
         let stable = starting_stable(&catalog, &economy, &Draws::new(5));
-        let mut census = Census::of(&catalog, &stable, 10_000_000);
+        let mut census = Census::of(&catalog, &economy, &stable, 10_000_000);
         let before = census.features(&catalog, &economy);
 
         let groups = stable.fertile_groups();
@@ -503,7 +539,7 @@ mod tests {
         let catalog = muldo();
         let economy = Economy::default();
         let stable = starting_stable(&catalog, &economy, &Draws::new(6));
-        let mut census = Census::of(&catalog, &stable, 10_000_000);
+        let mut census = Census::of(&catalog, &economy, &stable, 10_000_000);
 
         let fertile = |c: &Census| -> f64 {
             c.fertile_males.iter().sum::<f64>() + c.fertile_females.iter().sum::<f64>()

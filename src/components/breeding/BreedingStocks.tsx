@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { Boxes, Check, Coins, Plus, Search, Trash2, Warehouse } from 'lucide-react';
+import { Boxes, Check, Coins, Plus, Search, Trash2, Upload, Warehouse } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingAddMount from '@/components/breeding/BreedingAddMount';
+import BreedingImportMounts from '@/components/breeding/BreedingImportMounts';
 import CopyableIcon from '@/components/ui/CopyableIcon';
 import { parseGaugeInfo, type GaugeInfo } from '@/lib/utils/gauges';
 import {
@@ -195,6 +196,7 @@ const BreedingStocks = ({
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [mountQuery, setMountQuery] = useState('');
   const [fuelQuery, setFuelQuery] = useState('');
   /** Les deux axes sur lesquels on cherche un carburant : sa jauge et son rang. */
@@ -500,6 +502,13 @@ const BreedingStocks = ({
               <Button size="sm" onClick={() => setAdding(true)}>
                 <Plus size={13} />
                 Ajouter une monture
+              </Button>
+              {/* L'import passe en second : c'est le geste des gros volumes, pas
+                  celui du quotidien. Il reste visible parce qu'un rechargement
+                  d'écurie ne se devine pas derrière un bouton « ajouter ». */}
+              <Button size="sm" variant="secondary" onClick={() => setImporting(true)}>
+                <Upload size={13} />
+                Importer une liste
               </Button>
             </div>
             <p className="text-[10px] text-dark-600 mb-2">
@@ -850,6 +859,13 @@ const BreedingStocks = ({
       <BreedingAddMount
         isOpen={adding}
         onClose={() => setAdding(false)}
+        colors={colors}
+        onAdd={onAddIndividual}
+      />
+
+      <BreedingImportMounts
+        isOpen={importing}
+        onClose={() => setImporting(false)}
         colors={colors}
         onAdd={onAddIndividual}
       />

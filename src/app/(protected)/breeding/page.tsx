@@ -424,7 +424,7 @@ const BreedingPage = () => {
           qu'on s'y pose neuf fois sur dix est « est-ce que j'ai quelque chose à
           faire maintenant ». La faire descendre sous les réglages et les stocks
           obligerait à défiler pour lire un compte à rebours. */}
-      <BreedingTimeline timeline={timeline} />
+      <BreedingTimeline timeline={timeline} enclosCount={settings.enclos_count} />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui
           les met tous les deux en tête : le planning dit **quand**, la fournée

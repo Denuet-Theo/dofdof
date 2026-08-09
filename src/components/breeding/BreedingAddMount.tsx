@@ -74,8 +74,8 @@ const SEX_LABEL: Record<Sex, string> = { M: 'Mâle', F: 'Femelle' };
 
 /** Ce que chaque état interdit, dit une fois pour toutes au moment du choix. */
 const STATUS_HINT: Record<MountStatus, string> = {
-  fertile: 'disponible — elle peut être chargée dans une fournée',
-  feconde: 'accouplée, elle porte : indisponible, mais un poulain arrive',
+  fertile: 'disponible, mais son cycle de jauges reste à faire avant de l’accoupler',
+  feconde: 'prête : son cycle est fait, elle s’accouple telle quelle',
   sterile: 'épuisée : il ne lui reste que le clonage et l’extraction',
 };
 

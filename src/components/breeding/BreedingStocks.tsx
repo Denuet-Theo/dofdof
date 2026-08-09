@@ -83,7 +83,7 @@ type Props = {
   }) => Promise<Individual | null>;
   onUpdateIndividual: (
     id: string,
-    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'pregnant' | 'name'>>
+    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
   ) => Promise<void>;
   onRemoveIndividual: (id: string) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
@@ -128,8 +128,8 @@ const chip = (label: string, active: boolean, onClick: () => void, title?: strin
 
 /** Ce que chaque état interdit — la même phrase qu'à la saisie, en infobulle. */
 const STATUS_HINT: Record<MountStatus, string> = {
-  fertile: 'Disponible : elle peut être chargée dans une fournée.',
-  feconde: 'Accouplée, elle porte. Indisponible, mais un poulain arrive — et elle ne se clone pas.',
+  fertile: 'Disponible, mais son cycle de jauges reste à faire avant de l’accoupler.',
+  feconde: 'Prête : son cycle est fait, elle s’accouple telle quelle.',
   sterile: 'Épuisée : il ne lui reste que le clonage et l’extraction.',
 };
 
@@ -166,11 +166,15 @@ const fuelRank = (info: GaugeInfo): FuelRank =>
     ? 'elixir'
     : (RANK_OF_CAP.get(info.capAmount) ?? 'elixir');
 
+/** Le vert va à la plus avancée : une féconde part sans repayer de cycle. */
 const STATUS_TONE: Record<MountStatus, string> = {
-  fertile: 'bg-profit/15 border-profit/40 text-profit',
-  feconde: 'bg-kamas/15 border-kamas/40 text-kamas',
+  fertile: 'bg-kamas/15 border-kamas/40 text-kamas',
+  feconde: 'bg-profit/15 border-profit/40 text-profit',
   sterile: 'bg-dark-700/60 border-dark-600/50 text-dark-300',
 };
+
+/** Les plus avancées d'abord : féconde, puis fertile, puis stérile. */
+const READINESS: Record<MountStatus, number> = { feconde: 2, fertile: 1, sterile: 0 };
 
 const BreedingStocks = ({
   colors,
@@ -270,7 +274,7 @@ const BreedingStocks = ({
       })
       .sort(
         (a, b) =>
-          Number(b.fertile) - Number(a.fertile) ||
+          READINESS[mountStatus(b)] - READINESS[mountStatus(a)] ||
           generationOfColor(b.colorId) - generationOfColor(a.colorId) ||
           nameOf(a.colorId).localeCompare(nameOf(b.colorId)) ||
           a.level - b.level ||
@@ -499,9 +503,9 @@ const BreedingStocks = ({
               </Button>
             </div>
             <p className="text-[10px] text-dark-600 mb-2">
-              Seules les <strong>fertiles</strong> entrent dans les fournées. Une féconde porte
-              — elle revient quand la naissance est saisie ; une stérile ne vaut plus que par le
-              clonage.
+              <strong>Fertiles et fécondes</strong> entrent toutes les deux dans les fournées :
+              ce qui les sépare est le cycle de jauges, que la féconde a déjà payé. Seule la
+              stérile est hors jeu — il ne lui reste que le clonage.
             </p>
 
             <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">

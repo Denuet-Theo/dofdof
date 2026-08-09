@@ -48,3 +48,4 @@ next-env.d.ts
 # identiques.
 /rust/target/
 /rust/champion.json
+/rust/finalists.json

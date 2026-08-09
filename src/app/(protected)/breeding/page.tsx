@@ -30,22 +30,36 @@ import {
 import { formatHours } from '@/lib/utils/date';
 
 /**
- * Le panneau « Couleur visée » est-il affiché.
+ * Les panneaux qui descendent de l'heuristique sont-ils affichés.
  *
- * À `false` : il répondait à « quelle couleur élever » alors que le modèle y
- * répond déjà, deux panneaux plus haut, avec un plan chiffré et daté. Deux
- * réponses concurrentes à la même question sur le même écran, et c'est la
- * moins bonne qui occupait le plus de place — cent vingt lignes de classement,
- * vitrine de l'heuristique que la recherche a précisément remplacée.
+ * Trois d'un coup, et c'est bien un seul interrupteur parce que c'est une seule
+ * source : « Couleur visée », « La fournée à charger » et « Prochaines
+ * fournées » lisent tous le plan que `breedingPlan` construit sur l'arbre des
+ * recettes, pour une couleur que le **classement** désigne.
  *
- * Une constante et non une suppression, parce que le panneau porte encore trois
- * choses qui servent : la saisie des prix de couleurs, la quantité visée, et le
- * choix de la couleur suivie. Les décrocher demande de leur trouver un toit, ce
- * qui est une décision de mise en page à part entière — voir l'issue. En
- * attendant, tout le calcul reste branché et vivant : seule la vue est coupée,
- * et la remettre est ce booléen.
+ * Masquer le classement seul n'a donc rien réglé : il a retiré la vue sur
+ * l'heuristique en laissant les trois panneaux lui obéir. L'écran annonçait
+ * « les étapes du plan Azur-Doré » — une couleur que personne n'avait choisie,
+ * puisque le seul endroit où la choisir venait de disparaître.
+ *
+ * Le modèle, lui, répond à la même question deux panneaux plus haut, avec un
+ * plan joué et daté. Entre les deux, ce n'est plus un doublon d'affichage :
+ * c'est une contradiction, et c'est la version devinée qui parlait le plus fort.
+ *
+ * Une constante et non une suppression, parce que ces panneaux portent encore
+ * des choses qui n'ont **pas** d'équivalent côté modèle :
+ *
+ * - la **saisie des naissances** (`BreedingBirthDialog`), seul chemin qui tienne
+ *   l'écurie à jour ;
+ * - les **clonages à faire** et les **signaux hors recette** (`driftSignals`),
+ *   qui ne sortent d'aucun plan et se lisent sur l'écurie seule ;
+ * - la saisie des prix de couleurs, la quantité visée, le choix de la couleur.
+ *
+ * Les reloger est une décision de mise en page à part entière — voir l'issue. En
+ * attendant tout le calcul reste branché : seules les vues sont coupées, et les
+ * remettre est ce booléen.
  */
-const SHOW_TARGET_COLOR_PANEL = false;
+const SHOW_HEURISTIC_PANELS = false;
 
 const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'muldo', label: 'Muldos' },
@@ -454,7 +468,7 @@ const BreedingPage = () => {
           s'apprêtait à charger, et le voir après aurait consommé les montures
           qui le portent. Le panneau disparaît de lui-même tant qu'aucune
           couleur n'est planifiable. */}
-      {loadout && (
+      {SHOW_HEURISTIC_PANELS && loadout && (
         <BreedingNextMove
           loadout={loadout}
           drift={drift}
@@ -489,7 +503,7 @@ const BreedingPage = () => {
           question « combien j'en veux » vient avant « laquelle », puisqu'elle
           change la réponse — à trente exemplaires les fournées se remplissent et
           le palmarès n'est plus le même. */}
-      <div className={`glass rounded-2xl ${SHOW_TARGET_COLOR_PANEL ? '' : 'hidden'}`}>
+      <div className={`glass rounded-2xl ${SHOW_HEURISTIC_PANELS ? '' : 'hidden'}`}>
         <button
           type="button"
           onClick={() => setGoalsOpen((value) => !value)}
@@ -684,7 +698,7 @@ const BreedingPage = () => {
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
           qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
-      {selectedColorId && (
+      {SHOW_HEURISTIC_PANELS && selectedColorId && (
         <div className="glass rounded-2xl px-5 py-4 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-dark-200">

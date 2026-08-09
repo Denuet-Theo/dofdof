@@ -48,7 +48,7 @@ import {
   type Sex,
   type Stable,
 } from '@/lib/dofus/breeding/stable';
-import { carriedGeneration, mountName } from '@/lib/dofus/breeding/naming';
+import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
 
 /**
  * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
@@ -342,15 +342,21 @@ export const useBreeding = (
    * ses propres accouplements visent. Voir `naming.ts`.
    */
   const nameForBirth = useCallback(
-    (colorId: string, parents: [string, string]): string =>
-      mountName(
-        carriedGeneration(colorIndex.generations.get(colorId) ?? 1, [
+    (colorId: string, parents: [string, string], sex: Sex): string =>
+      mountName({
+        carriedGeneration: carriedGeneration(colorIndex.generations.get(colorId) ?? 1, [
           colorIndex.generations.get(parents[0]) ?? 1,
           colorIndex.generations.get(parents[1]) ?? 1,
         ]),
-        [colorIndex.names.get(parents[0]) ?? parents[0], colorIndex.names.get(parents[1]) ?? parents[1]]
-      ),
-    [colorIndex]
+        colorName: colorIndex.names.get(colorId) ?? colorId,
+        sex,
+        parentNames: [
+          colorIndex.names.get(parents[0]) ?? parents[0],
+          colorIndex.names.get(parents[1]) ?? parents[1],
+        ],
+        code: colorCoder(tree?.colors ?? []),
+      }),
+    [colorIndex, tree]
   );
 
   /** Prix nu d'un item, pour les co-produits qu'on ne fait que revendre. */
@@ -754,7 +760,7 @@ export const useBreeding = (
           // Une monture ajoutée à la main est achetée ou capturée : elle n'a pas
           // d'ascendance, donc rien à inscrire, donc « Anonyme » — qui est déjà
           // son nom dans le jeu. En dicter un ferait renommer pour rien.
-          name: mount.parents ? nameForBirth(mount.colorId, mount.parents) : null,
+          name: mount.parents ? nameForBirth(mount.colorId, mount.parents, mount.sex) : null,
           sex: mount.sex,
           level: mount.level ?? 1,
           parent_a_color: mount.parents?.[0] ?? null,
@@ -879,7 +885,7 @@ export const useBreeding = (
           // pouvoir désigner cette monture-là au tour suivant. S'il ne le
           // recopie pas en jeu, la fournée le lui redira — c'est le seul
           // rattrapage possible, l'outil ne voit pas le jeu.
-          name: nameForBirth(entry.colorId, [entry.male.colorId, entry.female.colorId]),
+          name: nameForBirth(entry.colorId, [entry.male.colorId, entry.female.colorId], entry.sex),
           sex: entry.sex,
           // La généalogie du bébé, c'est-à-dire les couleurs de ses deux
           // parents : c'est elle qui décidera de ses propres ratés.

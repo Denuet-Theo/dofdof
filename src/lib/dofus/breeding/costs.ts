@@ -152,8 +152,26 @@ export type BreedingColor = {
    */
   itemId: number | null;
   itemName: string | null;
+  /**
+   * L'icône du certificat chez DofusDB. `null` si l'item n'est pas connu.
+   *
+   * Figée ici plutôt que relue au chargement : c'est une donnée de jeu qui ne
+   * bouge pas, et le miroir du catalogue n'est pas joignable hors ligne. Voir
+   * `colorIconUrl`.
+   */
+  iconId: number | null;
   recipes: BreedingRecipe[];
 };
+
+/**
+ * L'image du certificat d'une couleur, servie par DofusDB.
+ *
+ * Même hôte que les icônes d'items du reste de l'app (voir `RecipeCard`), mais
+ * sans passer par le miroir local : l'`iconId` est figé dans `trees.json`, donc
+ * la vignette s'affiche sans requête et sans catalogue synchronisé.
+ */
+export const colorIconUrl = (color: Pick<BreedingColor, 'iconId'>): string | null =>
+  color.iconId === null ? null : `https://api.dofusdb.fr/img/items/${color.iconId}.png`;
 
 /** Un item du catalogue, réduit à ce qu'on en affiche. */
 export type BreedingItem = {

@@ -13,20 +13,37 @@
  *
  * ## La forme
  *
- * `G3 AMA-DOR` : la génération la plus haute de sa généalogie, puis les codes de
- * ses deux parents.
+ * `G4 DO M AM-DO` : la génération la plus haute de sa généalogie, sa couleur,
+ * son sexe, puis les codes de ses deux parents.
  *
  * Le chiffre passe devant parce que c'est lui qu'on cherche. Trié
  * alphabétiquement, ce que fait l'écurie du jeu, il regroupe les montures par ce
  * qu'elles permettent — et « G9 » se repère d'un coup d'œil au milieu des
  * « Anonyme ».
  *
- * ## Pourquoi trois lettres et non les noms entiers
+ * ## Pourquoi tout y est, couleur comprise
  *
- * Dix caractères au plus, contre vingt disponibles : la moitié reste libre pour
- * une annotation à la main — un numéro, un « vendu », un « à monter ». Un nom
- * complet aurait mangé la place et se serait fait tronquer sur les couleurs
- * longues, là où un code ne se tronque jamais.
+ * Un accouplement rend un poulain dont le sexe et la couleur sont tirés : tous
+ * les poulains d'un même croisement portaient donc le **même nom**. Or c'est par
+ * le nom qu'on retrouve une monture dans l'écurie du jeu, et l'écurie ne sait
+ * filtrer que sur un critère à la fois : chercher « G4 AM-DO » rendait des
+ * Doré et des Pourpre, des mâles et des femelles, et il fallait ensuite
+ * repasser un filtre de couleur par-dessus.
+ *
+ * Mettre les trois dans le nom, c'est ramener ce tri à **une seule recherche**.
+ * C'est aussi ce qui décide de l'ordre des champs : de la question la plus large
+ * à la plus fine, si bien qu'une recherche partielle — « G4 DO » — reste juste.
+ *
+ * Rien n'est laissé dehors au motif que le jeu l'afficherait par ailleurs : la
+ * vignette montre bien la couleur et la fiche bien le sexe, mais ni l'une ni
+ * l'autre ne se cherchent, et c'est chercher qu'on fait devant l'enclos.
+ *
+ * ## Pourquoi des codes et non les noms entiers
+ *
+ * Un nom complet aurait mangé toute la place et se serait fait tronquer sur les
+ * couleurs longues, là où un code ne se tronque jamais. Sur la longueur des
+ * codes eux-mêmes, voir `colorCoder` : deux lettres, et c'est ce qui fait tenir
+ * la couleur dans les vingt caractères du jeu.
  *
  * ## Découper un nom de couleur
  *
@@ -37,10 +54,12 @@
  * les 226 couleurs des trois familles — « marine » est la seule continuation
  * existante, et après recollage aucune couleur ne porte plus de deux composants.
  *
- * D'où un code d'au plus six lettres par parent, et un nom d'au plus dix-sept
- * caractères dans le pire cas (`G10 AIGTUR-AIGEME`). La limite des vingt n'est
- * donc jamais atteinte, et rien n'a besoin d'être tronqué.
+ * D'où un code d'au plus quatre lettres par couleur, et un nom d'au plus vingt
+ * caractères dans le pire cas (`G10 ABDO M DOOR-DOPO`). La limite du jeu est
+ * atteinte pile, et rien n'a besoin d'être tronqué.
  */
+
+import type { Sex } from './stable';
 
 /** Ce que le jeu accepte comme nom de monture. */
 export const MOUNT_NAME_MAX_LENGTH = 20;
@@ -70,27 +89,82 @@ export const colorParts = (name: string): string[] => {
 };
 
 /**
- * Le code d'une couleur : trois lettres par composant, sans accent.
+ * Un composant réduit à ses lettres latines majuscules.
  *
- * Les accents tombent parce que le jeu ne garantit pas de les rendre dans un
- * champ de nom, et qu'un « É » qui s'affiche « ? » ne se lit pas mieux qu'un
- * « E ». Trois lettres suffisent à distinguer : au sein d'une famille, aucune
- * paire de couleurs simples ne partage ses trois premières lettres.
+ * NFD détache l'accent de sa lettre, et le filtre qui suit l'emporte avec tout
+ * ce qui n'est pas une lettre latine : « Doré » devient « DORE ». Les accents
+ * tombent parce que le jeu ne garantit pas de les rendre dans un champ de nom,
+ * et qu'un « É » qui s'affiche « ? » ne se lit pas mieux qu'un « E ».
  */
-export const colorCode = (name: string): string =>
-  colorParts(name)
-    .map((part) =>
-      part
-        // NFD détache l'accent de sa lettre, et le filtre qui suit l'emporte
-        // avec tout ce qui n'est pas une lettre latine : « Doré » devient
-        // « Dor ». Une plage de diacritiques explicite ferait la même chose,
-        // avec des caractères invisibles dans le source.
-        .normalize('NFD')
-        .replace(/[^A-Za-z]/g, '')
-        .slice(0, 3)
-        .toUpperCase()
-    )
-    .join('');
+const plain = (part: string): string =>
+  part.normalize('NFD').replace(/[^A-Za-z]/g, '').toUpperCase();
+
+/** Traduit un nom de couleur en code, dans le vocabulaire d'une famille. */
+export type ColorCoder = (colorName: string) => string;
+
+/** Les tables déjà construites, une par catalogue de couleurs. */
+const coderCache = new WeakMap<readonly { name: string }[], ColorCoder>();
+
+/**
+ * Le codeur d'une famille : deux lettres par composant, sans collision.
+ *
+ * La première lettre, puis **la première qui départage** — d'où `AM` pour
+ * Amande et `AB` pour Ambre, qui se disputent le préfixe `AM`. Les composants
+ * sont servis par ordre alphabétique, si bien que la table est la même d'une
+ * session à l'autre, et le codeur est relatif à une famille : c'est le seul
+ * périmètre où deux couleurs ont besoin de se distinguer.
+ *
+ * ## Pourquoi deux lettres et non trois
+ *
+ * Trois lettres se lisaient mieux — `DOR`, `AMA` — mais depuis que le nom porte
+ * aussi la **couleur** de la monture, elles ne tiennent plus : mesuré sur les
+ * 84 876 combinaisons (couleur née, ascendance, sexe) des trois familles, la
+ * forme à trois lettres dépasse les vingt caractères dans **35 %** des cas et
+ * fabrique 2 800 noms tronqués qui recouvrent plusieurs montures distinctes —
+ * c'est-à-dire qu'elle reperd exactement ce qu'on venait de gagner.
+ *
+ * À deux lettres, le pire cas tombe à **vingt caractères pile**
+ * (`G10 ABDO M DOOR-DOPO`) : zéro troncature, zéro collision, sur les trois
+ * familles. La marge libre pour une annotation manuscrite disparaît, et c'est
+ * l'arbitrage assumé — un nom qui désigne une monture sans ambiguïté vaut mieux
+ * qu'un nom court avec de la place à côté.
+ */
+export const colorCoder = (colors: readonly { name: string }[]): ColorCoder => {
+  const cached = coderCache.get(colors);
+  if (cached) return cached;
+
+  const components = [...new Set(colors.flatMap((color) => colorParts(color.name).map(plain)))]
+    .sort();
+
+  const codeOf = new Map<string, string>();
+  const taken = new Set<string>();
+
+  for (const component of components) {
+    // La première lettre reste, la seconde est la première qui n'est pas déjà
+    // prise : `AM` pour Amande, puis `AB` pour Ambre.
+    let code = '';
+    for (let index = 1; index < component.length; index += 1) {
+      const candidate = component[0] + component[index];
+      if (!taken.has(candidate)) {
+        code = candidate;
+        break;
+      }
+    }
+    // Aucun couple de lettres libre — inatteignable sur les trois familles, mais
+    // le composant entier est toujours unique, donc il fait un repli sûr.
+    if (!code) code = component;
+    codeOf.set(component, code);
+    taken.add(code);
+  }
+
+  const coder: ColorCoder = (colorName) =>
+    colorParts(colorName)
+      .map((part) => codeOf.get(plain(part)) ?? plain(part).slice(0, 2))
+      .join('');
+
+  coderCache.set(colors, coder);
+  return coder;
+};
 
 /**
  * Le nom à inscrire en jeu sur une monture, ou `ANONYMOUS_NAME` si elle n'a pas
@@ -101,23 +175,46 @@ export const colorCode = (name: string): string =>
  * « Anonyme » est donc exact et non un aveu d'ignorance — c'est même
  * l'information utile, puisque tout ce qui n'est pas anonyme mérite un regard.
  */
-export const mountName = (
+export type MountNameParts = {
   /** La génération la plus haute de la généalogie : la sienne ou celle d'un parent. */
-  carriedGeneration: number,
+  carriedGeneration: number;
+  /** Le nom affiché de la couleur de la monture elle-même. */
+  colorName: string;
+  /**
+   * Le sexe, qui sépare les deux poulains d'un même croisement.
+   *
+   * Sans lui, la moitié de l'écurie répondait au même nom — et comme un
+   * accouplement demande un mâle **et** une femelle, c'était l'attribut sur
+   * lequel on butait à chaque fournée.
+   */
+  sex: Sex;
   /** Les noms affichés des deux parents, ou `null` sans ascendance connue. */
-  parentNames: [string, string] | null
-): string => {
+  parentNames: [string, string] | null;
+  /** Le codeur de la famille — voir `colorCoder`. */
+  code: ColorCoder;
+};
+
+export const mountName = ({
+  carriedGeneration,
+  colorName,
+  sex,
+  parentNames,
+  code,
+}: MountNameParts): string => {
   if (!parentNames) return ANONYMOUS_NAME;
 
   // Les deux codes se rangent par ordre alphabétique, et ce n'est pas une
   // coquetterie : l'ordre des parents n'est pas une propriété de la généalogie.
   // Le même accouplement, selon que l'Amande est le mâle ou la femelle, donnait
-  // « G4 AMA-DOR » à un poulain et « G4 DOR-AMA » à son jumeau. Deux montures
+  // « G4 AM-DO » à un poulain et « G4 DO-AM » à son jumeau. Deux montures
   // rigoureusement identiques sous deux noms — et le tri de l'écurie, qui est
   // toute la raison d'être de ce nom, cessait de les rapprocher.
-  const codes = [colorCode(parentNames[0]), colorCode(parentNames[1])].sort();
+  const parents = [code(parentNames[0]), code(parentNames[1])].sort();
 
-  return `G${carriedGeneration} ${codes[0]}-${codes[1]}`.slice(0, MOUNT_NAME_MAX_LENGTH);
+  return `G${carriedGeneration} ${code(colorName)} ${sex} ${parents[0]}-${parents[1]}`.slice(
+    0,
+    MOUNT_NAME_MAX_LENGTH
+  );
 };
 
 /**

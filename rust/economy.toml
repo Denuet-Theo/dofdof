@@ -1,0 +1,370 @@
+# L'économie de l'élevage muldo, telle qu'on la simule.
+#
+# Ce fichier est fait pour être édité à la main : les prix de l'HDV bougent, et
+# une mesure ne vaut que si on peut la refaire avec les prix du jour. Rien ici
+# n'est dans le code.
+#
+# ## Ce qui se passe quand un prix change
+#
+# Toutes les mesures publiées deviennent incomparables. C'est normal et c'est le
+# but — mais il faut alors rejouer la baseline avant de conclure quoi que ce
+# soit sur une politique :
+#
+#   cargo run --release -p breeding-sim --bin bench
+#
+# ## Les valeurs marquées « INCONNU »
+#
+# Elles valent -1. Le chargeur refuse de les utiliser en silence : il dit ce qui
+# manque et ce qu'il fait à la place. Mieux vaut une mesure qui s'annonce
+# incomplète qu'un chiffre inventé qu'on finit par croire.
+
+# ---------------------------------------------------------------------------
+[partie]
+# ---------------------------------------------------------------------------
+
+# Capital de départ. Le solde ne peut jamais passer sous zéro.
+kamas_de_depart = 10_000_000
+
+# Montures offertes au départ, tirées uniformément entre les deux générations
+# ci-dessous, généalogie comprise et jouable (tirée dans les recettes de leur
+# propre couleur).
+#
+# Elles existent parce qu'une partie qui commence à zéro passe l'essentiel de
+# ses fournées dans les basses générations : la politique apprendrait très bien
+# à fabriquer des gen 2 et n'aurait presque jamais vu une gen 8.
+montures_de_depart = 100
+generation_minimale_du_pool = 2
+generation_maximale_du_pool = 9
+
+# L'horizon. Deux façons de le compter, et elles ne donnent pas la même partie :
+#
+#   "fournees"  — 100 tours, quelle que soit leur durée. Accélérer une fournée
+#                 ne rapporte alors rien, et le levier « vitesse de jauge » est
+#                 décoratif.
+#   "heures"    — un temps mural fixe. Une fournée rapide en laisse jouer
+#                 d'autres, donc payer du carburant achète des tours.
+#
+# C'est "heures" qui a été retenu, mais le mode "fournees" reste jouable pour
+# rejouer les mesures publiées avant ce changement.
+mode = "heures"
+fournees = 100
+
+# Budget en heures, quand `mode = "heures"`.
+#
+# 300 h, soit une trentaine de jours à une dizaine d'heures de jeu par jour.
+#
+# ## Ce que ce chiffre fait au problème
+#
+# Les 2 084 h qu'il remplaçait étaient les 100 fournées actuelles jouées en
+# bande basse. À ce budget-là, la vitesse ne servait presque à rien : on avait
+# le temps de tout faire lentement. À 300 h, elle devient **la** décision.
+#
+#   bande  40 000 → 20 h 55 la fournée →  14 fournées, à   115 000 pièce
+#   bande  70 000 → 10 h 30            →  28 fournées, à   171 000
+#   bande  90 000 →  7 h 02            →  42 fournées, à   402 000
+#   bande 100 000 →  5 h 17            →  56 fournées, à 1 294 000
+#
+# (durées jauge + les 5 minutes incompressibles de `[fournee]`)
+#
+# Quatre fois plus de tours pour onze fois le prix du tour. Et surtout :
+# quatorze fournées ne suffisent probablement pas à monter jusqu'à la gen 10,
+# alors que cinquante-sept, oui. La question cesse d'être « combien ça coûte »
+# pour devenir « est-ce que j'ai le temps ».
+#
+# C'est aussi ce qui devrait renverser la stratégie trouvée par NEAT sur
+# l'économie simplifiée : elle gagnait par le débit pur, en remplissant cent
+# fournées bon marché. Il n'y en aura plus cent.
+heures = 300
+
+# ---------------------------------------------------------------------------
+[fournee]
+# ---------------------------------------------------------------------------
+
+# Le transfert de jauge se fait au niveau de l'enclos, et chaque enclos porte
+# dix places — deux par croisement, donc cinq croisements.
+places_par_enclos = 10
+
+# ## Deux unités de production, et c'est un compromis d'usage
+#
+# Rien dans le jeu n'oblige les enclos à tourner ensemble : chacun a ses propres
+# jauges, donc ses propres bandes, son propre niveau et sa propre durée. Le
+# calcul favorise même la différenciation, puisque monter dix montures au niveau
+# 150 coûte 250 000 contre 2 447 000 pour cinquante.
+#
+# Mais six enclos aux rythmes différents demandent une intervention toutes les
+# trois minutes, et une politique qu'on ne peut pas exécuter ne vaut rien. On
+# coupe donc la poire en deux :
+#
+#   - **l'unité synchrone** : plusieurs enclos qui démarrent et finissent
+#     ensemble, mêmes réglages, un seul bloc à surveiller ;
+#   - **les unités libres** : un enclos chacune, réglages propres, timeline
+#     propre. C'est là qu'on peut payer un niveau élevé pour quelques paires de
+#     haute génération sans que tout le parc le paie.
+#
+# Deux unités à suivre au lieu de six, et le gain principal est conservé.
+enclos_synchronises = 5
+enclos_libres = 1
+
+# Le temps de manipulation entre deux fournées : sortir, trier, réaccoupler.
+# Incompressible, quel que soit le carburant.
+#
+# C'est un **plancher sur la cadence**. À 5 minutes, une fournée ne peut pas
+# descendre sous 5 min quoi qu'on paie, donc l'accélération par le carburant
+# butera toujours dessus. Aux durées actuelles (5 h à 21 h) l'effet est faible —
+# il retire une demi-fournée sur les 57 de la bande haute — mais il est réel et
+# il grandit à mesure qu'on accélère.
+minutes_entre_fournees = 5
+
+# Prix à plat d'une fournée, dès qu'elle porte au moins un croisement.
+#
+# ATTENTION : ce prix est une **simplification**. Dans le jeu il dépend du
+# niveau qu'on veut donner aux montures (Mangeoire) et de la vitesse à laquelle
+# on remplit les jauges (carburant), et les deux se règlent par tranche de 10
+# montures. Les 150 000 correspondent au niveau 67 en bande basse de jauge.
+#
+# Tant que [mangeoire] et [carburant] sont inconnus, c'est ce forfait qui
+# s'applique.
+prix_forfaitaire = 150_000
+
+# ---------------------------------------------------------------------------
+[montures]
+# ---------------------------------------------------------------------------
+
+# Un gen 1 anonyme, sans ascendance, quantité libre.
+#
+# C'est le prix le plus important du fichier. La fécondité est à usage unique,
+# donc c'est elle la vraie contrainte — et à 1 000 kamas contre 150 000 la
+# fournée, elle ne coûte presque rien. La politique trouvée par NEAT en achète
+# une vingtaine par fournée ; le glouton n'en achète que quand plus rien ne
+# s'accouple.
+prix_gen1_anonyme = 1_000
+
+# Niveau de toutes les montures. Le taux de réussite en découle :
+# `0,3 + 0,0015 × (niveau_A + niveau_B)`, donc 50,1 % à 67 des deux côtés.
+#
+# Deux niveau 200 plafonnent à 90 %. Rendre le niveau variable demande le prix
+# de la Mangeoire ci-dessous.
+niveau = 67
+
+# ---------------------------------------------------------------------------
+[valeurs]
+# ---------------------------------------------------------------------------
+
+# Ce qu'une monture rend à la conversion.
+#
+# Une gen `g` rend `g` ambres. Une gen 1 ne s'extrait pas et ne rend donc rien —
+# ce n'est pas un arrondi mais la règle du jeu, et accessoirement ce qui empêche
+# d'acheter des gen 1 à 1 000 pour les revendre 20 000 à l'infini.
+ambre_par_rang = 20_000
+gen1 = 0
+
+# L'ambre a oscillé entre 11 000 et 30 000 sur trente jours — un facteur 2,7,
+# plus large encore que le parchemin. Une monture gen 9 vaut donc entre 99 000 et
+# 270 000 selon la semaine. Chaque partie tire son prix dans ces bornes.
+ambre_min = 11_000
+ambre_max = 30_000
+
+# La gen 10 se vend au lieu de s'extraire. N'importe laquelle des 50 couleurs,
+# au niveau 0 — c'est ainsi qu'elle naît et qu'on la revend.
+#
+# Elle oscille entre 300 000 et 1 000 000, soit un facteur 3,3 : c'est la plus
+# volatile des trois. Le rapport entre ce prix et celui de l'ambre décide s'il
+# faut monter jusqu'au bout ou encaisser en génération 9.
+gen10 = 500_000
+gen10_min = 300_000
+gen10_max = 1_000_000
+
+# ---------------------------------------------------------------------------
+[genetons]
+# ---------------------------------------------------------------------------
+#
+# Le co-produit garanti de tout accouplement, et **le levier qui manquait**.
+#
+# ## Le rendement suit les parents directs, pas la cible
+#
+#   gen 1 → 1     gen 4 →   8     gen 7 →  60
+#   gen 2 → 2     gen 5 →  15     gen 8 → 120
+#   gen 3 → 4     gen 6 →  30     gen 9 → 250
+#
+# Les deux parents s'additionnent. Deux gen 9 rendent donc 500 génétons, deux
+# gen 1 en rendent 2 — un facteur 250 entre croiser haut et croiser bas.
+#
+# ## Ils ne tombent qu'en cas de succès
+#
+# Un croisement qui manque sa génération ne rend rien. Deux gen 9 rapportent donc
+# 269 000 kamas quand ça passe, mais à 50,1 % de réussite l'espérance vaut
+# 134 800 — la moitié de ce qu'un rendement garanti donnerait.
+#
+# Conséquence sur l'Optimakina : son bonus de dix points achète aussi dix pour
+# cent du géneton, ce qui resserre son calcul sans le renverser — 21 900 gagnés
+# pour 78 700 dépensés à la gen 9.
+#
+# Et deux cas rendent zéro quoi qu'il arrive : un croisement qui ne peut pas
+# monter, et un dont aucune couleur ne nomme la cible. Purifier et recopier ne
+# rapportent rien.
+#
+# ## Le prix
+#
+# Meilleur rapport à l'HDV : le **Petit Parchemin**, 10 génétons pour 5 490
+# kamas. Les gros paliers sont moins bons — 50 génétons pour 21 997 (440 le
+# géneton), 100 pour 43 998 (440), 160 pour 84 984 (531).
+#
+# Le prix est net de la taxe HDV de 2 %, puisqu'il faut vendre le parchemin.
+prix_unitaire = 5_490
+genetons_par_unite = 10
+taxe_hdv = 0.02
+
+# ## Le prix bouge, et la politique doit y survivre
+#
+# Relevé sur trente jours : le Petit Parchemin a oscillé entre 5 000 et 10 000
+# kamas, soit un facteur deux sur le géneton. Un croisement gen 9 × gen 9 réussi
+# rapporte donc entre 245 000 et 490 000 selon la semaine.
+#
+# Chaque partie tire son prix dans ces bornes, et la politique le **voit**. Une
+# politique aveugle au marché apprendrait un réglage moyen, incapable de dire
+# « les parchemins sont hauts, croisez haut » ni l'inverse — ce qui est
+# précisément le conseil qu'on attend d'elle.
+prix_unitaire_min = 5_000
+prix_unitaire_max = 10_000
+
+# ---------------------------------------------------------------------------
+[optimakina]
+# ---------------------------------------------------------------------------
+#
+# +10 points de taux de réussite sur un croisement visant cette génération.
+#
+# Prix relevés à l'HDV, en retenant le meilleur prix unitaire disponible (les
+# gros lots sont souvent moins chers à l'unité).
+#
+# ## Ça a l'air d'un mauvais achat
+#
+# Le bonus rapporte `0,10 × (valeur de la cible − valeur d'un raté)`. À la
+# gen 10 : 0,10 × (500 000 − ~100 000) = 40 000 pour 149 996 dépensés. À la
+# gen 8 : ~8 000 pour 35 000. Le moins mauvais cas est la gen 2, où un raté rend
+# une gen 1 qui ne vaut rien, donc le bonus achète toute la différence :
+# ~4 000 pour 5 000.
+#
+# C'est une estimation d'ordre de grandeur, pas une mesure. La recherche
+# tranchera — et si elle n'en achète jamais, c'est un résultat.
+
+gen2 = 5_000       # lot de 100 à 500 000
+gen3 = 8_000       # lot de 10 à 79 999
+gen4 = 10_001      # lot de 100 à 1 000 069
+gen5 = 13_000      # lot de 10 à 129 998
+gen6 = 15_000      # lot de 10 à 150 000
+gen7 = 22_500      # lot de 10 à 224 995
+gen8 = 35_000      # lot de 10 à 349 991
+gen9 = 78_700      # aucune offre à l'HDV : coût de craft
+gen10 = 149_996    # à l'unité
+
+# Le bonus lui-même, en points de taux. Relevé dans `costs.ts`.
+bonus = 0.10
+
+# ---------------------------------------------------------------------------
+[mangeoire]
+# ---------------------------------------------------------------------------
+#
+# Ce que coûte de monter une monture en niveau, donc d'acheter du taux de
+# réussite.
+#
+# Points d'XP nécessaires : `3,795 × niveau^2,329`.
+#   niveau  67 →    67 700 points  → 50,1 % de réussite à deux
+#   niveau 100 →   173 000 points  → 60,0 %
+#   niveau 200 →   867 900 points  → 90,0 %
+#
+# Treize fois plus de points pour 1,8 fois le taux : c'est le levier le plus
+# lourd des quatre, et son prix décide s'il vaut quoi que ce soit.
+#
+# Meilleur rapport trouvé à l'HDV : Extrait de Mangeoire niveau 25, 3 000 points
+# pour 1 692 kamas. Les bandes hautes coûtent 3,5 à 8 fois plus cher au point,
+# et elles ne servent qu'à aller vite — voir les blocs [[carburant]].
+prix_par_point = 0.5640
+prix_unite = 1_692
+points_par_unite = 3_000
+
+# ## Par enclos, comme les autres jauges — confirmé par le mainteneur
+#
+# Dix montures nourries ensemble coûtent ce que coûte une. Ça pesait un facteur
+# dix sur le levier le plus lourd des quatre, donc ça valait d'être demandé
+# plutôt que supposé :
+#
+#   niveau  67 :  38 200 par enclos →   191 000 la fournée
+#   niveau 100 :  97 600            →   488 000
+#   niveau 200 : 489 500            → 2 447 000
+#
+# À comparer aux 115 000 de jauge en bande basse : nourrir coûte déjà plus cher
+# que faire tourner l'enclos, et monter au niveau 200 coûte vingt fois la jauge.
+# C'est ce qui rend l'arbitrage réel plutôt que théorique.
+par_monture = false
+
+# ---------------------------------------------------------------------------
+[carburant]
+# ---------------------------------------------------------------------------
+#
+# ## La bande se choisit JAUGE PAR JAUGE
+#
+# C'est ce qui rend l'optimisation intéressante : on peut payer cher ce qui est
+# sur le chemin critique et laisser le reste au tarif du bas. Chaque jauge a son
+# propre débit et son propre prix au point.
+#
+#   bande 0 (plafond  40 000) → 1 point/seconde
+#   bande 1 (plafond  70 000) → 2
+#   bande 2 (plafond  90 000) → 3
+#   bande 3 (plafond 100 000) → 4   — les Élixirs, sans clause de plafond
+#
+# ## L'ordonnancement, relevé en jeu
+#
+# La sérénité va de −5000 à +5000 et commande tout le reste :
+#
+#   1. amener toute la fournée à un extrême (±5000)  — 10 000 points
+#      pendant ce temps, seule la Mangeoire peut tourner
+#   2. sérénité au bout → lancer la 1re stat          — 20 000
+#   3. redescendre la sérénité vers 0                 —  5 001
+#   4. entre −2000 et +2000 → lancer l'Abreuvoir      — 20 000
+#   5. de l'autre côté de 0 → lancer la 2e stat       — 20 000
+#
+# Total 75 001, contre 75 010 dans enclos.ts : le découpage est le bon.
+# Le Foudroyeur ne tourne qu'en sérénité négative, ce qui fixe l'ordre des
+# stats. **Deux jauges au plus tournent en parallèle, Mangeoire comprise** —
+# donc un niveau d'XP élevé bloque une place et rallonge la fournée.
+#
+# ## À lire dans la table
+#
+# L'Abreuvoir est **moins cher en bande 1 qu'en bande 0** tout en allant deux
+# fois plus vite : sa bande basse est strictement dominée. Un modèle à bande
+# unique pour tout l'enclos ne pouvait pas voir ce gain-là.
+#
+# Prix moyens de l'HDV relevés le 2026-08-08, croisés avec les points de
+# recharge de DofusDB (120 carburants, tous appariés). Fiables à ~10 % près
+# selon le jour de la semaine, d'après le mainteneur.
+
+points_par_seconde = [1, 2, 3, 4]
+
+# baffeur : bandes 0 à 3, en kamas par point
+baffeur = [0.0152, 0.0803, 0.1796, 2.0503]
+
+# caresseur : bandes 0 à 3, en kamas par point
+caresseur = [0.0526, 0.13, 1.366, 2.843]
+
+# foudroyeur : bandes 0 à 3, en kamas par point
+foudroyeur = [0.442, 0.542, 0.842, 5.279]
+
+# dragofesse : bandes 0 à 3, en kamas par point
+dragofesse = [0.3102, 0.5507, 1.551, 2.1877]
+
+# abreuvoir : bandes 0 à 3, en kamas par point
+abreuvoir = [1.2588, 1.0775, 1.8337, 3.549]
+
+# mangeoire : bandes 0 à 3, en kamas par point
+mangeoire = [0.564, 1.9646, 1.9505, 4.6515]
+
+# ---------------------------------------------------------------------------
+[cycle]
+# ---------------------------------------------------------------------------
+#
+# Les points d'un cycle de fécondité, par enclos.
+montee_serenite = 10_000
+descente_serenite = 5_001
+points_par_stat = 20_000
+# Deux jauges au plus à la fois, Mangeoire comprise.
+places_paralleles = 2

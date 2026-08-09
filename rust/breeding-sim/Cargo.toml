@@ -1,0 +1,16 @@
+[package]
+name = "breeding-sim"
+edition.workspace = true
+version.workspace = true
+
+# Volontairement sans `serde` ni sa dérive : ce crate porte un **build script**,
+# et Smart App Control (actif sur cette machine, état 1) refuse d'exécuter les
+# binaires non signés qu'il produit — `os error 4551`. `serde_json` seul n'en a
+# pas et suffit : le catalogue se lit une fois au démarrage, naviguer un `Value`
+# n'y coûte rien.
+#
+# À garder en tête pour les dépendances à venir : toute crate avec un build
+# script sera bloquée de la même façon.
+[dependencies]
+serde_json = "1"
+toml = "0.9"

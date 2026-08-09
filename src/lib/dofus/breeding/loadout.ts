@@ -1,5 +1,5 @@
 import { BULK_MATE_LEVEL, matingOutcomes, type Mate } from './pairing';
-import { carriedGeneration, mountName } from './naming';
+import { carriedGeneration, colorCoder, mountName } from './naming';
 import { stableFrontier } from './drift';
 import {
   availableBySex,
@@ -281,13 +281,24 @@ const namesFor = (
     const generation = context.generations.get(outcome.colorId) ?? 1;
     if (!tracksIndividually(generation, parentGenerations)) continue;
 
-    const name = mountName(carriedGeneration(generation, parentGenerations), [
-      nameOf(first),
-      nameOf(second),
-    ]);
-    const current = byName.get(name);
-    if (current) current.probability += outcome.probability;
-    else byName.set(name, { name, colorId: outcome.colorId, probability: outcome.probability });
+    // Le nom porte le sexe depuis qu'il doit désigner **une** monture dans
+    // l'écurie du jeu, et le sexe se tire à la naissance : on prépare donc les
+    // deux, chacun pour la moitié de la probabilité. C'est une liste de noms à
+    // avoir sous la main, pas une prédiction — et il vaut mieux en préparer un
+    // de trop que de buter devant l'enclos.
+    for (const sex of ['M', 'F'] as const) {
+      const name = mountName({
+        carriedGeneration: carriedGeneration(generation, parentGenerations),
+        colorName: nameOf(outcome.colorId),
+        sex,
+        parentNames: [nameOf(first), nameOf(second)],
+        code: colorCoder(context.colors),
+      });
+      const current = byName.get(name);
+      if (current) current.probability += outcome.probability / 2;
+      else
+        byName.set(name, { name, colorId: outcome.colorId, probability: outcome.probability / 2 });
+    }
   }
 
   return [...byName.values()].sort((a, b) => b.probability - a.probability);

@@ -7,6 +7,7 @@ import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
+import BreedingTimeline from '@/components/breeding/BreedingTimeline';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
@@ -19,6 +20,7 @@ import { planWaves } from '@/lib/dofus/breeding/waves';
 import { nextBatches } from '@/lib/dofus/breeding/batches';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
+import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
 import {
   OBJECTIVES,
   combinedRate,
@@ -56,6 +58,7 @@ const BreedingPage = () => {
   const [draftObjective, setDraftObjective] = useState<ObjectiveId>('profit');
 
   const project = useBreedingProject(family);
+  const timeline = useBreedingTimeline(family);
 
   // Le plan sélectionné fait foi : c'est la quantité retenue en le choisissant,
   // et le classement doit se relire dans les mêmes termes. Dérivé plutôt que
@@ -461,6 +464,14 @@ const BreedingPage = () => {
           </button>
         ))}
       </div>
+
+      {/* La timeline vient avant tout le reste, et pour une raison d'usage : le
+          reste de l'écran répond à « quoi faire », elle seule répond à « quand ».
+          On ouvre cette page entre deux allers-retours en jeu, et la question
+          qu'on s'y pose neuf fois sur dix est « est-ce que j'ai quelque chose à
+          faire maintenant ». La faire descendre sous les réglages et les stocks
+          obligerait à défiler pour lire un compte à rebours. */}
+      <BreedingTimeline timeline={timeline} />
 
       <BreedingSettings settings={settings} onSave={saveSettings} />
 

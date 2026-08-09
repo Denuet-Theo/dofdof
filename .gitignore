@@ -42,3 +42,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# rust — le simulateur de politique d'élevage. `Cargo.lock` est versionné :
+# c'est un workspace de binaires, et une mesure ne se rejoue qu'à dépendances
+# identiques.
+/rust/target/
+/rust/champion*.json
+/rust/finalists*.json
+
+# L'état d'un entraînement en cours : 128 génomes et le registre d'innovations,
+# soit près d'un mégaoctet réécrit à chaque manche. C'est une sortie de calcul,
+# pas une source — et une reprise ne se partage pas, elle se relance.
+/rust/checkpoint*.json
+
+# Le plan émis pour inspection. Celui qu'embarque l'app est versionné, lui :
+# src/lib/dofus/breeding/model-plan.json.
+/rust/plan.json

@@ -81,6 +81,38 @@ struct Options {
     hours: f64,
     iterations: usize,
     out: Option<String>,
+    /// Taille du parc, en enclos. `None` = celui d'`economy.toml`.
+    enclos: Option<usize>,
+}
+
+/// Comment découper `total` enclos entre le bloc synchrone et l'enclos libre.
+///
+/// La question n'est pas rhétorique : à parc égal, les deux découpes ne donnent
+/// pas le même résultat, et l'écart va jusqu'à 15 M. L'unité libre n'est pas
+/// synchronisée avec le bloc, donc elle tourne sur son propre cycle et le parc
+/// enchaîne à peu près deux fois plus de fournées ; en échange elle retire un
+/// enclos au bloc, qui produit moins par tour.
+///
+/// Mesuré en rejouant le champion sur 200 graines du domaine d'entraînement
+/// (500 000..500 200), médiane en millions :
+///
+/// | Parc | bloc seul | bloc + libre |
+/// | ---: | ---: | ---: |
+/// | 2 | **58,28** | 52,73 |
+/// | 3 | **80,70** | 74,35 |
+/// | 4 | 93,85 | **96,44** |
+/// | 5 | 99,93 | **106,58** |
+/// | 6 | 101,82 | **109,03** |
+/// | 8 | 98,55 | **113,00** |
+/// | 10 | 94,00 | **107,58** |
+/// | 12 | 92,27 | **110,29** |
+///
+/// La bascule tombe entre 3 et 4 : en dessous, amputer le bloc coûte plus que
+/// la seconde timeline ne rapporte. D'où le seuil, qui n'est pas un réglage
+/// mais un relevé.
+fn split(total: usize) -> (usize, usize) {
+    let total = total.max(1);
+    if total >= 4 { (total - 1, 1) } else { (total, 0) }
 }
 
 impl Options {
@@ -94,6 +126,7 @@ impl Options {
             hours: 24.0,
             iterations: 800,
             out: None,
+            enclos: None,
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
         let mut index = 0;
@@ -119,6 +152,10 @@ impl Options {
                 }
                 "--out" => {
                     options.out = value.cloned();
+                    index += 1;
+                }
+                "--enclos" => {
+                    options.enclos = value.and_then(|v| v.parse().ok());
                     index += 1;
                 }
                 other if !other.starts_with("--") => options.path = other.to_string(),
@@ -388,7 +425,7 @@ fn main() {
     };
 
     let catalog = muldo();
-    let economy = Prices::load_default()
+    let mut economy = Prices::load_default()
         .map(|prices| prices.economy)
         .unwrap_or_else(|error| {
             // Émettre un plan sur une économie autre que celle du fichier
@@ -396,6 +433,17 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         });
+
+    // Le parc de l'éleveur, et non celui de l'entraînement. Tout le reste de ce
+    // binaire lit déjà `sync_enclos` et `unit_count()`, donc il suffit de poser
+    // la découpe avant de jouer : la partie enregistrée est alors celle du parc
+    // demandé, pas une extrapolation de celle à six enclos.
+    if let Some(total) = options.enclos {
+        let (sync, free) = split(total);
+        economy.sync_enclos = sync;
+        economy.free_enclos = free;
+    }
+    let economy = economy;
 
     let network = Network::compile(&genome);
     let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
@@ -545,13 +593,24 @@ fn main() {
 
     let plan = json!({
         "version": TIMELINE_VERSION,
-        "label": format!(
-            "{} enclos en {} · enclos libre en {} · graine {}",
-            sync,
-            strategy_line(0),
-            strategy_line(1),
-            options.seed
-        ),
+        // L'étiquette dit la découpe réellement émise. Annoncer un enclos libre
+        // sur un parc qui n'en a pas ferait chercher une piste absente.
+        "label": if economy.unit_count() > 1 {
+            format!(
+                "{} enclos en {} · enclos libre en {} · graine {}",
+                sync,
+                strategy_line(0),
+                strategy_line(1),
+                options.seed
+            )
+        } else {
+            format!(
+                "{} enclos en {} · graine {}",
+                sync,
+                strategy_line(0),
+                options.seed
+            )
+        },
         "horizon": window.max(last_event),
         "tracks": tracks,
     });

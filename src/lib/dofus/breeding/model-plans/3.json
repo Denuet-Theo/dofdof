@@ -1,0 +1,835 @@
+{
+  "horizon": 105603.0,
+  "label": "3 enclos en 001110/40 · graine 900000",
+  "tracks": [
+    {
+      "events": [
+        {
+          "at": 0.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-1-t0-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 0.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-1-t0-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 0.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-1-t0-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 10000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-1-t0-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 20000.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t0-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 23000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-1-t0-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 23000.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t0-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 25001.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-1-t0-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 35001.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-1-t0-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 35301.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-1-t1-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 35301.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-1-t1-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 35301.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-1-t1-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 45301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-1-t1-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 55301.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t1-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 58301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-1-t1-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 58301.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t1-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 60302.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-1-t1-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 70302.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-1-t1-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 70602.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-1-t2-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 70602.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-1-t2-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 70602.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-1-t2-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 80602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-1-t2-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 90602.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t2-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 93602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-1-t2-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 93602.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-1-t2-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 95603.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-1-t2-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 105603.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-1-t2-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        }
+      ],
+      "id": "enclos-1",
+      "label": "Enclos 1"
+    },
+    {
+      "events": [
+        {
+          "at": 0.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-2-t0-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 0.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-2-t0-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 0.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-2-t0-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 10000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-2-t0-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 20000.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t0-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 23000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-2-t0-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 23000.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t0-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 25001.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-2-t0-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 35001.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-2-t0-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 35301.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-2-t1-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 35301.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-2-t1-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 35301.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-2-t1-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 45301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-2-t1-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 55301.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t1-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 58301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-2-t1-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 58301.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t1-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 60302.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-2-t1-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 70302.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-2-t1-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 70602.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-2-t2-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 70602.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-2-t2-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 70602.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-2-t2-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 80602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-2-t2-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 90602.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t2-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 93602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-2-t2-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 93602.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-2-t2-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 95603.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-2-t2-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 105603.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-2-t2-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        }
+      ],
+      "id": "enclos-2",
+      "label": "Enclos 2"
+    },
+    {
+      "events": [
+        {
+          "at": 0.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-3-t0-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 0.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-3-t0-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 0.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-3-t0-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 10000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-3-t0-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 20000.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t0-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 23000.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-3-t0-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 23000.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t0-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 25001.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-3-t0-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 35001.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-3-t0-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 35301.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-3-t1-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 35301.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-3-t1-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 35301.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-3-t1-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 45301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-3-t1-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 55301.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t1-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 58301.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-3-t1-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 58301.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t1-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 60302.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-3-t1-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 70302.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-3-t1-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        },
+        {
+          "at": 70602.0,
+          "count": 10,
+          "detail": "5 croisements sur cet enclos, 15 sur la fournée entière.",
+          "duration": 0,
+          "id": "enclos-3-t2-mate",
+          "kind": "mate",
+          "label": "Charger l'enclos"
+        },
+        {
+          "at": 70602.0,
+          "detail": "10 000 points sur le Baffeur. Toute la fournée part d'une sérénité tirée au hasard : la plus éloignée demande la course entière. Seule la Mangeoire peut tourner pendant ce temps.",
+          "duration": 10000.0,
+          "gauge": "baffeur",
+          "id": "enclos-3-t2-g0",
+          "kind": "gauge",
+          "label": "Sérénité → ±5000"
+        },
+        {
+          "at": 70602.0,
+          "detail": "20437 points d'expérience. Occupe une des deux places : elle allonge la fournée.",
+          "duration": 20437.0,
+          "gauge": "mangeoire",
+          "id": "enclos-3-t2-g1",
+          "kind": "gauge",
+          "label": "Mangeoire — niveau 40"
+        },
+        {
+          "at": 80602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "dragofesse",
+          "id": "enclos-3-t2-g2",
+          "kind": "gauge",
+          "label": "Dragofesse"
+        },
+        {
+          "at": 90602.0,
+          "detail": "3 000 points sur le Caresseur : ouvre l'Abreuvoir sans couper la stat en cours.",
+          "duration": 3000.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t2-g3",
+          "kind": "gauge",
+          "label": "Sérénité → ±2000"
+        },
+        {
+          "at": 93602.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "abreuvoir",
+          "id": "enclos-3-t2-g4",
+          "kind": "gauge",
+          "label": "Abreuvoir"
+        },
+        {
+          "at": 93602.0,
+          "detail": "2 001 points sur le Caresseur. On attend que la première stat ait fini : franchir zéro la couperait net.",
+          "duration": 2001.0,
+          "gauge": "caresseur",
+          "id": "enclos-3-t2-g5",
+          "kind": "gauge",
+          "label": "Sérénité → ∓1"
+        },
+        {
+          "at": 95603.0,
+          "detail": "20000 points. Fenêtre de sérénité imposée.",
+          "duration": 10000.0,
+          "gauge": "foudroyeur",
+          "id": "enclos-3-t2-g6",
+          "kind": "gauge",
+          "label": "Foudroyeur"
+        },
+        {
+          "at": 105603.0,
+          "count": 5,
+          "detail": "5 naissances sur cet enclos, 15 sur la fournée. Les places finissent ensemble.",
+          "duration": 0,
+          "id": "enclos-3-t2-collect",
+          "kind": "collect",
+          "label": "Récupérer la fournée"
+        }
+      ],
+      "id": "enclos-3",
+      "label": "Enclos 3"
+    },
+    {
+      "events": [
+        {
+          "at": 35301.0,
+          "count": 3,
+          "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
+          "duration": 0,
+          "id": "ecurie-clone-t1",
+          "kind": "clone",
+          "label": "Cloner 3 stérile(s)"
+        },
+        {
+          "at": 70602.0,
+          "count": 4,
+          "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
+          "duration": 0,
+          "id": "ecurie-clone-t2",
+          "kind": "clone",
+          "label": "Cloner 4 stérile(s)"
+        }
+      ],
+      "id": "ecurie",
+      "label": "Écurie"
+    },
+    {
+      "events": [
+        {
+          "at": 0.0,
+          "count": 5,
+          "detail": "3 Muldo Ébène femelle, 1 Muldo Doré mâle, 1 Muldo Doré femelle. À avoir avant de charger l'enclos — environ 5 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t0-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 5 monture(s)"
+        },
+        {
+          "at": 0.0,
+          "detail": "Pour 3 enclos. Baffeur : 30 000 pts en bande 0 (0 k) · Caresseur : 15 003 pts en bande 0 (1 k) · Foudroyeur : 60 000 pts en bande 1 (33 k) · Dragofesse : 60 000 pts en bande 1 (33 k) · Abreuvoir : 60 000 pts en bande 1 (65 k) · Mangeoire : 21 Extrait(s) (61 310 pts, 35 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t0-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 166 k"
+        },
+        {
+          "at": 35301.0,
+          "count": 3,
+          "detail": "1 Muldo Pourpre femelle, 1 Muldo Ébène femelle, 1 Muldo Doré femelle. À avoir avant de charger l'enclos — environ 3 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t1-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 3 monture(s)"
+        },
+        {
+          "at": 35301.0,
+          "detail": "Pour 3 enclos. Baffeur : 30 000 pts en bande 0 (0 k) · Caresseur : 15 003 pts en bande 0 (1 k) · Foudroyeur : 60 000 pts en bande 1 (33 k) · Dragofesse : 60 000 pts en bande 1 (33 k) · Abreuvoir : 60 000 pts en bande 1 (65 k) · Mangeoire : 21 Extrait(s) (61 310 pts, 35 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t1-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 166 k"
+        },
+        {
+          "at": 70602.0,
+          "count": 6,
+          "detail": "1 Muldo Pourpre mâle, 2 Muldo Orchidée femelle, 1 Muldo Doré femelle, 1 Muldo Indigo mâle, 1 Muldo Indigo femelle. À avoir avant de charger l'enclos — environ 6 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t2-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 6 monture(s)"
+        },
+        {
+          "at": 70602.0,
+          "detail": "Pour 3 enclos. Baffeur : 30 000 pts en bande 0 (0 k) · Caresseur : 15 003 pts en bande 0 (1 k) · Foudroyeur : 60 000 pts en bande 1 (33 k) · Dragofesse : 60 000 pts en bande 1 (33 k) · Abreuvoir : 60 000 pts en bande 1 (65 k) · Mangeoire : 21 Extrait(s) (61 310 pts, 35 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t2-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 166 k"
+        }
+      ],
+      "id": "marche",
+      "label": "Marché"
+    }
+  ],
+  "version": 1
+}

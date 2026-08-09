@@ -123,7 +123,7 @@ pub const SERENITY_RETURN: f64 = 5_001.0;
 pub const STAT_POINTS: f64 = 20_000.0;
 /// Points de descente au bout desquels la sérénité entre dans `[-2000, +2000]`
 /// et libère l'Abreuvoir.
-const ABREUVOIR_GATE: f64 = 3_000.0;
+pub const ABREUVOIR_GATE: f64 = 3_000.0;
 
 /// Deux jauges à la fois, Mangeoire comprise.
 pub const PARALLEL_SLOTS: usize = 2;
@@ -153,20 +153,90 @@ struct Task {
     after: Option<(usize, f64)>,
 }
 
+/// Une tâche **placée dans le temps**, ce que `schedule` calcule sans le dire.
+///
+/// La durée totale suffit pour choisir des bandes ; elle ne suffit pas pour
+/// afficher un plan. L'écran (`src/lib/dofus/breeding/timeline.ts`) demande
+/// quand chaque jauge démarre et combien de temps elle tourne — c'est-à-dire
+/// exactement le `started`/`finished` que l'ordonnancement produit déjà et
+/// jetait.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Slot {
+    pub gauge: usize,
+    pub points: f64,
+    /// Secondes depuis le début de la fournée.
+    pub start: f64,
+    pub end: f64,
+}
+
 /// La durée et le coût d'une fournée, pour un choix de bande par jauge.
 pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Schedule {
-    let rate = |gauge: usize| economy.band_rate(bands[gauge]);
     let price = |gauge: usize| economy.gauge_price(gauge, bands[gauge]);
+    let (climber, _) = climb_and_return(economy, bands);
+    let tasks = task_list(climber, other_serenity(climber), xp_points);
 
-    // La montée va sur la sérénité la moins chère au point. Les deux jauges sont
-    // interchangeables, donc c'est un choix gratuit — et il porte sur 10 000
-    // points contre 5 001, ce qui n'est pas rien.
-    let (climber, returner) = if price(BAFFEUR) <= price(CARESSEUR) {
+    let cost_per_enclos: f64 = tasks
+        .iter()
+        .map(|task| task.points * price(task.gauge))
+        .sum();
+
+    let rate = |gauge: usize| economy.band_rate(bands[gauge]);
+    let (seconds, _, _) = makespan(&tasks, &rate);
+    Schedule {
+        hours: seconds / 3600.0,
+        cost_per_enclos,
+        climber,
+    }
+}
+
+/// Le même ordonnancement, mais rendu tâche par tâche.
+///
+/// Les tâches de points nuls sont écartées : une Mangeoire à zéro point n'est
+/// pas un événement de durée nulle, c'est un événement qui n'existe pas.
+pub fn slots(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Vec<Slot> {
+    let (climber, _) = climb_and_return(economy, bands);
+    let tasks = task_list(climber, other_serenity(climber), xp_points);
+    let rate = |gauge: usize| economy.band_rate(bands[gauge]);
+    let (_, started, finished) = makespan(&tasks, &rate);
+
+    let mut placed: Vec<Slot> = tasks
+        .iter()
+        .zip(started.iter().zip(finished.iter()))
+        .filter(|(task, (start, _))| task.points > 0.0 && start.is_finite())
+        .map(|(task, (&start, &end))| Slot {
+            gauge: task.gauge,
+            points: task.points,
+            start,
+            end: if end.is_finite() { end } else { start },
+        })
+        .collect();
+    placed.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    placed
+}
+
+/// L'autre jauge de sérénité : elles sont interchangeables, donc l'une désigne
+/// l'autre.
+fn other_serenity(climber: usize) -> usize {
+    if climber == BAFFEUR { CARESSEUR } else { BAFFEUR }
+}
+
+/// La montée va sur la sérénité la moins chère au point. Les deux jauges sont
+/// interchangeables, donc c'est un choix gratuit — et il porte sur 10 000
+/// points contre 5 001, ce qui n'est pas rien.
+fn climb_and_return(economy: &Economy, bands: [usize; GAUGES]) -> (usize, usize) {
+    let price = |gauge: usize| economy.gauge_price(gauge, bands[gauge]);
+    if price(BAFFEUR) <= price(CARESSEUR) {
         (BAFFEUR, CARESSEUR)
     } else {
         (CARESSEUR, BAFFEUR)
-    };
+    }
+}
 
+fn task_list(climber: usize, returner: usize, xp_points: f64) -> [Task; TASKS] {
     // Indices : 0 montée, 1 Mangeoire, 2 descente jusqu'à la fenêtre de
     // l'Abreuvoir, 3 première stat, 4 Abreuvoir, 5 passage de zéro,
     // 6 seconde stat.
@@ -181,7 +251,7 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
     // `[-2000, +2000]` pour l'Abreuvoir et dans `[-5000, -1]` pour le
     // Foudroyeur. La sérénité ne bouge que si on la pousse, donc les deux
     // dernières stats tournent ensemble sans rien casser.
-    let tasks = [
+    [
         Task {
             gauge: climber,
             points: SERENITY_CLIMB,
@@ -219,23 +289,18 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
             points: STAT_POINTS,
             after: Some((5, SERENITY_RETURN - ABREUVOIR_GATE)),
         },
-    ];
-
-    let cost_per_enclos: f64 = tasks
-        .iter()
-        .map(|task| task.points * price(task.gauge))
-        .sum();
-
-    let hours = makespan(&tasks, &rate) / 3600.0;
-    Schedule {
-        hours,
-        cost_per_enclos,
-        climber,
-    }
+    ]
 }
 
-/// Simule l'ordonnancement à deux places et rend la durée en secondes.
-fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> f64 {
+/// Simule l'ordonnancement à deux places.
+///
+/// Rend la durée totale en secondes, puis le départ et la fin de chaque tâche —
+/// une tâche jamais lancée gardant `INFINITY`, ce qui la distingue d'une tâche
+/// instantanée.
+fn makespan(
+    tasks: &[Task; TASKS],
+    rate: &impl Fn(usize) -> f64,
+) -> (f64, [f64; TASKS], [f64; TASKS]) {
     let duration = |task: &Task| {
         let rate = rate(task.gauge);
         if rate > 0.0 { task.points / rate } else { 0.0 }
@@ -290,6 +355,18 @@ fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> f64 {
             if running.len() >= PARALLEL_SLOTS {
                 break;
             }
+            // Une jauge déjà en train de tourner ne peut pas porter une seconde
+            // tâche. Les deux segments de descente sont sur la **même** jauge de
+            // sérénité — descendre jusqu'à +2000, puis franchir zéro — et rien
+            // d'autre ici ne l'interdisait : l'ordonnancement les lançait
+            // ensemble et rendait une fournée plus courte que le parc ne peut la
+            // faire.
+            if running
+                .iter()
+                .any(|&(other, _)| tasks[other].gauge == tasks[index].gauge)
+            {
+                continue;
+            }
             started[index] = now;
             let end = now + duration(&tasks[index]);
             finished[index] = end;
@@ -324,10 +401,11 @@ fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> f64 {
         running.retain(|&(_, end)| end > now + 1e-9);
     }
 
-    finished
+    let total = finished
         .iter()
         .filter(|end| end.is_finite())
-        .fold(0.0, |longest, &end| longest.max(end))
+        .fold(0.0f64, |longest, &end| longest.max(end));
+    (total, started, finished)
 }
 
 #[cfg(test)]
@@ -435,5 +513,83 @@ mod tests {
             cible.cost_per_enclos,
             uniforme.cost_per_enclos
         );
+    }
+
+    /// Le plan affiché doit finir quand la fournée finit.
+    ///
+    /// `schedule` et `slots` rejouent le même ordonnancement ; s'ils divergent,
+    /// l'écran montre une fournée qui ne dure pas ce que le modèle a payé — et
+    /// c'est le genre d'écart qu'on ne verrait qu'en comptant les heures à la
+    /// main devant le jeu.
+    #[test]
+    fn le_plan_detaille_dure_ce_que_la_fournee_dure() {
+        let economy = economy();
+        for bands in [[0; GAUGES], [1; GAUGES], [3, 1, 1, 1, 0, 2], [0, 0, 1, 1, 1, 0]] {
+            for xp in [0.0, 5_628.0, 40_000.0] {
+                let plan = schedule(&economy, bands, xp);
+                let placed = slots(&economy, bands, xp);
+                let last = placed
+                    .iter()
+                    .fold(0.0f64, |longest, slot| longest.max(slot.end));
+                assert!(
+                    (last / 3600.0 - plan.hours).abs() < 1e-6,
+                    "bandes {bands:?}, xp {xp} : plan détaillé {:.4} h, fournée {:.4} h",
+                    last / 3600.0,
+                    plan.hours
+                );
+            }
+        }
+    }
+
+    /// Une jauge ne porte qu'une tâche à la fois.
+    ///
+    /// La descente de sérénité est coupée en deux et les deux moitiés sont sur
+    /// la **même** jauge : rien dans les précédences ne l'empêchait de les
+    /// lancer ensemble, ce qui rendait une fournée plus courte que le parc ne
+    /// peut la faire. Le défaut était invisible tant qu'on ne consommait que la
+    /// durée totale ; il est apparu au premier plan affiché.
+    #[test]
+    fn deux_taches_ne_partagent_jamais_une_jauge() {
+        let economy = economy();
+        for bands in [
+            [0; GAUGES],
+            [1; GAUGES],
+            [3; GAUGES],
+            [0, 0, 1, 1, 1, 0], // le champion : 001110
+            [3, 1, 1, 1, 0, 2],
+        ] {
+            for xp in [0.0, 5_628.0, 20_460.0, 40_000.0] {
+                let placed = slots(&economy, bands, xp);
+                for (index, a) in placed.iter().enumerate() {
+                    for b in placed.iter().skip(index + 1) {
+                        if a.gauge != b.gauge {
+                            continue;
+                        }
+                        assert!(
+                            b.start >= a.end - 1e-6 || a.start >= b.end - 1e-6,
+                            "bandes {bands:?}, xp {xp} : {} tourne deux fois à la fois \
+                             ({:.0}–{:.0} s et {:.0}–{:.0} s)",
+                            GAUGE_NAMES[a.gauge],
+                            a.start,
+                            a.end,
+                            b.start,
+                            b.end
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Une Mangeoire à zéro point ne doit pas produire d'événement.
+    #[test]
+    fn une_jauge_sans_points_ne_fait_pas_evenement() {
+        let economy = economy();
+        let placed = slots(&economy, [1; GAUGES], 0.0);
+        assert!(
+            placed.iter().all(|slot| slot.gauge != MANGEOIRE),
+            "la Mangeoire à 0 point ne devrait rien émettre : {placed:?}"
+        );
+        assert_eq!(placed.len(), TASKS - 1, "les six autres tâches restent");
     }
 }

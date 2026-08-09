@@ -36,9 +36,21 @@ type Props = {
   nameOf: (colorId: string) => string;
   /** L'écurie suivie, pour traduire un identifiant en nom porté **en jeu**. */
   individuals: Individual[];
+  /**
+   * Prix d'un cycle de fécondité, pour chiffrer ce que les fécondes évitent.
+   * `null` tant qu'aucun carburant n'est tarifé — on compte alors en cycles.
+   */
+  fuelCostPerCycle: number | null;
 };
 
-const BreedingNextMove = ({ loadout, drift, clonings, nameOf, individuals }: Props) => {
+const BreedingNextMove = ({
+  loadout,
+  drift,
+  clonings,
+  nameOf,
+  individuals,
+  fuelCostPerCycle,
+}: Props) => {
   /**
    * Le nom que porte une monture dans le jeu.
    *
@@ -111,6 +123,27 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf, individuals }: Pro
           {loadout.crossings} accouplements · {loadout.used}/{loadout.slots} places
         </span>
       </div>
+
+      {/* Ce que les fécondes dispensent de repayer. Le dire explicitement parce
+          que c'est invisible autrement : la fournée coûte simplement moins, et
+          rien n'indiquerait pourquoi. */}
+      {loadout.cyclesSaved > 0 && (
+        <p className="text-[11px] text-profit">
+          {loadout.cyclesSaved} cycle{loadout.cyclesSaved > 1 ? 's' : ''} de fécondité déjà
+          payé{loadout.cyclesSaved > 1 ? 's' : ''} — ces montures sont fécondes, elles partent
+          sans repasser par les jauges
+          {fuelCostPerCycle !== null && fuelCostPerCycle > 0 && (
+            <>
+              , soit{' '}
+              <strong>
+                {Math.round(loadout.cyclesSaved * fuelCostPerCycle).toLocaleString('fr-FR')} kamas
+              </strong>{' '}
+              de carburant en moins sur cette fournée
+            </>
+          )}
+          .
+        </p>
+      )}
 
       {/* Où j'en suis : la frontière, telle que l'écurie la porte réellement —
           ascendance comprise, donc pas forcément ce que le plan croit tenir. */}

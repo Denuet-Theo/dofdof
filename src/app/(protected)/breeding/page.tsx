@@ -443,6 +443,7 @@ const BreedingPage = () => {
           clonings={clonings}
           nameOf={nameOf}
           individuals={stable.individuals}
+          fuelCostPerCycle={supplies?.fuelCostPerCycle ?? null}
         />
       )}
 

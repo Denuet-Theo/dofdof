@@ -21,12 +21,22 @@
 //! deux graines donnent deux plans également valides. C'est honnête — l'élevage
 //! est un tirage — mais il ne faut pas lire le fichier comme une prophétie.
 //!
+//! ## Les achats portent une date limite, pas une heure d'action
+//!
+//! Un `buy` se date au moment où la chose doit être **là** : les montures avant
+//! qu'on charge l'enclos, le carburant avant que la jauge parte. C'est la seule
+//! date utile — un aller-retour à l'HDV peut demander plusieurs passages, et
+//! savoir « il te faut dix Doré dans deux heures » vaut mieux que l'apprendre
+//! devant l'enclos vide.
+//!
 //! ## Ce qu'on n'émet pas
 //!
 //! Pas d'événement `refuel`. Le modèle ne connaît pas les capacités de cuve :
-//! `economy.toml` porte un prix au point, pas un volume par recharge. Émettre
-//! des rechargements demanderait de les inventer, et un plan qui invente est
-//! pire qu'un plan incomplet.
+//! `economy.toml` porte un prix au point, pas un volume par recharge. On dit
+//! donc **combien de points** il faut par jauge, ce qui est vrai, plutôt qu'un
+//! nombre de recharges, qui serait inventé. L'Extrait de Mangeoire fait
+//! exception : son conditionnement est dans le fichier, donc là on compte des
+//! unités.
 
 use breeding_neat::champion;
 use breeding_neat::neat::Network;
@@ -37,7 +47,8 @@ use breeding_sim::schedule::{
     ABREUVOIR_GATE, GAUGE_NAMES, MANGEOIRE, SERENITY_CLIMB, SERENITY_RETURN, Slot, slots,
 };
 use breeding_sim::search::{Searching, ValueFn};
-use breeding_sim::trees::{Catalog, muldo};
+use breeding_sim::stable::Sex;
+use breeding_sim::trees::{Catalog, ColorId, muldo};
 use serde_json::{Value, json};
 
 /// Les identifiants de jauge côté écran, dans l'ordre de `GAUGE_NAMES`.
@@ -164,6 +175,124 @@ fn label_of(slot: &Slot, level: u16) -> (String, String) {
         name.to_string(),
         format!("{:.0} points. Fenêtre de sérénité imposée.", slot.points),
     )
+}
+
+/// Un nombre en kamas, lisible : « 1,24 M » plutôt que « 1238400 ».
+fn kamas(value: f64) -> String {
+    if value >= 1e6 {
+        format!("{:.2} M", value / 1e6)
+    } else {
+        format!("{:.0} k", value / 1e3)
+    }
+}
+
+/// La liste de courses d'une fournée, datée de l'instant où il faut l'avoir.
+///
+/// Deux lignes séparées et non une : les montures se cherchent une par une à
+/// l'HDV et le carburant s'achète en pile. Les mélanger donnerait une consigne
+/// qu'on ne peut pas cocher à moitié.
+fn shopping_events(
+    catalog: &Catalog,
+    economy: &Economy,
+    strategy: Strategy,
+    batch: &Batch,
+    enclos: usize,
+    id: &str,
+) -> Vec<Value> {
+    let mut events = Vec::new();
+    let at = seconds(batch.at_hours);
+
+    // --- les montures ------------------------------------------------------
+    if !batch.purchases.is_empty() {
+        // Regroupées par couleur et par sexe, dans l'ordre où elles arrivent :
+        // une liste de dix lignes « un Doré mâle » ne se lit pas.
+        let mut grouped: Vec<((ColorId, Sex), usize)> = Vec::new();
+        for &(color, sex) in &batch.purchases {
+            match grouped.iter_mut().find(|(key, _)| *key == (color, sex)) {
+                Some((_, count)) => *count += 1,
+                None => grouped.push(((color, sex), 1)),
+            }
+        }
+        let detail = grouped
+            .iter()
+            .map(|((color, sex), count)| {
+                format!(
+                    "{count} {} {}",
+                    catalog.name(*color),
+                    if *sex == Sex::Male { "mâle" } else { "femelle" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        events.push(json!({
+            "id": format!("{id}-buy-mounts"),
+            "kind": "buy",
+            "at": at,
+            "duration": 0,
+            "label": format!("Acheter {} monture(s)", batch.purchases.len()),
+            "count": batch.purchases.len(),
+            "detail": format!(
+                "{detail}. À avoir avant de charger l'enclos — environ {} au total.",
+                kamas(batch.purchases.len() as f64 * economy.starter_price as f64)
+            ),
+        }));
+    }
+
+    // --- le carburant ------------------------------------------------------
+    let level = economy.level_of(strategy);
+    let placed = slots(economy, strategy.bands, mount_xp_for_level(level));
+    if placed.is_empty() {
+        return events;
+    }
+
+    let mut per_gauge = [0.0f64; 6];
+    for slot in &placed {
+        per_gauge[slot.gauge] += slot.points;
+    }
+    let enclos = enclos.max(1) as f64;
+
+    let mut lines = Vec::new();
+    let mut total = 0.0f64;
+    for gauge in 0..6 {
+        let points = per_gauge[gauge] * enclos;
+        if points <= 0.0 {
+            continue;
+        }
+        let cost = points * economy.gauge_price(gauge, strategy.bands[gauge]);
+        total += cost;
+        // Seule la Mangeoire a un conditionnement connu ; pour les autres on
+        // donne les points, qui sont vrais, plutôt qu'un nombre de recharges,
+        // qui serait inventé.
+        if gauge == MANGEOIRE && economy.mangeoire_points_per_unit > 0.0 {
+            let units = (points / economy.mangeoire_points_per_unit).ceil();
+            lines.push(format!(
+                "Mangeoire : {units:.0} Extrait(s) ({points:.0} pts, {})",
+                kamas(cost)
+            ));
+        } else {
+            lines.push(format!(
+                "{} : {points:.0} pts en bande {} ({})",
+                GAUGE_NAMES[gauge],
+                strategy.bands[gauge],
+                kamas(cost)
+            ));
+        }
+    }
+
+    events.push(json!({
+        "id": format!("{id}-buy-fuel"),
+        "kind": "buy",
+        "at": at,
+        "duration": 0,
+        "label": format!("Carburant — {}", kamas(total)),
+        "detail": format!(
+            "Pour {enclos:.0} enclos. {}. À avoir avant que les jauges partent.",
+            lines.join(" · ")
+        ),
+    }));
+
+    events
 }
 
 /// Les événements d'un enclos pour une fournée.
@@ -334,25 +463,43 @@ fn main() {
                 "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
             }));
         }
-        // Le contrat n'a pas de genre « acheter » : un achat se pose donc en
-        // note. Il ne remontera pas dans l'agenda des gestes, ce qui est un
-        // manque à signaler plutôt qu'à masquer derrière un genre détourné.
-        if batch.purchases > 0 {
-            stable_events.push(json!({
-                "id": format!("ecurie-buy-t{round}"),
-                "kind": "note",
-                "at": at,
-                "duration": 0,
-                "label": format!("Acheter {} monture(s)", batch.purchases),
-                "count": batch.purchases,
-                "detail": "Complément de fournée pris au marché avant de charger.",
-            }));
-        }
     }
     tracks.push(json!({
         "id": "ecurie",
         "label": "Écurie",
         "events": stable_events,
+    }));
+
+    // --- le marché ---------------------------------------------------------
+    //
+    // Piste à part, et pas un geste posé sur l'enclos concerné : une course se
+    // fait une fois, pour tout le parc, et à un moment qu'on choisit. Ce qui est
+    // daté n'est pas l'achat mais la **date limite**.
+    let mut market_events: Vec<Value> = Vec::new();
+    for (round, batch) in batches.iter().enumerate() {
+        if seconds(batch.at_hours) > window {
+            break;
+        }
+        if batch.crossings == 0 {
+            continue;
+        }
+        market_events.extend(shopping_events(
+            &catalog,
+            &economy,
+            genome.strategies[batch.unit.min(1)],
+            batch,
+            if batch.unit == 0 {
+                sync
+            } else {
+                economy.unit_enclos(batch.unit)
+            },
+            &format!("marche-u{}-t{round}", batch.unit),
+        ));
+    }
+    tracks.push(json!({
+        "id": "marche",
+        "label": "Marché",
+        "events": market_events,
     }));
 
     let strategy_line = |unit: usize| {

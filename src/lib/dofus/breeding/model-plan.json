@@ -1500,30 +1500,12 @@
       "events": [
         {
           "at": 0.0,
-          "count": 12,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t0",
-          "kind": "note",
-          "label": "Acheter 12 monture(s)"
-        },
-        {
-          "at": 0.0,
           "count": 3,
           "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
           "duration": 0,
           "id": "ecurie-clone-t1",
           "kind": "clone",
           "label": "Cloner 3 stérile(s)"
-        },
-        {
-          "at": 0.0,
-          "count": 2,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t1",
-          "kind": "note",
-          "label": "Acheter 2 monture(s)"
         },
         {
           "at": 35301.0,
@@ -1535,15 +1517,6 @@
           "label": "Cloner 4 stérile(s)"
         },
         {
-          "at": 35301.0,
-          "count": 6,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t2",
-          "kind": "note",
-          "label": "Acheter 6 monture(s)"
-        },
-        {
           "at": 35800.0,
           "count": 11,
           "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
@@ -1551,15 +1524,6 @@
           "id": "ecurie-clone-t3",
           "kind": "clone",
           "label": "Cloner 11 stérile(s)"
-        },
-        {
-          "at": 35800.0,
-          "count": 2,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t3",
-          "kind": "note",
-          "label": "Acheter 2 monture(s)"
         },
         {
           "at": 70602.0,
@@ -1571,15 +1535,6 @@
           "label": "Cloner 5 stérile(s)"
         },
         {
-          "at": 70602.0,
-          "count": 14,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t4",
-          "kind": "note",
-          "label": "Acheter 14 monture(s)"
-        },
-        {
           "at": 71601.0,
           "count": 12,
           "detail": "Une stérile ne vaut plus rien tant qu'on ne la clone pas.",
@@ -1587,19 +1542,118 @@
           "id": "ecurie-clone-t5",
           "kind": "clone",
           "label": "Cloner 12 stérile(s)"
-        },
-        {
-          "at": 71601.0,
-          "count": 3,
-          "detail": "Complément de fournée pris au marché avant de charger.",
-          "duration": 0,
-          "id": "ecurie-buy-t5",
-          "kind": "note",
-          "label": "Acheter 3 monture(s)"
         }
       ],
       "id": "ecurie",
       "label": "Écurie"
+    },
+    {
+      "events": [
+        {
+          "at": 0.0,
+          "count": 12,
+          "detail": "1 Muldo Pourpre femelle, 1 Muldo Pourpre mâle, 6 Muldo Ébène femelle, 1 Muldo Doré femelle, 2 Muldo Doré mâle, 1 Muldo Orchidée femelle. À avoir avant de charger l'enclos — environ 12 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t0-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 12 monture(s)"
+        },
+        {
+          "at": 0.0,
+          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t0-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 277 k"
+        },
+        {
+          "at": 0.0,
+          "count": 2,
+          "detail": "1 Muldo Pourpre femelle, 1 Muldo Orchidée femelle. À avoir avant de charger l'enclos — environ 2 k au total.",
+          "duration": 0,
+          "id": "marche-u1-t1-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 2 monture(s)"
+        },
+        {
+          "at": 0.0,
+          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u1-t1-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 67 k"
+        },
+        {
+          "at": 35301.0,
+          "count": 6,
+          "detail": "2 Muldo Indigo femelle, 2 Muldo Doré femelle, 1 Muldo Doré mâle, 1 Muldo Pourpre femelle. À avoir avant de charger l'enclos — environ 6 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t2-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 6 monture(s)"
+        },
+        {
+          "at": 35301.0,
+          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t2-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 277 k"
+        },
+        {
+          "at": 35800.0,
+          "count": 2,
+          "detail": "2 Muldo Orchidée femelle. À avoir avant de charger l'enclos — environ 2 k au total.",
+          "duration": 0,
+          "id": "marche-u1-t3-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 2 monture(s)"
+        },
+        {
+          "at": 35800.0,
+          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u1-t3-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 67 k"
+        },
+        {
+          "at": 70602.0,
+          "count": 14,
+          "detail": "2 Muldo Indigo mâle, 2 Muldo Orchidée mâle, 4 Muldo Indigo femelle, 2 Muldo Pourpre femelle, 2 Muldo Orchidée femelle, 1 Muldo Doré mâle, 1 Muldo Doré femelle. À avoir avant de charger l'enclos — environ 14 k au total.",
+          "duration": 0,
+          "id": "marche-u0-t4-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 14 monture(s)"
+        },
+        {
+          "at": 70602.0,
+          "detail": "Pour 5 enclos. Baffeur : 50000 pts en bande 0 (1 k) · Caresseur : 25005 pts en bande 0 (1 k) · Foudroyeur : 100000 pts en bande 1 (54 k) · Dragofesse : 100000 pts en bande 1 (55 k) · Abreuvoir : 100000 pts en bande 1 (108 k) · Mangeoire : 35 Extrait(s) (102183 pts, 58 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u0-t4-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 277 k"
+        },
+        {
+          "at": 71601.0,
+          "count": 3,
+          "detail": "1 Muldo Pourpre mâle, 1 Muldo Indigo femelle, 1 Muldo Ébène mâle. À avoir avant de charger l'enclos — environ 3 k au total.",
+          "duration": 0,
+          "id": "marche-u1-t5-buy-mounts",
+          "kind": "buy",
+          "label": "Acheter 3 monture(s)"
+        },
+        {
+          "at": 71601.0,
+          "detail": "Pour 1 enclos. Baffeur : 10000 pts en bande 1 (1 k) · Caresseur : 5001 pts en bande 3 (14 k) · Foudroyeur : 20000 pts en bande 1 (11 k) · Dragofesse : 20000 pts en bande 0 (6 k) · Abreuvoir : 20000 pts en bande 0 (25 k) · Mangeoire : 2 Extrait(s) (5078 pts, 10 k). À avoir avant que les jauges partent.",
+          "duration": 0,
+          "id": "marche-u1-t5-buy-fuel",
+          "kind": "buy",
+          "label": "Carburant — 67 k"
+        }
+      ],
+      "id": "marche",
+      "label": "Marché"
     }
   ],
   "version": 1

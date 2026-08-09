@@ -266,6 +266,25 @@ impl Prices {
         };
         economy.overhead_hours = overhead_hours;
         economy.mangeoire_per_point = mangeoire.unwrap_or(0.0);
+        // La taille d'une unité d'Extrait, gardée telle quelle.
+        //
+        // Le calcul ci-dessus la divise aussitôt en prix au point, ce qui suffit
+        // pour arbitrer mais pas pour faire une liste de courses : on n'achète
+        // pas 20 460 points, on achète sept Extraits. Absente si le fichier
+        // donne directement `prix_par_point`, et on ne devine pas le
+        // conditionnement dans ce cas.
+        economy.mangeoire_points_per_unit = root
+            .get("mangeoire")
+            .and_then(|table| table.get("points_par_unite"))
+            .and_then(toml::Value::as_float)
+            .or_else(|| {
+                root.get("mangeoire")
+                    .and_then(|table| table.get("points_par_unite"))
+                    .and_then(toml::Value::as_integer)
+                    .map(|points| points as f64)
+            })
+            .filter(|points| *points > 0.0)
+            .unwrap_or(0.0);
         economy.mangeoire_per_mount = root
             .get("mangeoire")
             .and_then(|table| table.get("par_monture"))

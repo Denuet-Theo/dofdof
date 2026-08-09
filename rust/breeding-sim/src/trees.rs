@@ -114,7 +114,16 @@ fn read_family<'a>(root: &'a Value, family_id: &str) -> Result<Vec<RawColor<'a>>
             .get("id")
             .and_then(Value::as_str)
             .ok_or_else(|| format!("{family_id}: une couleur sans `id`"))?;
-        let name = color.get("name").and_then(Value::as_str).unwrap_or(slug);
+        // `itemName` porte le nom de l'objet tel qu'il s'écrit en jeu — « Muldo
+        // Doré » — là où `name` est une forme dépouillée de ses accents
+        // (« Dore »). C'est `itemName` qu'on tape dans la recherche de l'HDV,
+        // donc c'est lui qu'une liste de courses doit dire. Il manque sur les
+        // couleurs sans objet correspondant, d'où le repli.
+        let name = color
+            .get("itemName")
+            .and_then(Value::as_str)
+            .or_else(|| color.get("name").and_then(Value::as_str))
+            .unwrap_or(slug);
         let generation = color
             .get("generation")
             .and_then(Value::as_u64)
@@ -262,6 +271,16 @@ impl Catalog {
     #[inline]
     pub fn slug(&self, id: ColorId) -> &str {
         &self.colors[id as usize].slug
+    }
+
+    /// Le nom affiché, celui qu'on lit dans le jeu et à l'HDV.
+    ///
+    /// Le slug suffit partout où le code se parle à lui-même ; devant une liste
+    /// de courses, `aigue_marine_dore` n'est pas ce qu'on tape dans la barre de
+    /// recherche.
+    #[inline]
+    pub fn name(&self, id: ColorId) -> &str {
+        &self.colors[id as usize].name
     }
 
     #[inline]

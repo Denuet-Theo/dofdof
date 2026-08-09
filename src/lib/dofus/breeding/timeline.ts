@@ -59,7 +59,16 @@
 
 /* ------------------------------------------------------------------ contrat */
 
-/** Version du contrat. Un plan d'une autre version se refuse plutôt que de se deviner. */
+/**
+ * Version du contrat. Un plan d'une autre version se refuse plutôt que de se
+ * deviner.
+ *
+ * Ajouter un **genre** ne la fait pas bouger, et c'est délibéré. La version
+ * garde un écran de lire un plan qu'il ne comprend pas ; or un genre en plus ne
+ * casse que le sens inverse — un vieil écran devant un plan neuf — et les deux
+ * partent dans le même déploiement. La bousculer, en revanche, ferait refuser
+ * le plan déjà enregistré dans le compte du joueur, qui n'a rien demandé.
+ */
 export const TIMELINE_VERSION = 1;
 
 /**
@@ -100,16 +109,26 @@ export const GAUGE_LABELS: Record<GaugeId, string> = {
  * Confondre les deux était le défaut d'une première version : une barre de trois
  * heures se lisait comme « trois heures de manipulation ».
  */
-export const EVENT_KINDS = ['gauge', 'refuel', 'collect', 'mate', 'clone', 'note'] as const;
+export const EVENT_KINDS = ['gauge', 'refuel', 'collect', 'mate', 'clone', 'buy', 'note'] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-/** Les genres qui demandent une présence : ceux que l'agenda égrène. */
+/**
+ * Les genres qui demandent une présence : ceux que l'agenda égrène.
+ *
+ * `buy` en fait partie, et c'est le seul dont le `at` n'est pas l'instant où on
+ * agit mais **la date limite** : il faut avoir les montures et le carburant
+ * *avant* de charger l'enclos, pas au moment où on le charge. Le compte à
+ * rebours de l'agenda se lit donc « il reste tant » et non « ça commence dans
+ * tant » — c'est la seule lecture utile, puisqu'un achat à l'HDV peut demander
+ * plusieurs passages.
+ */
 const ACTIONABLE: ReadonlySet<EventKind> = new Set<EventKind>([
   'refuel',
   'collect',
   'mate',
   'clone',
+  'buy',
 ]);
 
 export const isActionable = (kind: EventKind) => ACTIONABLE.has(kind);

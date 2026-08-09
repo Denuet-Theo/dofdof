@@ -11,6 +11,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  ShoppingCart,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -83,6 +84,7 @@ type Props = { timeline: BreedingTimelineState };
 
 const KIND_ICON: Record<EventKind, typeof Fuel> = {
   refuel: Fuel,
+  buy: ShoppingCart,
   collect: Egg,
   mate: Heart,
   clone: Dna,
@@ -93,6 +95,7 @@ const KIND_ICON: Record<EventKind, typeof Fuel> = {
 /** La couleur d'un geste, prise dans les jetons de l'app. */
 const KIND_TONE: Record<EventKind, string> = {
   refuel: 'text-kamas',
+  buy: 'text-kamas',
   collect: 'text-gain',
   mate: 'text-info',
   clone: 'text-craft',
@@ -109,6 +112,7 @@ const KIND_TONE: Record<EventKind, string> = {
  */
 const KIND_DOT: Record<EventKind, string> = {
   refuel: 'bg-kamas',
+  buy: 'bg-kamas',
   collect: 'bg-gain',
   mate: 'bg-info',
   clone: 'bg-craft',
@@ -154,6 +158,10 @@ const gaugeFill = (event: PlacedEvent): string => {
  */
 const KIND_SIZE: Record<EventKind, string> = {
   collect: 'w-2.5 h-2.5',
+  // Aussi gros que la récupération, parce que c'est le seul autre événement
+  // qu'on peut vraiment rater : une jauge en retard se rattrape, une fournée
+  // qu'on n'a pas de quoi charger est une fournée perdue.
+  buy: 'w-2.5 h-2.5',
   mate: 'w-2 h-2',
   clone: 'w-2 h-2',
   refuel: 'w-1.5 h-1.5',
@@ -432,6 +440,22 @@ const Agenda = ({
                 {date ? formatWallClock(date) : '—'}
               </span>
             </div>
+
+            {/* La liste de courses s'affiche, elle ne se survole pas.
+                Ailleurs le `detail` explique un geste qu'on comprend déjà par
+                son libellé, et le tooltip suffit ; ici il **est** la consigne —
+                « acheter 6 montures » n'envoie personne à l'HDV, « 2 Muldo
+                Indigo femelle, 2 Muldo Doré femelle » oui. Et c'est le seul
+                genre dont l'échéance se prépare : il faut pouvoir la lire sans
+                avoir la souris sur la ligne. */}
+            {event.kind === 'buy' && event.detail && (
+              <p
+                className={`pl-[6.5rem] pr-2 pb-1 text-[11px] leading-snug text-dark-500
+                  ${past ? 'opacity-45' : ''}`}
+              >
+                {event.detail}
+              </p>
+            )}
           </div>
         );
       })}

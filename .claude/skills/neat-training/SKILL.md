@@ -169,10 +169,17 @@ own `parsePlan` from `src/lib/dofus/breeding/timeline.ts`, so a field renamed on
 either side fails loudly instead of rendering an empty ribbon. It caught a real
 overrun the first time it ran.
 
-Two things the emitted plan deliberately does not contain, so don't "fix" them
-by inventing values: **refuel events** (the economy has a price per point, no
-tank capacity) and a **buy** event kind (the contract has none, so purchases
-land as notes and stay out of the agenda).
+One thing the emitted plan deliberately does not contain, so don't "fix" it by
+inventing values: **refuel events**. The economy has a price per point and no
+tank capacity, so the plan says how many *points* each gauge needs — which is
+true — rather than a number of refills, which would not be. The Mangeoire is
+the exception: `points_par_unite` is in `economy.toml`, so there it counts
+Extraits.
+
+`buy` events carry a **deadline**, not an action time: `at` is the moment the
+thing must already be there. Mounts are named with `itemName` from `trees.json`
+("Muldo Doré"), not `name` ("Dore") — the former is what you type into the
+market search.
 
 A plan belongs to its `--seed`: the counts come from one game that actually ran.
 The durations and the ordering carry the model's decision; the per-gesture

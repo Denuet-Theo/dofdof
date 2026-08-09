@@ -182,6 +182,10 @@ pub struct Economy {
     pub bands: [Band; 4],
     pub mangeoire_per_point: f64,
     pub mangeoire_per_mount: bool,
+    /// Points d unite d Extrait de Mangeoire, 0 si le fichier ne le dit pas.
+    /// Sert a la liste de courses, pas au calcul : le prix au point suffit pour
+    /// arbitrer, mais on achete des Extraits, pas des points.
+    pub mangeoire_points_per_unit: f64,
     pub optimakina: [i64; 11],
     pub optimakina_bonus: f64,
     /// Kamas nets qu'un géneton rapporte, taxe HDV déduite.
@@ -227,6 +231,7 @@ impl Default for Economy {
             bands: [Band::default(); 4],
             mangeoire_per_point: 0.0,
             mangeoire_per_mount: false,
+            mangeoire_points_per_unit: 0.0,
             optimakina: [0; 11],
             optimakina_bonus: 0.1,
             geneton_value: 0.0,
@@ -903,7 +908,7 @@ fn apply(
 /// 14 h. Pour émettre le plan que l'écran attend, il faut le déroulé — quelle
 /// unité, à quelle heure, avec combien de croisements et de clonages. C'est ce
 /// que la boucle calcule déjà et agrégeait aussitôt.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Batch {
     pub unit: usize,
     /// Heures depuis le début de la partie.
@@ -912,7 +917,10 @@ pub struct Batch {
     pub hours: f64,
     pub crossings: usize,
     pub clonings: usize,
-    pub purchases: usize,
+    /// Les montures à acheter, **nommées**. Un compte ne suffit pas pour aller
+    /// à l'HDV : « acheter trois montures » n'est pas une consigne, « acheter
+    /// deux Doré mâles et une Amande femelle » en est une.
+    pub purchases: Vec<(ColorId, Sex)>,
     pub sacrifices: usize,
     pub births: usize,
 }
@@ -1055,7 +1063,7 @@ fn run(
                         hours,
                         crossings: applied.crossings,
                         clonings: applied.clonings,
-                        purchases: applied.purchases,
+                        purchases: plan.purchases.clone(),
                         sacrifices: applied.sacrifices,
                         births: applied.births.len(),
                     });

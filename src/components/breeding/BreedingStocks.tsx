@@ -5,7 +5,8 @@ import { Boxes, Check, Coins, Plus, Search, Trash2, Warehouse } from 'lucide-rea
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingAddMount from '@/components/breeding/BreedingAddMount';
-import { parseGaugeInfo } from '@/lib/utils/gauges';
+import CopyableIcon from '@/components/ui/CopyableIcon';
+import { parseGaugeInfo, type GaugeInfo } from '@/lib/utils/gauges';
 import {
   MOUNT_STATUS_LABEL,
   mountStatus,
@@ -108,12 +109,62 @@ const countInput = (
   />
 );
 
+/** Un bouton de filtre : sélectionné ou non, et rien d'autre à dire. */
+const chip = (label: string, active: boolean, onClick: () => void, title?: string) => (
+  <button
+    key={label}
+    type="button"
+    onClick={onClick}
+    title={title}
+    className={`px-2 py-0.5 rounded-lg border text-[10px] transition-all cursor-pointer ${
+      active
+        ? 'bg-kamas/15 border-kamas/40 text-kamas'
+        : 'bg-dark-800/60 border-dark-700/50 text-dark-400 hover:border-dark-500'
+    }`}
+  >
+    {label}
+  </button>
+);
+
 /** Ce que chaque état interdit — la même phrase qu'à la saisie, en infobulle. */
 const STATUS_HINT: Record<MountStatus, string> = {
   fertile: 'Disponible : elle peut être chargée dans une fournée.',
   feconde: 'Accouplée, elle porte. Indisponible, mais un poulain arrive — et elle ne se clone pas.',
   sterile: 'Épuisée : il ne lui reste que le clonage et l’extraction.',
 };
+
+/**
+ * Le rang d'un carburant : Extrait, Philtre, Potion, Élixir.
+ *
+ * Il ne se lit pas sur le nom, qui varie d'une jauge à l'autre, mais sur le
+ * **plafond** que la description annonce — « sans dépasser 70 000 ». C'est le
+ * même chiffre qui décide du débit de transfert (voir `TRANSFER_TIERS`), donc le
+ * rang n'est pas une étiquette : c'est ce qui dit à quelle vitesse la jauge
+ * montera, et pourquoi le point coûte plus cher en haut.
+ *
+ * L'Élixir se reconnaît à l'absence de clause : il n'a pas de plafond, donc
+ * `parseGaugeInfo` recopie la recharge dans `capAmount`. On teste ce cas
+ * d'abord — un plafond égal à la recharge ne peut pas être un vrai plafond.
+ */
+type FuelRank = 'extrait' | 'philtre' | 'potion' | 'elixir';
+
+const FUEL_RANKS: { id: FuelRank; label: string; hint: string }[] = [
+  { id: 'extrait', label: 'Extrait', hint: 'jusqu’à 40 000 — 1 pt/s' },
+  { id: 'philtre', label: 'Philtre', hint: 'jusqu’à 70 000 — 2 pt/s' },
+  { id: 'potion', label: 'Potion', hint: 'jusqu’à 90 000 — 3 pt/s' },
+  { id: 'elixir', label: 'Élixir', hint: 'sans plafond — 4 pt/s' },
+];
+
+const RANK_OF_CAP = new Map<number, FuelRank>([
+  [40_000, 'extrait'],
+  [70_000, 'philtre'],
+  [90_000, 'potion'],
+]);
+
+const fuelRank = (info: GaugeInfo): FuelRank =>
+  info.capAmount === info.rechargeAmount
+    ? 'elixir'
+    : (RANK_OF_CAP.get(info.capAmount) ?? 'elixir');
 
 const STATUS_TONE: Record<MountStatus, string> = {
   fertile: 'bg-profit/15 border-profit/40 text-profit',
@@ -142,6 +193,9 @@ const BreedingStocks = ({
   const [adding, setAdding] = useState(false);
   const [mountQuery, setMountQuery] = useState('');
   const [fuelQuery, setFuelQuery] = useState('');
+  /** Les deux axes sur lesquels on cherche un carburant : sa jauge et son rang. */
+  const [gaugeFilter, setGaugeFilter] = useState<string | null>(null);
+  const [rankFilter, setRankFilter] = useState<FuelRank | null>(null);
   const [budget, setBudget] = useState(String(settings.kamas_available));
   const [enclos, setEnclos] = useState(String(settings.enclos_count));
   const [savedBudget, setSavedBudget] = useState(false);
@@ -233,28 +287,56 @@ const BreedingStocks = ({
     [bulk, nameOf]
   );
 
-  /** Les carburants d'enclos, groupés par jauge et ordonnés par palier. */
+  /** Tous les carburants lisibles, avec leur jauge et leur rang, avant filtrage. */
+  const allFuels = useMemo(
+    () =>
+      fuelItems.flatMap((item) => {
+        const info = parseGaugeInfo(item);
+        if (!info || info.rechargeAmount <= 0) return [];
+        return [{ item, info, rank: fuelRank(info) }];
+      }),
+    [fuelItems]
+  );
+
+  /** Les jauges et les rangs réellement présents, pour ne proposer que du vivant. */
+  const gaugesPresent = useMemo(
+    () => [...new Set(allFuels.map((fuel) => fuel.info.gaugeName))].sort((a, b) => a.localeCompare(b)),
+    [allFuels]
+  );
+  const ranksPresent = useMemo(
+    () =>
+      FUEL_RANKS.filter((rank) => allFuels.some((fuel) => fuel.rank === rank.id)),
+    [allFuels]
+  );
+
+  /** Les carburants retenus, groupés par jauge et ordonnés par palier. */
   const fuelsByGauge = useMemo(() => {
     const needle = fuelQuery.trim().toLowerCase();
-    const groups = new Map<string, { item: DofusDBItem; recharge: number }[]>();
+    const groups = new Map<string, typeof allFuels>();
 
-    for (const item of fuelItems) {
-      const info = parseGaugeInfo(item);
-      if (!info || info.rechargeAmount <= 0) continue;
+    for (const fuel of allFuels) {
+      if (gaugeFilter && fuel.info.gaugeName !== gaugeFilter) continue;
+      if (rankFilter && fuel.rank !== rankFilter) continue;
 
-      const name = item.name?.fr ?? '';
-      if (needle && !name.toLowerCase().includes(needle) && !info.gaugeName.toLowerCase().includes(needle)) {
+      const name = fuel.item.name?.fr ?? '';
+      if (
+        needle &&
+        !name.toLowerCase().includes(needle) &&
+        !fuel.info.gaugeName.toLowerCase().includes(needle)
+      ) {
         continue;
       }
 
-      const group = groups.get(info.gaugeName) ?? [];
-      group.push({ item, recharge: info.rechargeAmount });
-      groups.set(info.gaugeName, group);
+      const group = groups.get(fuel.info.gaugeName) ?? [];
+      group.push(fuel);
+      groups.set(fuel.info.gaugeName, group);
     }
 
-    for (const group of groups.values()) group.sort((a, b) => a.recharge - b.recharge);
+    for (const group of groups.values()) {
+      group.sort((a, b) => a.info.rechargeAmount - b.info.rechargeAmount);
+    }
     return [...groups].sort(([a], [b]) => a.localeCompare(b));
-  }, [fuelItems, fuelQuery]);
+  }, [allFuels, fuelQuery, gaugeFilter, rankFilter]);
 
   /**
    * Le meilleur prix au point de chaque jauge, pour signaler le carburant que
@@ -263,8 +345,9 @@ const BreedingStocks = ({
   const bestPerPoint = useMemo(() => {
     const best = new Map<string, number>();
     for (const [gauge, fuels] of fuelsByGauge) {
-      for (const { item, recharge } of fuels) {
+      for (const { item, info } of fuels) {
         const price = itemPrices.get(item.id) ?? 0;
+        const recharge = info.rechargeAmount;
         if (price <= 0 || recharge <= 0) continue;
         const perPoint = price / recharge;
         const current = best.get(gauge);
@@ -641,6 +724,35 @@ const BreedingStocks = ({
                 />
               </div>
             </div>
+
+            {/* Deux axes, parce qu'on cherche de deux façons : « je remplis le
+                Foudroyeur » et « je ne prends que des Élixirs ». Les cent vingt
+                carburants sont le produit des deux, et une seule zone de texte
+                obligeait à connaître le nom exact de ce qu'on cherchait. */}
+            <div className="space-y-1.5 mb-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-dark-500 w-10">Jauge</span>
+                {chip('Toutes', gaugeFilter === null, () => setGaugeFilter(null))}
+                {gaugesPresent.map((gauge) =>
+                  chip(gauge, gaugeFilter === gauge, () =>
+                    setGaugeFilter(gaugeFilter === gauge ? null : gauge)
+                  )
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-dark-500 w-10">Rang</span>
+                {chip('Tous', rankFilter === null, () => setRankFilter(null))}
+                {ranksPresent.map((rank) =>
+                  chip(
+                    rank.label,
+                    rankFilter === rank.id,
+                    () => setRankFilter(rankFilter === rank.id ? null : rank.id),
+                    rank.hint
+                  )
+                )}
+              </div>
+            </div>
+
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
               {fuelsByGauge.map(([gauge, fuels]) => (
                 <div key={gauge}>
@@ -655,9 +767,10 @@ const BreedingStocks = ({
                     )}
                   </p>
                   <div className="space-y-1">
-                    {fuels.map(({ item, recharge }) => {
+                    {fuels.map(({ item, info, rank }) => {
                       const name = item.name?.fr ?? String(item.id);
                       const price = itemPrices.get(item.id) ?? 0;
+                      const recharge = info.rechargeAmount;
                       // Le prix au point est la seule mesure qui compare deux
                       // paliers : un Élixir verse huit fois plus qu'un Extrait,
                       // donc leurs prix bruts ne se comparent pas.
@@ -669,7 +782,18 @@ const BreedingStocks = ({
                           key={item.id}
                           className="flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-dark-800/40"
                         >
+                          {/* L'icône se clique et copie le nom : c'est avec lui
+                              qu'on cherche l'item en HDV, comme partout
+                              ailleurs dans l'app. */}
+                          <CopyableIcon src={item.img} name={name} size="sm" toast={false} />
                           <span className="text-xs text-dark-200 flex-1 truncate">{name}</span>
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-700/60
+                              text-dark-400 shrink-0"
+                            title={FUEL_RANKS.find((entry) => entry.id === rank)?.hint}
+                          >
+                            {FUEL_RANKS.find((entry) => entry.id === rank)?.label}
+                          </span>
                           <span className="text-[10px] text-dark-500 shrink-0">
                             {recharge.toLocaleString('fr-FR')} pts / unité
                           </span>

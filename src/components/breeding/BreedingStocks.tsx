@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { Boxes, Check, Coins, Plus, Search, Trash2 } from 'lucide-react';
+import { Boxes, Check, Coins, Plus, Search, Trash2, Warehouse } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingAddMount from '@/components/breeding/BreedingAddMount';
@@ -143,6 +143,7 @@ const BreedingStocks = ({
   const [mountQuery, setMountQuery] = useState('');
   const [fuelQuery, setFuelQuery] = useState('');
   const [budget, setBudget] = useState(String(settings.kamas_available));
+  const [enclos, setEnclos] = useState(String(settings.enclos_count));
   const [savedBudget, setSavedBudget] = useState(false);
 
   const byId = useMemo(() => new Map(colors.map((color) => [color.id, color])), [colors]);
@@ -284,14 +285,26 @@ const BreedingStocks = ({
     <div className="glass rounded-2xl">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            // Les brouillons se calent sur les réglages **à l'ouverture** plutôt
+            // que par un effet : les réglages arrivent du réseau après le
+            // premier rendu, et les recopier à chaque changement écraserait une
+            // saisie en cours.
+            if (!value) {
+              setBudget(String(settings.kamas_available));
+              setEnclos(String(settings.enclos_count));
+            }
+            return !value;
+          })
+        }
         className="w-full flex items-center gap-2 px-5 py-4 cursor-pointer text-left"
       >
         <Boxes size={16} className="text-kamas" />
         <span className="text-sm font-semibold text-dark-200">Mes stocks</span>
         <span className="text-xs text-dark-500 ml-2 truncate">
           {ownedMounts} monture{ownedMounts > 1 ? 's' : ''} · {ownedFuels} carburant
-          {ownedFuels > 1 ? 's' : ''} ·{' '}
+          {ownedFuels > 1 ? 's' : ''} · {settings.enclos_count} enclos ·{' '}
           {settings.kamas_available > 0
             ? `${settings.kamas_available.toLocaleString('fr-FR')} kamas`
             : 'budget non renseigné'}
@@ -303,13 +316,34 @@ const BreedingStocks = ({
 
       {open && (
         <div className="px-5 pb-5 space-y-6 border-t border-dark-700/40 pt-4">
-          {/* Kamas */}
-          <div>
-            <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
-              <Coins size={13} className="text-kamas" />
-              Kamas engageables
-            </label>
-            <div className="flex items-center gap-3">
+          {/* Le parc et la caisse : les deux seules choses qu'on possède sans
+              qu'elles soient une monture ou un carburant, et les deux qui
+              bornent ce qu'un plan peut proposer. Le panneau « Mon élevage » qui
+              les portait avec cinq autres réglages a disparu : ce que le modèle
+              décide maintenant, il ne sert plus à rien de le paramétrer. */}
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
+                <Warehouse size={13} className="text-kamas" />
+                Enclos possédés
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={enclos}
+                onChange={(event) => setEnclos(event.target.value)}
+                className="w-28 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                  text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
+              />
+              <p className="text-[10px] text-dark-600 mt-1">10 places, 2 jauges chacun</p>
+            </div>
+
+            <div>
+              <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
+                <Coins size={13} className="text-kamas" />
+                Kamas engageables
+              </label>
               <input
                 type="number"
                 min={0}
@@ -319,11 +353,24 @@ const BreedingStocks = ({
                 className="w-48 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
                   text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
               />
+              <p className="text-[10px] text-dark-600 mt-1">
+                À 0, aucune contrainte n&apos;est appliquée.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pb-6">
               <Button
                 size="sm"
                 onClick={async () => {
-                  const value = Math.max(0, Number(budget) || 0);
-                  if (await onSaveSettings({ ...settings, kamas_available: value })) {
+                  // Les deux partent ensemble : ils vivent dans la même ligne de
+                  // réglages, et deux boutons côte à côte laisseraient croire
+                  // qu'oublier l'un annule l'autre.
+                  const saved = await onSaveSettings({
+                    ...settings,
+                    kamas_available: Math.max(0, Number(budget) || 0),
+                    enclos_count: Math.max(0, Math.min(20, Number(enclos) || 0)),
+                  });
+                  if (saved) {
                     setSavedBudget(true);
                     setTimeout(() => setSavedBudget(false), 2000);
                   }
@@ -337,11 +384,12 @@ const BreedingStocks = ({
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-dark-600 mt-1">
-              Les plans qui dépassent ce budget sont signalés, avec l&apos;étape où
-              l&apos;argent manque. À 0, aucune contrainte n&apos;est appliquée.
-            </p>
           </div>
+          <p className="text-[10px] text-dark-600 -mt-4">
+            Les plans qui dépassent le budget sont signalés, avec l&apos;étape où l&apos;argent
+            manque. Le nombre d&apos;enclos traduit les heures d&apos;enclos d&apos;un plan en
+            délai réel — c&apos;est lui qui décide de la largeur d&apos;une fournée.
+          </p>
 
           {/* Montures */}
           <div>

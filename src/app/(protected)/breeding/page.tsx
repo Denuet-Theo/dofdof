@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
 import ColorRow from '@/components/breeding/ColorRow';
-import BreedingSettings from '@/components/breeding/BreedingSettings';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
@@ -472,8 +471,6 @@ const BreedingPage = () => {
           faire maintenant ». La faire descendre sous les réglages et les stocks
           obligerait à défiler pour lire un compte à rebours. */}
       <BreedingTimeline timeline={timeline} />
-
-      <BreedingSettings settings={settings} onSave={saveSettings} />
 
       <BreedingStocks
         // Le catalogue et non les lignes de l'écran : l'écurie a besoin des

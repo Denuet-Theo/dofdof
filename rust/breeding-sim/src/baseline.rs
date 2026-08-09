@@ -46,7 +46,7 @@
 
 use std::collections::HashMap;
 
-use crate::economy::{BatchPlan, BatchView, Economy, Policy, Rng};
+use crate::economy::{Economy, Policy, Rng, Strategy, UnitPlan, UnitView};
 use crate::pairing::{MateSignature, PairOutlook, pair_outlook};
 use crate::stable::{Sex, Stable};
 use crate::trees::{Catalog, ColorId};
@@ -96,7 +96,7 @@ pub struct Scoring<'a> {
 
 impl<'a> Scoring<'a> {
     pub fn new(catalog: &'a Catalog, economy: &'a Economy, objective: Objective) -> Self {
-        let crossings = economy.crossings_per_batch.max(1) as f64;
+        let crossings = economy.unit_crossings(0).max(1) as f64;
         Self {
             catalog,
             economy,
@@ -481,7 +481,7 @@ impl Greedy {
 /// Sacrifie des stériles, **les mieux dotés d'abord**, jusqu'à pouvoir payer.
 /// Les mieux dotés parce que ça minimise le nombre de têtes converties ; les
 /// stériles seulement parce qu'ils ne peuvent plus rien produire.
-fn fund_the_batch(view: &BatchView<'_>, needed: i64) -> Vec<usize> {
+fn fund_the_batch(view: &UnitView<'_>, needed: i64) -> Vec<usize> {
     if view.kamas >= needed {
         return Vec::new();
     }
@@ -510,7 +510,7 @@ fn fund_the_batch(view: &BatchView<'_>, needed: i64) -> Vec<usize> {
 }
 
 /// Apparie les stériles clonables : même génération, même signature d'abord.
-fn clone_pairs(view: &BatchView<'_>) -> Vec<[usize; 2]> {
+fn clone_pairs(view: &UnitView<'_>) -> Vec<[usize; 2]> {
     let by_generation = view.stable.steriles_by_generation(view.catalog);
     let mut pairs = Vec::new();
 
@@ -556,7 +556,14 @@ impl Policy for Greedy {
         "glouton"
     }
 
-    fn plan(&mut self, view: &BatchView<'_>, _rng: &mut Rng) -> BatchPlan {
+    /// Le glouton ne règle aucun levier : bande la moins chère, niveau par
+    /// défaut, aucune Optimakina, sur toutes les unités. C'est ce qui le garde
+    /// comparable d'une économie à l'autre.
+    fn strategy(&self, _unit: usize) -> Strategy {
+        Strategy::default()
+    }
+
+    fn plan(&mut self, view: &UnitView<'_>, _rng: &mut Rng) -> UnitPlan {
         let steriles = view.stable.mounts.iter().filter(|m| !m.fertile).count();
 
         // Une fournée de recyclage : gratuite, et c'est le seul moyen de rendre
@@ -569,7 +576,7 @@ impl Policy for Greedy {
         };
 
         let scoring = Scoring::new(view.catalog, view.economy, self.objective);
-        let capacity = view.economy.crossings_per_batch * 2;
+        let capacity = view.capacity * 2;
         let mut crossings = ranked_couples(&scoring, view.stable, capacity);
 
         // Les montures engagées dans un clonage ne peuvent pas servir ailleurs
@@ -617,7 +624,7 @@ impl Policy for Greedy {
         if view.kamas + raised < needed {
             // Insolvable : on ne lance rien plutôt que de proposer un plan que
             // le moteur refusera. Une fournée vide est gratuite.
-            return BatchPlan {
+            return UnitPlan {
                 clonings,
                 ..Default::default()
             };
@@ -630,16 +637,11 @@ impl Policy for Greedy {
             .filter(|[a, b]| !sacrificed.contains(a) && !sacrificed.contains(b))
             .collect();
 
-        BatchPlan {
+        UnitPlan {
             purchases,
             clonings,
             crossings,
             sacrifices,
-            // Le glouton ne règle aucun levier : bande la moins chère, niveau par
-            // défaut, aucune Optimakina. C'est ce qui le garde comparable aux
-            // mesures publiées avant que les leviers existent.
-            bands: [0; 6],
-            level: view.economy.mount_level,
             optimakina: Vec::new(),
         }
     }
@@ -693,9 +695,9 @@ mod tests {
         let stable = starting_stable(&catalog, &economy, &Draws::new(2));
         let scoring = Scoring::new(&catalog, &economy, Objective::Gen10Balanced);
 
-        let couples = ranked_couples(&scoring, &stable, economy.crossings_per_batch * 2);
+        let couples = ranked_couples(&scoring, &stable, economy.unit_crossings(0) * 2);
         assert!(!couples.is_empty(), "cent montures doivent s'apparier");
-        assert!(couples.len() <= economy.crossings_per_batch);
+        assert!(couples.len() <= economy.unit_crossings(0));
 
         let mut seen = std::collections::HashSet::new();
         for [male, female] in &couples {
@@ -721,9 +723,9 @@ mod tests {
                 seed,
             );
             assert_eq!(
-                outcome.infeasible_batches, 0,
+                outcome.rejected_loads, 0,
                 "graine {seed} : {} fournées refusées",
-                outcome.infeasible_batches
+                outcome.rejected_loads
             );
             assert!(outcome.score > 0);
         }

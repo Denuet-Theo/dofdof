@@ -12,7 +12,7 @@ fn main() {
     let economy = Prices::load_default().expect("economy.toml").economy;
     let budget = economy.horizon_hours.unwrap_or(300.0);
     let overhead = economy.overhead_hours;
-    let enclos = economy.enclos_per_batch as f64;
+    let enclos = economy.sync_enclos as f64;
 
     println!("Budget {budget:.0} h, {:.0} min entre fournées, {enclos:.0} enclos.\n", overhead * 60.0);
     println!("--- bandes uniformes ---");

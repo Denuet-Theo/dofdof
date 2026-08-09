@@ -17,7 +17,7 @@
 use breeding_neat::neat::{Connection, Genome, Network};
 use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
-use breeding_sim::economy::{Economy, Policy, RunOutcome, play};
+use breeding_sim::economy::{Economy, MAX_UNITS, Policy, RunOutcome, Strategy, play};
 use breeding_sim::encode::Census;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
 use breeding_sim::trees::{Catalog, muldo};
@@ -73,17 +73,24 @@ fn load(path: &str) -> Result<Genome, String> {
         // Les réglages stratégiques du champion. Absents d'un fichier écrit
         // avant qu'ils existent : on retombe alors sur l'économie simplifiée,
         // ce qui rejoue exactement les mesures d'alors.
-        bands: {
-            let mut bands = [0usize; 6];
-            if let Some(list) = root["bands"].as_array() {
-                for (index, value) in list.iter().take(6).enumerate() {
-                    bands[index] = value.as_u64().unwrap_or(0) as usize;
+        strategies: {
+            // Une stratégie par unité. Un champion écrit avant qu'elles
+            // existent retombe sur le réglage neutre.
+            let mut strategies = [Strategy::default(); MAX_UNITS];
+            if let Some(list) = root["strategies"].as_array() {
+                for (unit, value) in list.iter().take(MAX_UNITS).enumerate() {
+                    if let Some(bands) = value["bands"].as_array() {
+                        for (gauge, band) in bands.iter().take(6).enumerate() {
+                            strategies[unit].bands[gauge] = band.as_u64().unwrap_or(0) as usize;
+                        }
+                    }
+                    strategies[unit].level = value["level"].as_u64().unwrap_or(0) as u16;
+                    strategies[unit].optimakina_from =
+                        value["optimakina_from"].as_u64().unwrap_or(11) as u8;
                 }
             }
-            bands
+            strategies
         },
-        level: root["level"].as_u64().unwrap_or(0) as u16,
-        optimakina_from: root["optimakina_from"].as_u64().unwrap_or(11) as u8,
     })
 }
 
@@ -153,7 +160,7 @@ fn main() {
             .collect::<Vec<u32>>()
             .par_iter()
             .map(|&seed| {
-                let mut policy = Searching::new(NetValue(&network)).with_strategy(genome.bands, genome.level, genome.optimakina_from);
+                let mut policy = Searching::new(NetValue(&network)).with_strategies(genome.strategies);
                 play(&catalog, &economy, &mut policy, seed)
             })
             .collect();
@@ -163,7 +170,7 @@ fn main() {
     println!("{} parties par politique, graines {:?}\n", seeds().len(), seeds());
     println!(
         "{:<20} {:>10} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9}",
-        "politique", "score méd.", "crois.", "achats", "sacrif.", "clones", "gen10", "fournées"
+        "politique", "score méd.", "crois.", "achats", "sacrif.", "clones", "gen10", "charg."
     );
     println!("{}", "-".repeat(88));
     for (label, outcomes) in &reports {
@@ -176,7 +183,7 @@ fn main() {
             mean(outcomes.iter().map(|o| o.sacrifices as f64)),
             mean(outcomes.iter().map(|o| o.clonings as f64)),
             mean(outcomes.iter().map(|o| o.gen10_held as f64)),
-            mean(outcomes.iter().map(|o| f64::from(o.batches_paid))),
+            mean(outcomes.iter().map(|o| f64::from(o.loads_paid))),
         );
     }
 

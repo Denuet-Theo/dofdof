@@ -139,8 +139,7 @@ impl Prices {
             _ => Horizon::Batches(batches),
         };
 
-        let places = get(&["fournee", "places"], 50.0) as usize;
-        let slots_per_enclos = get(&["fournee", "places_par_enclos"], 10.0) as usize;
+                let slots_per_enclos = get(&["fournee", "places_par_enclos"], 10.0) as usize;
         let overhead_hours = get(&["fournee", "minutes_entre_fournees"], 0.0) / 60.0;
 
         let economy = Economy {
@@ -156,7 +155,6 @@ impl Prices {
             batch_cost: get(&["fournee", "prix_forfaitaire"], default.batch_cost as f64) as i64,
             // Deux places par croisement : la capacité se lit sur les places,
             // pas l'inverse, parce que c'est l'enclos qui est physique.
-            crossings_per_batch: places / 2,
             starter_price: get(
                 &["montures", "prix_gen1_anonyme"],
                 default.starter_price as f64,
@@ -267,7 +265,6 @@ impl Prices {
             Horizon::Batches(_) => None,
         };
         economy.overhead_hours = overhead_hours;
-        economy.enclos_per_batch = (places / slots_per_enclos.max(1)).max(1);
         economy.mangeoire_per_point = mangeoire.unwrap_or(0.0);
         economy.mangeoire_per_mount = root
             .get("mangeoire")
@@ -275,6 +272,28 @@ impl Prices {
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
         economy.optimakina_bonus = get(&["optimakina", "bonus"], 0.1);
+
+        // Les génétons : le co-produit d'un croisement réussi, et le levier qui
+        // manquait le plus à cette économie.
+        let per_unit = get(&["genetons", "genetons_par_unite"], 10.0).max(1.0);
+        let tax = get(&["genetons", "taxe_hdv"], 0.02);
+        let net = |price: f64| price / per_unit * (1.0 - tax);
+        economy.geneton_value = net(get(&["genetons", "prix_unitaire"], 0.0));
+        if economy.geneton_value <= 0.0 {
+            missing.push("prix du parchemin d'échange des génétons".into());
+        }
+        economy.geneton_range = (
+            net(get(&["genetons", "prix_unitaire_min"], 0.0)),
+            net(get(&["genetons", "prix_unitaire_max"], 0.0)),
+        );
+        economy.amber_range = (
+            get(&["valeurs", "ambre_min"], economy.amber_per_generation as f64) as i64,
+            get(&["valeurs", "ambre_max"], economy.amber_per_generation as f64) as i64,
+        );
+
+        economy.slots_per_enclos = slots_per_enclos;
+        economy.sync_enclos = get(&["fournee", "enclos_synchronises"], 5.0) as usize;
+        economy.free_enclos = get(&["fournee", "enclos_libres"], 0.0) as usize;
         economy.gauge_prices = gauge_prices;
         economy.band_rates = band_rates;
         economy.cycle_serenity_points =
@@ -336,7 +355,7 @@ mod tests {
         let prices = Prices::load_default().expect("economy.toml doit se charger");
 
         assert_eq!(prices.economy.starting_kamas, 10_000_000);
-        assert_eq!(prices.economy.crossings_per_batch, 25, "50 places, deux par croisement");
+        assert_eq!(prices.economy.unit_crossings(0), 25, "50 places, deux par croisement");
         assert_eq!(prices.economy.starter_price, 1_000);
         assert_eq!(prices.economy.mount_level, 67);
         assert_eq!(prices.slots_per_enclos, 10);
@@ -354,7 +373,7 @@ mod tests {
 
         assert_eq!(prices.economy.starting_kamas, hard.starting_kamas);
         assert_eq!(prices.economy.batch_cost, hard.batch_cost);
-        assert_eq!(prices.economy.crossings_per_batch, hard.crossings_per_batch);
+        assert_eq!(prices.economy.unit_crossings(0), 25);
         assert_eq!(prices.economy.starter_price, hard.starter_price);
         assert_eq!(prices.economy.amber_per_generation, hard.amber_per_generation);
         assert_eq!(prices.economy.top_value, hard.top_value);

@@ -122,7 +122,7 @@ fn fitness(
         .iter()
         .map(|&seed| {
             let mut policy = Searching::with_iterations(NetValue(&network), iterations)
-                .with_strategy(genome.bands, genome.level, genome.optimakina_from);
+                .with_strategies(genome.strategies);
             play(catalog, economy, &mut policy, seed).score as f64
         })
         .sum();
@@ -437,19 +437,19 @@ fn main() {
     );
     for (rank, (index, score)) in judged.iter().take(12).enumerate() {
         let (genome, training) = &finalists[*index];
-        let (cost, _) = economy.batch_plan(genome.bands, genome.level);
-        let bands: Vec<String> = genome.bands.iter().map(|b| b.to_string()).collect();
+        let (cost, _) = economy.unit_load(0, genome.strategies[0]);
+        let bands: Vec<String> = genome.strategies[0].bands.iter().map(|b| b.to_string()).collect();
         println!(
             "{:>4} {:>11} {:>11} {:<9} {:>7} {:>6} {:>9}",
             rank + 1,
             millions(*training),
             millions(*score),
             bands.join(""),
-            genome.level,
-            if genome.optimakina_from > 10 {
+            genome.strategies[0].level,
+            if genome.strategies[0].optimakina_from > 10 {
                 "—".to_string()
             } else {
-                genome.optimakina_from.to_string()
+                genome.strategies[0].optimakina_from.to_string()
             },
             cost
         );
@@ -508,7 +508,7 @@ fn main() {
         .par_iter()
         .map(|&seed| {
             let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
-                .with_strategy(best.bands, best.level, best.optimakina_from);
+                .with_strategies(best.strategies);
             play(&catalog, &economy, &mut policy, seed).score as f64
         })
         .collect();
@@ -534,25 +534,22 @@ fn main() {
         (evolved_median - myopic_median) / myopic_median * 100.0
     );
 
-    {
-        let (cost, hours) = economy.batch_plan(best.bands, best.level);
-        let bands: Vec<String> = (0..breeding_sim::schedule::GAUGES)
-            .map(|g| format!("{}={}", &breeding_sim::schedule::GAUGE_NAMES[g][..3], best.bands[g]))
-            .collect();
-        println!("  bandes : {}", bands.join(" "));
+    for unit in 0..economy.unit_count() {
+        let strategy = best.strategies[unit];
+        let (cost, hours) = economy.unit_load(unit, strategy);
+        let bands: Vec<String> = strategy.bands.iter().map(|b| b.to_string()).collect();
         println!(
-            "  niveau {} ({:.1} % de réussite), Optimakina {}",
-            best.level,
-            economy.success_rate(best.level, false) * 100.0,
-            if best.optimakina_from > 10 {
+            "  unité {unit} ({} enclos, {} croisements) : bandes {} · niveau {} ({:.1} %) ·              Optimakina {} · {cost} kamas, {hours:.2} h",
+            economy.unit_enclos(unit),
+            economy.unit_crossings(unit),
+            bands.join(""),
+            strategy.level,
+            economy.success_rate(strategy.level, false) * 100.0,
+            if strategy.optimakina_from > 10 {
                 "jamais".to_string()
             } else {
-                format!("à partir de la gen {}", best.optimakina_from)
+                format!("dès la gen {}", strategy.optimakina_from)
             }
-        );
-        println!(
-            "  une fournée : {cost} kamas, {hours:.2} h → {} fournées tenables",
-            (economy.horizon_hours.unwrap_or(0.0) / hours.max(1e-9)) as u32
         );
     }
 
@@ -564,9 +561,11 @@ fn main() {
             "from": c.from, "to": c.to, "weight": c.weight,
             "enabled": c.enabled, "innovation": c.innovation,
         })).collect::<Vec<_>>(),
-        "bands": best.bands.to_vec(),
-        "level": best.level,
-        "optimakina_from": best.optimakina_from,
+        "strategies": best.strategies.iter().map(|s| serde_json::json!({
+            "bands": s.bands.to_vec(),
+            "level": s.level,
+            "optimakina_from": s.optimakina_from,
+        })).collect::<Vec<_>>(),
         "training_score": training_score,
         "validation_score": validated,
         "test_median": evolved_median,

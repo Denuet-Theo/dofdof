@@ -40,7 +40,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::economy::{BatchPlan, BatchView, Economy, Rng};
+use crate::economy::{Economy, MAX_UNITS, Rng, Strategy, UnitPlan, UnitView};
 use crate::encode::{Census, PairDelta};
 use crate::pairing::{Mate, MateSignature};
 use crate::stable::{Sex, Stable};
@@ -97,24 +97,6 @@ enum Action {
     Clone(usize, usize),
     SacrificeFertile(usize),
     SacrificeSterile(usize),
-}
-
-/// Les réglages uniformes d'une fournée, décidés hors de la recherche.
-#[derive(Clone, Copy, Debug)]
-pub struct Strategy {
-    pub bands: [usize; 6],
-    pub level: u16,
-    pub optimakina_from: u8,
-}
-
-impl Default for Strategy {
-    fn default() -> Self {
-        Self {
-            bands: [0; 6],
-            level: 0,
-            optimakina_from: 11,
-        }
-    }
 }
 
 pub struct SearchConfig {
@@ -206,18 +188,18 @@ impl Searcher {
     /// Compose la fournée que la fonction de valeur préfère.
     pub fn plan(
         &mut self,
-        view: &BatchView<'_>,
+        view: &UnitView<'_>,
         rng: &mut Rng,
         value: &dyn ValueFn,
-        strategy: Strategy,
-    ) -> BatchPlan {
+    ) -> UnitPlan {
         let catalog = view.catalog;
         let economy = view.economy;
+        let strategy = view.strategy;
 
         let (fertile, sterile) = partition(catalog, economy, view.stable);
         let candidates = self.candidates(catalog, economy, &fertile, strategy);
         if candidates.is_empty() && sterile.is_empty() {
-            return BatchPlan::default();
+            return UnitPlan::default();
         }
 
         let mut state = State {
@@ -231,13 +213,13 @@ impl Searcher {
         let mut best = value.value(&state.census, catalog, economy);
 
         for _ in 0..self.config.iterations {
-            let Some(mutation) = propose(&state, &candidates, &fertile, &sterile, economy, rng)
+            let Some(mutation) = propose(&state, &candidates, &fertile, &sterile, view.capacity, rng)
             else {
                 continue;
             };
 
             mutation.apply(&mut state, &candidates, &fertile, &sterile, economy);
-            let scored = if feasible(&state, economy, strategy) {
+            let scored = if feasible(&state, economy, view.unit, strategy, view.capacity) {
                 value.value(&state.census, catalog, economy)
             } else {
                 f64::NEG_INFINITY
@@ -250,14 +232,7 @@ impl Searcher {
             }
         }
 
-        materialise(
-            &state,
-            &candidates,
-            &fertile,
-            &sterile,
-            view.stable.len(),
-            strategy,
-        )
+        materialise(&state, &candidates, &fertile, &sterile, view.stable.len())
     }
 
     fn candidates(
@@ -496,23 +471,18 @@ fn revert_effects(
     }
 }
 
-fn feasible(state: &State, economy: &Economy, strategy: Strategy) -> bool {
-    if state.crossings > economy.crossings_per_batch {
+fn feasible(state: &State, economy: &Economy, unit: usize, strategy: Strategy, capacity: usize) -> bool {
+    if state.crossings > capacity {
         return false;
     }
-    let level = if strategy.level == 0 {
-        economy.mount_level
-    } else {
-        strategy.level
-    };
-    // La fournée ne se paie que si elle porte un croisement — jauges et
+    // Le chargement ne se paie que s'il porte un croisement — jauges et
     // Mangeoire comprises, puisque c'est l'enclos qu'on nourrit.
-    let batch = if state.crossings > 0 {
-        (economy.batch_cost_for(strategy.bands, level) + state.optimakina_cost) as f64
+    let load = if state.crossings > 0 {
+        (economy.unit_load(unit, strategy).0 + state.optimakina_cost) as f64
     } else {
         0.0
     };
-    state.census.kamas() - batch >= 0.0
+    state.census.kamas() - load >= 0.0
 }
 
 fn partition(catalog: &Catalog, economy: &Economy, stable: &Stable) -> (Vec<Group>, Vec<Group>) {
@@ -558,7 +528,7 @@ fn propose(
     candidates: &[Candidate],
     fertile: &[Group],
     sterile: &[Group],
-    economy: &Economy,
+    capacity: usize,
     rng: &mut Rng,
 ) -> Option<Mutation> {
     let roll = rng.next_f64();
@@ -571,7 +541,7 @@ fn propose(
         return Some(Mutation::Remove(at, state.actions[at]));
     }
 
-    let action = random_action(state, candidates, fertile, sterile, economy, rng)?;
+    let action = random_action(state, candidates, fertile, sterile, capacity, rng)?;
     if !state.actions.is_empty() && roll < 0.30 {
         let at = pick(rng, state.actions.len());
         return Some(Mutation::Swap(at, state.actions[at], action));
@@ -584,7 +554,7 @@ fn random_action(
     candidates: &[Candidate],
     fertile: &[Group],
     sterile: &[Group],
-    economy: &Economy,
+    capacity: usize,
     rng: &mut Rng,
 ) -> Option<Action> {
     let pick = |rng: &mut Rng, count: usize| -> usize {
@@ -593,7 +563,7 @@ fn random_action(
     let kind = rng.next_f64();
 
     // Un croisement le plus souvent : c'est la décision qui porte la partie.
-    if kind < 0.75 && state.crossings < economy.crossings_per_batch && !candidates.is_empty() {
+    if kind < 0.75 && state.crossings < capacity && !candidates.is_empty() {
         // Quelques essais plutôt qu'un balayage : les candidats indisponibles
         // sont minoritaires, et balayer coûterait plus cher que retirer.
         for _ in 0..8 {
@@ -664,13 +634,8 @@ fn materialise(
     fertile: &[Group],
     sterile: &[Group],
     stable_len: usize,
-    strategy: Strategy,
-) -> BatchPlan {
-    let mut plan = BatchPlan {
-        bands: strategy.bands,
-        level: strategy.level,
-        ..Default::default()
-    };
+) -> UnitPlan {
+    let mut plan = UnitPlan::default();
 
     // La recherche a raisonné sur des compteurs ; on rattache ici des montures
     // concrètes. Toutes les membres d'un groupe sont interchangeables par
@@ -683,7 +648,7 @@ fn materialise(
         match *action {
             Action::Cross(index) => {
                 let candidate = &candidates[index];
-                let mut take = |side: Side, sex: Sex, plan: &mut BatchPlan| match side {
+                let mut take = |side: Side, sex: Sex, plan: &mut UnitPlan| match side {
                     Side::Have(group) => fertile_pool[group].pop(),
                     Side::Buy(color) => {
                         plan.purchases.push((color, sex));
@@ -729,12 +694,9 @@ fn materialise(
 pub struct Searching<V: ValueFn> {
     pub searcher: Searcher,
     pub value: V,
-    /// Les trois réglages uniformes de la fournée. Ils viennent du génome, pas
-    /// de la recherche : voir `breeding-neat`, `Genome`.
-    pub bands: [usize; 6],
-    pub level: u16,
-    /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
-    pub optimakina_from: u8,
+    /// Une stratégie par unité de production. Elles viennent du génome, pas de
+    /// la recherche : voir `breeding-neat`, `Genome`.
+    pub strategies: [Strategy; MAX_UNITS],
 }
 
 impl<V: ValueFn> Searching<V> {
@@ -747,20 +709,15 @@ impl<V: ValueFn> Searching<V> {
             searcher: Searcher::new(SearchConfig { iterations }),
             value,
             // Par défaut : la bande la moins chère, le niveau de l'économie,
-            // aucune Optimakina. C'est ce qui garde la valeur myope comparable
-            // aux mesures publiées avant que les leviers existent.
-            bands: [0; 6],
-            level: 0,
-            optimakina_from: 11,
+            // aucune Optimakina — le réglage le plus neutre possible, et celui
+            // qui garde la valeur myope comparable d'une économie à l'autre.
+            strategies: [Strategy::default(); MAX_UNITS],
         }
     }
 
-    /// Fixe les réglages stratégiques : une bande par jauge, le niveau, le
-    /// seuil d'Optimakina.
-    pub fn with_strategy(mut self, bands: [usize; 6], level: u16, optimakina_from: u8) -> Self {
-        self.bands = bands.map(|band| band.min(3));
-        self.level = level;
-        self.optimakina_from = optimakina_from;
+    /// Fixe la stratégie de chaque unité de production.
+    pub fn with_strategies(mut self, strategies: [Strategy; MAX_UNITS]) -> Self {
+        self.strategies = strategies;
         self
     }
 }
@@ -769,18 +726,13 @@ impl<V: ValueFn> crate::economy::Policy for Searching<V> {
     fn name(&self) -> &str {
         "recherche"
     }
-    fn plan(&mut self, view: &BatchView<'_>, rng: &mut Rng) -> BatchPlan {
+    fn strategy(&self, unit: usize) -> Strategy {
+        self.strategies[unit.min(MAX_UNITS - 1)]
+    }
+
+    fn plan(&mut self, view: &UnitView<'_>, rng: &mut Rng) -> UnitPlan {
         let value = &self.value;
-        let strategy = Strategy {
-            bands: self.bands,
-            level: if self.level == 0 {
-                view.economy.mount_level
-            } else {
-                self.level
-            },
-            optimakina_from: self.optimakina_from,
-        };
-        self.searcher.plan(view, rng, value, strategy)
+        self.searcher.plan(view, rng, value)
     }
 }
 
@@ -802,9 +754,9 @@ mod tests {
                 seed,
             );
             assert_eq!(
-                outcome.infeasible_batches, 0,
+                outcome.rejected_loads, 0,
                 "graine {seed} : {} fournées refusées",
-                outcome.infeasible_batches
+                outcome.rejected_loads
             );
         }
     }
@@ -854,7 +806,7 @@ mod tests {
         let mut rng = Rng::new(5);
         for _ in 0..200 {
             if let Some(mutation) =
-                propose(&state, &candidates, &fertile, &sterile, &economy, &mut rng)
+                propose(&state, &candidates, &fertile, &sterile, 25, &mut rng)
             {
                 mutation.apply(&mut state, &candidates, &fertile, &sterile, &economy);
                 mutation.undo(&mut state, &candidates, &fertile, &sterile, &economy);

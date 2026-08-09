@@ -209,6 +209,10 @@ pub struct PairDelta {
     /// la stratégie n'en achète pas à ce rang.
     pub target_generation: u8,
     pub optimakina_cost: i64,
+    /// Ce que le croisement rapporte en génétons, **en espérance** : ils ne
+    /// tombent qu'en cas de succès. C'est le lien sans lequel la recherche ne
+    /// verrait pas que croiser haut rapporte 250 fois plus que croiser bas.
+    pub geneton_kamas: f64,
 }
 
 impl PairDelta {
@@ -237,6 +241,19 @@ impl PairDelta {
         if outcomes.is_empty() {
             return None;
         }
+
+        // La masse de réussite vaut `rate` quand une couleur nomme la cible, et
+        // zéro sinon — c'est exactement la condition des génétons.
+        let names_target = outcomes
+            .iter()
+            .any(|outcome| outcome.kind == crate::pairing::OutcomeKind::Target);
+        let geneton_kamas = rate
+            * crate::economy::genetons_for_crossing(
+                catalog.generation(male.color),
+                catalog.generation(female.color),
+                names_target,
+            ) as f64
+            * economy.geneton_value;
 
         let male_carried = ancestry_generation(catalog, male);
         let female_carried = ancestry_generation(catalog, female);
@@ -267,6 +284,7 @@ impl PairDelta {
             expected_value,
             target_generation,
             optimakina_cost,
+            geneton_kamas,
         })
     }
 }
@@ -305,6 +323,7 @@ impl Census {
             self.held[color as usize] += probability;
         }
         self.headcount += 1.0;
+        self.kamas += delta.geneton_kamas;
     }
 
     /// Le pendant exact, pour que la recherche locale puisse défaire un coup
@@ -327,6 +346,7 @@ impl Census {
             self.held[color as usize] -= probability;
         }
         self.headcount -= 1.0;
+        self.kamas -= delta.geneton_kamas;
     }
 
     /// Un gen 1 anonyme entre au parc. `sign` vaut `-1.0` pour défaire.

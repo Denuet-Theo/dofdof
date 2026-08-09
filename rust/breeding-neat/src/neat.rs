@@ -32,6 +32,7 @@
 
 use std::collections::HashMap;
 
+use breeding_sim::economy::{MAX_UNITS, Strategy};
 use breeding_sim::encode::FEATURES;
 
 /// Entrées, plus un biais constant.
@@ -112,19 +113,18 @@ pub struct Genome {
     //
     // L'évolution, elle, note sur le **score final**, qui compte les heures.
     // Elle peut donc arbitrer sans que la politique ait rien vu.
-    /// La bande de chacune des six jauges — Baffeur, Caresseur, Foudroyeur,
-    /// Dragofesse, Abreuvoir, Mangeoire — de 0 (lente, bon marché) à 3.
+    /// Une stratégie par unité de production : six bandes de jauge, un niveau,
+    /// un seuil d'Optimakina.
     ///
-    /// Six réglages et non un : la bande se choisit jauge par jauge, donc on
-    /// peut payer cher ce qui est sur le chemin critique et laisser le reste au
-    /// tarif du bas. C'est le gain qu'une bande unique pour tout l'enclos ne
-    /// pouvait pas voir — l'Abreuvoir, par exemple, est moins cher en bande 1
-    /// qu'en bande 0 tout en allant deux fois plus vite.
-    pub bands: [usize; 6],
-    /// Niveau auquel nourrir les montures. Décide du taux de réussite.
-    pub level: u16,
-    /// Acheter une Optimakina à partir de cette génération visée. 11 = jamais.
-    pub optimakina_from: u8,
+    /// Six bandes et non une : elle se choisit jauge par jauge, donc on peut
+    /// payer cher ce qui est sur le chemin critique et laisser le reste au tarif
+    /// du bas — l'Abreuvoir, par exemple, est moins cher en bande 1 qu'en bande 0
+    /// tout en allant deux fois plus vite.
+    ///
+    /// Et une stratégie par unité, parce que l'unité libre peut porter un niveau
+    /// élevé pour quelques paires de haute génération sans que le bloc de
+    /// cinquante le paie.
+    pub strategies: [Strategy; MAX_UNITS],
 }
 
 /// Le registre des innovations, partagé par toute la population.
@@ -264,9 +264,11 @@ impl Genome {
             connections,
             // On part au milieu plutôt qu'à un extrême : l'évolution doit
             // pouvoir descendre comme monter dès la première génération.
-            bands: std::array::from_fn(|_| rng.range(4)),
-            level: 1 + rng.range(MAX_LEVEL as usize) as u16,
-            optimakina_from: 2 + rng.range(10) as u8,
+            strategies: std::array::from_fn(|_| Strategy {
+                bands: std::array::from_fn(|_| rng.range(4)),
+                level: 1 + rng.range(MAX_LEVEL as usize) as u16,
+                optimakina_from: 2 + rng.range(10) as u8,
+            }),
         }
     }
 
@@ -275,6 +277,8 @@ impl Genome {
         // et par saut de temps en temps : un optimum local sur la bande coûte
         // très cher, et un pas de un ne le franchit jamais.
         if rng.f64() < config.strategy_mutation {
+            let unit = rng.range(MAX_UNITS);
+            let strategy = &mut self.strategies[unit];
             match rng.range(3) {
                 0 => {
                     // Une jauge à la fois : muter les six d'un coup ferait
@@ -283,20 +287,20 @@ impl Genome {
                     // bandes sont séparées par des facteurs de prix énormes et
                     // qu'un optimum local ne se franchit pas d'un cran.
                     let gauge = rng.range(6);
-                    self.bands[gauge] = if rng.f64() < 0.7 {
-                        nudge(self.bands[gauge] as i64, 1, 0, 3, rng) as usize
+                    strategy.bands[gauge] = if rng.f64() < 0.7 {
+                        nudge(strategy.bands[gauge] as i64, 1, 0, 3, rng) as usize
                     } else {
                         rng.range(4)
                     }
                 }
                 1 => {
                     let step = if rng.f64() < 0.7 { 10 } else { 60 };
-                    self.level =
-                        nudge(i64::from(self.level), step, 1, i64::from(MAX_LEVEL), rng) as u16
+                    strategy.level =
+                        nudge(i64::from(strategy.level), step, 1, i64::from(MAX_LEVEL), rng) as u16
                 }
                 _ => {
-                    self.optimakina_from =
-                        nudge(i64::from(self.optimakina_from), 1, 2, 11, rng) as u8
+                    strategy.optimakina_from =
+                        nudge(i64::from(strategy.optimakina_from), 1, 2, 11, rng) as u8
                 }
             }
         }
@@ -460,13 +464,22 @@ impl Genome {
         // ait été affinée — exactement ce que la spéciation existe pour
         // empêcher. Sans ce terme, l'entraînement converge sur une stratégie
         // unique et on ne voit jamais les alternatives.
-        let bands: f64 = (0..6)
-            .map(|gauge| (self.bands[gauge] as f64 - other.bands[gauge] as f64).abs())
-            .sum::<f64>()
-            / 6.0;
-        let level = (f64::from(self.level) - f64::from(other.level)).abs() / f64::from(MAX_LEVEL);
-        let optimakina =
-            (f64::from(self.optimakina_from) - f64::from(other.optimakina_from)).abs() / 10.0;
+        let mut bands = 0.0;
+        let mut level = 0.0;
+        let mut optimakina = 0.0;
+        for unit in 0..MAX_UNITS {
+            let (mine, theirs) = (self.strategies[unit], other.strategies[unit]);
+            bands += (0..6)
+                .map(|gauge| (mine.bands[gauge] as f64 - theirs.bands[gauge] as f64).abs())
+                .sum::<f64>()
+                / 6.0;
+            level += (f64::from(mine.level) - f64::from(theirs.level)).abs() / f64::from(MAX_LEVEL);
+            optimakina += (f64::from(mine.optimakina_from) - f64::from(theirs.optimakina_from))
+                .abs()
+                / 10.0;
+        }
+        let units = MAX_UNITS as f64;
+        let (bands, level, optimakina) = (bands / units, level / units, optimakina / units);
 
         topology + config.c4 * (bands + 2.0 * level + optimakina)
     }
@@ -519,9 +532,17 @@ impl Genome {
             connections,
             // Chaque jauge se tire indépendamment : deux parents peuvent avoir
             // trouvé chacun un bon réglage sur des jauges différentes.
-            bands: std::array::from_fn(|g| pick(better.bands[g], worse.bands[g], rng)),
-            level: pick(better.level, worse.level, rng),
-            optimakina_from: pick(better.optimakina_from, worse.optimakina_from, rng),
+            strategies: std::array::from_fn(|u| Strategy {
+                bands: std::array::from_fn(|g| {
+                    pick(better.strategies[u].bands[g], worse.strategies[u].bands[g], rng)
+                }),
+                level: pick(better.strategies[u].level, worse.strategies[u].level, rng),
+                optimakina_from: pick(
+                    better.strategies[u].optimakina_from,
+                    worse.strategies[u].optimakina_from,
+                    rng,
+                ),
+            }),
         }
     }
 

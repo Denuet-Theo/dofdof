@@ -80,10 +80,30 @@ heures = 300
 [fournee]
 # ---------------------------------------------------------------------------
 
-# 50 places d'enclos, deux par croisement. Le transfert de jauge se fait au
-# niveau de l'enclos (10 places), d'où les cinq groupes indépendants.
-places = 50
+# Le transfert de jauge se fait au niveau de l'enclos, et chaque enclos porte
+# dix places — deux par croisement, donc cinq croisements.
 places_par_enclos = 10
+
+# ## Deux unités de production, et c'est un compromis d'usage
+#
+# Rien dans le jeu n'oblige les enclos à tourner ensemble : chacun a ses propres
+# jauges, donc ses propres bandes, son propre niveau et sa propre durée. Le
+# calcul favorise même la différenciation, puisque monter dix montures au niveau
+# 150 coûte 250 000 contre 2 447 000 pour cinquante.
+#
+# Mais six enclos aux rythmes différents demandent une intervention toutes les
+# trois minutes, et une politique qu'on ne peut pas exécuter ne vaut rien. On
+# coupe donc la poire en deux :
+#
+#   - **l'unité synchrone** : plusieurs enclos qui démarrent et finissent
+#     ensemble, mêmes réglages, un seul bloc à surveiller ;
+#   - **les unités libres** : un enclos chacune, réglages propres, timeline
+#     propre. C'est là qu'on peut payer un niveau élevé pour quelques paires de
+#     haute génération sans que tout le parc le paie.
+#
+# Deux unités à suivre au lieu de six, et le gain principal est conservé.
+enclos_synchronises = 5
+enclos_libres = 1
 
 # Le temps de manipulation entre deux fournées : sortir, trier, réaccoupler.
 # Incompressible, quel que soit le carburant.
@@ -138,8 +158,67 @@ niveau = 67
 ambre_par_rang = 20_000
 gen1 = 0
 
+# L'ambre a oscillé entre 11 000 et 30 000 sur trente jours — un facteur 2,7,
+# plus large encore que le parchemin. Une monture gen 9 vaut donc entre 99 000 et
+# 270 000 selon la semaine. Chaque partie tire son prix dans ces bornes.
+ambre_min = 11_000
+ambre_max = 30_000
+
 # La gen 10 se vend au lieu de s'extraire. N'importe laquelle des 50 couleurs.
 gen10 = 500_000
+
+# ---------------------------------------------------------------------------
+[genetons]
+# ---------------------------------------------------------------------------
+#
+# Le co-produit garanti de tout accouplement, et **le levier qui manquait**.
+#
+# ## Le rendement suit les parents directs, pas la cible
+#
+#   gen 1 → 1     gen 4 →   8     gen 7 →  60
+#   gen 2 → 2     gen 5 →  15     gen 8 → 120
+#   gen 3 → 4     gen 6 →  30     gen 9 → 250
+#
+# Les deux parents s'additionnent. Deux gen 9 rendent donc 500 génétons, deux
+# gen 1 en rendent 2 — un facteur 250 entre croiser haut et croiser bas.
+#
+# ## Ils ne tombent qu'en cas de succès
+#
+# Un croisement qui manque sa génération ne rend rien. Deux gen 9 rapportent donc
+# 269 000 kamas quand ça passe, mais à 50,1 % de réussite l'espérance vaut
+# 134 800 — la moitié de ce qu'un rendement garanti donnerait.
+#
+# Conséquence sur l'Optimakina : son bonus de dix points achète aussi dix pour
+# cent du géneton, ce qui resserre son calcul sans le renverser — 21 900 gagnés
+# pour 78 700 dépensés à la gen 9.
+#
+# Et deux cas rendent zéro quoi qu'il arrive : un croisement qui ne peut pas
+# monter, et un dont aucune couleur ne nomme la cible. Purifier et recopier ne
+# rapportent rien.
+#
+# ## Le prix
+#
+# Meilleur rapport à l'HDV : le **Petit Parchemin**, 10 génétons pour 5 490
+# kamas. Les gros paliers sont moins bons — 50 génétons pour 21 997 (440 le
+# géneton), 100 pour 43 998 (440), 160 pour 84 984 (531).
+#
+# Le prix est net de la taxe HDV de 2 %, puisqu'il faut vendre le parchemin.
+prix_unitaire = 5_490
+genetons_par_unite = 10
+taxe_hdv = 0.02
+
+# ## Le prix bouge, et la politique doit y survivre
+#
+# Relevé sur trente jours : le Petit Parchemin a oscillé entre 5 000 et 10 000
+# kamas, soit un facteur deux sur le géneton. Un croisement gen 9 × gen 9 réussi
+# rapporte donc entre 245 000 et 490 000 selon la semaine.
+#
+# Chaque partie tire son prix dans ces bornes, et la politique le **voit**. Une
+# politique aveugle au marché apprendrait un réglage moyen, incapable de dire
+# « les parchemins sont hauts, croisez haut » ni l'inverse — ce qui est
+# précisément le conseil qu'on attend d'elle.
+prix_unitaire_min = 5_000
+prix_unitaire_max = 10_000
 
 # ---------------------------------------------------------------------------
 [optimakina]

@@ -88,12 +88,12 @@ fn main() {
     let economy = prices.economy;
 
     println!(
-        "Économie ({}) : {} M de départ, {} fournées à {} kamas, {} croisements,",
+        "Économie ({}) : {} M de départ, {} h de jeu, chargements à ~{} kamas, {} croisements de parc,",
         Prices::default_path().display(),
         economy.starting_kamas / 1_000_000,
-        economy.batches,
+        economy.horizon_hours.unwrap_or(0.0),
         economy.batch_cost,
-        economy.crossings_per_batch
+        economy.total_crossings()
     );
     println!(
         "  pool de {} muldos gen {} à {}, gen 1 à {}, ambre à {}/rang, gen 10 à {}.",
@@ -152,12 +152,12 @@ fn main() {
         let mean = |f: fn(&RunOutcome) -> f64| -> f64 {
             report.outcomes.iter().map(f).sum::<f64>() / report.outcomes.len() as f64
         };
-        let infeasible: u32 = report.outcomes.iter().map(|o| o.infeasible_batches).sum();
+        let infeasible: u32 = report.outcomes.iter().map(|o| o.rejected_loads).sum();
         println!(
             "{:<26} {:>9.0} {:>9.0} {:>9.2} {:>9.2} {:>9.0} {:>10.0}",
             report.name,
             mean(|o| o.crossings as f64),
-            mean(|o| f64::from(o.batches_paid)),
+            mean(|o| f64::from(o.loads_paid)),
             mean(|o| f64::from(o.best_generation)),
             mean(|o| o.gen10_held as f64),
             mean(|o| o.sacrifices as f64),

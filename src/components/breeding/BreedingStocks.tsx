@@ -1,13 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Boxes, Check, Coins, Plus, Search, Trash2 } from 'lucide-react';
 import Button from '@/components/ui/Button';
+import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
+import BreedingAddMount from '@/components/breeding/BreedingAddMount';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
 import {
-  INDIVIDUAL_TRACKING_FROM,
+  MOUNT_STATUS_LABEL,
+  mountStatus,
+  statusFlags,
   type BulkStock,
   type Individual,
+  type MountStatus,
   type Sex,
 } from '@/lib/dofus/breeding/stable';
 import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage';
@@ -17,8 +22,9 @@ import {
   colorCoder,
   mountName,
 } from '@/lib/dofus/breeding/naming';
+import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { DofusDBItem } from '@/lib/supabase/types';
-import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
+import type { DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -32,17 +38,34 @@ import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
  *   les points sont déjà payés ;
  * - les **kamas** ne changent rien du tout, ils décident de ce qui est
  *   réalisable.
+ *
+ * ## L'écurie ne se saisit plus par la liste des couleurs
+ *
+ * Cet écran affichait les 120 couleurs de la famille, chacune avec ses deux
+ * compteurs ou ses boutons `+♂` / `+♀`. C'était une liste pour **corriger un
+ * chiffre**, pas pour charger une écurie : ni niveau, ni état, ni ascendance à
+ * l'ajout, et rien qui dise laquelle des trois Amande on vient d'incrémenter.
+ *
+ * Elle ne montre donc plus que ce qu'on **possède**, et l'ajout passe par
+ * `BreedingAddMount`, qui demande dans l'ordre ce que porte la fiche du jeu.
  */
 
 type Settings = typeof DEFAULT_SETTINGS;
 
 type Props = {
-  rows: BreedingRow[];
+  /** Les couleurs de la famille : générations, noms d'affichage et icônes. */
+  colors: BreedingColor[];
   fuelItems: DofusDBItem[];
-  /** Effectifs par couleur et par sexe, vrac et individus confondus. */
-  stockBySex: Map<string, BulkStock>;
-  /** Les montures de génération 3 et plus, suivies une par une. */
+  /** Les montures suivies une par une — depuis l'assistant, toutes le sont. */
   individuals: Individual[];
+  /**
+   * Le vrac hérité : les effectifs saisis au compteur avant l'assistant.
+   *
+   * Ils ne s'ajoutent plus, mais ils comptent encore dans tous les plans. Les
+   * masquer les rendrait invisibles **et** indécrémentables, donc ils restent
+   * affichés — le temps qu'on les remplace par des montures nommées.
+   */
+  bulk: Map<string, BulkStock>;
   itemStock: Map<number, number>;
   /** Prix unitaire des carburants, pour les afficher et les comparer au point. */
   itemPrices: Map<number, number>;
@@ -54,10 +77,12 @@ type Props = {
     colorId: string;
     sex: Sex;
     level?: number;
+    parents?: [string, string] | null;
+    status?: MountStatus;
   }) => Promise<Individual | null>;
   onUpdateIndividual: (
     id: string,
-    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'name'>>
+    patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'pregnant' | 'name'>>
   ) => Promise<void>;
   onRemoveIndividual: (id: string) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
@@ -83,11 +108,24 @@ const countInput = (
   />
 );
 
+/** Ce que chaque état interdit — la même phrase qu'à la saisie, en infobulle. */
+const STATUS_HINT: Record<MountStatus, string> = {
+  fertile: 'Disponible : elle peut être chargée dans une fournée.',
+  feconde: 'Accouplée, elle porte. Indisponible, mais un poulain arrive — et elle ne se clone pas.',
+  sterile: 'Épuisée : il ne lui reste que le clonage et l’extraction.',
+};
+
+const STATUS_TONE: Record<MountStatus, string> = {
+  fertile: 'bg-profit/15 border-profit/40 text-profit',
+  feconde: 'bg-kamas/15 border-kamas/40 text-kamas',
+  sterile: 'bg-dark-700/60 border-dark-600/50 text-dark-300',
+};
+
 const BreedingStocks = ({
-  rows,
+  colors,
   fuelItems,
-  stockBySex,
   individuals,
+  bulk,
   itemStock,
   itemPrices,
   onSaveFuelPrice,
@@ -101,42 +139,34 @@ const BreedingStocks = ({
   onSaveSettings,
 }: Props) => {
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [mountQuery, setMountQuery] = useState('');
-  const [ownedOnly, setOwnedOnly] = useState(false);
   const [fuelQuery, setFuelQuery] = useState('');
   const [budget, setBudget] = useState(String(settings.kamas_available));
   const [savedBudget, setSavedBudget] = useState(false);
 
-  /** Les ascendances ne portent que des identifiants ; les lignes ont les noms. */
-  const nameOf = useMemo(() => {
-    const names = new Map(rows.map((row) => [row.colorId, row.name]));
-    return (colorId: string) => names.get(colorId) ?? colorId;
-  }, [rows]);
+  const byId = useMemo(() => new Map(colors.map((color) => [color.id, color])), [colors]);
+  /** Les ascendances ne portent que des identifiants ; le catalogue a les noms. */
+  const nameOf = useCallback(
+    (colorId: string) => byId.get(colorId)?.name ?? colorId,
+    [byId]
+  );
+  const generationOfColor = useCallback(
+    (colorId: string) => byId.get(colorId)?.generation ?? 1,
+    [byId]
+  );
+  const iconOf = (colorId: string) => {
+    const color = byId.get(colorId);
+    return color ? colorIconUrl(color) : null;
+  };
 
   /**
-   * Le codeur de la famille, construit sur les lignes : elles portent toutes les
-   * couleurs de la famille, ce dont `colorCoder` a besoin pour garantir qu'aucun
-   * code n'en désigne deux.
+   * Le codeur de la famille, construit sur le catalogue : il porte toutes les
+   * couleurs, ce dont `colorCoder` a besoin pour garantir qu'aucun code n'en
+   * désigne deux.
    */
-  const code = useMemo(() => colorCoder(rows), [rows]);
-
-  const mounts = useMemo(() => {
-    const needle = mountQuery.trim().toLowerCase();
-    const total = (colorId: string) => {
-      const counts = stockBySex.get(colorId);
-      return (counts?.males ?? 0) + (counts?.females ?? 0);
-    };
-    return rows
-      .filter((row) => {
-        if (ownedOnly && !total(row.colorId)) return false;
-        return !needle || row.name.toLowerCase().includes(needle);
-      })
-      .sort((a, b) => {
-        // Ce qu'on possède remonte : c'est ce qu'on vient corriger.
-        const owned = total(b.colorId) - total(a.colorId);
-        return owned || a.generation - b.generation || a.name.localeCompare(b.name);
-      });
-  }, [rows, mountQuery, ownedOnly, stockBySex]);
+  const code = useMemo(() => colorCoder(colors), [colors]);
+  const codeOf = (colorId: string) => code(nameOf(colorId));
 
   /**
    * À quel point la lignée d'une monture est concentrée sur une seule couleur.
@@ -146,12 +176,6 @@ const BreedingStocks = ({
    */
   const purityOf = (mount: Individual): number | null =>
     mount.parents ? lineagePurity(lineageDistribution(mount.colorId, mount.parents)) : null;
-
-  /** Générations des couleurs, pour dire quelle génération une monture porte. */
-  const generationOfColor = useMemo(() => {
-    const byId = new Map(rows.map((row) => [row.colorId, row.generation]));
-    return (colorId: string) => byId.get(colorId) ?? 1;
-  }, [rows]);
 
   /**
    * Le nom que cette monture devrait porter en jeu, d'après sa généalogie.
@@ -173,21 +197,40 @@ const BreedingStocks = ({
         })
       : null;
 
-  /** Les individus d'une couleur, les fertiles devant puis par niveau. */
-  const individualsOf = useMemo(() => {
-    const byColor = new Map<string, Individual[]>();
-    for (const mount of individuals) {
-      const group = byColor.get(mount.colorId) ?? [];
-      group.push(mount);
-      byColor.set(mount.colorId, group);
-    }
-    for (const group of byColor.values()) {
-      group.sort(
-        (a, b) => Number(b.fertile) - Number(a.fertile) || a.level - b.level || a.id.localeCompare(b.id)
+  /**
+   * L'écurie affichée : les fertiles devant, puis par couleur et par niveau.
+   *
+   * Les fertiles remontent parce que ce sont les seules qui décident de quelque
+   * chose — les autres attendent une naissance ou un clonage.
+   */
+  const owned = useMemo(() => {
+    const needle = mountQuery.trim().toLowerCase();
+    return individuals
+      .filter((mount) => {
+        if (!needle) return true;
+        return (
+          nameOf(mount.colorId).toLowerCase().includes(needle) ||
+          (mount.name ?? '').toLowerCase().includes(needle)
+        );
+      })
+      .sort(
+        (a, b) =>
+          Number(b.fertile) - Number(a.fertile) ||
+          generationOfColor(b.colorId) - generationOfColor(a.colorId) ||
+          nameOf(a.colorId).localeCompare(nameOf(b.colorId)) ||
+          a.level - b.level ||
+          a.id.localeCompare(b.id)
       );
-    }
-    return byColor;
-  }, [individuals]);
+  }, [individuals, mountQuery, nameOf, generationOfColor]);
+
+  /** Le vrac restant, couleurs vides exclues. */
+  const legacyBulk = useMemo(
+    () =>
+      [...bulk]
+        .filter(([, counts]) => counts.males > 0 || counts.females > 0)
+        .sort(([a], [b]) => nameOf(a).localeCompare(nameOf(b))),
+    [bulk, nameOf]
+  );
 
   /** Les carburants d'enclos, groupés par jauge et ordonnés par palier. */
   const fuelsByGauge = useMemo(() => {
@@ -230,10 +273,11 @@ const BreedingStocks = ({
     return best;
   }, [fuelsByGauge, itemPrices]);
 
-  const ownedMounts = [...stockBySex.values()].reduce(
+  const ownedBulk = [...bulk.values()].reduce(
     (total, { males, females }) => total + males + females,
     0
   );
+  const ownedMounts = individuals.length + ownedBulk;
   const ownedFuels = [...itemStock.values()].reduce((total, quantity) => total + quantity, 0);
 
   return (
@@ -301,8 +345,8 @@ const BreedingStocks = ({
 
           {/* Montures */}
           <div>
-            <div className="flex flex-wrap items-center gap-4 mb-2">
-              <p className="text-xs text-dark-400">Montures fertiles en écurie</p>
+            <div className="flex flex-wrap items-center gap-3 mb-2">
+              <p className="text-xs text-dark-400">Mon écurie</p>
               <div className="relative flex-1 min-w-[200px]">
                 <Search
                   size={14}
@@ -312,226 +356,221 @@ const BreedingStocks = ({
                   type="text"
                   value={mountQuery}
                   onChange={(event) => setMountQuery(event.target.value)}
-                  placeholder="Filtrer par nom"
+                  placeholder="Filtrer par couleur ou par nom en jeu"
                   className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-dark-800/80 border
                     border-dark-600/50 text-dark-100 text-xs placeholder:text-dark-500
                     transition-all hover:border-dark-500 focus:border-kamas/50"
                 />
               </div>
-              <label className="flex items-center gap-2 text-xs text-dark-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={ownedOnly}
-                  onChange={(event) => setOwnedOnly(event.target.checked)}
-                  className="accent-kamas cursor-pointer"
-                />
-                Seulement celles que je possède
-              </label>
+              <Button size="sm" onClick={() => setAdding(true)}>
+                <Plus size={13} />
+                Ajouter une monture
+              </Button>
             </div>
             <p className="text-[10px] text-dark-600 mb-2">
-              Ne compte que les montures <strong>fertiles</strong> : une monture déjà
-              accouplée est stérile, et son recyclage par clonage est déjà pris en compte
-              dans les plans.
+              Seules les <strong>fertiles</strong> entrent dans les fournées. Une féconde porte
+              — elle revient quand la naissance est saisie ; une stérile ne vaut plus que par le
+              clonage.
             </p>
-            <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
-              {mounts.map((row) => {
-                const counts = stockBySex.get(row.colorId) ?? { males: 0, females: 0 };
-                const owned = individualsOf.get(row.colorId) ?? [];
-                // Le compteur cède la place au suivi individuel dès la
-                // génération 3. En deçà, il reste — une gen 1 ou 2 s'achète en
-                // volume — mais la liste des individus s'affiche quand même :
-                // une basse génération née d'un croisement haut est suivie une
-                // par une, parce que son ascendance relève la cible de ses
-                // propres accouplements. Voir `tracksIndividually`.
-                const tracked = row.generation >= INDIVIDUAL_TRACKING_FROM;
+
+            <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
+              {owned.map((mount) => {
+                const status = mountStatus(mount);
+                const carried = mount.parents ? nameForIndividual(mount) : null;
+                const current = mount.name ?? ANONYMOUS_NAME;
+                const purity = purityOf(mount);
 
                 return (
-                  <div key={row.colorId} className="px-3 py-1.5 rounded-xl hover:bg-dark-800/40">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-dark-200 flex-1 truncate">{row.name}</span>
-                      <span className="text-[10px] text-dark-500 shrink-0">
-                        gen {row.generation}
-                      </span>
+                  <div
+                    key={mount.id}
+                    className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+                      bg-dark-800/40 hover:bg-dark-800/60 transition-colors"
+                  >
+                    <ColorChip
+                      name={nameOf(mount.colorId)}
+                      code={codeOf(mount.colorId)}
+                      icon={iconOf(mount.colorId)}
+                      size="sm"
+                    />
+                    <span className="text-xs text-dark-200 truncate max-w-[9rem]">
+                      {nameOf(mount.colorId)}
+                    </span>
+                    <GenBadge generation={generationOfColor(mount.colorId)} />
+                    <span
+                      className={`text-xs ${mount.sex === 'M' ? 'text-info' : 'text-loss-light'}`}
+                      title={mount.sex === 'M' ? 'Mâle' : 'Femelle'}
+                    >
+                      {mount.sex === 'M' ? '♂' : '♀'}
+                    </span>
 
-                      {tracked ? (
-                        // Rien à compter : on ajoute des montures une par une, et
-                        // le sexe se choisit à l'ajout puisqu'il ne se corrige
-                        // presque jamais.
-                        <span className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] text-dark-500 tabular-nums mr-1">
-                            {counts.males}♂ {counts.females}♀
-                          </span>
-                          {(['M', 'F'] as const).map((sex) => (
-                            <button
-                              key={sex}
-                              type="button"
-                              onClick={() => onAddIndividual({ colorId: row.colorId, sex })}
-                              title={`Ajouter ${sex === 'M' ? 'un mâle' : 'une femelle'} ${row.name}`}
-                              className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg
-                                bg-dark-800/80 border border-dark-600/50 text-[10px] text-dark-300
-                                transition-all hover:border-dark-500 hover:text-dark-100
-                                cursor-pointer"
-                            >
-                              <Plus size={10} />
-                              {sex === 'M' ? '♂' : '♀'}
-                            </button>
+                    <label className="flex items-center gap-1 text-[10px] text-dark-500">
+                      niv
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={String(mount.level)}
+                        onChange={(event) =>
+                          onUpdateIndividual(mount.id, {
+                            level: Math.max(1, Math.min(200, Number(event.target.value) || 1)),
+                          })
+                        }
+                        className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                          border-dark-600/50 text-dark-100 text-[11px] text-right
+                          transition-all hover:border-dark-500 focus:border-kamas/50"
+                      />
+                    </label>
+
+                    {/* Trois états, et non plus une case « fertile » : cocher ou
+                        décocher ne pouvait pas dire qu'une monture porte, or
+                        c'est exactement ce qui interdit de la cloner. */}
+                    <span className="flex items-center gap-1">
+                      {(['fertile', 'feconde', 'sterile'] as const).map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => onUpdateIndividual(mount.id, statusFlags(value))}
+                          title={STATUS_HINT[value]}
+                          className={`px-1.5 py-0.5 rounded-lg border text-[10px] transition-all
+                            cursor-pointer ${
+                              status === value
+                                ? STATUS_TONE[value]
+                                : 'bg-dark-800/60 border-dark-700/50 text-dark-500 hover:text-dark-300'
+                            }`}
+                        >
+                          {MOUNT_STATUS_LABEL[value]}
+                        </button>
+                      ))}
+                    </span>
+
+                    {/* Le nom porté en jeu, et le nom attendu quand ils
+                        divergent. C'est la seule chose qui permette de retrouver
+                        cette monture-là dans une écurie où tout s'appelle
+                        « Anonyme » — donc un écart se signale, et se corrige
+                        d'un clic. */}
+                    <code
+                      className={`text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 shrink-0 ${
+                        current === ANONYMOUS_NAME ? 'text-dark-500' : 'text-kamas'
+                      }`}
+                      title="Le nom que porte cette monture dans le jeu."
+                    >
+                      {current}
+                    </code>
+                    {carried && carried !== current && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateIndividual(mount.id, { name: carried })}
+                        title={`Renomme-la « ${carried} » dans le jeu, puis clique ici pour le noter.`}
+                        className="text-[10px] text-amber-400/80 hover:text-amber-300
+                          transition-colors cursor-pointer shrink-0"
+                      >
+                        → {carried}
+                      </button>
+                    )}
+
+                    {mount.parents && (
+                      <>
+                        <span
+                          className="flex items-center gap-1 text-[10px] text-dark-600"
+                          title={`Née de ${nameOf(mount.parents[0])} et ${nameOf(mount.parents[1])}`}
+                        >
+                          ←
+                          {mount.parents.map((parentId, index) => (
+                            <ColorChip
+                              key={`${parentId}-${index}`}
+                              name={nameOf(parentId)}
+                              code={codeOf(parentId)}
+                              icon={iconOf(parentId)}
+                              size="sm"
+                            />
                           ))}
                         </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[10px] text-dark-500">♂</span>
-                          {countInput(
-                            counts.males,
-                            (next) => onSaveBulk(row.colorId, next, counts.females),
-                            9999,
-                            `Mâles ${row.name} fertiles en écurie`
-                          )}
-                          <span className="text-[10px] text-dark-500">♀</span>
-                          {countInput(
-                            counts.females,
-                            (next) => onSaveBulk(row.colorId, counts.males, next),
-                            9999,
-                            `Femelles ${row.name} fertiles en écurie`
-                          )}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Le détail des individus : leur niveau décide du taux de
-                        réussite de leurs accouplements, et leur fertilité de leur
-                        disponibilité tout court. */}
-                    {owned.length > 0 && (
-                      <div className="mt-1.5 ml-3 pl-3 border-l border-dark-700/40 space-y-1">
-                        {owned.map((mount) => (
-                          <div key={mount.id} className="flex items-center gap-2">
-                            <span className="text-[11px] text-dark-400 w-4 shrink-0">
-                              {mount.sex === 'M' ? '♂' : '♀'}
-                            </span>
-                            <label className="flex items-center gap-1 text-[10px] text-dark-500">
-                              niv
-                              <input
-                                type="number"
-                                min={1}
-                                max={200}
-                                value={String(mount.level)}
-                                onChange={(event) =>
-                                  onUpdateIndividual(mount.id, {
-                                    level: Math.max(
-                                      1,
-                                      Math.min(200, Number(event.target.value) || 1)
-                                    ),
-                                  })
-                                }
-                                className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
-                                  border-dark-600/50 text-dark-100 text-[11px] text-right
-                                  transition-all hover:border-dark-500 focus:border-kamas/50"
-                              />
-                            </label>
-                            <label className="flex items-center gap-1 text-[10px] text-dark-500 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={mount.fertile}
-                                onChange={(event) =>
-                                  onUpdateIndividual(mount.id, { fertile: event.target.checked })
-                                }
-                                className="accent-kamas cursor-pointer"
-                              />
-                              fertile
-                            </label>
-                            {/* Le nom porté en jeu, et le nom attendu quand ils
-                                divergent. C'est la seule chose qui permette de
-                                retrouver cette monture-là dans une écurie où
-                                tout s'appelle « Anonyme » — donc un écart se
-                                signale, et se corrige d'un clic. */}
-                            {(() => {
-                              const carried = mount.parents
-                                ? nameForIndividual(mount)
-                                : null;
-                              const current = mount.name ?? ANONYMOUS_NAME;
-                              return (
-                                <>
-                                  <code
-                                    className={`text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60
-                                      shrink-0 ${
-                                        current === ANONYMOUS_NAME
-                                          ? 'text-dark-500'
-                                          : 'text-kamas'
-                                      }`}
-                                    title="Le nom que porte cette monture dans le jeu."
-                                  >
-                                    {current}
-                                  </code>
-                                  {carried && carried !== current && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        onUpdateIndividual(mount.id, { name: carried })
-                                      }
-                                      title={`Renomme-la « ${carried} » dans le jeu, puis clique ici pour le noter.`}
-                                      className="text-[10px] text-amber-400/80 hover:text-amber-300
-                                        transition-colors cursor-pointer shrink-0"
-                                    >
-                                      → {carried}
-                                    </button>
-                                  )}
-                                </>
-                              );
-                            })()}
-
-                            {mount.parents && (
-                              <>
-                                <span
-                                  className="text-[10px] text-dark-600 truncate"
-                                  title={`Née de ${nameOf(mount.parents[0])} et ${nameOf(mount.parents[1])}`}
-                                >
-                                  ← {mount.parents.map((id) => nameOf(id)).join(' × ')}
-                                </span>
-                                {/* La concentration de la lignée décide de
-                                    l'éventail des couleurs que cette monture
-                                    peut transmettre : plus elle est haute, plus
-                                    le résultat d'un croisement est prévisible. */}
-                                {(() => {
-                                  const purity = purityOf(mount);
-                                  if (purity === null) return null;
-                                  return (
-                                    <span
-                                      className={`text-[10px] shrink-0 ${
-                                        purity >= 0.99
-                                          ? 'text-profit'
-                                          : purity >= 0.75
-                                            ? 'text-dark-400'
-                                            : 'text-amber-400/70'
-                                      }`}
-                                      title={`Lignée concentrée à ${(purity * 100).toFixed(0)} % sur une seule couleur. Croiser cette couleur avec elle-même monte ce chiffre, et rend le résultat des croisements suivants plus sûr.`}
-                                    >
-                                      lignée {(purity * 100).toFixed(0)}%
-                                    </span>
-                                  );
-                                })()}
-                              </>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onRemoveIndividual(mount.id)}
-                              title="Retirer de l'écurie"
-                              className="ml-auto text-dark-600 hover:text-loss transition-colors
-                                cursor-pointer shrink-0"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                        {/* La concentration de la lignée décide de l'éventail
+                            des couleurs que cette monture peut transmettre :
+                            plus elle est haute, plus le résultat d'un croisement
+                            est prévisible. */}
+                        {purity !== null && (
+                          <span
+                            className={`text-[10px] shrink-0 ${
+                              purity >= 0.99
+                                ? 'text-profit'
+                                : purity >= 0.75
+                                  ? 'text-dark-400'
+                                  : 'text-amber-400/70'
+                            }`}
+                            title={`Lignée concentrée à ${(purity * 100).toFixed(0)} % sur une seule couleur. Croiser cette couleur avec elle-même monte ce chiffre, et rend le résultat des croisements suivants plus sûr.`}
+                          >
+                            lignée {(purity * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => onRemoveIndividual(mount.id)}
+                      title="Retirer de l'écurie"
+                      className="ml-auto text-dark-600 hover:text-loss transition-colors
+                        cursor-pointer shrink-0"
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   </div>
                 );
               })}
-              {mounts.length === 0 && (
-                <p className="text-xs text-dark-500 text-center py-4">
-                  Aucune couleur ne correspond.
+
+              {owned.length === 0 && (
+                <p className="text-xs text-dark-500 text-center py-6">
+                  {individuals.length === 0
+                    ? 'Aucune monture saisie — « Ajouter une monture » demande sa génération, sa couleur, son niveau et son ascendance.'
+                    : 'Aucune monture ne correspond à ce filtre.'}
                 </p>
               )}
             </div>
+
+            {/* Le vrac hérité. Il ne s'ajoute plus, mais il compte encore dans
+                tous les plans : le masquer le rendrait invisible et
+                indécrémentable à la fois. */}
+            {legacyBulk.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-dark-700/40 space-y-1">
+                <p className="text-[11px] text-dark-400">
+                  Vrac hérité — saisi au compteur avant l&apos;assistant
+                </p>
+                <p className="text-[10px] text-dark-600">
+                  Ces effectifs comptent dans les plans mais n&apos;ont ni niveau ni ascendance :
+                  une monture de vrac ne fait jamais viser plus haut que sa couleur. Remplace-les
+                  par des montures nommées au fil de l&apos;eau, et ramène le compteur à zéro.
+                </p>
+                {legacyBulk.map(([colorId, counts]) => (
+                  <div key={colorId} className="flex items-center gap-2 px-3 py-1.5">
+                    <ColorChip
+                      name={nameOf(colorId)}
+                      code={codeOf(colorId)}
+                      icon={iconOf(colorId)}
+                      size="sm"
+                    />
+                    <span className="text-xs text-dark-300 flex-1 truncate">
+                      {nameOf(colorId)}
+                    </span>
+                    <GenBadge generation={generationOfColor(colorId)} />
+                    <span className="text-[10px] text-dark-500">♂</span>
+                    {countInput(
+                      counts.males,
+                      (next) => onSaveBulk(colorId, next, counts.females),
+                      9999,
+                      `Mâles ${nameOf(colorId)} en vrac`
+                    )}
+                    <span className="text-[10px] text-dark-500">♀</span>
+                    {countInput(
+                      counts.females,
+                      (next) => onSaveBulk(colorId, counts.males, next),
+                      9999,
+                      `Femelles ${nameOf(colorId)} en vrac`
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Carburants */}
@@ -631,6 +670,13 @@ const BreedingStocks = ({
           </div>
         </div>
       )}
+
+      <BreedingAddMount
+        isOpen={adding}
+        onClose={() => setAdding(false)}
+        colors={colors}
+        onAdd={onAddIndividual}
+      />
     </div>
   );
 };

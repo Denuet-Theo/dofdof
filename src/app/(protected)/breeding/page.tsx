@@ -476,10 +476,12 @@ const BreedingPage = () => {
       <BreedingSettings settings={settings} onSave={saveSettings} />
 
       <BreedingStocks
-        rows={rows}
+        // Le catalogue et non les lignes de l'écran : l'écurie a besoin des
+        // icônes de certificats, que seule `BreedingColor` porte.
+        colors={tree?.colors ?? []}
         fuelItems={fuelItems}
-        stockBySex={stockBySex}
         individuals={stable.individuals}
+        bulk={stable.bulk}
         itemStock={itemStock}
         itemPrices={fuelPrices}
         onSaveFuelPrice={saveFuelPrice}

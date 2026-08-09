@@ -127,6 +127,15 @@ export type Loadout = {
   /** Ce que la fournée coûte, et le temps d'enclos qu'elle mobilise. */
   cost: number;
   enclosHours: number;
+  /**
+   * Cycles de fécondité que la fournée n'a pas à payer, parce que les montures
+   * concernées sont déjà **fécondes**.
+   *
+   * Compté en cycles et non en kamas : c'est du carburant, et son prix change
+   * avec le cours du jour. L'écran le monétise avec `fuelCostPerCycle`, qui est
+   * le même chiffre que celui du reste de la page.
+   */
+  cyclesSaved: number;
   /** La plus haute génération que l'écurie porte, ascendance comprise. */
   frontier: number;
   /** Les étapes que le plan réclame et que l'écurie ne permet pas encore. */
@@ -304,15 +313,29 @@ const namesFor = (
   return [...byName.values()].sort((a, b) => b.probability - a.probability);
 };
 
-/** Ce qu'un accouplement de cette recette coûte, parents consommés compris. */
+/**
+ * Ce qu'un accouplement de cette recette coûte, parents consommés compris.
+ *
+ * `cyclesAlreadyPaid` retire les cycles de fécondité qu'on n'aura pas à
+ * repayer : une monture **féconde** a déjà traversé ses jauges, elle part telle
+ * quelle. C'est toute la différence entre les deux états disponibles, et elle
+ * vaut un cycle de carburant par monture — sur une écurie qu'on vient de monter,
+ * c'est le poste le plus lourd de la fournée.
+ *
+ * Par défaut zéro : le simulateur ne cycle jamais une monture d'avance, et une
+ * monture de vrac n'a pas d'état enregistré. Supposer le cycle à payer est le
+ * sens prudent — on surestime la dépense, on ne promet pas une économie qui
+ * n'existe pas.
+ */
 export const crossingCost = (
   [first, second]: readonly [string, string],
-  context: LoadoutContext
+  context: LoadoutContext,
+  cyclesAlreadyPaid = 0
 ): number => {
   const parents =
     (Math.max(context.costOf(first), 0) + Math.max(context.costOf(second), 0)) *
     (context.recycleSteriles ? 0.5 : 1);
-  return parents + context.fuelCostPerCycle * 2;
+  return parents + context.fuelCostPerCycle * Math.max(0, 2 - cyclesAlreadyPaid);
 };
 
 /**
@@ -359,6 +382,25 @@ export const buildLoadout = (
   const stepByColor = new Map(plan.steps.map((step) => [step.colorId, step]));
 
   /**
+   * Les montures dont le cycle de fécondité est déjà payé.
+   *
+   * Se lit sur l'écurie **réelle** et non sur celle de travail : `copyStable`
+   * recopie l'état, mais c'est l'identité qui nous intéresse et elle ne bouge
+   * pas. Le vrac n'y figure pas — il n'enregistre aucun état, donc son cycle est
+   * réputé à payer.
+   */
+  const cycled = new Set(
+    stable.individuals.filter((mount) => mount.cycled).map((mount) => mount.id)
+  );
+
+  /** Combien des deux parents d'un couple n'auront pas à repasser les jauges. */
+  const cyclesPaidBy = (couple: Couple): number =>
+    [couple.male.mountId, couple.female.mountId].filter((id) => id !== null && cycled.has(id))
+      .length;
+
+  let cyclesSaved = 0;
+
+  /**
    * Les couples repliés en lignes. Deux au plus par étape : la recette fixe les
    * deux couleurs, et seul le sens varie.
    */
@@ -375,16 +417,31 @@ export const buildLoadout = (
         male: { colorId: couple.male.colorId, mountIds: [] },
         female: { colorId: couple.female.colorId, mountIds: [] },
         count: 0,
-        cost: crossingCost([couple.male.colorId, couple.female.colorId], context),
+        // Cumulé couple par couple, puis ramené à la moyenne après la boucle :
+        // deux accouplements d'une même ligne ne coûtent pas pareil selon que
+        // leurs parents sont fertiles ou fécondes.
+        cost: 0,
         enclosHours: crossingHours(context),
         names: namesFor(step, context, nameOf),
       } satisfies LoadoutLine);
 
+    const paid = cyclesPaidBy(couple);
+    cyclesSaved += paid;
+    line.cost += crossingCost(
+      [couple.male.colorId, couple.female.colorId],
+      context,
+      paid
+    );
     line.count += 1;
     if (couple.male.mountId) line.male.mountIds.push(couple.male.mountId);
     if (couple.female.mountId) line.female.mountIds.push(couple.female.mountId);
     byLine.set(key, line);
   }
+
+  // Le coût d'une ligne redevient un coût **par accouplement**, ce que son nom
+  // annonce et ce que `count * cost` suppose. C'est une moyenne dès que la ligne
+  // mélange des parents cyclés et d'autres, et c'est exact au total.
+  for (const line of byLine.values()) line.cost /= Math.max(1, line.count);
 
   // Ce qui monte en tête, comme à l'allocation : les accouplements d'une fournée
   // partent ensemble, donc l'ordre n'est pas celui de l'exécution — c'est celui
@@ -427,6 +484,7 @@ export const buildLoadout = (
     used,
     cost: lines.reduce((total, line) => total + line.count * line.cost, 0),
     enclosHours: lines.reduce((total, line) => total + line.count * line.enclosHours, 0),
+    cyclesSaved,
     frontier: stableFrontier(stable, context.generations),
     blocked,
     purchases: plan.purchases.filter((purchase) => purchase.count > 0),

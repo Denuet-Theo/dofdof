@@ -54,6 +54,24 @@
 //! pour le Foudroyeur. On s'y gare et les deux tournent ensemble. Sans cette
 //! coïncidence des fenêtres, la fournée serait bien plus longue.
 //!
+//! ## Les cinq enclos sont identiques, et c'est une contrainte d'usage
+//!
+//! Rien dans le jeu ne l'impose : chaque enclos a ses propres jauges, donc on
+//! pourrait leur donner des bandes et des niveaux différents. Un enclos « cher
+//! et précis » à haut niveau pour les paires de génération 9, quatre enclos
+//! « jetables » à niveau 1 pour le reste — le calcul est même favorable, puisque
+//! monter dix montures au niveau 150 coûte 250 000 contre 2 447 000 pour les
+//! cinquante.
+//!
+//! On ne le modélise pas, et la raison n'est pas technique : **cinq enclos aux
+//! rythmes différents demandent une intervention toutes les trois minutes**. Une
+//! politique qu'un humain ne peut pas exécuter ne vaut rien, quel que soit son
+//! score. La contrainte est donc d'usage, et elle écarte une famille entière de
+//! stratégies — ce qui mérite d'être écrit, sans quoi on la rouvre.
+//!
+//! Conséquence directe : une fournée est un bloc de cinquante, les cinq enclos
+//! démarrent et finissent ensemble, et le coût d'un réglage se paie cinq fois.
+//!
 //! ## Mettre une jauge en pause est gratuit
 //!
 //! Confirmé aussi, et tout le modèle en dépend : cesser de nourrir une jauge

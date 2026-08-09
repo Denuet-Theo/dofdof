@@ -72,6 +72,10 @@ struct Options {
     seeds: usize,
     iterations: usize,
     seed: u64,
+    /// Population de départ, pour reprendre un entraînement au lieu de le
+    /// refaire. Huit heures de recherche jetées à chaque lancement était une
+    /// perte qu'on ne peut pas se permettre.
+    resume: Option<String>,
 }
 
 impl Options {
@@ -82,6 +86,7 @@ impl Options {
             seeds: 4,
             iterations: 600,
             seed: 20_260_808,
+            resume: None,
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
         let mut index = 0;
@@ -95,6 +100,7 @@ impl Options {
                 "--seeds" => options.seeds = value.parse().unwrap_or(options.seeds),
                 "--iterations" => options.iterations = value.parse().unwrap_or(options.iterations),
                 "--seed" => options.seed = value.parse().unwrap_or(options.seed),
+                "--resume" => options.resume = Some(value.clone()),
                 _ => {}
             }
             index += 2;
@@ -129,6 +135,44 @@ fn fitness(
     total / seeds.len() as f64
 }
 
+/// Ce qu'une politique **fait**, pas ce qu'elle vaut.
+///
+/// Un écart de score dit qu'une stratégie est meilleure ; il ne dit pas
+/// pourquoi. Et la réponse est régulièrement la même : le clonage est gratuit et
+/// c'est le seul moyen de récupérer de la fécondité, donc les stratégies se
+/// séparent surtout par leur assiduité à recycler.
+struct Behaviour {
+    crossings: f64,
+    clonings: f64,
+    purchases: f64,
+    gen10: f64,
+}
+
+fn behaviour(
+    catalog: &Catalog,
+    economy: &Economy,
+    genome: &Genome,
+    seeds: &[u32],
+    iterations: usize,
+) -> Behaviour {
+    let network = Network::compile(genome);
+    let runs: Vec<_> = seeds
+        .par_iter()
+        .map(|&seed| {
+            let mut policy = Searching::with_iterations(NetValue(&network), iterations)
+                .with_strategies(genome.strategies);
+            play(catalog, economy, &mut policy, seed)
+        })
+        .collect();
+    let n = runs.len().max(1) as f64;
+    Behaviour {
+        crossings: runs.iter().map(|r| r.crossings as f64).sum::<f64>() / n,
+        clonings: runs.iter().map(|r| r.clonings as f64).sum::<f64>() / n,
+        purchases: runs.iter().map(|r| r.purchases as f64).sum::<f64>() / n,
+        gen10: runs.iter().map(|r| r.gen10_held as f64).sum::<f64>() / n,
+    }
+}
+
 struct Species {
     representative: Genome,
     members: Vec<usize>,
@@ -140,6 +184,120 @@ fn distribution(values: &mut [f64]) -> (f64, f64, f64) {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let at = |q: f64| values[((values.len() - 1) as f64 * q).round() as usize];
     (at(0.1), at(0.5), at(0.9))
+}
+
+/// Un génome en JSON, topologie et réglages compris.
+fn genome_json(genome: &Genome) -> serde_json::Value {
+    serde_json::json!({
+        "hidden": genome.hidden,
+        "connections": genome.connections.iter().map(|c| serde_json::json!({
+            "from": c.from, "to": c.to, "weight": c.weight,
+            "enabled": c.enabled, "innovation": c.innovation,
+        })).collect::<Vec<_>>(),
+        "strategies": genome.strategies.iter().map(|s| serde_json::json!({
+            "bands": s.bands.to_vec(),
+            "level": s.level,
+            "optimakina_from": s.optimakina_from,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Tout ce qu'il faut pour reprendre un entraînement là où il s'est arrêté.
+struct Checkpoint {
+    population: Vec<Genome>,
+    innovations: Innovations,
+    threshold: f64,
+    generations: usize,
+}
+
+fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path} : {e}"))?;
+    let root: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path} : {e}"))?;
+
+    // Un tableau nu est l'ancien format « population seule » ; on l'accepte
+    // encore, en reconstituant ce qu'on peut.
+    let list = root["population"]
+        .as_array()
+        .or_else(|| root.as_array())
+        .ok_or(format!("{path} : population absente"))?;
+    let population: Vec<Genome> = list.iter().map(genome_from_json).collect();
+
+    let registry = &root["innovations"];
+    let innovations = if registry.is_object() {
+        let rows = |key: &str, arity: usize| -> Vec<Vec<u64>> {
+            registry[key]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|row| row.as_array())
+                        .filter(|row| row.len() >= arity)
+                        .map(|row| row.iter().map(|v| v.as_u64().unwrap_or(0)).collect())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Innovations::restore(
+            registry["next_innovation"].as_u64().unwrap_or(0),
+            registry["next_node"].as_u64().unwrap_or(0) as usize,
+            rows("links", 3)
+                .into_iter()
+                .map(|row| (row[0] as usize, row[1] as usize, row[2]))
+                .collect(),
+            rows("splits", 2)
+                .into_iter()
+                .map(|row| (row[0], row[1] as usize))
+                .collect(),
+        )
+    } else {
+        // Ancien format : on reconstitue au mieux. Ce qui se perd est `splits` —
+        // rien dans un génome ne dit **quel lien** a été coupé pour créer tel
+        // nœud, donc deux lignées cesseraient de reconnaître la même mutation
+        // structurelle et le croisement s'en trouverait dégradé.
+        Innovations::from_population(&population)
+    };
+
+    Ok(Checkpoint {
+        population,
+        innovations,
+        threshold: root["threshold"].as_f64().unwrap_or(f64::NAN),
+        generations: root["generations"].as_u64().unwrap_or(0) as usize,
+    })
+}
+
+fn genome_from_json(value: &serde_json::Value) -> Genome {
+    let mut strategies = [breeding_sim::economy::Strategy::default(); breeding_sim::economy::MAX_UNITS];
+    if let Some(list) = value["strategies"].as_array() {
+        for (unit, entry) in list.iter().take(strategies.len()).enumerate() {
+            if let Some(bands) = entry["bands"].as_array() {
+                for (gauge, band) in bands.iter().take(6).enumerate() {
+                    strategies[unit].bands[gauge] = band.as_u64().unwrap_or(0) as usize;
+                }
+            }
+            strategies[unit].level = entry["level"].as_u64().unwrap_or(0) as u16;
+            strategies[unit].optimakina_from = entry["optimakina_from"].as_u64().unwrap_or(11) as u8;
+        }
+    }
+    Genome {
+        hidden: value["hidden"]
+            .as_array()
+            .map(|list| list.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect())
+            .unwrap_or_default(),
+        connections: value["connections"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .map(|c| neat::Connection {
+                        from: c["from"].as_u64().unwrap_or(0) as usize,
+                        to: c["to"].as_u64().unwrap_or(0) as usize,
+                        weight: c["weight"].as_f64().unwrap_or(0.0),
+                        enabled: c["enabled"].as_bool().unwrap_or(false),
+                        innovation: c["innovation"].as_u64().unwrap_or(0),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        strategies,
+    }
 }
 
 fn millions(kamas: f64) -> String {
@@ -170,14 +328,43 @@ fn main() {
 
     let mut rng = Rng::new(options.seed);
     let mut innovations = Innovations::new();
-    let mut population: Vec<Genome> = (0..config.population)
-        .map(|_| Genome::minimal(&mut innovations, &mut rng))
-        .collect();
-    let mut species: Vec<Species> = Vec::new();
-    // Le seuil s'ajuste pour tenir le nombre d'espèces visé. C'est ce qui rend
-    // la spéciation robuste à l'échelle de la distance, qui change à mesure que
-    // les génomes grossissent.
+    // Le seuil s'ajuste pour tenir le nombre d'espèces visé, et il se reprend
+    // avec le reste : recommencer à 2,0 après huit heures de calibration ferait
+    // exploser le nombre d'espèces à la première génération.
     let mut threshold = config.compatibility_threshold;
+    let mut resumed_from = 0usize;
+    let mut population: Vec<Genome> = match options.resume.as_deref().map(read_checkpoint) {
+        Some(Ok(saved)) if !saved.population.is_empty() => {
+            println!(
+                "reprise : {} génomes, {} générations déjà cumulées",
+                saved.population.len(),
+                saved.generations
+            );
+            innovations = saved.innovations;
+            if saved.threshold.is_finite() {
+                threshold = saved.threshold;
+            }
+            resumed_from = saved.generations;
+            // On complète si la population demandée est plus grande, on tronque
+            // sinon : le fichier ne doit pas dicter la taille.
+            let mut population = saved.population;
+            while population.len() < config.population {
+                let mut child = population[rng.range(population.len())].clone();
+                child.mutate(&config, &mut innovations, &mut rng);
+                population.push(child);
+            }
+            population.truncate(config.population);
+            population
+        }
+        Some(Err(error)) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        _ => (0..config.population)
+            .map(|_| Genome::minimal(&mut innovations, &mut rng))
+            .collect(),
+    };
+    let mut species: Vec<Species> = Vec::new();
 
     let started = Instant::now();
     let budget = options.minutes * 60.0;
@@ -186,7 +373,10 @@ fn main() {
     // Le meilleur de chaque espèce à la dernière génération. C'est ce qu'on
     // vient chercher en spéciant : les stratégies **alternatives**, pas
     // seulement celle qui a gagné.
-    let mut survivors: Vec<(Genome, f64)> = Vec::new();
+    // Chaque finaliste porte le numéro de son espèce : c'est ce qui permet de
+    // comparer les stratégies **entre** espèces plutôt que de lister douze
+    // quasi-clones du vainqueur.
+    let mut survivors: Vec<(usize, Genome, f64)> = Vec::new();
 
     while started.elapsed().as_secs_f64() < budget {
         // --- graines communes, tournantes ---------------------------------
@@ -349,7 +539,8 @@ fn main() {
         }
         survivors = species
             .iter()
-            .flat_map(|entry| {
+            .enumerate()
+            .flat_map(|(species_index, entry)| {
                 let mut ranked: Vec<usize> = entry
                     .members
                     .iter()
@@ -364,11 +555,11 @@ fn main() {
                 ranked
                     .into_iter()
                     .take(FINALISTS_PER_SPECIES)
-                    .map(|index| (population[index].clone(), scores[index]))
+                    .map(|index| (species_index, population[index].clone(), scores[index]))
                     .collect::<Vec<_>>()
             })
             .collect();
-        survivors.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        survivors.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         population = next;
         generation += 1;
@@ -404,9 +595,11 @@ fn main() {
     // On rejoue donc les trois meilleurs de chaque espèce sur cent graines
     // dédiées, et c'est ce second passage qui tranche. Le champion historique
     // entre aussi dans la liste : il peut avoir disparu de la population.
-    let mut finalists: Vec<(Genome, f64)> = survivors.clone();
+    let mut finalists: Vec<(usize, Genome, f64)> = survivors.clone();
     if let Some((genome, score)) = champion.clone() {
-        finalists.push((genome, score));
+        // Le champion historique n'appartient à aucune espèce courante : on le
+        // marque à part plutôt que de le ranger de force dans l'une d'elles.
+        finalists.push((usize::MAX, genome, score));
     }
     if finalists.is_empty() {
         println!("aucun candidat — l'entraînement n'a pas tourné");
@@ -417,7 +610,7 @@ fn main() {
     let mut judged: Vec<(usize, f64)> = finalists
         .par_iter()
         .enumerate()
-        .map(|(index, (genome, _))| {
+        .map(|(index, (_, genome, _))| {
             (
                 index,
                 fitness(&catalog, &economy, genome, &validation, options.iterations),
@@ -426,9 +619,70 @@ fn main() {
         .collect();
     judged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    // --- le meilleur de chaque espèce, réglages et comportement ------------
+    //
+    // C'est ce qu'on vient chercher en spéciant. La table de départage brute
+    // liste souvent trois quasi-clones du vainqueur ; ici chaque ligne est une
+    // espèce distincte, et elle porte ce que la stratégie **fait** et pas
+    // seulement ce qu'elle vaut.
+    let mut best_per_species: Vec<(usize, usize, f64)> = Vec::new();
+    for &(index, score) in &judged {
+        let species_of = finalists[index].0;
+        if !best_per_species.iter().any(|&(s, _, _)| s == species_of) {
+            best_per_species.push((species_of, index, score));
+        }
+    }
+
     println!(
-        "
---- départage sur {} graines dédiées ({VALIDATION_SEEDS:?}) ---",
+        "\n--- le meilleur de chaque espèce ({} espèces) ---",
+        best_per_species.len()
+    );
+    println!(
+        "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>7}",
+        "espèce", "départage", "bloc", "libre", "opti", "crois.", "clones", "achats", "gen10"
+    );
+    println!("{}", "-".repeat(92));
+    for &(species_of, index, score) in best_per_species.iter().take(12) {
+        let genome = &finalists[index].1;
+        let acts = behaviour(&catalog, &economy, genome, &validation[..40], options.iterations);
+        let unit = |u: usize| {
+            let strategy = genome.strategies[u];
+            format!(
+                "{}/{}",
+                strategy
+                    .bands
+                    .iter()
+                    .map(|band| band.to_string())
+                    .collect::<String>(),
+                strategy.level
+            )
+        };
+        println!(
+            "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.0} {:>7.1}",
+            if species_of == usize::MAX {
+                "hist.".to_string()
+            } else {
+                species_of.to_string()
+            },
+            millions(score),
+            unit(0),
+            unit(1),
+            if genome.strategies[0].optimakina_from > 10 {
+                "—".to_string()
+            } else {
+                genome.strategies[0].optimakina_from.to_string()
+            },
+            acts.crossings,
+            acts.clonings,
+            acts.purchases,
+            acts.gen10
+        );
+    }
+    println!("  (bandes Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire / niveau)");
+    println!("  (comportement moyenné sur 40 graines de départage)");
+
+    println!(
+        "\n--- départage complet sur {} graines dédiées ({VALIDATION_SEEDS:?}) ---",
         validation.len()
     );
     println!(
@@ -436,7 +690,7 @@ fn main() {
         "rang", "entraîn.", "départage", "bandes", "niveau", "opti", "fournée"
     );
     for (rank, (index, score)) in judged.iter().take(12).enumerate() {
-        let (genome, training) = &finalists[*index];
+        let (_, genome, training) = &finalists[*index];
         let (cost, _) = economy.unit_load(0, genome.strategies[0]);
         let bands: Vec<String> = genome.strategies[0].bands.iter().map(|b| b.to_string()).collect();
         println!(
@@ -457,7 +711,7 @@ fn main() {
     println!("  (bandes dans l'ordre Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire)");
 
     let (winner, validated) = judged[0];
-    let (best, training_score) = finalists[winner].clone();
+    let (_, best, training_score) = finalists[winner].clone();
 
 
     // --- la porte : les graines scellées -----------------------------------
@@ -587,7 +841,7 @@ fn main() {
     let finalists_json: Vec<serde_json::Value> = judged
         .iter()
         .map(|(index, validated)| {
-            let (genome, training) = &finalists[*index];
+            let (_, genome, training) = &finalists[*index];
             serde_json::json!({
                 "hidden": genome.hidden,
                 "connections": genome.connections.iter().map(|c| serde_json::json!({
@@ -611,6 +865,40 @@ fn main() {
     .is_ok()
     {
         println!("{} finalistes écrits dans finalists.json", finalists_json.len());
+    }
+
+    // La population entière, pour pouvoir reprendre. C'est ce qui manquait :
+    // huit heures de recherche disparaissaient à chaque fin de run, et une
+    // session courte lancée ensuite repartait de zéro plutôt que d'affiner.
+    if std::fs::write(
+        "checkpoint.json",
+        serde_json::to_string(&{
+            // Le registre d'innovations part en entier plutôt que d'être
+            // reconstruit : rien dans un génome ne dit **quel lien** a été coupé
+            // pour créer tel nœud, donc `splits` se perdrait et deux lignées
+            // cesseraient de reconnaître la même mutation structurelle.
+            let (next_innovation, next_node, links, splits) = innovations.snapshot();
+            serde_json::json!({
+                "population": population.iter().map(genome_json).collect::<Vec<_>>(),
+                "innovations": {
+                    "next_innovation": next_innovation,
+                    "next_node": next_node,
+                    "links": links,
+                    "splits": splits,
+                },
+                "threshold": threshold,
+                "generations": resumed_from + generation,
+            })
+        })
+        .unwrap_or_default(),
+    )
+    .is_ok()
+    {
+        println!(
+            "checkpoint : {} génomes, {} générations cumulées — reprendre avec --resume checkpoint.json",
+            population.len(),
+            resumed_from + generation
+        );
     }
 
     let path = "champion.json";

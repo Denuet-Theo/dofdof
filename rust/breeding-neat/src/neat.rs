@@ -141,12 +141,69 @@ pub struct Innovations {
 }
 
 impl Innovations {
+    /// Reconstruit le registre à partir d'une population sauvegardée.
+    ///
+    /// Sans lui, reprendre un entraînement redistribuerait des numéros
+    /// d'innovation déjà utilisés : deux lignées porteraient le même numéro pour
+    /// des liens différents, et le croisement les confondrait. C'est le genre de
+    /// corruption qui ne casse rien visiblement et dégrade tout.
+    pub fn from_population(population: &[Genome]) -> Self {
+        let mut registry = Self::new();
+        for genome in population {
+            for connection in &genome.connections {
+                registry
+                    .links
+                    .insert((connection.from, connection.to), connection.innovation);
+                registry.next_innovation = registry.next_innovation.max(connection.innovation + 1);
+            }
+            for &node in &genome.hidden {
+                registry.next_node = registry.next_node.max(node + 1);
+            }
+        }
+        registry
+    }
+
     pub fn new() -> Self {
         Self {
             next_innovation: 0,
             next_node: FIRST_HIDDEN,
             links: HashMap::new(),
             splits: HashMap::new(),
+        }
+    }
+
+    /// Le registre en clair, pour le sauvegarder.
+    ///
+    /// `splits` est ce que `from_population` ne peut pas reconstituer : rien dans
+    /// un génome ne dit *quel lien* a été coupé pour créer tel nœud. Le perdre
+    /// ferait recréer un nœud neuf à chaque recoupe du même lien, et deux lignées
+    /// cesseraient de reconnaître la même mutation.
+    pub fn snapshot(&self) -> (u64, usize, Vec<(usize, usize, u64)>, Vec<(u64, usize)>) {
+        (
+            self.next_innovation,
+            self.next_node,
+            self.links
+                .iter()
+                .map(|(&(from, to), &innovation)| (from, to, innovation))
+                .collect(),
+            self.splits.iter().map(|(&a, &b)| (a, b)).collect(),
+        )
+    }
+
+    pub fn restore(
+        next_innovation: u64,
+        next_node: usize,
+        links: Vec<(usize, usize, u64)>,
+        splits: Vec<(u64, usize)>,
+    ) -> Self {
+        Self {
+            next_innovation,
+            next_node: next_node.max(FIRST_HIDDEN),
+            links: links
+                .into_iter()
+                .map(|(from, to, innovation)| ((from, to), innovation))
+                .collect(),
+            splits: splits.into_iter().collect(),
         }
     }
 

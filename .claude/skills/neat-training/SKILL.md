@@ -120,11 +120,20 @@ successful genome fills the podium with copies of itself.
 - The last four columns are behaviour averaged over 40 run-off seeds, not score.
   A score gap says one policy is better; only these say why.
 
-**A `hist.` row is not a species.** It is the cumulative champion, re-entered
-into the run-off because the population may have lost it. If `hist.` wins the
-round, the live population did **not** improve — a good genome appeared during
-the hour, was archived, and was then dropped again. Report that distinction;
-the headline number alone hides it.
+**A `hist.` row is not a species.** It is the running champion, re-entered into
+the run-off because the population may have lost it. If `hist.` wins the round,
+the live population did **not** improve — a good genome appeared, was archived,
+and was then dropped again. Report that distinction; the headline number alone
+hides it.
+
+The champion is kept on **training fitness**, so it inherits the winner's curse
+it is meant to protect against: a genome with a higher training score replaces
+one that was better on the run-off. Round 5 here archived a genome worth
+104,46 M; round 6 replaced it with one scoring 116,06 M in training and 93,38 M
+on the run-off. So `champion.json` is **not monotone**, and archiving each
+round (`cp champion.json champion-r5.json`) is what makes the best artefact
+recoverable afterwards. It travels in the checkpoint, so a resumed run keeps
+it — before that fix, `hist.` silently meant "best of this hour".
 
 ## Replaying a champion
 
@@ -137,6 +146,13 @@ the third argument picks which one. The second argument moves the seed window,
 which is how to separate two explanations of a gap: replay on training-domain
 seeds, and if the score is unchanged, the sealed set was not harder — the gap
 was the winner's curse.
+
+Careful when comparing a replay against a training run's own sealed-seed line:
+`replay` uses `Searching::new`, which defaults to **1500** hill-climbing
+iterations, while training uses whatever `--iterations` was passed. The same
+champion measured 107,99 M at 800 iterations and 112,66 M at 1500 — the policy
+keeps paying off with a larger search budget at play time, which is worth
+knowing on its own, but it makes the two numbers non-comparable.
 
 ## Retargeting at another mount family
 
@@ -201,3 +217,4 @@ measuring against an economy other than the file's is worse than not measuring.
 | champion scores exactly the do-nothing floor | disconnected network — `is_connected()` returns `NEG_INFINITY` rather than paying for the games |
 | run-off far below training fitness | expected. Only worth acting on if the gap grows every round, which means the population has converged and the maximum is measuring luck |
 | every species suddenly shares one strategy | the threshold reopened or collapsed; check the species count in the generation log before reading the table |
+| generations per hour keeps falling across resumed rounds | topology bloat. Measured here: 11 nodes / 70 links at 297 generations/hour, 44 / 124 at 168 — the search loses half its budget to networks that are not earning it. Watch the topology printed with the champion |

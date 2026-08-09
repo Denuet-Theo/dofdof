@@ -208,6 +208,15 @@ struct Checkpoint {
     innovations: Innovations,
     threshold: f64,
     generations: usize,
+    /// Le meilleur génome jamais vu, avec sa fitness d'entraînement.
+    ///
+    /// Sans lui, `champion` repart à `None` à chaque reprise et la ligne
+    /// `hist.` du départage ne dit plus « le meilleur depuis le début » mais
+    /// « le meilleur de cette heure-ci ». Mesuré : une manche a rendu 104,46 M
+    /// au départage, la suivante 93,38 M sur la même ligne — non pas parce que
+    /// le premier avait été battu, mais parce qu'il n'était plus dans la
+    /// course.
+    champion: Option<(Genome, f64)>,
 }
 
 fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
@@ -256,11 +265,21 @@ fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
         Innovations::from_population(&population)
     };
 
+    // Absent des fichiers écrits avant que le champion soit sauvegardé : la
+    // reprise repart alors sans lui, comme avant.
+    let champion = root["champion"]["genome"].is_object().then(|| {
+        (
+            genome_from_json(&root["champion"]["genome"]),
+            root["champion"]["fitness"].as_f64().unwrap_or(0.0),
+        )
+    });
+
     Ok(Checkpoint {
         population,
         innovations,
         threshold: root["threshold"].as_f64().unwrap_or(f64::NAN),
         generations: root["generations"].as_u64().unwrap_or(0) as usize,
+        champion,
     })
 }
 
@@ -333,6 +352,7 @@ fn main() {
     // exploser le nombre d'espèces à la première génération.
     let mut threshold = config.compatibility_threshold;
     let mut resumed_from = 0usize;
+    let mut restored_champion: Option<(Genome, f64)> = None;
     let mut population: Vec<Genome> = match options.resume.as_deref().map(read_checkpoint) {
         Some(Ok(saved)) if !saved.population.is_empty() => {
             println!(
@@ -345,6 +365,10 @@ fn main() {
                 threshold = saved.threshold;
             }
             resumed_from = saved.generations;
+            if let Some((_, fitness)) = &saved.champion {
+                println!("  champion repris : entraîné à {}", millions(*fitness));
+            }
+            restored_champion = saved.champion;
             // On complète si la population demandée est plus grande, on tronque
             // sinon : le fichier ne doit pas dicter la taille.
             let mut population = saved.population;
@@ -369,7 +393,7 @@ fn main() {
     let started = Instant::now();
     let budget = options.minutes * 60.0;
     let mut generation = 0usize;
-    let mut champion: Option<(Genome, f64)> = None;
+    let mut champion: Option<(Genome, f64)> = restored_champion;
     // Le meilleur de chaque espèce à la dernière génération. C'est ce qu'on
     // vient chercher en spéciant : les stratégies **alternatives**, pas
     // seulement celle qui a gagné.
@@ -888,6 +912,14 @@ fn main() {
                 },
                 "threshold": threshold,
                 "generations": resumed_from + generation,
+                // Le champion voyage avec le reste, sinon chaque reprise
+                // recommence à le chercher et la ligne `hist.` du départage
+                // devient « le meilleur de cette heure » au lieu de « le
+                // meilleur depuis le début ».
+                "champion": champion.as_ref().map(|(genome, fitness)| serde_json::json!({
+                    "genome": genome_json(genome),
+                    "fitness": fitness,
+                })),
             })
         })
         .unwrap_or_default(),

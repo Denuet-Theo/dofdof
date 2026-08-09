@@ -472,6 +472,26 @@ const BreedingPage = () => {
           obligerait à défiler pour lire un compte à rebours. */}
       <BreedingTimeline timeline={timeline} />
 
+      {/* La fournée suit le planning immédiatement, et c'est la même raison qui
+          les met tous les deux en tête : le planning dit **quand**, la fournée
+          dit **quoi**, et on ouvre cet écran pour ces deux réponses-là. Elle
+          était sous les stocks, les réglages et le classement — trois panneaux
+          qu'on ne consulte qu'une fois par semaine, à défiler à chaque
+          aller-retour en jeu. Elle reste avant les fournées suivantes : un
+          croisement hors recette rend inutile une partie du plan qu'on
+          s'apprêtait à charger, et le voir après aurait consommé les montures
+          qui le portent. Le panneau disparaît de lui-même tant qu'aucune
+          couleur n'est planifiable. */}
+      {loadout && (
+        <BreedingNextMove
+          loadout={loadout}
+          drift={drift}
+          clonings={clonings}
+          nameOf={nameOf}
+          individuals={stable.individuals}
+        />
+      )}
+
       <BreedingStocks
         // Le catalogue et non les lignes de l'écran : l'écurie a besoin des
         // icônes de certificats, que seule `BreedingColor` porte.
@@ -776,15 +796,6 @@ const BreedingPage = () => {
           </div>
         )}
       </div>
-
-      {/* La fournée vient avant les lots, et ce n'est pas un détail de mise en
-          page : un croisement hors recette rend inutile une partie du plan qu'on
-          s'apprêtait à charger. Le voir après aurait consommé les montures qui
-          le portent. Le panneau disparaît de lui-même tant qu'aucune couleur
-          n'est planifiable. */}
-      {loadout && (
-        <BreedingNextMove loadout={loadout} drift={drift} clonings={clonings} nameOf={nameOf} />
-      )}
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

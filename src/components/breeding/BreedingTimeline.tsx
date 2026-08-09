@@ -36,6 +36,7 @@ import {
   type PlacedEvent,
   type TimelinePlan,
 } from '@/lib/dofus/breeding/timeline';
+import { MODEL_PLAN_SOURCE, modelPlan } from '@/lib/dofus/breeding/model-plan';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -62,12 +63,18 @@ import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
  * courir afficherait au retour une pile de rendez-vous ratés qui n'ont jamais
  * existé.
  *
- * ## Le modèle ne remplit pas encore ce ruban
+ * ## D'où vient le plan
  *
- * L'optimiseur tourne. L'écran lit dès aujourd'hui le format qu'il produira —
- * voir `timeline.ts` — et sait le charger depuis un fichier. Le bouton
- * « exemple » sert à juger la mise en page en attendant, avec des durées prises
- * sur `schedule.rs` plutôt que sur rien.
+ * Trois entrées, et elles ne se remplacent pas. Le **plan du modèle** est
+ * embarqué (`model-plan.ts`) : c'est la sortie du champion, un clic, le cas
+ * courant. Le **fichier** sert quand on vient d'en régénérer un. Le **collage**
+ * sert quand on bricole un ordonnancement à la main. Toutes passent par
+ * `parsePlan`.
+ *
+ * L'exemple reste en second parce qu'il tient les durées de `schedule.rs`
+ * toutes jauges en bande haute : quand le plan du modèle surprend — et il
+ * surprend, il laisse les cinq enclos synchronisés en bande basse — c'est à lui
+ * qu'on le compare.
  */
 
 type Props = { timeline: BreedingTimelineState };
@@ -450,17 +457,21 @@ const Agenda = ({
 /**
  * Le chargement d'un plan, tant que le modèle ne le pousse pas lui-même.
  *
- * Fichier **et** collage : le Rust écrit un fichier, mais on itère aussi à la
- * main sur un ordonnancement qu'on veut juste voir à l'écran. Les deux passent
- * par `parsePlan`, donc une erreur de format se dit ici plutôt que de produire
- * un ruban vide.
+ * Trois entrées, et elles ne se remplacent pas : le plan **embarqué** du
+ * champion pour le cas courant, un fichier pour celui qu'on vient de
+ * régénérer, un collage pour l'ordonnancement qu'on bricole. Toutes passent par
+ * `parsePlan`, donc une erreur de format se dit ici plutôt que de produire un
+ * ruban vide.
  */
 const PlanLoader = ({
   onLoad,
+  fromModel,
   compact = false,
   actions,
 }: {
   onLoad: (plan: TimelinePlan) => void;
+  /** Le plan du champion, ou `null` s'il ne passe plus le contrat. */
+  fromModel?: TimelinePlan | null;
   compact?: boolean;
   /**
    * Ce qui accompagne le déclencheur sur sa ligne.
@@ -504,11 +515,23 @@ const PlanLoader = ({
           <Upload size={13} />
           {open ? 'Fermer' : 'Importer un plan'}
         </Button>
+        {/* Le plan du modèle passe devant l'exemple : c'est la réponse, l'autre
+            n'était que la maquette qui a permis de juger l'écran avant qu'elle
+            existe. L'exemple reste, en second, parce qu'il tient les durées de
+            `schedule.rs` en bande haute et sert donc de repère quand le plan du
+            modèle surprend. */}
         {!compact && (
-          <Button size="sm" onClick={() => onLoad(samplePlan())}>
-            <CalendarClock size={13} />
-            Charger l’exemple
-          </Button>
+          <>
+            {fromModel && (
+              <Button size="sm" onClick={() => onLoad(fromModel)}>
+                <CalendarClock size={13} />
+                Charger le plan du modèle
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => onLoad(samplePlan())}>
+              Charger l’exemple
+            </Button>
+          </>
         )}
         {actions}
       </div>
@@ -572,6 +595,10 @@ const PlanLoader = ({
 const BreedingTimeline = ({ timeline }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
+  // Relu une fois : le plan embarqué ne change pas d'un rendu à l'autre, et
+  // `parsePlan` reconstruit tout le tableau d'événements.
+  const fromModel = useMemo(() => modelPlan(), []);
+
   // `now` reste nul jusqu'au montage — voir `useBreedingTimeline` sur l'écart
   // d'hydratation qu'un `Date.now()` initial produirait.
   if (loading || now === null) {
@@ -594,8 +621,21 @@ const BreedingTimeline = ({ timeline }: Props) => {
           </span>
         </div>
         <p className="text-[11px] text-dark-500">
-          Aucun plan chargé. L’optimiseur émettra cet ordonnancement quand il aura convergé ;
-          d’ici là, l’exemple donne la forme exacte du format attendu.
+          {fromModel ? (
+            <>
+              Aucun plan chargé. Celui du modèle tient {(
+                (fromModel.horizon ?? planHorizon(fromModel)) / 3600
+              ).toFixed(0)}{' '}
+              h et vaut {(MODEL_PLAN_SOURCE.sealedMedian / 1e6).toFixed(0)} M de kamas médians sur
+              les graines scellées, contre 72 M pour l’heuristique gloutonne.
+            </>
+          ) : (
+            <>
+              Aucun plan chargé, et celui du modèle ne passe plus le contrat — il a été émis
+              avant un changement de format. Le régénérer&nbsp;: <code>plan.exe</code>, puis{' '}
+              <code>scripts/check-plan.mjs</code>.
+            </>
+          )}
         </p>
         {error && (
           <p className="flex items-start gap-1.5 text-[11px] text-loss">
@@ -603,7 +643,7 @@ const BreedingTimeline = ({ timeline }: Props) => {
             {error}
           </p>
         )}
-        <PlanLoader onLoad={load} />
+        <PlanLoader onLoad={load} fromModel={fromModel} />
       </div>
     );
   }
@@ -697,6 +737,7 @@ const BreedingTimeline = ({ timeline }: Props) => {
       <div className="pt-3 border-t border-dark-700/40">
         <PlanLoader
           onLoad={load}
+          fromModel={fromModel}
           compact
           actions={
             <span className="ml-auto flex items-center gap-3">

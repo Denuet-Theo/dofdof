@@ -54,3 +54,7 @@ next-env.d.ts
 # soit près d'un mégaoctet réécrit à chaque manche. C'est une sortie de calcul,
 # pas une source — et une reprise ne se partage pas, elle se relance.
 /rust/checkpoint*.json
+
+# Le plan émis pour inspection. Celui qu'embarque l'app est versionné, lui :
+# src/lib/dofus/breeding/model-plan.json.
+/rust/plan.json

@@ -40,13 +40,21 @@
  * d'actions déjà manquées, alors que le parc, lui, attend exactement là où on
  * l'a laissé.
  *
- * ## Le modèle ne l'émet pas encore
+ * ## Le modèle l'émet
  *
- * L'optimiseur tourne toujours. Ce fichier définit donc la cible : quand le Rust
- * saura ordonnancer, il produira ce JSON et rien de ce qui est ici ne bougera.
- * En attendant, `samplePlan()` en donne un exemplaire fidèle — les durées y sont
- * celles de `schedule.rs` à 4 pt/s, pas des nombres décoratifs — pour que
- * l'écran soit jugeable avant que le modèle ait convergé.
+ * `rust/breeding-neat/src/bin/plan.rs` produit ce JSON, et rien d'écrit ici n'a
+ * bougé pour l'accueillir — c'était l'intérêt d'avoir posé le contrat d'abord.
+ * `scripts/check-plan.mjs` valide chaque sortie avec `parsePlan`, donc c'est ce
+ * fichier qui arbitre, pas une seconde idée de ce qu'est un plan valide.
+ *
+ * `samplePlan()` reste, en second : ses durées sont celles de `schedule.rs`
+ * toutes jauges en bande haute, ce qui en fait un repère quand le plan du
+ * modèle surprend. Et il a servi à juger l'écran avant que le modèle converge,
+ * ce qui était son vrai travail.
+ *
+ * Ce fichier n'importe **rien**, et cela se garde : `check-plan.mjs` le compile
+ * seul pour valider une sortie du Rust sans monter tout le bundle. Le plan
+ * embarqué vit donc à côté, dans `model-plan.ts`.
  */
 
 /* ------------------------------------------------------------------ contrat */

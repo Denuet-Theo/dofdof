@@ -156,15 +156,34 @@ knowing on its own, but it makes the two numbers non-comparable.
 
 ## Shipping a champion to the app
 
-The screen does not run the network — it reads a schedule. `plan` emits it:
+The screen does not run the network — it reads a schedule. `plan` emits it, and
+it emits **one per paddock count**, because the breeder's park is not the park
+the champion trained on:
 
 ```sh
-./target/release/plan.exe champion-r5.json --out plan.json   # --seed, --hours, --rank
-cd .. && node scripts/check-plan.mjs rust/plan.json
-cp rust/plan.json src/lib/dofus/breeding/model-plan.json
+cd rust
+for n in $(seq 1 12); do
+  ./target/release/plan.exe champion-r5.json --enclos $n \
+    --out "../src/lib/dofus/breeding/model-plans/$n.json"   # --seed, --hours, --rank
+done
+cd ..
+for n in $(seq 1 12); do node scripts/check-plan.mjs "src/lib/dofus/breeding/model-plans/$n.json"; done
 ```
 
-The middle step is not optional. `check-plan.mjs` validates with the screen's
+`--enclos` sets the whole park and lets `split` in `plan.rs` decide how to cut
+it — block only below four paddocks, block plus one free unit above. That
+threshold is a measurement, not a preference; the table is in the doc comment,
+and re-deriving it after an economy change is a `replay` sweep, not a guess.
+
+Each size is a **played game at that size**, never the six-paddock plan scaled.
+Extrapolating would reintroduce exactly the guessing this whole crate exists to
+replace.
+
+Twelve plans are 748 KB, so `model-plan.ts` imports them one at a time through a
+lazy map keyed by size. Adding a size means adding a line there too — the paths
+have to stay statically readable or the bundler cannot split them.
+
+The validation step is not optional. `check-plan.mjs` validates with the screen's
 own `parsePlan` from `src/lib/dofus/breeding/timeline.ts`, so a field renamed on
 either side fails loudly instead of rendering an empty ribbon. It caught a real
 overrun the first time it ran.

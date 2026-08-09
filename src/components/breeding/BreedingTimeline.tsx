@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
@@ -37,7 +37,11 @@ import {
   type PlacedEvent,
   type TimelinePlan,
 } from '@/lib/dofus/breeding/timeline';
-import { MODEL_PLAN_SOURCE, modelPlan } from '@/lib/dofus/breeding/model-plan';
+import {
+  MODEL_PLAN_SOURCE,
+  modelPlan,
+  type ModelPlan,
+} from '@/lib/dofus/breeding/model-plan';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -78,7 +82,17 @@ import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
  * qu'on le compare.
  */
 
-type Props = { timeline: BreedingTimelineState };
+type Props = {
+  timeline: BreedingTimelineState;
+  /**
+   * Le parc de l'éleveur, qui décide **de quel** plan du modèle on parle.
+   *
+   * Il y en a un par taille, joué sur cette taille-là : un plan de six enclos
+   * montré à qui en possède cinq annonce une piste de trop et des achats qu'il
+   * ne peut pas honorer. Voir `model-plan.ts`.
+   */
+  enclosCount: number;
+};
 
 /* ------------------------------------------------------------ vocabulaire -- */
 
@@ -494,8 +508,11 @@ const PlanLoader = ({
   actions,
 }: {
   onLoad: (plan: TimelinePlan) => void;
-  /** Le plan du champion, ou `null` s'il ne passe plus le contrat. */
-  fromModel?: TimelinePlan | null;
+  /**
+   * Le plan du champion pour le parc courant, ou `null` s'il ne passe plus le
+   * contrat — ou n'est pas encore arrivé, puisqu'il se charge à la demande.
+   */
+  fromModel?: ModelPlan | null;
   compact?: boolean;
   /**
    * Ce qui accompagne le déclencheur sur sa ligne.
@@ -547,9 +564,9 @@ const PlanLoader = ({
         {!compact && (
           <>
             {fromModel && (
-              <Button size="sm" onClick={() => onLoad(fromModel)}>
+              <Button size="sm" onClick={() => onLoad(fromModel.plan)}>
                 <CalendarClock size={13} />
-                Charger le plan du modèle
+                Charger le plan du modèle — {fromModel.enclos} enclos
               </Button>
             )}
             <Button size="sm" variant="secondary" onClick={() => onLoad(samplePlan())}>
@@ -616,12 +633,31 @@ const PlanLoader = ({
 
 /* -------------------------------------------------------------- le panneau - */
 
-const BreedingTimeline = ({ timeline }: Props) => {
+const BreedingTimeline = ({ timeline, enclosCount }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
-  // Relu une fois : le plan embarqué ne change pas d'un rendu à l'autre, et
-  // `parsePlan` reconstruit tout le tableau d'événements.
-  const fromModel = useMemo(() => modelPlan(), []);
+  /**
+   * Le plan du modèle pour ce parc-là, chargé à la demande.
+   *
+   * Les douze tailles pèsent 748 Ko à elles toutes : les importer d'un bloc
+   * ferait payer à chaque visite onze plans que personne ne lira. Un import
+   * dynamique n'apporte que celui du parc courant, au prix d'un état — le
+   * bouton apparaît un instant après le reste, ce qui est sans conséquence sur
+   * un écran qu'on vient consulter.
+   */
+  const [fromModel, setFromModel] = useState<ModelPlan | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    modelPlan(enclosCount).then((loaded) => {
+      if (current) setFromModel(loaded);
+    });
+    return () => {
+      // Changer d'enclos pendant le chargement doit laisser gagner la dernière
+      // demande, pas la plus lente.
+      current = false;
+    };
+  }, [enclosCount]);
 
   // `now` reste nul jusqu'au montage — voir `useBreedingTimeline` sur l'écart
   // d'hydratation qu'un `Date.now()` initial produirait.
@@ -647,11 +683,16 @@ const BreedingTimeline = ({ timeline }: Props) => {
         <p className="text-[11px] text-dark-500">
           {fromModel ? (
             <>
-              Aucun plan chargé. Celui du modèle tient {(
-                (fromModel.horizon ?? planHorizon(fromModel)) / 3600
-              ).toFixed(0)}{' '}
-              h et vaut {(MODEL_PLAN_SOURCE.sealedMedian / 1e6).toFixed(0)} M de kamas médians sur
-              les graines scellées, contre 72 M pour l’heuristique gloutonne.
+              Aucun plan chargé. Celui du modèle est joué sur{' '}
+              <strong>
+                {fromModel.enclos} enclos
+                {fromModel.enclos !== enclosCount && ` — le plus proche de tes ${enclosCount}`}
+              </strong>
+              , tient {((fromModel.plan.horizon ?? planHorizon(fromModel.plan)) / 3600).toFixed(0)}{' '}
+              h, et la même politique vaut{' '}
+              {(MODEL_PLAN_SOURCE.sealedMedian / 1e6).toFixed(0)} M de kamas médians à{' '}
+              {MODEL_PLAN_SOURCE.sealedEnclos} enclos sur les graines scellées, contre 72 M pour
+              l’heuristique gloutonne.
             </>
           ) : (
             <>

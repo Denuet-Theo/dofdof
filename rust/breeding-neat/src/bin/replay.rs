@@ -24,7 +24,17 @@ use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
 use serde_json::Value;
 
-const SEEDS: std::ops::Range<u32> = 900_000..900_200;
+/// Par défaut les graines scellées. Un second argument déplace la plage, ce
+/// qui permet de rejouer sur des graines **du domaine d'entraînement** et de
+/// séparer deux explications d'un écart : la malédiction du vainqueur, ou un
+/// jeu de test plus difficile que la moyenne.
+fn seeds() -> std::ops::Range<u32> {
+    let start = std::env::args()
+        .nth(2)
+        .and_then(|arg| arg.parse().ok())
+        .unwrap_or(900_000u32);
+    start..start + 200
+}
 
 struct NetValue<'a>(&'a Network);
 
@@ -97,8 +107,7 @@ fn run(label: &str, make: impl Fn() -> Box<dyn Policy> + Sync) -> (String, Vec<R
             eprintln!("{error}");
             std::process::exit(1);
         });
-    let outcomes = SEEDS
-        .collect::<Vec<u32>>()
+    let outcomes = seeds().collect::<Vec<u32>>()
         .par_iter()
         .map(|&seed| {
             let mut policy = make();
@@ -140,7 +149,7 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         });
-        let outcomes = SEEDS
+        let outcomes = seeds()
             .collect::<Vec<u32>>()
             .par_iter()
             .map(|&seed| {
@@ -151,7 +160,7 @@ fn main() {
         reports.push(("recherche / NEAT".to_string(), outcomes));
     }
 
-    println!("{} parties par politique, graines {SEEDS:?}\n", SEEDS.len());
+    println!("{} parties par politique, graines {:?}\n", seeds().len(), seeds());
     println!(
         "{:<20} {:>10} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9}",
         "politique", "score méd.", "crois.", "achats", "sacrif.", "clones", "gen10", "fournées"

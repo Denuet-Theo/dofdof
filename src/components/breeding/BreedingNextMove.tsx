@@ -1,9 +1,13 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Compass, Dna, Flag, ShoppingCart, Sparkles } from 'lucide-react';
+import CopyableText from '@/components/ui/CopyableText';
+import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { Loadout } from '@/lib/dofus/breeding/loadout';
 import type { DriftSignal } from '@/lib/dofus/breeding/drift';
 import type { CloneOption } from '@/lib/dofus/breeding/cloning';
+import type { Individual } from '@/lib/dofus/breeding/stable';
 
 /**
  * La fournée à charger, dans l'ordre où on s'en sert devant l'enclos.
@@ -30,12 +34,61 @@ type Props = {
   drift: DriftSignal[];
   clonings: CloneOption[];
   nameOf: (colorId: string) => string;
+  /** L'écurie suivie, pour traduire un identifiant en nom porté **en jeu**. */
+  individuals: Individual[];
 };
 
-/** Les identifiants courts des montures désignées, pour les retrouver en jeu. */
-const shortIds = (ids: string[]) => ids.map((id) => id.slice(0, 6)).join(' · ');
+const BreedingNextMove = ({ loadout, drift, clonings, nameOf, individuals }: Props) => {
+  /**
+   * Le nom que porte une monture dans le jeu.
+   *
+   * Cet écran affichait les six premiers caractères de l'identifiant de base —
+   * `a3f91c` — qui ne se cherche nulle part : l'écurie du jeu ne connaît pas cet
+   * identifiant, et il n'apparaît sur aucune fiche. Le seul repère utilisable
+   * devant l'enclos est le nom, et c'est justement ce que `naming.ts` fabrique.
+   */
+  const nameOfMount = useMemo(() => {
+    const names = new Map(individuals.map((mount) => [mount.id, mount.name ?? ANONYMOUS_NAME]));
+    return (mountId: string) => names.get(mountId) ?? ANONYMOUS_NAME;
+  }, [individuals]);
 
-const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
+  /**
+   * Les noms d'un côté de couple, dédoublonnés.
+   *
+   * Une ligne charge souvent plusieurs montures d'ascendance identique, dont
+   * l'une a été renommée et l'autre pas : elles se comptent, elles ne se
+   * répètent pas.
+   */
+  const mountNames = (ids: string[]) => {
+    const counts = new Map<string, number>();
+    for (const id of ids) {
+      const name = nameOfMount(id);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts];
+  };
+
+  /** Un nom à chercher en jeu — copiable, sauf quand il n'y a rien à chercher. */
+  const nameChip = (name: string, count: number, key: string) =>
+    name === ANONYMOUS_NAME ? (
+      <span
+        key={key}
+        className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"
+        title="Monture non renommée : prends-en une dans le tas, elles sont interchangeables."
+      >
+        {name}
+        {count > 1 && ` × ${count}`}
+      </span>
+    ) : (
+      <span key={key} className="inline-flex items-center gap-1">
+        <CopyableText
+          value={name}
+          title={`Copier « ${name} » — le nom à chercher dans l’écurie du jeu`}
+        />
+        {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
+      </span>
+    );
+
   if (
     loadout.lines.length === 0 &&
     loadout.blocked.length === 0 &&
@@ -87,17 +140,17 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
               <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0">
                 {line.count} ×
               </span>
-              <span className="text-dark-200">
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
                 ♂ {nameOf(line.male.colorId)}
-                {line.male.mountIds.length > 0 && (
-                  <span className="text-dark-500"> · {shortIds(line.male.mountIds)}</span>
+                {mountNames(line.male.mountIds).map(([name, count]) =>
+                  nameChip(name, count, `m-${name}`)
                 )}
               </span>
               <span className="text-dark-600">+</span>
-              <span className="text-dark-200">
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
                 ♀ {nameOf(line.female.colorId)}
-                {line.female.mountIds.length > 0 && (
-                  <span className="text-dark-500"> · {shortIds(line.female.mountIds)}</span>
+                {mountNames(line.female.mountIds).map(([name, count]) =>
+                  nameChip(name, count, `f-${name}`)
                 )}
               </span>
 
@@ -189,9 +242,9 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
               className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
                 bg-profit/10 text-xs"
             >
-              <span className="text-dark-200">
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
                 {signal.mount.sex === 'M' ? '♂' : '♀'} {nameOf(signal.mount.colorId)}
-                <span className="text-dark-500"> · {signal.mount.id.slice(0, 6)}</span>
+                {nameChip(nameOfMount(signal.mount.id), 1, signal.mount.id)}
               </span>
               <span
                 className="px-1.5 py-0.5 rounded-lg bg-dark-700/60 text-dark-300 text-[10px] font-semibold"
@@ -289,12 +342,15 @@ const BreedingNextMove = ({ loadout, drift, clonings, nameOf }: Props) => {
                 className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
                   bg-dark-800/40 text-xs"
               >
-                <span className="text-dark-200">
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
                   {option.keep.sex === 'M' ? '♂' : '♀'} {nameOf(option.keep.colorId)}
+                  {option.keep.id && nameChip(nameOfMount(option.keep.id), 1, option.keep.id)}
                 </span>
                 <span className="text-dark-600">+</span>
-                <span className="text-dark-400">
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-400">
                   {option.partner.sex === 'M' ? '♂' : '♀'} {nameOf(option.partner.colorId)}
+                  {option.partner.id &&
+                    nameChip(nameOfMount(option.partner.id), 1, option.partner.id)}
                 </span>
                 <span
                   className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"

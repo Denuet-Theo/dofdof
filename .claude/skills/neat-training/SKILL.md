@@ -154,6 +154,30 @@ champion measured 107,99 M at 800 iterations and 112,66 M at 1500 — the policy
 keeps paying off with a larger search budget at play time, which is worth
 knowing on its own, but it makes the two numbers non-comparable.
 
+## Shipping a champion to the app
+
+The screen does not run the network — it reads a schedule. `plan` emits it:
+
+```sh
+./target/release/plan.exe champion-r5.json --out plan.json   # --seed, --hours, --rank
+cd .. && node scripts/check-plan.mjs rust/plan.json
+cp rust/plan.json src/lib/dofus/breeding/model-plan.json
+```
+
+The middle step is not optional. `check-plan.mjs` validates with the screen's
+own `parsePlan` from `src/lib/dofus/breeding/timeline.ts`, so a field renamed on
+either side fails loudly instead of rendering an empty ribbon. It caught a real
+overrun the first time it ran.
+
+Two things the emitted plan deliberately does not contain, so don't "fix" them
+by inventing values: **refuel events** (the economy has a price per point, no
+tank capacity) and a **buy** event kind (the contract has none, so purchases
+land as notes and stay out of the agenda).
+
+A plan belongs to its `--seed`: the counts come from one game that actually ran.
+The durations and the ordering carry the model's decision; the per-gesture
+counts do not.
+
 ## Retargeting at another mount family
 
 `Catalog::load(path, family_id)` already takes the family. `muldo()`

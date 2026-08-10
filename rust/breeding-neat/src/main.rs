@@ -364,6 +364,100 @@ fn genome_json(genome: &Genome) -> serde_json::Value {
     })
 }
 
+/// Comment une ligne du tableau se nomme : une espèce courante, le champion
+/// historique, ou un rescapé du vivier.
+fn label_of(species: usize) -> String {
+    match species {
+        usize::MAX => "hist.".to_string(),
+        n if n == usize::MAX - 1 => "vivier".to_string(),
+        n => n.to_string(),
+    }
+}
+
+/// Combien de génomes le vivier retient, par-delà les générations.
+///
+/// Le champion historique seul ne suffit pas, et pour deux raisons distinctes. Sa
+/// fitness d'entraînement est le **maximum** d'estimations bruitées, donc un
+/// tirage de graines heureux enfonce dans la case un génome que plus rien ne
+/// pourra déloger — la malédiction du vainqueur, la même que celle qui a imposé le
+/// départage. Et si la population dégénère dans la dernière heure, les finalistes
+/// sont ceux d'une mauvaise génération plus ce seul rescapé.
+///
+/// Un vivier borné coûte zéro évaluation pendant la manche : on garde les
+/// meilleurs vus, et c'est le départage — sur cent graines dédiées — qui tranche à
+/// la fin. La sélection sur le bruit est donc reportée là où elle est corrigée.
+const HALL_SIZE: usize = 16;
+
+/// Combien de temps entre deux points de reprise, en secondes.
+const SAVE_EVERY_SECONDS: f64 = 600.0;
+
+/// Un point de reprise, écrit **pendant** la manche et non seulement à la fin.
+///
+/// Une manche de six heures interrompue à la cinquième ne rendait rien du tout :
+/// tout partait dans le même `fs::write`, après la boucle. Le coût d'en écrire un
+/// toutes les dix minutes est de quelques dizaines de millisecondes, contre des
+/// heures de calcul.
+fn write_checkpoint(
+    population: &[Genome],
+    innovations: &Innovations,
+    threshold: f64,
+    generations: usize,
+    champion: Option<&(Genome, f64)>,
+    hall: &[(Genome, f64)],
+) -> bool {
+    // Le registre d'innovations part en entier plutôt que d'être reconstruit :
+    // rien dans un génome ne dit **quel lien** a été coupé pour créer tel nœud,
+    // donc `splits` se perdrait et deux lignées cesseraient de reconnaître la même
+    // mutation structurelle.
+    let (next_innovation, next_node, links, splits) = innovations.snapshot();
+    let document = serde_json::json!({
+        "population": population.iter().map(genome_json).collect::<Vec<_>>(),
+        "innovations": {
+            "next_innovation": next_innovation,
+            "next_node": next_node,
+            "links": links,
+            "splits": splits,
+        },
+        "threshold": threshold,
+        "generations": generations,
+        // Le champion voyage avec le reste, sinon chaque reprise recommence à le
+        // chercher et la ligne `hist.` du départage devient « le meilleur de cette
+        // heure » au lieu de « le meilleur depuis le début ».
+        "champion": champion.map(|(genome, fitness)| serde_json::json!({
+            "genome": genome_json(genome),
+            "fitness": fitness,
+        })),
+        "hall": hall.iter().map(|(genome, fitness)| serde_json::json!({
+            "genome": genome_json(genome),
+            "fitness": fitness,
+        })).collect::<Vec<_>>(),
+    });
+    std::fs::write(
+        "checkpoint.json",
+        serde_json::to_string(&document).unwrap_or_default(),
+    )
+    .is_ok()
+}
+
+/// Range un génome au vivier, s'il y a mieux à y faire entrer.
+///
+/// Le vivier est trié par fitness décroissante et borné : le dernier tombe quand
+/// un meilleur arrive. On refuse les doublons exacts de fitness, qui sont presque
+/// toujours le même génome revu à la génération suivante — sans quoi seize places
+/// se remplissent de seize copies du vainqueur du moment, et le vivier ne protège
+/// plus de rien.
+fn remember(hall: &mut Vec<(Genome, f64)>, genome: &Genome, fitness: f64) {
+    if hall.iter().any(|(_, seen)| (seen - fitness).abs() < 1e-9) {
+        return;
+    }
+    if hall.len() >= HALL_SIZE && hall.last().is_some_and(|(_, worst)| fitness <= *worst) {
+        return;
+    }
+    hall.push((genome.clone(), fitness));
+    hall.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    hall.truncate(HALL_SIZE);
+}
+
 /// Tout ce qu'il faut pour reprendre un entraînement là où il s'est arrêté.
 struct Checkpoint {
     population: Vec<Genome>,
@@ -379,6 +473,9 @@ struct Checkpoint {
     /// le premier avait été battu, mais parce qu'il n'était plus dans la
     /// course.
     champion: Option<(Genome, f64)>,
+    /// Le vivier : les meilleurs génomes vus, toutes générations confondues.
+    /// Voir `HALL_SIZE`.
+    hall: Vec<(Genome, f64)>,
 }
 
 fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
@@ -436,12 +533,29 @@ fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
         )
     });
 
+    // Absent des fichiers écrits avant le vivier : la reprise repart avec le seul
+    // champion, comme avant.
+    let hall: Vec<(Genome, f64)> = root["hall"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| {
+                    (
+                        genome_from_json(&row["genome"]),
+                        row["fitness"].as_f64().unwrap_or(0.0),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     Ok(Checkpoint {
         population,
         innovations,
         threshold: root["threshold"].as_f64().unwrap_or(f64::NAN),
         generations: root["generations"].as_u64().unwrap_or(0) as usize,
         champion,
+        hall,
     })
 }
 
@@ -523,6 +637,7 @@ fn main() {
     let mut threshold = config.compatibility_threshold;
     let mut resumed_from = 0usize;
     let mut restored_champion: Option<(Genome, f64)> = None;
+    let mut restored_hall: Vec<(Genome, f64)> = Vec::new();
     let mut population: Vec<Genome> = match options.resume.as_deref().map(read_checkpoint) {
         Some(Ok(saved)) if !saved.population.is_empty() => {
             println!(
@@ -539,6 +654,7 @@ fn main() {
                 println!("  champion repris : entraîné à {}", millions(*fitness));
             }
             restored_champion = saved.champion;
+            restored_hall = saved.hall;
             // On complète si la population demandée est plus grande, on tronque
             // sinon : le fichier ne doit pas dicter la taille.
             let mut population = saved.population;
@@ -564,6 +680,8 @@ fn main() {
     let budget = options.minutes * 60.0;
     let mut generation = 0usize;
     let mut champion: Option<(Genome, f64)> = restored_champion;
+    let mut hall: Vec<(Genome, f64)> = restored_hall;
+    let mut last_saved = Instant::now();
     // Le meilleur de chaque espèce à la dernière génération. C'est ce qu'on
     // vient chercher en spéciant : les stratégies **alternatives**, pas
     // seulement celle qui a gagné.
@@ -597,6 +715,25 @@ fn main() {
             .unwrap_or(0);
         if champion.as_ref().is_none_or(|(_, best)| scores[best_at] > *best) {
             champion = Some((population[best_at].clone(), scores[best_at]));
+        }
+        // Le meilleur de **chaque** génération passe au vivier, pas seulement
+        // celui qui bat le record. C'est ce qui reste quand la population
+        // dégénère : le départage retrouve alors autre chose que la dernière
+        // génération et un unique rescapé.
+        remember(&mut hall, &population[best_at], scores[best_at]);
+
+        // Un point de reprise en cours de route. Sans lui, une manche de six
+        // heures interrompue à la cinquième ne rend rien.
+        if last_saved.elapsed().as_secs_f64() >= SAVE_EVERY_SECONDS {
+            write_checkpoint(
+                &population,
+                &innovations,
+                threshold,
+                resumed_from + generation,
+                champion.as_ref(),
+                &hall,
+            );
+            last_saved = Instant::now();
         }
 
         // --- spéciation ----------------------------------------------------
@@ -800,6 +937,19 @@ fn main() {
         // marque à part plutôt que de le ranger de force dans l'une d'elles.
         finalists.push((usize::MAX, genome, score));
     }
+    // Et le vivier, pour la même raison en plus large : le champion seul est le
+    // maximum d'estimations bruitées, donc autant un tirage heureux qu'un bon
+    // génome. Seize candidats de plus coûtent seize départages ; ils ne coûtent
+    // rien pendant la manche.
+    for (genome, score) in &hall {
+        if champion
+            .as_ref()
+            .is_some_and(|(_, best)| (best - score).abs() < 1e-9)
+        {
+            continue;
+        }
+        finalists.push((usize::MAX - 1, genome.clone(), *score));
+    }
     if finalists.is_empty() {
         println!("aucun candidat — l'entraînement n'a pas tourné");
         return;
@@ -863,11 +1013,7 @@ fn main() {
             );
             println!(
                 "{:>7} {:>10} {:>10.0} {:>9.0} {:>9.0} {:>8.1} % {:>9.1} {:>7.2}",
-                if species_of == usize::MAX {
-                    "hist.".to_string()
-                } else {
-                    species_of.to_string()
-                },
+                label_of(species_of),
                 millions(score),
                 acts.genetons,
                 acts.crossings,
@@ -904,11 +1050,7 @@ fn main() {
         };
         println!(
             "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.1} {:>8.0} {:>8.0} {:>7.1}",
-            if species_of == usize::MAX {
-                "hist.".to_string()
-            } else {
-                species_of.to_string()
-            },
+            label_of(species_of),
             millions(score),
             unit(0),
             unit(1),
@@ -1214,45 +1356,20 @@ fn main() {
         println!("{} finalistes écrits dans finalists.json", finalists_json.len());
     }
 
-    // La population entière, pour pouvoir reprendre. C'est ce qui manquait :
-    // huit heures de recherche disparaissaient à chaque fin de run, et une
-    // session courte lancée ensuite repartait de zéro plutôt que d'affiner.
-    if std::fs::write(
-        "checkpoint.json",
-        serde_json::to_string(&{
-            // Le registre d'innovations part en entier plutôt que d'être
-            // reconstruit : rien dans un génome ne dit **quel lien** a été coupé
-            // pour créer tel nœud, donc `splits` se perdrait et deux lignées
-            // cesseraient de reconnaître la même mutation structurelle.
-            let (next_innovation, next_node, links, splits) = innovations.snapshot();
-            serde_json::json!({
-                "population": population.iter().map(genome_json).collect::<Vec<_>>(),
-                "innovations": {
-                    "next_innovation": next_innovation,
-                    "next_node": next_node,
-                    "links": links,
-                    "splits": splits,
-                },
-                "threshold": threshold,
-                "generations": resumed_from + generation,
-                // Le champion voyage avec le reste, sinon chaque reprise
-                // recommence à le chercher et la ligne `hist.` du départage
-                // devient « le meilleur de cette heure » au lieu de « le
-                // meilleur depuis le début ».
-                "champion": champion.as_ref().map(|(genome, fitness)| serde_json::json!({
-                    "genome": genome_json(genome),
-                    "fitness": fitness,
-                })),
-            })
-        })
-        .unwrap_or_default(),
-    )
-    .is_ok()
-    {
+    if write_checkpoint(
+        &population,
+        &innovations,
+        threshold,
+        resumed_from + generation,
+        champion.as_ref(),
+        &hall,
+    ) {
         println!(
-            "checkpoint : {} génomes, {} générations cumulées — reprendre avec --resume checkpoint.json",
+            "checkpoint : {} génomes, {} générations cumulées, {} au vivier — \
+             reprendre avec --resume checkpoint.json",
             population.len(),
-            resumed_from + generation
+            resumed_from + generation,
+            hall.len(),
         );
     }
 

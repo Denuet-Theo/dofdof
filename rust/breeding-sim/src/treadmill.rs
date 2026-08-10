@@ -54,7 +54,13 @@
 //!
 //! ## La fitness
 //!
-//! Les **génétons**, cumulés. Trois raisons, et la troisième décide :
+//! Les **kamas**. Les génétons se vendent, donc les compter bruts reviendrait à
+//! noter une politique dans une monnaie qu'elle ne dépense pas — et le
+//! débordement de l'écurie, lui, se paie bien en kamas. Une seule unité des deux
+//! côtés, aucun taux de change à inventer.
+//!
+//! Ce sont les génétons qui portent le gain. Trois raisons, et la troisième
+//! décide :
 //!
 //! - ils ne tombent qu'à la **naissance réussie**, donc ils ne comptent que les
 //!   reproductions — une monture gardée n'en rend aucun, et thésauriser ne paie
@@ -63,6 +69,19 @@
 //!   deux gen 9 et deux gen 1, donc croiser haut domine largement ;
 //! - ils sont **relevés en jeu** et déjà calculés par `apply`. C'est une mesure,
 //!   pas une pondération inventée pour l'occasion.
+//!
+//! ## Le marché est tiré par partie
+//!
+//! Comme dans `economy::run` : `for_run` pioche l'ambre, le géneton et la gen 10
+//! dans leurs fourchettes, et le marché du jour **fait partie du monde**.
+//!
+//! Ce n'est pas un raffinement. Le vecteur d'entrée porte `PRICE_AMBER`,
+//! `PRICE_GENETON` et `PRICE_TOP` précisément pour qu'une politique distingue une
+//! semaine où l'ambre est à 11 000 d'une où il est à 30 000. Sur un marché figé
+//! ces entrées ne bougent jamais, le réseau n'apprend rien d'elles — et le jour où
+//! l'écran lui passe les prix réels de l'éleveur, qui changent d'un jour à
+//! l'autre, il reçoit des valeurs qu'il n'a jamais vues. Il rendrait un nombre,
+//! simplement pas le bon.
 //!
 //! Deux angles morts connus, à garder en tête en lisant un résultat. La
 //! purification rend **zéro** — mesuré, voir #68 : deux Indigo capturés donnent
@@ -95,6 +114,13 @@ pub struct TreadmillConfig {
     pub gen1_target: usize,
     /// Bornes du niveau tiré à la promotion.
     pub promotion_levels: (u16, u16),
+    /// Montures détenues sans frais. Au-delà, l'écurie déborde sur l'inventaire.
+    ///
+    /// Le plafond du jeu n'est pas un mur : on gère des centaines de montures en
+    /// passant par l'inventaire, c'est seulement moins commode — et ça se paie.
+    pub stable_cap: usize,
+    /// Kamas dus **par tour et par monture** au-delà du plafond.
+    pub overflow_kamas: i64,
     /// Poids du tirage initial, indexés par génération.
     ///
     /// Une **pyramide**, parce que c'est la forme d'une écurie réelle : beaucoup
@@ -112,11 +138,21 @@ pub struct TreadmillConfig {
 impl Default for TreadmillConfig {
     fn default() -> Self {
         Self {
-            mounts: 1000,
+            // Deux cent cinquante et non mille. Le tapis coûte trente appels de
+            // l'optimiseur par épisode, et le coût d'un appel suit la **diversité
+            // des signatures** de l'écurie : à mille montures un épisode approche
+            // la seconde, et une génération d'entraînement passe à plus d'une
+            // minute. La nature du problème ne change pas avec l'échelle — la
+            // trajectoire décroissait pareil à 1000, 400 et 200 — donc autant
+            // payer le prix qui laisse tourner assez de générations pour
+            // apprendre quelque chose.
+            mounts: 250,
             cycles: 30,
             promotions: [20, 80, 100],
             gen1_target: 20,
             promotion_levels: (1, 200),
+            stable_cap: 250,
+            overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
         }
@@ -127,7 +163,14 @@ impl Default for TreadmillConfig {
 /// **pourquoi**, ce qu'un score seul ne dit jamais.
 #[derive(Clone, Debug, Default)]
 pub struct TreadmillOutcome {
-    /// La fitness.
+    /// La fitness, en kamas : les génétons vendus au prix du jour, moins le
+    /// débordement.
+    ///
+    /// Portée par le résultat et non recalculée par l'appelant, parce que le prix
+    /// du jour est **tiré dans l'appel** : le lui faire reconvertir avec l'économie
+    /// du fichier donnerait un chiffre converti à 538 pendant que le réseau, lui,
+    /// aurait lu 892. L'incohérence ne se voit sur aucun test de compilation.
+    pub kamas: f64,
     pub genetons: i64,
     pub crossings: usize,
     pub clonings: usize,
@@ -153,6 +196,11 @@ pub struct TreadmillOutcome {
     pub mounts_end: usize,
     /// Fournées refusées par `apply`. Doit rester à zéro.
     pub rejected: usize,
+    /// Kamas payés pour le débordement, tous cycles confondus.
+    ///
+    /// Ils ne sont pas dans `genetons` : ce sont deux unités. `net_genetons` fait
+    /// la conversion, au prix du géneton de l'économie du jour.
+    pub overflow_paid: i64,
     /// Génétons cycle par cycle.
     ///
     /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
@@ -160,6 +208,16 @@ pub struct TreadmillOutcome {
     /// de chauffe ; une trajectoire qui décroît sans fin veut dire que le tapis
     /// n'est pas alimenté assez pour tourner, et aucune chauffe n'y changera rien.
     pub per_cycle: Vec<i64>,
+}
+
+/// Ce qu'une monture coûte à détenir : rien si c'est une gen 1 sans ascendance.
+///
+/// Ces gen 1-là sont le robinet de l'environnement — complétées à vingt par
+/// couleur à chaque tour — et les facturer reviendrait à taxer ce qu'on injecte
+/// soi-même. Elles sont aussi ce qu'on remplace le plus facilement en jeu : sans
+/// généalogie, elles sont interchangeables.
+fn chargeable(catalog: &Catalog, mount: &Mount) -> bool {
+    !(mount.parents.is_none() && catalog.generation(mount.color) == 1)
 }
 
 /// Fait tourner un épisode et rend ce qu'il a produit.
@@ -174,6 +232,9 @@ pub fn play_treadmill(
     // Décalée comme dans `economy::run` : la politique ne doit pas pouvoir
     // rejouer le flux des naissances en devinant sa propre graine.
     let draws = Draws::new(seed ^ 0x5bf0_3635);
+    // Le marché du jour, tiré comme le reste du monde. Voir l'en-tête.
+    let drawn = economy.for_run(catalog, &draws);
+    let economy = &drawn;
     let mut stable = random_stable(catalog, &mut rng, config);
     let mut outcome = TreadmillOutcome::default();
 
@@ -263,8 +324,25 @@ pub fn play_treadmill(
             .collect();
         outcome.gen10_harvested += harvested.len();
         stable.remove_all(&harvested);
+
+        // --- 6. le débordement ------------------------------------------------
+        //
+        // Compté sur l'écurie telle qu'on la garde entre deux tours, donc après la
+        // récolte et le complément.
+        let held = stable
+            .mounts
+            .iter()
+            .filter(|mount| chargeable(catalog, mount))
+            .count();
+        outcome.overflow_paid +=
+            held.saturating_sub(config.stable_cap) as i64 * config.overflow_kamas;
     }
 
+    // Au prix du jour, celui qui a été tiré pour cette partie. Les deux termes
+    // sont en kamas et aucun taux n'est inventé — c'est ce qui rend
+    // `PRICE_GENETON` utile au réseau : un géneton vaut plus certains jours, donc
+    // croiser vaut plus certains jours.
+    outcome.kamas = outcome.genetons as f64 * economy.geneton_value - outcome.overflow_paid as f64;
     outcome.top_generation = stable.top_generation(catalog);
     outcome.mounts_end = stable.len();
     outcome
@@ -476,6 +554,29 @@ mod tests {
         assert_eq!(outcome.rejected, 0);
     }
 
+    /// Le marché doit **bouger d'une partie à l'autre**, sinon les trois entrées
+    /// de prix du vecteur restent constantes, le réseau n'apprend rien d'elles, et
+    /// l'écran lui passera un jour des prix qu'il n'a jamais vus.
+    #[test]
+    fn le_marche_du_jour_est_tire_par_partie() {
+        let catalog = muldo();
+        let economy = economy();
+        let config = TreadmillConfig { cycles: 2, mounts: 120, ..Default::default() };
+        // Le rapport kamas/géneton **est** le prix du géneton de la partie : si le
+        // marché était figé, les deux graines rendraient exactement le même.
+        let rate = |seed| {
+            let mut policy = Searching::with_iterations(Myopic, 100);
+            let outcome = play_treadmill(&catalog, &economy, &mut policy, seed, &config);
+            assert!(outcome.genetons > 0, "graine {seed} : rien produit, le test ne dit rien");
+            outcome.kamas / outcome.genetons as f64
+        };
+        let (a, b) = (rate(1), rate(2));
+        assert!(
+            (a - b).abs() > 1e-6,
+            "le marché ne bouge pas : {a} contre {b}"
+        );
+    }
+
     #[test]
     fn un_episode_se_rejoue_a_l_identique() {
         let catalog = muldo();
@@ -581,3 +682,4 @@ mod tests {
         }
     }
 }
+

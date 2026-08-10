@@ -657,6 +657,19 @@ pub struct RunOutcome {
     /// continue de tout croiser sur place. À zéro, le découplage n'a rien changé au
     /// comportement — et un écart de score serait alors à chercher ailleurs.
     pub cycles: usize,
+    /// Les mêmes, **par unité**.
+    ///
+    /// Le total seul ne peut pas trancher la question qui compte : banquer sert-il
+    /// partout, ou surtout sur l'unité **libre** ? Le bloc a cinquante places et
+    /// compose une paire complète sans peine ; l'unité libre en a dix, et sa vraie
+    /// contrainte est qu'un croisement demande **les deux** parents au même
+    /// instant. Y féconder la moitié disponible coûte une place et rend le
+    /// croisement gratuit dès que l'autre naît — sans attendre que l'unité se
+    /// libère, puisque deux fécondes s'accouplent d'un clic.
+    ///
+    /// Si le banking se concentre là, c'est une fluidification et non du bruit.
+    /// Réparti uniformément, c'est du bruit. Le total ne distingue pas les deux.
+    pub cycles_by_unit: [usize; MAX_UNITS],
     /// Génétons produits sur toute la partie, tous croisements confondus.
     pub genetons: i64,
     /// Chargements ayant réellement porté un croisement, donc payés.
@@ -1062,6 +1075,7 @@ fn run(
         purchases: 0,
         clonings: 0,
         cycles: 0,
+        cycles_by_unit: [0; MAX_UNITS],
         sacrifices: 0,
         genetons: 0,
         loads_paid: 0,
@@ -1131,6 +1145,7 @@ fn run(
                 outcome.purchases += applied.purchases;
                 outcome.clonings += applied.clonings;
                 outcome.cycles += applied.cycles;
+                outcome.cycles_by_unit[unit.min(MAX_UNITS - 1)] += applied.cycles;
                 outcome.sacrifices += applied.sacrifices;
                 outcome.genetons += applied.genetons;
                 outcome.best_generation = outcome.best_generation.max(applied.best_generation);

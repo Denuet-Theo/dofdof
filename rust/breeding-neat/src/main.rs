@@ -167,6 +167,13 @@ struct Behaviour {
     /// de tout croiser sur place. À zéro, le découplage n'a rien changé au
     /// comportement — et un écart de score serait alors à chercher ailleurs.
     cycles: f64,
+    /// Les fécondations posées sur l'unité **libre** seule.
+    ///
+    /// Séparée du total parce que c'est là que le banking devrait payer s'il paie :
+    /// dix places, et la contrainte n'est pas le volume mais qu'un croisement
+    /// demande les deux parents au même instant. Une colonne qui mélange les deux
+    /// unités ne peut pas distinguer une fluidification d'un tic.
+    cycles_free: f64,
     clonings: f64,
     purchases: f64,
     gen10: f64,
@@ -192,6 +199,11 @@ fn behaviour(
     Behaviour {
         crossings: runs.iter().map(|r| r.crossings as f64).sum::<f64>() / n,
         cycles: runs.iter().map(|r| r.cycles as f64).sum::<f64>() / n,
+        cycles_free: runs
+            .iter()
+            .map(|r| r.cycles_by_unit[1..].iter().sum::<usize>() as f64)
+            .sum::<f64>()
+            / n,
         clonings: runs.iter().map(|r| r.clonings as f64).sum::<f64>() / n,
         purchases: runs.iter().map(|r| r.purchases as f64).sum::<f64>() / n,
         gen10: runs.iter().map(|r| r.gen10_held as f64).sum::<f64>() / n,
@@ -695,11 +707,11 @@ fn main() {
         best_per_species.len()
     );
     println!(
-        "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>8} {:>7}",
-        "espèce", "départage", "bloc", "libre", "opti", "crois.", "fécond.", "clones", "achats",
-        "gen10"
+        "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>7}",
+        "espèce", "départage", "bloc", "libre", "opti", "crois.", "féc.tot", "féc.lib", "clones",
+        "achats", "gen10"
     );
-    println!("{}", "-".repeat(101));
+    println!("{}", "-".repeat(110));
     for &(species_of, index, score) in best_per_species.iter().take(12) {
         let genome = &finalists[index].1;
         let acts = behaviour(&catalog, &economy, genome, &validation[..40], options.iterations);
@@ -716,7 +728,7 @@ fn main() {
             )
         };
         println!(
-            "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.0} {:>8.0} {:>7.1}",
+            "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.1} {:>8.0} {:>8.0} {:>7.1}",
             if species_of == usize::MAX {
                 "hist.".to_string()
             } else {
@@ -732,6 +744,7 @@ fn main() {
             },
             acts.crossings,
             acts.cycles,
+            acts.cycles_free,
             acts.clonings,
             acts.purchases,
             acts.gen10

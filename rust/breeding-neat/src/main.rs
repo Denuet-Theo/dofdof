@@ -206,8 +206,12 @@ fn fitness(
                 Env::Economy => play(catalog, economy, &mut policy, seed).score as f64,
                 // Les génétons, et rien d'autre. Ils ne tombent qu'à la naissance
                 // réussie, donc ils ne comptent que les reproductions.
-                Env::Treadmill => play_treadmill(catalog, economy, &mut policy, seed, &config)
-                    .net_genetons(economy),
+                // En kamas comme l'économie complète : les deux environnements se
+                // notent alors dans la même unité, et un chiffre de tapis se lit
+                // sans conversion mentale.
+                Env::Treadmill => {
+                    play_treadmill(catalog, economy, &mut policy, seed, &config).kamas
+                }
             }
         })
         .sum();
@@ -290,7 +294,7 @@ fn treadmill_behaviour(
         .sum();
     let crossings: f64 = runs.iter().map(|r| r.crossings as f64).sum::<f64>();
     TreadmillBehaviour {
-        genetons: runs.iter().map(|r| r.genetons as f64).sum::<f64>() / n,
+        genetons: runs.iter().map(|r| r.kamas).sum::<f64>() / n,
         crossings: crossings / n,
         clonings: runs.iter().map(|r| r.clonings as f64).sum::<f64>() / n,
         gen1_share: runs.iter().map(|r| r.gen1_crossings as f64).sum::<f64>()
@@ -858,15 +862,13 @@ fn main() {
                 options.mounts,
             );
             println!(
-                "{:>7} {:>10.0} {:>10.0} {:>9.0} {:>9.0} {:>8.1} % {:>9.1} {:>7.2}",
+                "{:>7} {:>10} {:>10.0} {:>9.0} {:>9.0} {:>8.1} % {:>9.1} {:>7.2}",
                 if species_of == usize::MAX {
                     "hist.".to_string()
                 } else {
                     species_of.to_string()
                 },
-                // Des génétons, pas des kamas : les formater en millions
-                // afficherait « 0.02 M » pour vingt-quatre mille.
-                score,
+                millions(score),
                 acts.genetons,
                 acts.crossings,
                 acts.clonings,
@@ -1064,11 +1066,7 @@ fn main() {
 
     println!(
         "\nchampion : entraîné à {}, topologie {:?}, {generation} générations",
-        if options.env == Env::Treadmill {
-            format!("{training_score:.0} génétons")
-        } else {
-            millions(training_score)
-        },
+        millions(training_score),
         best.size()
     );
 
@@ -1124,23 +1122,23 @@ fn main() {
             }
             let per_cycle: Vec<i64> = summed.iter().map(|&g| g / runs.len() as i64).collect();
             println!(
-                "{label:<26} {:>9.0} nets · {:>7.0} bruts · {:>6.0} crois. · {:>6.0} clones · \
+                "{label:<26} {:>9} nets · {:>7.0} génétons · {:>6.0} crois. · {:>6.0} clones · \
                  {:>5.0} sacr. · trajectoire {:?}",
-                mean(&|o| o.net_genetons(&economy)),
+                millions(mean(&|o| o.kamas)),
                 mean(&|o| o.genetons as f64),
                 mean(&|o| o.crossings as f64),
                 mean(&|o| o.clonings as f64),
                 mean(&|o| o.sacrifices as f64),
                 bands(&per_cycle)
             );
-            mean(&|o| o.net_genetons(&economy))
+            mean(&|o| o.kamas)
         };
         println!("\n--- tapis, départage ({} parties) ---", validation_seeds.len());
         let myopic = run("recherche / valeur myope", false);
         let evolved = run("recherche / valeur NEAT", true);
         println!(
-            "écart à la valeur myope : {:+.0} génétons ({:+.0} %)",
-            evolved - myopic,
+            "écart à la valeur myope : {:+.2} M ({:+.0} %)",
+            (evolved - myopic) / 1e6,
             (evolved - myopic) / myopic.max(1.0) * 100.0
         );
     } else {

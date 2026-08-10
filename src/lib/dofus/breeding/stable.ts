@@ -42,8 +42,31 @@ export type Sex = 'M' | 'F';
  *
  * En deçà, un couple de compteurs par couleur suffit et évite une écurie de
  * plusieurs centaines de lignes à saisir à la main.
+ *
+ * ## Pourquoi 2 et non 3
+ *
+ * Le vrac ne représente qu'une chose : une monture **sans généalogie**. Or il n'y
+ * a qu'une façon d'en obtenir une, et c'est de se la procurer sans l'élever —
+ * acheter ou capturer. Les deux sont bornées à la première génération :
+ *
+ * - la capture l'est déjà, structurellement — `costs.ts` ne la propose que pour
+ *   `color.recipes.length === 0`, « au-delà de la première génération, aucun filet
+ *   ne la sort d'une zone » ;
+ * - l'achat l'est dans le jeu, et `search.rs` en tient compte depuis toujours :
+ *   ses `starters` sont `catalog.ids_at_generation(1)`, donc le modèle n'a jamais
+ *   pu acheter une gen 2.
+ *
+ * Un seuil à 3 laissait donc entrer au vrac une chose qui n'existe pas : la gen 2
+ * sans ascendance. Le seul endroit qui en fabriquait était `costs.ts`, qui propose
+ * encore d'acheter n'importe quelle couleur tarifée (#105) — un défaut, pas un
+ * régime à représenter — et la saisie manuelle, qui offrait un compteur de vrac
+ * aux gen 2 parce que ce seuil le lui disait.
+ *
+ * Ce qu'il faut savoir avant de croire au gain que la mesure montre en régime
+ * « gen 1-2 achetables » : ce régime **n'est pas jouable**. Il n'est là que pour
+ * dire ce que le changement fait au défaut de #105, pas pour l'arbitrer.
  */
-export const INDIVIDUAL_TRACKING_FROM = 3;
+export const INDIVIDUAL_TRACKING_FROM = 2;
 
 /**
  * Si une monture doit être suivie une par une, ascendance comprise.

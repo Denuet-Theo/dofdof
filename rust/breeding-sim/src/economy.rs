@@ -719,6 +719,59 @@ struct Applied {
     births: Vec<Mount>,
 }
 
+/// Ce qu'un chargement a produit, pour qui l'applique hors d'une partie.
+///
+/// `Applied` reste privé — il porte les bébés en attente, qui n'ont de sens que
+/// dans la boucle de `run` où ils naissent à la fin du cycle. Le tapis roulant,
+/// lui, n'a pas de temps : ses naissances arrivent tout de suite, et il n'a besoin
+/// que des comptes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AppliedSummary {
+    pub genetons: i64,
+    pub crossings: usize,
+    pub clonings: usize,
+    pub sacrifices: usize,
+    pub cycles: usize,
+    pub births: usize,
+}
+
+/// Applique un plan **hors de toute économie**, naissances posées immédiatement.
+///
+/// Sert au tapis roulant de `treadmill.rs`, qui apprend l'appariement seul. Le
+/// solde est un jeton : il n'est ni lu ni rendu, et le plancher de solvabilité ne
+/// peut donc pas mordre. Ce qui reste actif est ce qui décrit le jeu — la loi
+/// d'appariement, les places, la stérilité, le clonage.
+///
+/// Passe par le **même** `apply` que la partie complète, exprès. Une seconde
+/// implémentation des naissances divergerait en silence, et c'est précisément ce
+/// que le test de parité existe pour empêcher entre le Rust et le TypeScript.
+pub fn apply_plan(
+    catalog: &Catalog,
+    economy: &Economy,
+    stable: &mut Stable,
+    plan: &UnitPlan,
+    strategy: Strategy,
+    draws: &Draws,
+    coord: u32,
+) -> Result<AppliedSummary, Rejected> {
+    let mut kamas = i64::MAX / 4;
+    let applied = apply(
+        catalog, economy, stable, &mut kamas, plan, strategy, 0, draws, coord,
+    )?;
+    let births = applied.births.len();
+    for baby in applied.births {
+        stable.push(baby);
+    }
+    Ok(AppliedSummary {
+        genetons: applied.genetons,
+        crossings: applied.crossings,
+        clonings: applied.clonings,
+        sacrifices: applied.sacrifices,
+        cycles: applied.cycles,
+        births,
+    })
+}
+
 /// Applique un chargement, ou dit pourquoi il est refusé.
 ///
 /// L'ordre est celui qui rend un chargement auto-finançable : on **crédite les

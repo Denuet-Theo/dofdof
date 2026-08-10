@@ -37,6 +37,7 @@ pub mod sample;
 pub mod schedule;
 pub mod search;
 pub mod stable;
+pub mod treadmill;
 pub mod trees;
 
 pub use trees::{Catalog, ColorId};

@@ -95,6 +95,13 @@ pub struct TreadmillConfig {
     pub gen1_target: usize,
     /// Bornes du niveau tiré à la promotion.
     pub promotion_levels: (u16, u16),
+    /// Montures détenues sans frais. Au-delà, l'écurie déborde sur l'inventaire.
+    ///
+    /// Le plafond du jeu n'est pas un mur : on gère des centaines de montures en
+    /// passant par l'inventaire, c'est seulement moins commode — et ça se paie.
+    pub stable_cap: usize,
+    /// Kamas dus **par tour et par monture** au-delà du plafond.
+    pub overflow_kamas: i64,
     /// Poids du tirage initial, indexés par génération.
     ///
     /// Une **pyramide**, parce que c'est la forme d'une écurie réelle : beaucoup
@@ -112,11 +119,21 @@ pub struct TreadmillConfig {
 impl Default for TreadmillConfig {
     fn default() -> Self {
         Self {
-            mounts: 1000,
+            // Deux cent cinquante et non mille. Le tapis coûte trente appels de
+            // l'optimiseur par épisode, et le coût d'un appel suit la **diversité
+            // des signatures** de l'écurie : à mille montures un épisode approche
+            // la seconde, et une génération d'entraînement passe à plus d'une
+            // minute. La nature du problème ne change pas avec l'échelle — la
+            // trajectoire décroissait pareil à 1000, 400 et 200 — donc autant
+            // payer le prix qui laisse tourner assez de générations pour
+            // apprendre quelque chose.
+            mounts: 250,
             cycles: 30,
             promotions: [20, 80, 100],
             gen1_target: 20,
             promotion_levels: (1, 200),
+            stable_cap: 250,
+            overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
         }
@@ -153,6 +170,11 @@ pub struct TreadmillOutcome {
     pub mounts_end: usize,
     /// Fournées refusées par `apply`. Doit rester à zéro.
     pub rejected: usize,
+    /// Kamas payés pour le débordement, tous cycles confondus.
+    ///
+    /// Ils ne sont pas dans `genetons` : ce sont deux unités. `net_genetons` fait
+    /// la conversion, au prix du géneton de l'économie du jour.
+    pub overflow_paid: i64,
     /// Génétons cycle par cycle.
     ///
     /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
@@ -160,6 +182,28 @@ pub struct TreadmillOutcome {
     /// de chauffe ; une trajectoire qui décroît sans fin veut dire que le tapis
     /// n'est pas alimenté assez pour tourner, et aucune chauffe n'y changera rien.
     pub per_cycle: Vec<i64>,
+}
+
+impl TreadmillOutcome {
+    /// La fitness : les génétons produits, moins ce que le débordement a coûté.
+    ///
+    /// La conversion passe par `geneton_value`, le prix net d'un géneton dans
+    /// l'économie du jour — 538 kamas au fichier livré, donc une monture en trop
+    /// coûte 0,186 géneton par tour. On ne pondère pas deux grandeurs à la main :
+    /// le taux de change existe déjà et il est mesuré.
+    pub fn net_genetons(&self, economy: &Economy) -> f64 {
+        self.genetons as f64 - self.overflow_paid as f64 / economy.geneton_value.max(1e-9)
+    }
+}
+
+/// Ce qu'une monture coûte à détenir : rien si c'est une gen 1 sans ascendance.
+///
+/// Ces gen 1-là sont le robinet de l'environnement — complétées à vingt par
+/// couleur à chaque tour — et les facturer reviendrait à taxer ce qu'on injecte
+/// soi-même. Elles sont aussi ce qu'on remplace le plus facilement en jeu : sans
+/// généalogie, elles sont interchangeables.
+fn chargeable(catalog: &Catalog, mount: &Mount) -> bool {
+    !(mount.parents.is_none() && catalog.generation(mount.color) == 1)
 }
 
 /// Fait tourner un épisode et rend ce qu'il a produit.
@@ -263,6 +307,18 @@ pub fn play_treadmill(
             .collect();
         outcome.gen10_harvested += harvested.len();
         stable.remove_all(&harvested);
+
+        // --- 6. le débordement ------------------------------------------------
+        //
+        // Compté sur l'écurie telle qu'on la garde entre deux tours, donc après la
+        // récolte et le complément.
+        let held = stable
+            .mounts
+            .iter()
+            .filter(|mount| chargeable(catalog, mount))
+            .count();
+        outcome.overflow_paid +=
+            held.saturating_sub(config.stable_cap) as i64 * config.overflow_kamas;
     }
 
     outcome.top_generation = stable.top_generation(catalog);

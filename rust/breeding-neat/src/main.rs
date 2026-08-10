@@ -90,6 +90,8 @@ struct Options {
     env: Env,
     /// Cycles d'un épisode de tapis. Sans effet sur l'économie complète.
     cycles: usize,
+    /// Montures de l'écurie de départ, sur le tapis. Le levier de coût principal.
+    mounts: usize,
     /// Ouvrir le jeu scellé. **Faux par défaut, et c'est tout l'intérêt.**
     ///
     /// Il était mesuré et imprimé à chaque exécution. Personne n'y sélectionnait
@@ -112,6 +114,7 @@ impl Options {
             resume: None,
             env: Env::Economy,
             cycles: 30,
+            mounts: TreadmillConfig::default().mounts,
             sealed: false,
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
@@ -142,6 +145,7 @@ impl Options {
                     }
                 }
                 "--cycles" => options.cycles = value.parse().unwrap_or(options.cycles),
+                "--mounts" => options.mounts = value.parse().unwrap_or(options.mounts),
                 _ => {}
             }
             index += 2;
@@ -153,21 +157,23 @@ impl Options {
 /// Le score moyen d'un génome sur un jeu de graines.
 /// La politique d'un génome, câblée pour l'environnement demandé.
 ///
-/// L'ambre est **fermée** sur le tapis : elle convertit du stock en kamas, donc
-/// c'est un arbitrage économique, et le tapis n'a pas d'économie. Voir
-/// `SearchConfig::sacrifices`.
+/// Le sacrifice reste **ouvert** sur le tapis, et c'était un aller-retour : il
+/// avait été fermé parce que l'ambre est un arbitrage économique, donc l'affaire
+/// de l'étape 2. Mais l'écurie déborde au-delà de son plafond et se paie au tour,
+/// et il faut bien un moyen de redescendre — sans quoi le coût ne serait pas une
+/// pression mais une punition à laquelle la politique ne peut rien.
+///
+/// Ce qui les sépare n'est donc pas l'action mais son **rendement** : la fitness
+/// est en génétons, donc les kamas qu'un sacrifice rapporte n'y entrent pas. Il
+/// ne sert qu'à tenir l'écurie, jamais à extraire de la valeur — et c'est
+/// exactement la distinction demandée.
 fn policy_of<'a>(
     network: &'a Network,
     genome: &Genome,
     iterations: usize,
-    env: Env,
+    _env: Env,
 ) -> Searching<NetValue<'a>> {
-    let policy = Searching::with_iterations(NetValue(network), iterations)
-        .with_strategies(genome.strategies);
-    match env {
-        Env::Economy => policy,
-        Env::Treadmill => policy.without_sacrifices(),
-    }
+    Searching::with_iterations(NetValue(network), iterations).with_strategies(genome.strategies)
 }
 
 fn fitness(
@@ -178,6 +184,7 @@ fn fitness(
     iterations: usize,
     env: Env,
     cycles: usize,
+    mounts: usize,
 ) -> f64 {
     let network = Network::compile(genome);
     if !network.is_connected() {
@@ -188,6 +195,7 @@ fn fitness(
     }
     let config = TreadmillConfig {
         cycles,
+        mounts,
         ..Default::default()
     };
     let total: f64 = seeds
@@ -198,9 +206,8 @@ fn fitness(
                 Env::Economy => play(catalog, economy, &mut policy, seed).score as f64,
                 // Les génétons, et rien d'autre. Ils ne tombent qu'à la naissance
                 // réussie, donc ils ne comptent que les reproductions.
-                Env::Treadmill => {
-                    play_treadmill(catalog, economy, &mut policy, seed, &config).genetons as f64
-                }
+                Env::Treadmill => play_treadmill(catalog, economy, &mut policy, seed, &config)
+                    .net_genetons(economy),
             }
         })
         .sum();
@@ -256,10 +263,12 @@ fn treadmill_behaviour(
     seeds: &[u32],
     iterations: usize,
     cycles: usize,
+    mounts: usize,
 ) -> TreadmillBehaviour {
     let network = Network::compile(genome);
     let config = TreadmillConfig {
         cycles,
+        mounts,
         ..Default::default()
     };
     let runs: Vec<_> = seeds
@@ -571,7 +580,7 @@ fn main() {
             .map(|genome| {
                 fitness(
                     &catalog, &economy, genome, &seeds, options.iterations, options.env,
-                    options.cycles,
+                    options.cycles, options.mounts,
                 )
             })
             .collect();
@@ -807,6 +816,7 @@ fn main() {
                     options.iterations,
                     options.env,
                     options.cycles,
+                    options.mounts,
                 ),
             )
         })
@@ -845,6 +855,7 @@ fn main() {
                 &validation[..40],
                 options.iterations,
                 options.cycles,
+                options.mounts,
             );
             println!(
                 "{:>7} {:>10.0} {:>10.0} {:>9.0} {:>9.0} {:>8.1} % {:>9.1} {:>7.2}",
@@ -1070,6 +1081,7 @@ fn main() {
     if options.env == Env::Treadmill {
         let config = TreadmillConfig {
             cycles: options.cycles,
+            mounts: options.mounts,
             ..Default::default()
         };
         let bands = |per_cycle: &[i64]| {
@@ -1095,15 +1107,14 @@ fn main() {
                             policy_of(&network, &best, options.iterations, Env::Treadmill);
                         play_treadmill(&catalog, &economy, &mut policy, seed, &config)
                     } else {
-                        let mut policy = Searching::with_iterations(Myopic, options.iterations)
-                            .without_sacrifices();
+                        let mut policy = Searching::with_iterations(Myopic, options.iterations);
                         play_treadmill(&catalog, &economy, &mut policy, seed, &config)
                     }
                 })
                 .collect();
             let n = runs.len().max(1) as f64;
-            let mean = |f: fn(&breeding_sim::treadmill::TreadmillOutcome) -> f64| {
-                runs.iter().map(f).sum::<f64>() / n
+            let mean = |f: &dyn Fn(&breeding_sim::treadmill::TreadmillOutcome) -> f64| {
+                runs.iter().map(|outcome| f(outcome)).sum::<f64>() / n
             };
             let mut summed = vec![0i64; options.cycles];
             for outcome in &runs {
@@ -1113,13 +1124,16 @@ fn main() {
             }
             let per_cycle: Vec<i64> = summed.iter().map(|&g| g / runs.len() as i64).collect();
             println!(
-                "{label:<26} {:>9.0} génétons · {:>6.0} crois. · {:>6.0} clones · trajectoire {:?}",
-                mean(|o| o.genetons as f64),
-                mean(|o| o.crossings as f64),
-                mean(|o| o.clonings as f64),
+                "{label:<26} {:>9.0} nets · {:>7.0} bruts · {:>6.0} crois. · {:>6.0} clones · \
+                 {:>5.0} sacr. · trajectoire {:?}",
+                mean(&|o| o.net_genetons(&economy)),
+                mean(&|o| o.genetons as f64),
+                mean(&|o| o.crossings as f64),
+                mean(&|o| o.clonings as f64),
+                mean(&|o| o.sacrifices as f64),
                 bands(&per_cycle)
             );
-            mean(|o| o.genetons as f64)
+            mean(&|o| o.net_genetons(&economy))
         };
         println!("\n--- tapis, départage ({} parties) ---", validation_seeds.len());
         let myopic = run("recherche / valeur myope", false);

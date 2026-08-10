@@ -118,8 +118,20 @@ pub struct TreadmillConfig {
     pub places: usize,
     /// Fertiles à maintenir pour chaque couleur de génération 1.
     pub gen1_target: usize,
-    /// Bornes du niveau tiré à la promotion.
+    /// Bornes du niveau **affiché** d'une monture promue.
+    ///
+    /// Décoratif pour l'appariement, et il faut le savoir : le taux de réussite
+    /// suit `strategy.level` — la Mangeoire monte la fournée entière — et le champ
+    /// `level` d'une monture n'entre ni dans `PairDelta::of` ni dans `apply`. Il ne
+    /// sert qu'à départager deux montures autrement identiques, chez le chargeur
+    /// comme dans `MateGroup::sample`.
     pub promotion_levels: (u16, u16),
+    /// Le niveau auquel la Mangeoire monte la fournée, donc **le** levier du taux.
+    ///
+    /// `0` laisse l'économie décider (`mount_level`). C'est la variable de
+    /// `bin/batch` : les bandes ne changent que la durée et le prix d'une fournée,
+    /// le niveau seul change ce qu'elle produit.
+    pub level: u16,
     /// Montures détenues sans frais. Au-delà, l'écurie déborde sur l'inventaire.
     ///
     /// Le plafond du jeu n'est pas un mur : on gère des centaines de montures en
@@ -157,6 +169,7 @@ impl Default for TreadmillConfig {
             places: 50,
             gen1_target: 20,
             promotion_levels: (1, 200),
+            level: 0,
             stable_cap: 250,
             overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
@@ -260,6 +273,10 @@ pub fn play_treadmill_with(
     let mut stable = random_stable(catalog, &mut rng, config);
     let mut outcome = TreadmillOutcome::default();
 
+    let strategy = Strategy {
+        level: config.level,
+        ..Strategy::default()
+    };
     let gen1: Vec<ColorId> = catalog.ids_at_generation(1).collect();
     // Avant le premier appel : sans ça le cycle 1 se jouerait sans aucune gen 1
     // alors que tous les suivants en portent vingt par couleur.
@@ -281,7 +298,7 @@ pub fn play_treadmill_with(
                 // cause de kamas serait un artefact.
                 kamas: i64::MAX / 4,
                 unit: 0,
-                strategy: Strategy::default(),
+                strategy,
                 capacity: 0,
             };
             policy.plan(&view, &mut rng)
@@ -309,7 +326,7 @@ pub fn play_treadmill_with(
             economy,
             &mut stable,
             &plan,
-            Strategy::default(),
+            strategy,
             &draws,
             cycle as u32,
         ) {

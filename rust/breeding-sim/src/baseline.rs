@@ -583,7 +583,11 @@ impl Policy for Greedy {
         };
 
         let scoring = Scoring::new(view.catalog, view.economy, self.objective);
-        let capacity = view.capacity * 2;
+        // `capacity` porte désormais des places, et `ranked_couples` en attend.
+        // Le doublement d'avant compensait un compte de croisements — c'est lui
+        // qui a masqué le défaut : le glouton voyait le bon enclos, la recherche
+        // non, et la porte « glouton identique » ne pouvait donc rien signaler.
+        let capacity = view.capacity;
         let mut crossings = ranked_couples(&scoring, view.stable, capacity);
 
         // Les montures engagées dans un clonage ne peuvent pas servir ailleurs

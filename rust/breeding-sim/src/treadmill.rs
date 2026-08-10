@@ -95,6 +95,18 @@ pub struct TreadmillConfig {
     pub gen1_target: usize,
     /// Bornes du niveau tiré à la promotion.
     pub promotion_levels: (u16, u16),
+    /// Poids du tirage initial, indexés par génération.
+    ///
+    /// Une **pyramide**, parce que c'est la forme d'une écurie réelle : beaucoup
+    /// de bas, peu de haut. Un tirage uniforme sur les rangs donnerait autant de
+    /// gen 9 que de gen 2, ce que personne ne possède, et la politique
+    /// apprendrait à compter sur une abondance qui n'arrive jamais.
+    ///
+    /// La gen 1 pèse **zéro** : elle n'entre que par le complément, donc son
+    /// vivier vaut vingt par couleur dès le premier cycle comme à tous les
+    /// autres. La tirer en plus donnerait au départ une manne qui n'existe nulle
+    /// part ailleurs dans l'épisode.
+    pub weights: [usize; 11],
 }
 
 impl Default for TreadmillConfig {
@@ -105,6 +117,8 @@ impl Default for TreadmillConfig {
             promotions: [20, 80, 100],
             gen1_target: 20,
             promotion_levels: (1, 200),
+            // 11 − génération, et zéro pour la gen 1.
+            weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
         }
     }
 }
@@ -129,12 +143,10 @@ pub struct TreadmillOutcome {
     pub gen1_crossings: usize,
     /// Montures sacrifiées — extraites en ambre.
     ///
-    /// La fitness est en génétons, donc l'ambre ne rapporte **rien** ici : un
-    /// sacrifice ne peut que détruire une reproduction. S'il y en a quand même,
-    /// c'est du bruit de recherche ; s'il y en a beaucoup, c'est que la fonction
-    /// de valeur y voit un gain qui n'existe pas dans la fitness, et il faudra
-    /// soit fermer l'action, soit décider que l'ambre relève de cette étape et
-    /// mettre les kamas dans la fitness.
+    /// **Doit rester à zéro.** L'ambre convertit du stock en kamas, donc c'est un
+    /// arbitrage économique et il relève de l'étape 2 ; l'action est fermée ici
+    /// via `Searching::without_sacrifices`. Le compteur reste pour que sa
+    /// réouverture accidentelle se voie tout de suite au lieu de se deviner.
     pub sacrifices: usize,
     /// La plus haute génération portée à la fin, fécondité mise à part.
     pub top_generation: u8,
@@ -159,6 +171,9 @@ pub fn play_treadmill(
     let mut outcome = TreadmillOutcome::default();
 
     let gen1: Vec<ColorId> = catalog.ids_at_generation(1).collect();
+    // Avant le premier appel : sans ça le cycle 1 se jouerait sans aucune gen 1
+    // alors que tous les suivants en portent vingt par couleur.
+    top_up_gen1(&mut stable, catalog, &mut rng, &gen1, config.gen1_target);
 
     for cycle in 0..config.cycles {
         // --- 1. l'optimiseur --------------------------------------------------
@@ -266,19 +281,43 @@ pub fn play_treadmill(
 /// autant, quelle que soit la largeur de son étage.
 fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> Stable {
     let mut stable = Stable::new();
-    // Les gen 10 sont exclues du départ : elles seraient récoltées avant d'avoir
-    // servi à quoi que ce soit.
-    let ceiling = catalog.top_generation().saturating_sub(1).max(1);
-    let by_generation: Vec<Vec<ColorId>> = (0..=ceiling)
-        .map(|generation| catalog.ids_at_generation(generation).collect())
+    let top = catalog.top_generation() as usize;
+    let by_generation: Vec<Vec<ColorId>> = (0..=top)
+        .map(|generation| catalog.ids_at_generation(generation as u8).collect())
         .collect();
+    // Poids annulés pour les rangs que le catalogue ne porte pas.
+    let weights: Vec<usize> = (0..=top)
+        .map(|generation| {
+            if by_generation[generation].is_empty() {
+                0
+            } else {
+                config.weights.get(generation).copied().unwrap_or(0)
+            }
+        })
+        .collect();
+    let total: usize = weights.iter().sum();
+    if total == 0 {
+        return stable;
+    }
 
     for _ in 0..config.mounts {
-        let generation = 1 + index_in(rng, ceiling as usize);
+        // Le rang d'abord, pondéré ; la couleur ensuite, uniformément dedans.
+        // Le poids porte donc sur la **génération** et non sur la couleur : les
+        // cinquante gen 10 du muldo se partagent une part de 1, chacune est donc
+        // rare individuellement, ce qui est bien ce qu'on observe en jeu.
+        let mut ticket = index_in(rng, total);
+        let generation = weights
+            .iter()
+            .position(|&weight| {
+                if ticket < weight {
+                    true
+                } else {
+                    ticket -= weight;
+                    false
+                }
+            })
+            .unwrap_or(1);
         let choices = &by_generation[generation];
-        if choices.is_empty() {
-            continue;
-        }
         let color = choices[index_in(rng, choices.len())];
         let recipes = &catalog.color(color).recipes;
         let parents = if recipes.is_empty() {
@@ -455,7 +494,7 @@ mod tests {
             let mut ends = 0usize;
             let started = std::time::Instant::now();
             for seed in 0..8u32 {
-                let mut policy = Searching::with_iterations(Myopic, 800);
+                let mut policy = Searching::with_iterations(Myopic, 800).without_sacrifices();
                 let o = play_treadmill(&catalog, &economy, &mut policy, seed, &config);
                 genetons += o.genetons;
                 crossings += o.crossings;

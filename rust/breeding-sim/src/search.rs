@@ -118,11 +118,26 @@ enum Action {
 pub struct SearchConfig {
     /// Mutations tirées par fournée.
     pub iterations: usize,
+    /// Proposer des sacrifices, c'est-à-dire l'extraction en ambre.
+    ///
+    /// À `false` pour le tapis roulant de l'étape 1 : l'ambre convertit du stock
+    /// en kamas, donc c'est un arbitrage **économique**, et cette étape-là n'a pas
+    /// d'économie. L'y laisser ouverte sans la récompenser était le seul régime
+    /// qui n'ait de sens ni dans un cas ni dans l'autre — l'action ne pouvait que
+    /// détruire une reproduction.
+    ///
+    /// On la ferme dans la recherche plutôt qu'en filtrant le plan après coup :
+    /// filtrer laisserait le recensement porter un sacrifice qui n'a pas lieu, et
+    /// la fonction de valeur jugerait alors une écurie qui n'existe pas.
+    pub sacrifices: bool,
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        Self { iterations: 1500 }
+        Self {
+            iterations: 1500,
+            sacrifices: true,
+        }
     }
 }
 
@@ -249,7 +264,15 @@ impl Searcher {
         let mut best = value.value(&state.census, catalog, economy);
 
         for _ in 0..self.config.iterations {
-            let Some(mutation) = propose(&state, &candidates, &fertile, &sterile, view.capacity, rng)
+            let Some(mutation) = propose(
+                &state,
+                &candidates,
+                &fertile,
+                &sterile,
+                view.capacity,
+                self.config.sacrifices,
+                rng,
+            )
             else {
                 continue;
             };
@@ -614,12 +637,14 @@ fn partition(catalog: &Catalog, economy: &Economy, stable: &Stable) -> (Vec<Grou
     (fertile, sterile)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn propose(
     state: &State,
     candidates: &[Candidate],
     fertile: &[Group],
     sterile: &[Group],
     capacity: usize,
+    sacrifices: bool,
     rng: &mut Rng,
 ) -> Option<Mutation> {
     let roll = rng.next_f64();
@@ -632,7 +657,7 @@ fn propose(
         return Some(Mutation::Remove(at, state.actions[at]));
     }
 
-    let action = random_action(state, candidates, fertile, sterile, capacity, rng)?;
+    let action = random_action(state, candidates, fertile, sterile, capacity, sacrifices, rng)?;
     if !state.actions.is_empty() && roll < 0.30 {
         let at = pick(rng, state.actions.len());
         return Some(Mutation::Swap(at, state.actions[at], action));
@@ -640,12 +665,14 @@ fn propose(
     Some(Mutation::Add(action))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn random_action(
     state: &State,
     candidates: &[Candidate],
     fertile: &[Group],
     sterile: &[Group],
     capacity: usize,
+    sacrifices: bool,
     rng: &mut Rng,
 ) -> Option<Action> {
     let pick = |rng: &mut Rng, count: usize| -> usize {
@@ -709,7 +736,11 @@ fn random_action(
         return Some(Action::Clone(first, partners[pick(rng, partners.len())]));
     }
 
-    // Un sacrifice, féconde ou stérile. Une gen 1 ne rend rien, donc on ne la
+    if !sacrifices {
+        return None;
+    }
+
+    // Un sacrifice, fertile ou stérile. Une gen 1 ne rend rien, donc on ne la
     // propose pas — ce n'est pas une préférence, c'est zéro.
     let from_fertile = rng.next_f64() < 0.5;
     let pool = if from_fertile { fertile } else { sterile };
@@ -835,9 +866,18 @@ impl<V: ValueFn> Searching<V> {
         Self::with_iterations(value, SearchConfig::default().iterations)
     }
 
+    /// Ferme l'extraction en ambre. Voir `SearchConfig::sacrifices`.
+    pub fn without_sacrifices(mut self) -> Self {
+        self.searcher.config.sacrifices = false;
+        self
+    }
+
     pub fn with_iterations(value: V, iterations: usize) -> Self {
         Self {
-            searcher: Searcher::new(SearchConfig { iterations }),
+            searcher: Searcher::new(SearchConfig {
+                iterations,
+                ..SearchConfig::default()
+            }),
             value,
             // Par défaut : la bande la moins chère, le niveau de l'économie,
             // aucune Optimakina — le réglage le plus neutre possible, et celui
@@ -917,7 +957,7 @@ mod tests {
         let catalog = muldo();
         let economy = Economy::default();
         let stable = starting_stable(&catalog, &economy, &Draws::new(9));
-        let mut searcher = Searcher::new(SearchConfig { iterations: 0 });
+        let mut searcher = Searcher::new(SearchConfig { iterations: 0, ..SearchConfig::default() });
 
         let (fertile, sterile) = partition(&catalog, &economy, &stable);
         let candidates = searcher.candidates(&catalog, &economy, &fertile, Strategy::default());
@@ -943,7 +983,7 @@ mod tests {
         let mut rng = Rng::new(5);
         for _ in 0..200 {
             if let Some(mutation) =
-                propose(&state, &candidates, &fertile, &sterile, 25, &mut rng)
+                propose(&state, &candidates, &fertile, &sterile, 25, true, &mut rng)
             {
                 mutation.apply(&mut state, &candidates, &fertile, &sterile, &economy);
                 mutation.undo(&mut state, &candidates, &fertile, &sterile, &economy);

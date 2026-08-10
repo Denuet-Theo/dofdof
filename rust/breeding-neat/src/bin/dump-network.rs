@@ -3,7 +3,7 @@
 //!
 //! ```sh
 //! cargo run --release -p breeding-neat --bin dump-network -- champion-t2.json \
-//!   ../src/lib/dofus/breeding/network-parity.json
+//!   ../scripts/fixtures/network-parity.json
 //! ```
 //!
 //! Même raisonnement que `dump-parity-fixtures.ts` en sens inverse : là-bas c'est
@@ -30,7 +30,7 @@ fn main() {
     let source = args.next().unwrap_or_else(|| "champion.json".into());
     let target = args
         .next()
-        .unwrap_or_else(|| "../src/lib/dofus/breeding/network-parity.json".into());
+        .unwrap_or_else(|| "../scripts/fixtures/network-parity.json".into());
 
     let genome = match champion::load(&source, 1) {
         Ok(genome) => genome,

@@ -22,7 +22,7 @@
  * ```sh
  * cd rust
  * cargo run --release -p breeding-neat --bin dump-network -- champion-t2.json \
- *   ../src/lib/dofus/breeding/network-parity.json
+ *   ../scripts/fixtures/network-parity.json
  * ```
  *
  * À refaire quand le champion change **ou** quand `FEATURES` bouge : l'artefact
@@ -61,7 +61,7 @@ execFileSync(
 const { compile, evaluate, isConnected } = await import(join(out, 'network.js'));
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const champion = read('src/lib/dofus/breeding/champion.json');
-const fixture = read('src/lib/dofus/breeding/network-parity.json');
+const fixture = read('scripts/fixtures/network-parity.json');
 
 if (champion.features !== fixture.features) {
   console.error(

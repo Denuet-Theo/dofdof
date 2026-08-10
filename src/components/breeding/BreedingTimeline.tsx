@@ -42,7 +42,10 @@ import {
   modelPlan,
   type ModelPlan,
 } from '@/lib/dofus/breeding/model-plan';
+import CopyableText from '@/components/ui/CopyableText';
+import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { Loadout } from '@/lib/dofus/breeding/loadout';
+import type { Individual } from '@/lib/dofus/breeding/stable';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -112,6 +115,15 @@ type Props = {
    */
   fill?: Loadout | null;
   nameOf: (colorId: string) => string;
+  /**
+   * Les montures suivies, pour retrouver leur **nom en jeu**.
+   *
+   * Une couleur et un sexe suffisent pour le vrac, où les montures sont
+   * interchangeables. Dès qu'une monture est suivie, non : deux Doré de même
+   * couleur n'ont pas la même ascendance, et le nom est la seule chose que
+   * l'écurie du jeu laisse lire. Voir `stable.ts` sur `name`.
+   */
+  individuals?: Individual[];
 };
 
 /* ------------------------------------------------------------ vocabulaire -- */
@@ -530,57 +542,153 @@ const Agenda = ({
 const Fill = ({
   fill,
   nameOf,
+  individuals = [],
 }: {
   fill: Loadout;
   nameOf: (colorId: string) => string;
-}) => (
-  <div className="space-y-1.5 px-3 py-2.5 rounded-xl bg-info/8 border border-info/20">
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <Heart size={13} className="text-info shrink-0" />
-      <span className="text-[11px] text-dark-300">
-        À sortir de l&apos;écurie pour la prochaine fournée —{' '}
-        <strong className="text-dark-100">{nameOf(fill.targetColorId)}</strong>
-      </span>
-      <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
-        {fill.crossings} accouplement{fill.crossings > 1 ? 's' : ''} · {fill.used}/{fill.slots}{' '}
-        places
-      </span>
-    </div>
+  individuals?: Individual[];
+}) => {
+  /**
+   * Le nom qu'une monture suivie porte en jeu.
+   *
+   * L'identifiant de base ne se cherche nulle part : l'écurie du jeu ne le
+   * connaît pas. Le seul repère devant l'enclos est le nom, que `naming.ts`
+   * fabrique précisément pour porter la généalogie — invisible autrement.
+   */
+  const nameOfMount = (mountId: string) =>
+    individuals.find((mount) => mount.id === mountId)?.name ?? ANONYMOUS_NAME;
 
-    {fill.pull.length > 0 ? (
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {fill.pull.map((pull) => (
-          <span key={pull.colorId} className="text-xs text-dark-300">
-            {nameOf(pull.colorId)}{' '}
-            <span className="text-dark-100 tabular-nums font-semibold">
-              {pull.males > 0 && `${pull.males}♂`}
-              {pull.males > 0 && pull.females > 0 && ' '}
-              {pull.females > 0 && `${pull.females}♀`}
-            </span>
-            {pull.exhausts && (
-              <span
-                className="text-[10px] text-amber-400/70"
-                title="La fournée vide cette couleur : il n'en restera aucune fertile."
-              >
-                {' '}
-                vidée
-              </span>
-            )}
-          </span>
-        ))}
-      </div>
+  /**
+   * Les noms d'un côté de couple, dédoublonnés.
+   *
+   * Une ligne charge souvent plusieurs montures d'ascendance identique, dont
+   * l'une a été renommée et l'autre pas : elles se comptent, elles ne se
+   * répètent pas.
+   */
+  const mountNames = (ids: string[]): [string, number][] => {
+    const counts = new Map<string, number>();
+    for (const id of ids) {
+      const name = nameOfMount(id);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts];
+  };
+
+  /** Un nom à chercher en jeu — copiable, sauf quand il n'y a rien à chercher. */
+  const nameChip = (name: string, count: number, key: string) =>
+    name === ANONYMOUS_NAME ? (
+      <span
+        key={key}
+        className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"
+        title="Monture non renommée : prends-en une dans le tas, elles sont interchangeables."
+      >
+        {name}
+        {count > 1 && ` × ${count}`}
+      </span>
     ) : (
-      /* Une fournée à zéro croisement se dit, plutôt que de laisser un cadre vide
-         qu'on prendrait pour un défaut d'affichage. C'est le cas quand l'écurie
-         ne porte aucun couple de la recette suivante — il faut alors élever ou
-         acheter les parents avant de pouvoir charger quoi que ce soit. */
-      <p className="text-[11px] text-dark-500">
-        L&apos;écurie ne permet aucun accouplement de ce plan pour l&apos;instant : les parents
-        des prochaines étapes manquent.
-      </p>
-    )}
-  </div>
-);
+      <span key={key} className="inline-flex items-center gap-1">
+        <CopyableText
+          value={name}
+          title={`Copier « ${name} » — le nom à chercher dans l’écurie du jeu`}
+        />
+        {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
+      </span>
+    );
+
+  return (
+    <div className="space-y-2 px-3 py-2.5 rounded-xl bg-info/8 border border-info/20">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Heart size={13} className="text-info shrink-0" />
+        <span className="text-[11px] text-dark-300">
+          La prochaine fournée —{' '}
+          <strong className="text-dark-100">{nameOf(fill.targetColorId)}</strong>
+        </span>
+        <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
+          {fill.crossings} accouplement{fill.crossings > 1 ? 's' : ''} · {fill.used}/{fill.slots}{' '}
+          places
+        </span>
+      </div>
+
+      {fill.lines.length > 0 ? (
+        <>
+          {/* Les couples, et non seulement les couleurs. L'appariement **est** la
+              consigne : quel mâle avec quelle femelle, et laquelle nommément dès
+              qu'elle est suivie — deux montures de même couleur n'ont pas la
+              même ascendance, et c'est l'ascendance qui décide de ce que le
+              croisement vise. */}
+          <div className="space-y-0.5">
+            {fill.lines.map((line, index) => (
+              <div
+                key={`${line.step.colorId}-${line.male.colorId}-${line.female.colorId}-${index}`}
+                className="flex flex-wrap items-center gap-2 text-xs"
+              >
+                <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
+                  {line.count} ×
+                </span>
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
+                  ♂ {nameOf(line.male.colorId)}
+                  {mountNames(line.male.mountIds).map(([name, count]) =>
+                    nameChip(name, count, `m-${index}-${name}`)
+                  )}
+                </span>
+                <span className="text-dark-600">+</span>
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
+                  ♀ {nameOf(line.female.colorId)}
+                  {mountNames(line.female.mountIds).map(([name, count]) =>
+                    nameChip(name, count, `f-${index}-${name}`)
+                  )}
+                </span>
+                <span
+                  className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+                  title={`Étape du plan : produire ${nameOf(line.step.colorId)}, de génération ${line.step.generation}.`}
+                >
+                  GEN. {line.step.generation}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Le récapitulatif par couleur, qui se lit devant le coffre : on y va
+              une fois, pas une fois par couple. Les sexes restent détaillés
+              parce qu'ils ne sont pas interchangeables. */}
+          {fill.pull.length > 0 && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-info/15">
+              <span className="text-[11px] text-dark-400">À sortir de l&apos;écurie</span>
+              {fill.pull.map((pull) => (
+                <span key={pull.colorId} className="text-xs text-dark-300">
+                  {nameOf(pull.colorId)}{' '}
+                  <span className="text-dark-100 tabular-nums font-semibold">
+                    {pull.males > 0 && `${pull.males}♂`}
+                    {pull.males > 0 && pull.females > 0 && ' '}
+                    {pull.females > 0 && `${pull.females}♀`}
+                  </span>
+                  {pull.exhausts && (
+                    <span
+                      className="text-[10px] text-amber-400/70"
+                      title="La fournée vide cette couleur : il n'en restera aucune fertile."
+                    >
+                      {' '}
+                      vidée
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        /* Une fournée à zéro croisement se dit, plutôt que de laisser un cadre vide
+           qu'on prendrait pour un défaut d'affichage. C'est le cas quand l'écurie
+           ne porte aucun couple de la recette suivante — il faut alors élever ou
+           acheter les parents avant de pouvoir charger quoi que ce soit. */
+        <p className="text-[11px] text-dark-500">
+          L&apos;écurie ne permet aucun accouplement de ce plan pour l&apos;instant : les parents
+          des prochaines étapes manquent.
+        </p>
+      )}
+    </div>
+  );
+};
 
 /* ------------------------------------------------------------ chargement --- */
 
@@ -725,7 +833,7 @@ const PlanLoader = ({
 
 /* -------------------------------------------------------------- le panneau - */
 
-const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf }: Props) => {
+const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
   /**
@@ -877,7 +985,7 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf }: Props) => {
           l'agenda égrène les gestes, et c'est entre les deux qu'on se demande ce
           qu'on met dedans. Absent quand aucune couleur n'a de plan — il n'y a
           alors rien à charger, et l'annoncer serait inventer une consigne. */}
-      {fill && <Fill fill={fill} nameOf={nameOf} />}
+      {fill && <Fill fill={fill} nameOf={nameOf} individuals={individuals} />}
 
       <Agenda events={upcoming} elapsed={elapsed} clock={clock} now={now} />
 

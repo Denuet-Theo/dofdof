@@ -465,6 +465,9 @@ const BreedingPage = () => {
         enclosCount={settings.enclos_count}
         fill={loadout}
         nameOf={nameOf}
+        // Les montures suivies, pour que la fournée nomme celles qui portent un
+        // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.
+        individuals={stable.individuals}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

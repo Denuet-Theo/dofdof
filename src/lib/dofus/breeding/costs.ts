@@ -937,10 +937,28 @@ export const computeBreedingCosts = (
     // zone.
     const capturable = color.recipes.length === 0 ? positive(captureCost) : null;
 
+    /**
+     * Acheter est borné à la première génération, comme capturer.
+     *
+     * Le prix d'une gen 2+ existe et sert — c'est ce qu'elle vaut à la revente,
+     * et c'est ce qui donne un intérêt à l'élever. Il ne dit **pas** qu'on peut
+     * s'en procurer une : personne n'en met en vente, puisque tout le monde les
+     * élève à la demande. Le laisser ouvert faisait proposer « acheter 14
+     * Doré-Orchidée », une consigne qu'aucun hôtel de vente ne permet
+     * d'exécuter (#105).
+     *
+     * Le seuil se lit sur la recette et non sur un nombre, exactement comme la
+     * capture juste au-dessus : une couleur sans recette est une feuille de
+     * l'arbre, et c'est la seule chose qu'on se procure sans l'élever. Les deux
+     * bornes disent donc la même phrase, et se liront ensemble le jour où l'une
+     * bouge.
+     */
+    const buyable = color.recipes.length === 0 ? priceLevel0 : null;
+
     // À égalité, acheter l'emporte : c'est immédiat, et ça n'engage ni une
     // recette qui pourrait être fausse ni une session de capture.
     const options: { strategy: NonNullable<BreedingEstimate['strategy']>; cost: number }[] = [];
-    if (priceLevel0 !== null) options.push({ strategy: 'buy', cost: priceLevel0 });
+    if (buyable !== null) options.push({ strategy: 'buy', cost: buyable });
     if (capturable !== null) options.push({ strategy: 'capture', cost: capturable });
     if (breedCost !== null) options.push({ strategy: 'breed', cost: breedCost });
 

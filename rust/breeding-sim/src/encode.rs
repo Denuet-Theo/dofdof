@@ -44,7 +44,13 @@ use crate::trees::{Catalog, ColorId};
 pub const MAX_GENERATION: usize = 10;
 
 /// La taille du vecteur d'entrée. Fixe, c'est ce que NEAT exige.
-pub const FEATURES: usize = 54;
+///
+/// Passée de 54 à 74 en séparant les fécondes des fertiles. **Un génome
+/// enregistré avant ce changement n'est plus chargeable** : sa couche d'entrée
+/// n'a pas la bonne arité. C'est assumé — sans cette séparation, une politique ne
+/// peut pas préférer une écurie dont le cycle est déjà payé à une écurie qui le
+/// doit encore, et tout le pré-fécondage lui est invisible.
+pub const FEATURES: usize = 74;
 
 const FERTILE_MALES: usize = 0;
 const FERTILE_FEMALES: usize = 10;
@@ -76,12 +82,35 @@ const PRICE_TOP: usize = 52;
 /// vise les couleurs chères d'elle-même, puisqu'elle maximise la valeur de
 /// l'écurie attendue.
 const LIQUIDATION: usize = 53;
+/// Les **fécondes** par génération, sous-ensemble des fertiles.
+///
+/// Ajoutées en queue plutôt qu'insérées près des fertiles : les offsets existants
+/// ne bougent pas, donc une lecture du vecteur écrite avant reste juste sur ce
+/// qu'elle regardait.
+///
+/// C'est un sous-ensemble et non une partition, exprès. `FERTILE_*` continue de
+/// compter **tout ce qui garde sa reproduction** — c'est ce qui dit ce que l'écurie
+/// pourra produire à terme, la question que le réseau se posait déjà. Ces deux
+/// entrées-ci disent ce qu'elle peut produire **sans repasser par l'enclos**, donc
+/// gratuitement et tout de suite. La différence des deux est la dette de cycle,
+/// que le réseau peut lire seul.
+const CYCLED_MALES: usize = 54;
+const CYCLED_FEMALES: usize = 64;
 
 /// Le recensement d'une écurie, en comptes bruts et fractionnaires.
 #[derive(Clone, Debug)]
 pub struct Census {
     fertile_males: [f64; MAX_GENERATION + 1],
     fertile_females: [f64; MAX_GENERATION + 1],
+    /// Les fécondes, **incluses** dans les deux tableaux ci-dessus.
+    ///
+    /// Redondant en apparence, et c'est le bon compromis : `apply_crossing` et
+    /// `PairDelta` continuent de travailler sur « ce qui garde sa reproduction »
+    /// sans rien savoir du cycle, donc la loi d'appariement — celle que le test de
+    /// parité verrouille au milliardième — n'est pas touchée. Le cycle se suit à
+    /// côté, là où il est décidé.
+    cycled_males: [f64; MAX_GENERATION + 1],
+    cycled_females: [f64; MAX_GENERATION + 1],
     steriles: [f64; MAX_GENERATION + 1],
     /// Histogramme de la génération **portée**, ascendance comprise, sur les
     /// fécondes. C'est elle qui dit ce que l'écurie peut viser, et non la
@@ -108,6 +137,8 @@ impl Census {
         let mut census = Self {
             fertile_males: [0.0; MAX_GENERATION + 1],
             fertile_females: [0.0; MAX_GENERATION + 1],
+            cycled_males: [0.0; MAX_GENERATION + 1],
+            cycled_females: [0.0; MAX_GENERATION + 1],
             steriles: [0.0; MAX_GENERATION + 1],
             carried: [0.0; MAX_GENERATION + 1],
             held: vec![0.0; catalog.len()],
@@ -131,6 +162,12 @@ impl Census {
                 Sex::Male => census.fertile_males[generation] += 1.0,
                 Sex::Female => census.fertile_females[generation] += 1.0,
             }
+            if mount.cycled {
+                match mount.sex {
+                    Sex::Male => census.cycled_males[generation] += 1.0,
+                    Sex::Female => census.cycled_females[generation] += 1.0,
+                }
+            }
             census.carried[mount.carried_generation(catalog) as usize] += 1.0;
             census.held[mount.color as usize] += 1.0;
         }
@@ -138,7 +175,26 @@ impl Census {
         census
     }
 
-    /// La frontière : le plus haut rang **porté** par une féconde.
+    /// Une monture passe fertile → féconde, ou l'inverse quand on défait.
+    ///
+    /// `by` est signé et fractionnaire pour la même raison que partout ailleurs
+    /// ici : la recherche défait ses mutations, et un compteur qu'on ne sait pas
+    /// décrémenter exactement fait dériver le recensement au fil des milliers
+    /// d'essais. Voir le test `appliquer_puis_defaire_ne_laisse_pas_de_trace`.
+    ///
+    /// Ne touche pas `fertile_*` : la monture gardait déjà sa reproduction avant le
+    /// cycle, elle la garde après. Seule sa disponibilité immédiate change.
+    #[inline]
+    pub fn cycle(&mut self, generation: usize, sex: Sex, by: f64) {
+        let slot = generation.min(MAX_GENERATION);
+        match sex {
+            Sex::Male => self.cycled_males[slot] += by,
+            Sex::Female => self.cycled_females[slot] += by,
+        }
+    }
+
+    /// La frontière : le plus haut rang **porté** par une monture qui garde sa
+    /// reproduction.
     #[inline]
     pub fn frontier(&self) -> usize {
         (1..=MAX_GENERATION)
@@ -193,6 +249,8 @@ impl Census {
             out[FERTILE_FEMALES + slot] = self.fertile_females[generation].max(0.0).ln_1p();
             out[STERILES + slot] = self.steriles[generation].max(0.0).ln_1p();
             out[CARRIED + slot] = self.carried[generation].max(0.0).ln_1p();
+            out[CYCLED_MALES + slot] = self.cycled_males[generation].max(0.0).ln_1p();
+            out[CYCLED_FEMALES + slot] = self.cycled_females[generation].max(0.0).ln_1p();
         }
 
         let frontier = self.frontier();

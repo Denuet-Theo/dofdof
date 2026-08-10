@@ -650,6 +650,11 @@ impl Policy for Greedy {
             crossings,
             sacrifices,
             optimakina: Vec::new(),
+            // Le glouton ne féconde jamais d'avance, et c'est ce qui en fait le bon
+            // témoin : il joue exactement la politique d'avant le découplage, sur
+            // le modèle d'après. Son chiffre doit donc être inchangé — s'il bouge,
+            // c'est le modèle qui a dérivé, pas la stratégie.
+            cycles: Vec::new(),
         }
     }
 }

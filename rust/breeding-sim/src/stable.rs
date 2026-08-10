@@ -1,12 +1,30 @@
 //! L'écurie : ce que l'éleveur a en main, et ce qu'on peut en faire.
 //!
+//! ## Les trois états, et le mot qui prêtait à confusion
+//!
+//! ```text
+//! fertile --(cycle de jauges, en enclos)--> féconde --(accouplement)--> stérile
+//! ```
+//!
+//! Les deux premiers sont **disponibles** : les deux finiront par s'accoupler. Ce
+//! qui les sépare est le cycle de fécondité — sérénité alignée, stats montées à
+//! l'extrême — qu'une féconde a déjà payé et qu'une fertile devra payer avant de
+//! servir. Une féconde qui n'est pas accouplée le reste : **la fécondité ne se
+//! perd qu'à la naissance**, ni par le temps ni par une montée de niveau.
+//!
+//! Ce fichier écrivait « fécond » pour ce que `stable.ts` appelle *fertile*, et
+//! réservait donc le mot du jeu à autre chose que ce que le jeu désigne. Comme les
+//! deux implémentations doivent porter les mêmes règles, elles doivent d'abord
+//! porter les mêmes mots : `fertile` dit « lui reste sa reproduction », `cycled`
+//! dit « son cycle est payé ».
+//!
 //! ## La fécondité est le vrai capital
 //!
 //! Une monture qui sert de parent devient **stérile définitivement**. Le jeu
 //! n'offre qu'un recyclage, le clonage, et il consomme deux stériles pour en
-//! rendre un fécond. Donc chaque monture porte exactement **une** reproduction,
+//! rendre une fertile. Donc chaque monture porte exactement **une** reproduction,
 //! et laisser une monture de côté n'est pas une place gaspillée : c'est une
-//! fécondité mise en réserve.
+//! reproduction mise en réserve.
 //!
 //! C'est ce qui justifie de sous-remplir une fournée. Vingt-trois croisements
 //! maintenant peuvent valoir mieux que vingt-cinq si les deux places gardées
@@ -16,11 +34,11 @@
 //!
 //! ## Le vrac du TypeScript n'est pas porté
 //!
-//! `stable.ts` sépare le *vrac* (des comptes par couleur, pour les basses
-//! générations achetées) des *individus*. C'est une commodité d'interface : le
-//! joueur ne veut pas saisir cinquante gen 1 une par une. Le simulateur n'a pas
-//! ce problème et gagne à tout traiter pareil ; le repli par signature de
-//! `groups()` rend de toute façon l'efficacité que le vrac cherchait.
+//! `stable.ts` sépare le *vrac* (des comptes par couleur, pour les gen 1 achetées)
+//! des *individus*. C'est une commodité d'interface : le joueur ne veut pas saisir
+//! cinquante gen 1 une par une. Le simulateur n'a pas ce problème et gagne à tout
+//! traiter pareil ; le repli par signature de `groups()` rend de toute façon
+//! l'efficacité que le vrac cherchait.
 
 use std::collections::HashMap;
 
@@ -51,6 +69,13 @@ pub struct Mount {
     /// Faux dès qu'elle a servi de parent. Ne redevient jamais vrai autrement
     /// que par clonage.
     pub fertile: bool,
+    /// Le cycle de fécondité est payé : la monture est **féconde** au sens du jeu,
+    /// donc accouplable sans repasser par les jauges.
+    ///
+    /// Ne se perd qu'à la naissance. Une féconde qu'on laisse de côté le reste, et
+    /// la remonter en niveau ne l'annule pas — c'est ce qui permet de féconder au
+    /// niveau 1 maintenant et de monter plus tard, ou l'inverse.
+    pub cycled: bool,
     /// Couleurs des deux ascendants, `None` pour une monture achetée.
     pub parents: Option<[ColorId; 2]>,
 }
@@ -128,12 +153,18 @@ impl Stable {
         self.mounts.len() - 1
     }
 
-    /// La plus haute génération **portée** par une monture féconde.
+    /// La plus haute génération **portée** par une monture qui lui reste sa
+    /// reproduction.
     ///
-    /// Restreint aux fécondes exprès : une stérile ne peut plus rien produire,
+    /// Restreint aux fertiles exprès : une stérile ne peut plus rien produire,
     /// donc la frontière qu'elle porterait est une frontière morte. On l'avait
     /// oublié une fois, et la politique croyait pouvoir composer un étage dont
     /// tous les ingrédients étaient épuisés.
+    ///
+    /// En revanche on **ne** demande pas qu'elle soit féconde : un cycle non payé
+    /// est une dépense à venir, pas une impossibilité. Exiger `cycled` ici ferait
+    /// disparaître la frontière à chaque fois que l'écurie vient de se renouveler,
+    /// et la politique croirait avoir régressé.
     pub fn frontier(&self, catalog: &Catalog) -> u8 {
         self.mounts
             .iter()
@@ -153,13 +184,33 @@ impl Stable {
             .unwrap_or(0)
     }
 
-    /// Les montures fécondes, repliées par signature et sexe.
+    /// Toutes celles qui gardent leur reproduction, fécondes ou non.
+    ///
+    /// C'est la base de l'énumération des paires, et ça reste juste après le
+    /// découplage : **un croisement peut employer n'importe quelle fertile**. Ce
+    /// que l'état change n'est pas l'éligibilité mais le **prix** — une fertile
+    /// non cyclée coûte une place d'enclos, une féconde n'en coûte aucune. Voir
+    /// `Action::Cross` dans `search.rs`.
     pub fn fertile_groups(&self) -> Vec<MateGroup> {
+        self.groups_where(|mount| mount.fertile)
+    }
+
+    /// Celles qu'un passage en enclos peut rendre fécondes : fertiles non cyclées.
+    ///
+    /// C'est ce qu'`Action::Cycle` consomme. Une monture déjà féconde n'a rien à y
+    /// gagner — la remettre en enclos serait payer deux fois — et une stérile n'a
+    /// plus de reproduction à armer.
+    pub fn cyclable_groups(&self) -> Vec<MateGroup> {
+        self.groups_where(|mount| mount.fertile && !mount.cycled)
+    }
+
+    /// Le repli par signature et sexe, sur le sous-ensemble qu'on lui donne.
+    fn groups_where(&self, keep: impl Fn(&Mount) -> bool) -> Vec<MateGroup> {
         let mut index: HashMap<(MateSignature, Sex), usize> = HashMap::new();
         let mut groups: Vec<MateGroup> = Vec::new();
 
         for (position, mount) in self.mounts.iter().enumerate() {
-            if !mount.fertile {
+            if !keep(mount) {
                 continue;
             }
             let key = (mount.signature(), mount.sex);
@@ -241,6 +292,9 @@ mod tests {
             sex,
             level: 67,
             fertile: true,
+            // Fécondes par défaut dans les tests : ce qui s'y vérifie porte sur
+            // l'appariement, pas sur le financement du cycle.
+            cycled: true,
             parents: parents.map(|[a, b]| {
                 [catalog.id_of(a).unwrap(), catalog.id_of(b).unwrap()]
             }),

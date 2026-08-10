@@ -79,7 +79,13 @@ struct Candidate {
     delta: Arc<PairDelta>,
 }
 
-/// Des montures interchangeables : même couleur, même ascendance, même sexe.
+/// Des montures interchangeables : même couleur, même ascendance, même sexe — et
+/// **même état de cycle**.
+///
+/// Le cycle entre dans la clé parce qu'il change le prix et non la cible : deux
+/// Doré de même ascendance visent la même chose, mais celle qui doit encore son
+/// cycle coûte une place d'enclos et l'autre non. Les confondre ferait choisir au
+/// hasard entre gratuit et payant.
 struct Group {
     sex: Option<Sex>,
     generation: usize,
@@ -87,6 +93,8 @@ struct Group {
     color: ColorId,
     parents: Option<[ColorId; 2]>,
     value: i64,
+    /// Son cycle de fécondité est payé : elle s'accouple sans passer par l'enclos.
+    cycled: bool,
     members: Vec<usize>,
 }
 
@@ -97,6 +105,14 @@ enum Action {
     Clone(usize, usize),
     SacrificeFertile(usize),
     SacrificeSterile(usize),
+    /// Mettre une fertile en enclos **sans la croiser** : elle en sort féconde et
+    /// reste en écurie.
+    ///
+    /// C'est la seule action réellement nouvelle du découplage, et elle n'a de sens
+    /// que parce que la fécondité ne se perd qu'à la naissance. Une place occupée
+    /// ainsi n'est pas un croisement de moins : c'est un croisement de plus **au
+    /// tour suivant**, gratuit, dès que le partenaire existe.
+    Cycle(usize),
 }
 
 pub struct SearchConfig {
@@ -132,7 +148,22 @@ struct State {
     actions: Vec<Action>,
     fertile_free: Vec<usize>,
     sterile_free: Vec<usize>,
+    /// Combien de chaque groupe fertile reste **à féconder** dans cette fournée.
+    ///
+    /// Distinct de `fertile_free` : féconder ne consomme pas la monture, elle reste
+    /// disponible pour un croisement — mais on ne peut pas la féconder deux fois,
+    /// et sans ce compteur la recherche gaspillerait des places à repayer un cycle
+    /// déjà payé.
+    cyclable_free: Vec<usize>,
     crossings: usize,
+    /// Places d'enclos engagées.
+    ///
+    /// C'est la **vraie** contrainte, et elle a remplacé le compte de croisements.
+    /// Un croisement paie une place par parent qui doit encore son cycle : deux
+    /// fertiles coûtent deux places comme avant, deux fécondes n'en coûtent
+    /// aucune. Compter les croisements plafonnait donc quelque chose qui n'est pas
+    /// rare — l'accouplement est un clic — au lieu de ce qui l'est : l'enclos.
+    places: usize,
     /// Les Optimakina engagées, suivies à part : leur prix dépend du rang visé
     /// par chaque croisement, donc il ne se déduit pas du nombre de places.
     optimakina_cost: i64,
@@ -207,7 +238,12 @@ impl Searcher {
             actions: Vec::new(),
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),
+            cyclable_free: fertile
+                .iter()
+                .map(|g| if g.cycled { 0 } else { g.members.len() })
+                .collect(),
             crossings: 0,
+            places: 0,
             optimakina_cost: 0,
         };
         let mut best = value.value(&state.census, catalog, economy);
@@ -388,7 +424,18 @@ fn apply_effects(
             let candidate = &candidates[index];
             for (side, sex) in [(candidate.male, Sex::Male), (candidate.female, Sex::Female)] {
                 match side {
-                    Side::Have(group) => state.fertile_free[group] -= 1,
+                    Side::Have(group) => {
+                        state.fertile_free[group] -= 1;
+                        if fertile[group].cycled {
+                            // Une féconde consommée quitte le stock immédiat sans
+                            // coûter de place : c'est tout le gain du report.
+                            state
+                                .census
+                                .cycle(fertile[group].generation, sex, -1.0);
+                        } else {
+                            state.cyclable_free[group] -= 1;
+                        }
+                    }
                     Side::Buy(color) => {
                         state
                             .census
@@ -398,7 +445,16 @@ fn apply_effects(
             }
             state.census.apply_crossing(&candidate.delta);
             state.crossings += 1;
+            state.places += places_of(candidate, fertile);
             state.optimakina_cost += candidate.delta.optimakina_cost;
+        }
+        Action::Cycle(group) => {
+            state.cyclable_free[group] -= 1;
+            state.places += 1;
+            let g = &fertile[group];
+            if let Some(sex) = g.sex {
+                state.census.cycle(g.generation, sex, 1.0);
+            }
         }
         Action::Clone(a, b) => {
             state.sterile_free[a] -= 1;
@@ -437,7 +493,14 @@ fn revert_effects(
             state.census.undo_crossing(&candidate.delta);
             for (side, sex) in [(candidate.male, Sex::Male), (candidate.female, Sex::Female)] {
                 match side {
-                    Side::Have(group) => state.fertile_free[group] += 1,
+                    Side::Have(group) => {
+                        state.fertile_free[group] += 1;
+                        if fertile[group].cycled {
+                            state.census.cycle(fertile[group].generation, sex, 1.0);
+                        } else {
+                            state.cyclable_free[group] += 1;
+                        }
+                    }
                     Side::Buy(color) => {
                         state
                             .census
@@ -446,7 +509,16 @@ fn revert_effects(
                 }
             }
             state.crossings -= 1;
+            state.places -= places_of(candidate, fertile);
             state.optimakina_cost -= candidate.delta.optimakina_cost;
+        }
+        Action::Cycle(group) => {
+            state.cyclable_free[group] += 1;
+            state.places -= 1;
+            let g = &fertile[group];
+            if let Some(sex) = g.sex {
+                state.census.cycle(g.generation, sex, -1.0);
+            }
         }
         Action::Clone(a, b) => {
             state.sterile_free[a] += 1;
@@ -471,13 +543,31 @@ fn revert_effects(
     }
 }
 
+/// Places d'enclos qu'un croisement engage : une par parent qui doit son cycle.
+///
+/// Zéro quand les deux parents sont déjà fécondes — l'accouplement est alors un
+/// clic, sans gestation ni séjour en enclos. Une monture achetée arrive fertile,
+/// donc elle compte toujours.
+fn places_of(candidate: &Candidate, fertile: &[Group]) -> usize {
+    [candidate.male, candidate.female]
+        .into_iter()
+        .filter(|side| match side {
+            Side::Have(group) => !fertile[*group].cycled,
+            Side::Buy(_) => true,
+        })
+        .count()
+}
+
 fn feasible(state: &State, economy: &Economy, unit: usize, strategy: Strategy, capacity: usize) -> bool {
-    if state.crossings > capacity {
+    if state.places > capacity {
         return false;
     }
-    // Le chargement ne se paie que s'il porte un croisement — jauges et
-    // Mangeoire comprises, puisque c'est l'enclos qu'on nourrit.
-    let load = if state.crossings > 0 {
+    // Le chargement se paie dès qu'une **place** est occupée, et non dès qu'un
+    // croisement est lancé. La distinction n'existait pas avant le découplage : un
+    // chargement sans croisement était impossible. Elle compte maintenant, sinon
+    // féconder serait gratuit et la politique banquerait sans rien payer — un
+    // optimum qui n'existe que dans la mesure.
+    let load = if state.places > 0 {
         (economy.unit_load(unit, strategy).0 + state.optimakina_cost) as f64
     } else {
         0.0
@@ -488,7 +578,7 @@ fn feasible(state: &State, economy: &Economy, unit: usize, strategy: Strategy, c
 fn partition(catalog: &Catalog, economy: &Economy, stable: &Stable) -> (Vec<Group>, Vec<Group>) {
     let mut fertile: Vec<Group> = Vec::new();
     let mut sterile: Vec<Group> = Vec::new();
-    let mut fertile_index: HashMap<(MateSignature, Sex), usize> = HashMap::new();
+    let mut fertile_index: HashMap<(MateSignature, Sex, bool), usize> = HashMap::new();
     let mut sterile_index: HashMap<MateSignature, usize> = HashMap::new();
 
     for (position, mount) in stable.mounts.iter().enumerate() {
@@ -500,12 +590,13 @@ fn partition(catalog: &Catalog, economy: &Economy, stable: &Stable) -> (Vec<Grou
             color: mount.color,
             parents: mount.parents,
             value: economy.value_of(catalog, mount.color),
+            cycled: mount.cycled,
             members: Vec::new(),
         };
 
         if mount.fertile {
             let at = *fertile_index
-                .entry((signature, mount.sex))
+                .entry((signature, mount.sex, mount.cycled))
                 .or_insert_with(|| {
                     fertile.push(make(Some(mount.sex)));
                     fertile.len() - 1
@@ -563,19 +654,40 @@ fn random_action(
     let kind = rng.next_f64();
 
     // Un croisement le plus souvent : c'est la décision qui porte la partie.
-    if kind < 0.75 && state.crossings < capacity && !candidates.is_empty() {
+    //
+    // Le plafond ne se lit plus sur le nombre de croisements : un croisement de
+    // deux fécondes ne coûte aucune place, donc il reste proposable même sur un
+    // enclos plein. C'est ce qui rend le report profitable au lieu d'être
+    // simplement possible.
+    if kind < 0.65 && !candidates.is_empty() {
         // Quelques essais plutôt qu'un balayage : les candidats indisponibles
         // sont minoritaires, et balayer coûterait plus cher que retirer.
         for _ in 0..8 {
             let index = pick(rng, candidates.len());
-            if available(state, &candidates[index]) {
+            let candidate = &candidates[index];
+            if available(state, candidate)
+                && state.places + places_of(candidate, fertile) <= capacity
+            {
                 return Some(Action::Cross(index));
             }
         }
         return None;
     }
 
-    if kind < 0.9 {
+    // Féconder sans croiser. Tirée aussi souvent que le clonage : c'est une
+    // décision de même nature — préparer plutôt que produire — et rien ne dit
+    // encore laquelle des deux paie le plus.
+    if kind < 0.80 && state.places < capacity {
+        let usable: Vec<usize> = (0..fertile.len())
+            .filter(|&i| state.cyclable_free[i] > 0)
+            .collect();
+        if usable.is_empty() {
+            return None;
+        }
+        return Some(Action::Cycle(usable[pick(rng, usable.len())]));
+    }
+
+    if kind < 0.92 {
         let usable: Vec<usize> = (0..sterile.len())
             .filter(|&i| state.sterile_free[i] > 0)
             .collect();
@@ -642,6 +754,9 @@ fn materialise(
     // construction, donc l'ordre n'a aucune importance.
     let mut fertile_pool: Vec<Vec<usize>> = fertile.iter().map(|g| g.members.clone()).collect();
     let mut sterile_pool: Vec<Vec<usize>> = sterile.iter().map(|g| g.members.clone()).collect();
+    // Combien de fécondations déjà nommées dans chaque groupe, pour piocher par le
+    // début sans retirer du pool des croisements.
+    let mut cycled_taken: Vec<usize> = vec![0; fertile.len()];
     let mut next_purchase = stable_len;
 
     for action in &state.actions {
@@ -678,6 +793,22 @@ fn materialise(
             Action::SacrificeSterile(group) => {
                 if let Some(index) = sterile_pool[group].pop() {
                     plan.sacrifices.push(index);
+                }
+            }
+            // Une fécondation ne retire rien du vivier : la monture reste
+            // disponible pour un croisement de la même fournée. On ne peut donc pas
+            // la sortir du pool — mais il ne faut pas non plus nommer deux fois la
+            // même monture.
+            //
+            // Les croisements piochent par la fin (`pop`), les fécondations par le
+            // début. Elles ne peuvent pas se rencontrer : `cyclable_free` part de
+            // l'effectif du groupe et les deux actions le décrémentent, donc leur
+            // somme ne dépasse jamais cet effectif.
+            Action::Cycle(group) => {
+                let at = cycled_taken[group];
+                if let Some(&index) = fertile[group].members.get(at) {
+                    cycled_taken[group] += 1;
+                    plan.cycles.push(index);
                 }
             }
         }
@@ -797,11 +928,17 @@ mod tests {
             actions: Vec::new(),
             fertile_free: fertile.iter().map(|g| g.members.len()).collect(),
             sterile_free: sterile.iter().map(|g| g.members.len()).collect(),
+            cyclable_free: fertile
+                .iter()
+                .map(|g| if g.cycled { 0 } else { g.members.len() })
+                .collect(),
             crossings: 0,
+            places: 0,
             optimakina_cost: 0,
         };
         let before = state.census.features(&catalog, &economy);
         let free_before = state.fertile_free.clone();
+        let cyclable_before = state.cyclable_free.clone();
 
         let mut rng = Rng::new(5);
         for _ in 0..200 {
@@ -818,6 +955,12 @@ mod tests {
             assert!((a - b).abs() < 1e-6, "entrée {index} : {a} ≠ {b}");
         }
         assert_eq!(free_before, state.fertile_free);
+        // Les places et le vivier à féconder doivent revenir aussi : une
+        // fécondation défaite qui laisserait une place engagée ferait juger toutes
+        // les compositions suivantes contre un enclos qu'on croit plus rempli
+        // qu'il n'est.
+        assert_eq!(cyclable_before, state.cyclable_free);
+        assert_eq!(state.places, 0);
         assert!(state.actions.is_empty());
         assert_eq!(state.crossings, 0);
     }

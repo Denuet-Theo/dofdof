@@ -321,10 +321,25 @@ impl Economy {
         if unit == 0 { self.sync_enclos } else { 1 }
     }
 
-    /// Combien de croisements une unité peut porter. Deux places par croisement.
+    /// Combien de croisements une unité peut porter **si aucun parent n'est
+    /// fécond**. Deux places par croisement.
+    ///
+    /// Reste le majorant utile — c'est le pire cas, celui d'une écurie qui doit
+    /// tous ses cycles — mais ce n'est plus la contrainte : voir `unit_places`.
     #[inline]
     pub fn unit_crossings(&self, unit: usize) -> usize {
         self.unit_enclos(unit) * self.slots_per_enclos / 2
+    }
+
+    /// Les places d'enclos d'une unité, dix par enclos.
+    ///
+    /// C'est la vraie ressource rare. Le transfert de points se paie **à
+    /// l'enclos** et les dix places en profitent également, donc une place vide
+    /// est une fécondité perdue gratuitement — et c'est pour ça qu'on compte des
+    /// places et non des croisements.
+    #[inline]
+    pub fn unit_places(&self, unit: usize) -> usize {
+        self.unit_enclos(unit) * self.slots_per_enclos
     }
 
     /// Le parc entier, en croisements.
@@ -567,6 +582,10 @@ pub fn starting_stable(catalog: &Catalog, economy: &Economy, draws: &Draws) -> S
             },
             level: economy.mount_level,
             fertile: true,
+            // Le pool s'achète : personne n'a payé son cycle. C'est ce qui garde
+            // l'économie de départ identique à celle d'avant le découplage, où
+            // deux places d'enclos étaient dues par croisement.
+            cycled: false,
             parents,
         });
     }
@@ -592,6 +611,13 @@ pub struct UnitPlan {
     pub optimakina: Vec<bool>,
     /// Créditées **avant** les dépenses, pour qu'un chargement se finance.
     pub sacrifices: Vec<usize>,
+    /// Montures mises en enclos **sans être croisées** : elles en sortent fécondes
+    /// et restent en écurie.
+    ///
+    /// C'est la fécondité mise en banque, et elle ne se périme pas. Une monture
+    /// citée ici occupe une place mais ne consomme pas sa reproduction — d'où un
+    /// champ à part plutôt qu'un croisement dégénéré.
+    pub cycles: Vec<usize>,
 }
 
 /// Ce que la politique voit quand une unité se libère.
@@ -625,6 +651,12 @@ pub struct RunOutcome {
     pub purchases: usize,
     pub clonings: usize,
     pub sacrifices: usize,
+    /// Fécondations posées **sans croisement** sur toute la partie.
+    ///
+    /// C'est la mesure qui dit si la politique banque sa fécondité ou si elle
+    /// continue de tout croiser sur place. À zéro, le découplage n'a rien changé au
+    /// comportement — et un écart de score serait alors à chercher ailleurs.
+    pub cycles: usize,
     /// Génétons produits sur toute la partie, tous croisements confondus.
     pub genetons: i64,
     /// Chargements ayant réellement porté un croisement, donc payés.
@@ -657,6 +689,11 @@ struct Applied {
     purchases: usize,
     clonings: usize,
     sacrifices: usize,
+    /// Montures fécondées sans être croisées.
+    cycles: usize,
+    /// Places d'enclos réellement occupées. C'est elle qui dit si l'unité a
+    /// travaillé, et donc si elle doit un cycle de manipulation.
+    places: usize,
     best_generation: u8,
     /// Les bébés, qui naîtront à la **fin** du cycle et pas maintenant.
     births: Vec<Mount>,
@@ -679,16 +716,31 @@ fn apply(
     draws: &Draws,
     coord: u32,
 ) -> Result<Applied, Rejected> {
-    let capacity = economy.unit_crossings(unit);
-    if plan.crossings.len() > capacity {
+    let level = economy.level_of(strategy);
+    let base = stable.len();
+
+    // --- les places, qui ont remplacé le compte de croisements --------------
+    //
+    // Un croisement paie une place par parent qui doit encore son cycle ; une
+    // fécondation en paie une. Deux fécondes croisées n'en paient aucune, donc le
+    // nombre de croisements d'un chargement n'est plus borné — c'est le sens du
+    // découplage, et c'est conforme au jeu où l'accouplement est un clic.
+    let cycled_at = |index: usize| index < base && stable.mounts[index].cycled;
+    let places: usize = plan
+        .crossings
+        .iter()
+        .flatten()
+        .chain(plan.cycles.iter())
+        .filter(|&&index| !cycled_at(index))
+        .count();
+    let capacity = economy.unit_places(unit);
+    if places > capacity {
         return Err(Rejected::TooManyCrossings {
-            asked: plan.crossings.len(),
+            asked: places,
             allowed: capacity,
         });
     }
 
-    let level = economy.level_of(strategy);
-    let base = stable.len();
     let total = base + plan.purchases.len();
     let check = |index: usize| {
         if index < total {
@@ -711,7 +763,10 @@ fn apply(
     }
 
     let mut debit = plan.purchases.len() as i64 * economy.starter_price;
-    if !plan.crossings.is_empty() {
+    // Le chargement se paie dès qu'une place est occupée. Le tester sur les
+    // croisements laissait une fournée de pure fécondation passer gratuitement,
+    // c'est-à-dire exactement l'action que le découplage introduit.
+    if places > 0 {
         debit += economy.unit_load(unit, strategy).0;
 
         // Les indices sont encore virtuels ici — les achats ne sont pas posés —
@@ -751,6 +806,9 @@ fn apply(
             sex,
             level,
             fertile: true,
+            // Une monture achetée arrive fertile, jamais féconde : son cycle
+            // reste à payer, et c'est une place d'enclos.
+            cycled: false,
             parents: None,
         });
     }
@@ -794,6 +852,26 @@ fn apply(
         };
         stable.mounts[survivor].fertile = true;
         doomed.push(if survivor == a { b } else { a });
+    }
+
+    // --- fécondations sans croisement ---------------------------------------
+    //
+    // Posées avant les croisements pour que `claim` arbitre : une monture ne sert
+    // qu'une fois par chargement, donc désigner la même à la fois ici et dans un
+    // croisement est refusé plutôt que facturé deux fois.
+    for &index in &plan.cycles {
+        check(index)?;
+        claim(index, &mut used)?;
+        if !stable.mounts[index].fertile {
+            return Err(Rejected::NotFertile(index));
+        }
+        // Déjà féconde : la remettre en enclos ne fait rien et occupe une place.
+        // On refuse au lieu de l'absorber — une politique qui le demande a un
+        // défaut, et l'absorber le cacherait.
+        if stable.mounts[index].cycled {
+            return Err(Rejected::NotFertile(index));
+        }
+        stable.mounts[index].cycled = true;
     }
 
     // --- croisements -------------------------------------------------------
@@ -869,6 +947,11 @@ fn apply(
             },
             level,
             fertile: true,
+            // Un poulain naît fertile, pas fécond : il doit son propre cycle avant
+            // de pouvoir servir. C'est ce qui donne un sens au pré-fécondage —
+            // sinon toute naissance serait immédiatement croisable et il n'y aurait
+            // rien à anticiper.
+            cycled: false,
             parents: Some([m.color, f.color]),
         });
     }
@@ -893,6 +976,8 @@ fn apply(
         purchases: plan.purchases.len(),
         clonings: plan.clonings.len(),
         sacrifices: plan.sacrifices.len(),
+        cycles: plan.cycles.len(),
+        places,
         best_generation,
         births,
     })
@@ -976,6 +1061,7 @@ fn run(
         crossings: 0,
         purchases: 0,
         clonings: 0,
+        cycles: 0,
         sacrifices: 0,
         genetons: 0,
         loads_paid: 0,
@@ -1044,6 +1130,7 @@ fn run(
                 outcome.crossings += applied.crossings;
                 outcome.purchases += applied.purchases;
                 outcome.clonings += applied.clonings;
+                outcome.cycles += applied.cycles;
                 outcome.sacrifices += applied.sacrifices;
                 outcome.genetons += applied.genetons;
                 outcome.best_generation = outcome.best_generation.max(applied.best_generation);
@@ -1069,7 +1156,10 @@ fn run(
                     });
                 }
 
-                if applied.crossings > 0 {
+                // L'enclos a tourné dès qu'une **place** a servi, croisement ou
+                // simple fécondation : les jauges ne savent pas faire la
+                // différence, et la durée du cycle est la même.
+                if applied.places > 0 {
                     outcome.loads_paid += 1;
                     idle[unit] = 0;
                     free_at[unit] = now + economy.unit_load(unit, strategy).1;
@@ -1159,6 +1249,120 @@ mod tests {
         assert_eq!(economy.unit_crossings(0), 25, "cinq enclos de dix places");
         assert_eq!(economy.unit_crossings(1), 5, "un enclos");
         assert_eq!(economy.total_crossings(), 30);
+        assert_eq!(economy.unit_places(0), 50, "deux places par croisement");
+        assert_eq!(economy.unit_places(1), 10);
+    }
+
+    /// Une monture, avec l'état de cycle qu'on veut lui donner.
+    fn mount(catalog: &Catalog, slug: &str, sex: Sex, cycled: bool) -> Mount {
+        Mount {
+            color: catalog.id_of(slug).expect(slug),
+            sex,
+            level: 67,
+            fertile: true,
+            cycled,
+            parents: None,
+        }
+    }
+
+    /// L'affirmation qui porte tout le découplage : deux fécondes s'accouplent
+    /// d'un clic, donc sans place d'enclos, donc sans plafond.
+    ///
+    /// Vingt-six croisements sur une unité qui n'en portait que vingt-cinq : le
+    /// vingt-sixième était refusé avant, et il doit passer maintenant.
+    #[test]
+    fn deux_fecondes_se_croisent_sans_occuper_l_enclos() {
+        let catalog = muldo();
+        let economy = economy();
+        let mut stable = Stable::new();
+        for _ in 0..26 {
+            stable.push(mount(&catalog, "dore", Sex::Male, true));
+            stable.push(mount(&catalog, "ebene", Sex::Female, true));
+        }
+
+        let crossings: Vec<[usize; 2]> = (0..26).map(|i| [i * 2, i * 2 + 1]).collect();
+        assert!(crossings.len() > economy.unit_crossings(0));
+
+        let mut kamas = 10_000_000;
+        let plan = UnitPlan {
+            crossings,
+            ..Default::default()
+        };
+        let applied = apply(
+            &catalog, &economy, &mut stable, &mut kamas, &plan,
+            Strategy::default(), 0, &Draws::new(1), 0,
+        )
+        .expect("vingt-six croisements de fécondes tiennent dans zéro place");
+
+        assert_eq!(applied.crossings, 26);
+        assert_eq!(applied.places, 0, "aucune place : les cycles étaient payés");
+        // Le solde **monte** : aucun chargement n'est dû, et les naissances
+        // rapportent leurs génétons. C'est bien le signe qu'on n'a rien payé — un
+        // chargement du bloc coûte six chiffres.
+        assert!(
+            kamas >= 10_000_000,
+            "aucune place occupée, donc aucun chargement à payer ; solde {kamas}"
+        );
+    }
+
+    /// Une fournée qui ne fait que féconder occupe l'enclos, donc le paie.
+    ///
+    /// Sans ça, banquer de la fécondité serait gratuit et la mesure flatterait
+    /// l'hypothèse qu'elle est censée éprouver.
+    #[test]
+    fn feconder_sans_croiser_paie_le_chargement() {
+        let catalog = muldo();
+        let economy = economy();
+        let mut stable = Stable::new();
+        for _ in 0..4 {
+            stable.push(mount(&catalog, "dore", Sex::Male, false));
+        }
+
+        let mut kamas = 10_000_000;
+        let plan = UnitPlan {
+            cycles: vec![0, 1, 2, 3],
+            ..Default::default()
+        };
+        let applied = apply(
+            &catalog, &economy, &mut stable, &mut kamas, &plan,
+            Strategy::default(), 0, &Draws::new(1), 0,
+        )
+        .expect("quatre places sur cinquante");
+
+        assert_eq!(applied.cycles, 4);
+        assert_eq!(applied.crossings, 0);
+        assert_eq!(applied.places, 4);
+        assert!(
+            kamas < 10_000_000,
+            "l'enclos a tourné : le chargement est dû même sans croisement"
+        );
+        assert!(
+            stable.mounts.iter().all(|m| m.cycled && m.fertile),
+            "les quatre sont fécondes et gardent leur reproduction"
+        );
+    }
+
+    /// Refécondier une féconde est un défaut, pas une opération neutre : ça
+    /// occuperait une place pour rien.
+    #[test]
+    fn refeconder_une_feconde_est_refuse() {
+        let catalog = muldo();
+        let economy = economy();
+        let mut stable = Stable::new();
+        stable.push(mount(&catalog, "dore", Sex::Male, true));
+
+        let mut kamas = 10_000_000;
+        let plan = UnitPlan {
+            cycles: vec![0],
+            ..Default::default()
+        };
+        assert!(
+            apply(
+                &catalog, &economy, &mut stable, &mut kamas, &plan,
+                Strategy::default(), 0, &Draws::new(1), 0,
+            )
+            .is_err()
+        );
     }
 
     #[test]

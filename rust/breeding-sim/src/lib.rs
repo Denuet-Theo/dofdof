@@ -32,6 +32,7 @@ pub mod config;
 pub mod economy;
 pub mod encode;
 pub mod lineage;
+pub mod loading;
 pub mod pairing;
 pub mod sample;
 pub mod schedule;

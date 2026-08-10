@@ -92,6 +92,7 @@
 //! laquelle la longueur est un paramètre et non une constante.
 
 use crate::economy::{Draws, Economy, MAX_UNITS, Policy, Rng, Strategy, UnitView, apply_plan};
+use crate::loading::{Loader, RandomLoader};
 use crate::stable::{Mount, Sex, Stable};
 use crate::trees::{Catalog, ColorId};
 
@@ -108,12 +109,29 @@ pub struct TreadmillConfig {
     /// produites, donc la montée redevient instrumentale. On mesure les deux au
     /// lieu de décréter.
     pub cycles: usize,
-    /// Les débits possibles de la promotion, tirés à chaque cycle.
-    pub promotions: [usize; 3],
+    /// Places d'enclos d'**une seule fournée**, toutes disponibles au même moment.
+    ///
+    /// Le parc ne se pilote plus en deux unités désynchronisées : deux vagues à
+    /// suivre, c'est déjà trop pour qui joue en guilde. Un chargement par cycle,
+    /// sur `enclos × 10` places — et remplir est dominant, puisque le transfert se
+    /// paie à l'enclos et que les dix places en profitent également.
+    pub places: usize,
     /// Fertiles à maintenir pour chaque couleur de génération 1.
     pub gen1_target: usize,
-    /// Bornes du niveau tiré à la promotion.
+    /// Bornes du niveau **affiché** d'une monture promue.
+    ///
+    /// Décoratif pour l'appariement, et il faut le savoir : le taux de réussite
+    /// suit `strategy.level` — la Mangeoire monte la fournée entière — et le champ
+    /// `level` d'une monture n'entre ni dans `PairDelta::of` ni dans `apply`. Il ne
+    /// sert qu'à départager deux montures autrement identiques, chez le chargeur
+    /// comme dans `MateGroup::sample`.
     pub promotion_levels: (u16, u16),
+    /// Le niveau auquel la Mangeoire monte la fournée, donc **le** levier du taux.
+    ///
+    /// `0` laisse l'économie décider (`mount_level`). C'est la variable de
+    /// `bin/batch` : les bandes ne changent que la durée et le prix d'une fournée,
+    /// le niveau seul change ce qu'elle produit.
+    pub level: u16,
     /// Montures détenues sans frais. Au-delà, l'écurie déborde sur l'inventaire.
     ///
     /// Le plafond du jeu n'est pas un mur : on gère des centaines de montures en
@@ -148,9 +166,10 @@ impl Default for TreadmillConfig {
             // apprendre quelque chose.
             mounts: 250,
             cycles: 30,
-            promotions: [20, 80, 100],
+            places: 50,
             gen1_target: 20,
             promotion_levels: (1, 200),
+            level: 0,
             stable_cap: 250,
             overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
@@ -163,8 +182,8 @@ impl Default for TreadmillConfig {
 /// **pourquoi**, ce qu'un score seul ne dit jamais.
 #[derive(Clone, Debug, Default)]
 pub struct TreadmillOutcome {
-    /// La fitness, en kamas : les génétons vendus au prix du jour, moins le
-    /// débordement.
+    /// La fitness, en kamas : les génétons vendus au prix du jour, **plus la
+    /// récolte à son prix par couleur**, moins le débordement.
     ///
     /// Portée par le résultat et non recalculée par l'appelant, parce que le prix
     /// du jour est **tiré dans l'appel** : le lui faire reconvertir avec l'économie
@@ -177,6 +196,18 @@ pub struct TreadmillOutcome {
     pub births: usize,
     /// Gen 10 retirées et comptées, tous cycles confondus.
     pub gen10_harvested: usize,
+    /// Ce que la récolte a rapporté, **couleur par couleur**.
+    ///
+    /// Une gen 10 vaut entre 300 000 et 1 000 000 selon la couleur, et
+    /// `economy.top_values` tire ce prix pour chacune — « c'est ce qui rend le
+    /// choix de la couleur stratégique et pas seulement celui du rang ».
+    ///
+    /// Sans ce terme dans la fitness, les gen 10 étaient comptées puis jetées :
+    /// rien ne poussait à viser la chère plutôt que n'importe laquelle, alors même
+    /// que le recensement porte la différence — `Census::liquidation` est suivie
+    /// en incrémental et exacte, précisément pour ne pas écraser les cinquante
+    /// prix de gen 10 en un seul.
+    pub harvest_value: i64,
     /// Croisements dont les deux parents étaient de génération 1.
     ///
     /// Le symptôme à surveiller : deux gen 1 rendent 2 génétons, sans risque et
@@ -228,6 +259,22 @@ pub fn play_treadmill(
     seed: u32,
     config: &TreadmillConfig,
 ) -> TreadmillOutcome {
+    play_treadmill_with(catalog, economy, policy, &mut RandomLoader, seed, config)
+}
+
+/// Le même tapis, avec un chargeur au choix.
+///
+/// C'est le point d'entrée de l'étape 2 : ce qui décidait au hasard devient une
+/// décision, et `loading.rs` en propose plusieurs pour qu'on puisse les comparer
+/// avant d'en apprendre une.
+pub fn play_treadmill_with(
+    catalog: &Catalog,
+    economy: &Economy,
+    policy: &mut dyn Policy,
+    loader: &mut dyn Loader,
+    seed: u32,
+    config: &TreadmillConfig,
+) -> TreadmillOutcome {
     let mut rng = Rng::new(seed);
     // Décalée comme dans `economy::run` : la politique ne doit pas pouvoir
     // rejouer le flux des naissances en devinant sa propre graine.
@@ -238,6 +285,10 @@ pub fn play_treadmill(
     let mut stable = random_stable(catalog, &mut rng, config);
     let mut outcome = TreadmillOutcome::default();
 
+    let strategy = Strategy {
+        level: config.level,
+        ..Strategy::default()
+    };
     let gen1: Vec<ColorId> = catalog.ids_at_generation(1).collect();
     // Avant le premier appel : sans ça le cycle 1 se jouerait sans aucune gen 1
     // alors que tous les suivants en portent vingt par couleur.
@@ -259,7 +310,7 @@ pub fn play_treadmill(
                 // cause de kamas serait un artefact.
                 kamas: i64::MAX / 4,
                 unit: 0,
-                strategy: Strategy::default(),
+                strategy,
                 capacity: 0,
             };
             policy.plan(&view, &mut rng)
@@ -287,7 +338,7 @@ pub fn play_treadmill(
             economy,
             &mut stable,
             &plan,
-            Strategy::default(),
+            strategy,
             &draws,
             cycle as u32,
         ) {
@@ -306,9 +357,20 @@ pub fn play_treadmill(
             }
         }
 
-        // --- 3. la promotion, qui tient lieu d'enclos -------------------------
-        let quota = config.promotions[index_in(&mut rng, config.promotions.len())];
-        promote(&mut stable, &mut rng, quota, config.promotion_levels);
+        // --- 3. le chargement -------------------------------------------------
+        //
+        // Une fournée, toutes les places. Le chargeur choisit **lesquelles**, pas
+        // combien : remplir est dominant.
+        let chosen = loader.choose(catalog, economy, &stable, config.places, &mut rng);
+        for index in chosen {
+            let mount = &mut stable.mounts[index];
+            debug_assert!(mount.fertile && !mount.cycled, "le chargeur a désigné une monture inéligible");
+            mount.cycled = true;
+            // Le niveau est **retiré** au passage : le cycle passe par la
+            // Mangeoire, et c'est là qu'une monture monte. Garder l'ancien
+            // reviendrait à supposer la montée gratuite.
+            mount.level = draw_level(&mut rng, config.promotion_levels);
+        }
 
         // --- 4. compléter le vivier de gen 1 ----------------------------------
         top_up_gen1(&mut stable, catalog, &mut rng, &gen1, config.gen1_target);
@@ -323,6 +385,10 @@ pub fn play_treadmill(
             .map(|(index, _)| index)
             .collect();
         outcome.gen10_harvested += harvested.len();
+        outcome.harvest_value += harvested
+            .iter()
+            .map(|&index| economy.value_of(catalog, stable.mounts[index].color))
+            .sum::<i64>();
         stable.remove_all(&harvested);
 
         // --- 6. le débordement ------------------------------------------------
@@ -342,7 +408,8 @@ pub fn play_treadmill(
     // sont en kamas et aucun taux n'est inventé — c'est ce qui rend
     // `PRICE_GENETON` utile au réseau : un géneton vaut plus certains jours, donc
     // croiser vaut plus certains jours.
-    outcome.kamas = outcome.genetons as f64 * economy.geneton_value - outcome.overflow_paid as f64;
+    outcome.kamas = outcome.genetons as f64 * economy.geneton_value + outcome.harvest_value as f64
+        - outcome.overflow_paid as f64;
     outcome.top_generation = stable.top_generation(catalog);
     outcome.mounts_end = stable.len();
     outcome
@@ -425,31 +492,6 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         });
     }
     stable
-}
-
-/// Passe `quota` fertiles en fécondes, tirées uniformément, niveau retiré au
-/// passage.
-///
-/// Le niveau est **retiré** et non conservé : le cycle passe par la Mangeoire, et
-/// c'est là qu'une monture monte. Garder l'ancien reviendrait à supposer que la
-/// montée est gratuite.
-fn promote(stable: &mut Stable, rng: &mut Rng, quota: usize, levels: (u16, u16)) {
-    let mut candidates: Vec<usize> = stable
-        .mounts
-        .iter()
-        .enumerate()
-        .filter(|(_, mount)| mount.fertile && !mount.cycled)
-        .map(|(index, _)| index)
-        .collect();
-
-    for _ in 0..quota.min(candidates.len()) {
-        // Tirage sans remise : `swap_remove` suffit, l'ordre du vivier n'a aucun
-        // sens à préserver.
-        let at = index_in(rng, candidates.len());
-        let chosen = candidates.swap_remove(at);
-        stable.mounts[chosen].cycled = true;
-        stable.mounts[chosen].level = draw_level(rng, levels);
-    }
 }
 
 /// Ramène chaque couleur de génération 1 à son effectif de fertiles.

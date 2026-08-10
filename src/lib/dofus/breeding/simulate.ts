@@ -3,6 +3,7 @@ import { crossingCost, crossingHours, planCouples, type LoadoutContext } from '.
 import { matingOutcomes, BULK_MATE_LEVEL, type Mate } from './pairing';
 import { cloneOptions, type CloneContext } from './cloning';
 import { driftSignals, stableFrontier } from './drift';
+import { seededRandom } from './random';
 import {
   breedableStock,
   copyStable,
@@ -49,19 +50,15 @@ import {
  * un changement soit imputable au changement.
  */
 
-/** Un générateur pseudo-aléatoire déterministe, pour que le résultat se relise. */
-export const seededRandom = (seed: number) => {
-  let state = seed >>> 0;
-  return () => {
-    // Mulberry32 : court, sans dépendance, de qualité largement suffisante pour
-    // tirer des naissances.
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
+/**
+ * Un générateur pseudo-aléatoire déterministe, pour que le résultat se relise.
+ *
+ * Il a déménagé dans `random.ts` le jour où `search.ts` en a eu besoin : la
+ * montée de colline portée du Rust n'est reproductible que si les deux côtés
+ * tirent la même suite, ce qui fait du générateur un contrat et non un détail de
+ * cette simulation-ci. Réexporté ici, où il a toujours été appelé.
+ */
+export { seededRandom };
 
 export type SimulationContext = LoadoutContext &
   Pick<CloneContext, 'cheapestAt' | 'sacrificeUnitValue'> & {

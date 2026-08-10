@@ -58,3 +58,7 @@ next-env.d.ts
 # Le plan émis pour inspection. Celui qu'embarque l'app est versionné, lui :
 # src/lib/dofus/breeding/model-plan.json.
 /rust/plan.json
+
+# Les journaux d'entraînement. Une manche en produit des milliers de lignes, et
+# c'est une sortie de calcul : elle se relit une fois, elle ne se partage pas.
+/rust/*.log

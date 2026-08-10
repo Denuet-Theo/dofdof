@@ -629,7 +629,14 @@ pub struct UnitView<'a> {
     /// L'unité qui se libère, et ce que le génome lui a assigné.
     pub unit: usize,
     pub strategy: Strategy,
-    /// Croisements que cette unité peut porter.
+    /// **Places d'enclos** que cette unité peut porter, dix par enclos.
+    ///
+    /// Des places et non des croisements, depuis que le cycle s'est détaché de
+    /// l'accouplement : un croisement en coûte deux, une, ou zéro selon ce que ses
+    /// parents doivent encore. Compter des croisements ici bridait la recherche à
+    /// la moitié de l'enclos — elle voyait vingt-cinq places là où il y en a
+    /// cinquante — sans que rien ne proteste, puisque `apply` acceptait ce qu'elle
+    /// produisait.
     pub capacity: usize,
 }
 
@@ -1130,7 +1137,7 @@ fn run(
                 kamas,
                 unit,
                 strategy,
-                capacity: economy.unit_crossings(unit),
+                capacity: economy.unit_places(unit),
             };
             policy.plan(&view, &mut rng)
         };

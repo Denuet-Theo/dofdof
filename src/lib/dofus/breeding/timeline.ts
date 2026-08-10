@@ -264,15 +264,35 @@ export const allEvents = (plan: TimelinePlan): PlacedEvent[] =>
     .sort((a, b) => a.at - b.at || precedence(a) - precedence(b) || a.trackId.localeCompare(b.trackId));
 
 /**
+ * La piste de l'écurie, celle qui ne dépend d'aucun enclos.
+ *
+ * Son identifiant est le contrat : `plan.rs` l'émet sous ce nom, et c'est lui qui
+ * dit « ces gestes-là se font tout de suite, avec ce qu'on a déjà ».
+ */
+export const STABLE_TRACK = 'ecurie';
+
+/**
  * Ce qui passe devant, à égalité d'instant.
  *
- * Un achat est le **prérequis** du geste qui porte la même date : il faut les
- * montures avant de charger l'enclos, le carburant avant que les jauges
- * partent. Rangés par piste, les six « Charger l'enclos » se listaient d'abord
- * et la course arrivait dessous — l'ordre exactement inverse de celui dans
- * lequel on agit. Vu à l'écran, pas déduit.
+ * Trois rangs, et ils suivent l'ordre dans lequel on agit réellement :
+ *
+ * 1. **L'écurie d'abord.** Accoupler deux fécondes et cloner deux stériles ne
+ *    demandent ni enclos, ni course, ni attente — un clic, avec ce qu'on tient
+ *    déjà. Les faire passer après une liste d'achats reviendrait à faire attendre
+ *    ce qui est immédiat derrière ce qui ne l'est pas.
+ * 2. **Puis les achats**, qui sont le prérequis du geste portant la même date : il
+ *    faut les montures avant de charger l'enclos, le carburant avant que les
+ *    jauges partent.
+ * 3. **Puis le reste**, chargements compris.
+ *
+ * Le rang 1 est ce qui manquait : rangés par piste, les six « Charger l'enclos »
+ * se listaient d'abord et la course arrivait dessous — l'ordre exactement inverse
+ * de celui dans lequel on agit. Vu à l'écran, pas déduit.
  */
-const precedence = (event: { kind: EventKind }) => (event.kind === 'buy' ? 0 : 1);
+const precedence = (event: { kind: EventKind; trackId: string }) => {
+  if (event.trackId === STABLE_TRACK) return 0;
+  return event.kind === 'buy' ? 1 : 2;
+};
 
 /**
  * Ce que l'agenda égrène : les gestes à venir, dans la fenêtre.
@@ -622,9 +642,36 @@ export const samplePlan = (): TimelinePlan => {
   // L'écurie n'est pas un enclos : ses gestes ne dépendent d'aucune jauge, ils
   // se placent dans les trous. D'où une piste à part.
   tracks.push({
-    id: 'ecurie',
+    id: STABLE_TRACK,
     label: 'Écurie',
     events: [
+      // Par quoi on commence, et ça ne dépend d'aucun enclos : accoupler ce qui
+      // est déjà fécond et cloner ce qui est stérile se font tout de suite, avec
+      // ce qu'on tient. C'est ce que `plan.rs` émettra en tête une fois le
+      // champion du tapis entraîné — l'exemple le porte d'avance pour que la
+      // mise en page se juge sans attendre.
+      {
+        id: 'ecurie-mate-0',
+        kind: 'mate',
+        at: 0,
+        duration: 0,
+        label: 'Accoupler 12 couples',
+        count: 12,
+        detail:
+          '♂ Amande-Pere × ♀ Dore ×2 · ♂ Dore × ♀ Amande-Mere ×1 · ♂ Ebene × ♀ Orchidee ×7 — ' +
+          'aucun enclos, aucune attente : deux fécondes s’accouplent d’un clic.',
+      },
+      {
+        id: 'ecurie-clone-0',
+        kind: 'clone',
+        at: 0,
+        duration: 0,
+        label: 'Cloner 8 stériles',
+        count: 8,
+        detail:
+          '4 paires de génération 3, 2 de génération 5, 2 de génération 8. ' +
+          'Deux stériles ne se clonent qu’à génération affichée égale, donc le choix n’est pas libre.',
+      },
       {
         id: 'ecurie-clone-1',
         kind: 'clone',

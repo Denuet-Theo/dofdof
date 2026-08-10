@@ -456,7 +456,16 @@ const BreedingPage = () => {
           qu'on s'y pose neuf fois sur dix est « est-ce que j'ai quelque chose à
           faire maintenant ». La faire descendre sous les réglages et les stocks
           obligerait à défiler pour lire un compte à rebours. */}
-      <BreedingTimeline timeline={timeline} enclosCount={settings.enclos_count} />
+      {/* La fournée réelle voyage avec le planning : le plan du modèle est joué
+          sur une graine, donc il sait quand recharger et pas avec quoi. Sans
+          elle, « Charger l'enclos ×10 » est la seule consigne que l'écran donne
+          — et elle n'en est pas une. */}
+      <BreedingTimeline
+        timeline={timeline}
+        enclosCount={settings.enclos_count}
+        fill={loadout}
+        nameOf={nameOf}
+      />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui
           les met tous les deux en tête : le planning dit **quand**, la fournée

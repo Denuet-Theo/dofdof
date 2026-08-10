@@ -153,6 +153,13 @@ pub struct TreadmillOutcome {
     pub mounts_end: usize,
     /// Fournées refusées par `apply`. Doit rester à zéro.
     pub rejected: usize,
+    /// Génétons cycle par cycle.
+    ///
+    /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
+    /// de la dotation initiale. Une trajectoire qui s'aplatit autorise une période
+    /// de chauffe ; une trajectoire qui décroît sans fin veut dire que le tapis
+    /// n'est pas alimenté assez pour tourner, et aucune chauffe n'y changera rien.
+    pub per_cycle: Vec<i64>,
 }
 
 /// Fait tourner un épisode et rend ce qu'il a produit.
@@ -224,6 +231,7 @@ pub fn play_treadmill(
             cycle as u32,
         ) {
             Ok(applied) => {
+                outcome.per_cycle.push(applied.genetons);
                 outcome.genetons += applied.genetons;
                 outcome.crossings += applied.crossings;
                 outcome.clonings += applied.clonings;
@@ -231,7 +239,10 @@ pub fn play_treadmill(
                 outcome.gen1_crossings += gen1_crossings;
                 outcome.sacrifices += applied.sacrifices;
             }
-            Err(_) => outcome.rejected += 1,
+            Err(_) => {
+                outcome.per_cycle.push(0);
+                outcome.rejected += 1;
+            }
         }
 
         // --- 3. la promotion, qui tient lieu d'enclos -------------------------
@@ -475,6 +486,58 @@ mod tests {
             play_treadmill(&catalog, &economy, &mut policy, seed, &config)
         };
         assert_eq!(run(3).genetons, run(3).genetons);
+    }
+
+    /// La trajectoire des génétons, et pourquoi elle ne se lit pas avec `Myopic`.
+    ///
+    /// Le tapis est **exactement stationnaire** dès qu'on clone : deux fertiles
+    /// donnent au croisement deux stériles et un poulain, et les deux stériles
+    /// rendent un fertile au clonage — donc deux fertiles pour deux fertiles, et
+    /// le seul apport net est le complément en gen 1.
+    ///
+    /// `Myopic` ne clone jamais, et ce n'est pas de l'indifférence : il note la
+    /// liquidation, or cloner consomme deux montures pour en rendre une. Il
+    /// **pénalise** donc le seul mécanisme qui alimente le tapis, et sa
+    /// trajectoire s'effondre quel que soit le départ. Ce relevé mesure la sonde
+    /// autant que l'environnement — à relire avec une politique entraînée.
+    /// `cargo test -p breeding-sim -- --nocapture la_trajectoire`
+    #[test]
+    fn la_trajectoire_des_genetons() {
+        let catalog = muldo();
+        let economy = economy();
+        println!(
+            "{:>8} {:>10}   génétons par cycle, par tranche de 5",
+            "départ", "total"
+        );
+        for mounts in [1000usize, 400, 200] {
+            let config = TreadmillConfig { cycles: 30, mounts, ..Default::default() };
+            let mut bands = [0i64; 6];
+            let mut total = 0i64;
+            let (mut clonings, mut crossings, mut steriles) = (0usize, 0usize, 0usize);
+            const SEEDS: u32 = 8;
+            for seed in 0..SEEDS {
+                let mut policy =
+                    Searching::with_iterations(Myopic, 800).without_sacrifices();
+                let o = play_treadmill(&catalog, &economy, &mut policy, seed, &config);
+                total += o.genetons;
+                for (cycle, &g) in o.per_cycle.iter().enumerate() {
+                    bands[(cycle / 5).min(5)] += g;
+                }
+                clonings += o.clonings;
+                crossings += o.crossings;
+                steriles += o.crossings * 2;
+            }
+            let per = |b: i64| b / (5 * SEEDS as i64);
+            println!(
+                "{mounts:>8} {:>10}   {:>6} {:>6} {:>6} {:>6} {:>6} {:>6}                    {:>5} croisements · {:>5} clonages pour {:>5} stériles produites",
+                total / SEEDS as i64,
+                per(bands[0]), per(bands[1]), per(bands[2]),
+                per(bands[3]), per(bands[4]), per(bands[5]),
+                crossings / SEEDS as usize,
+                clonings / SEEDS as usize,
+                steriles / SEEDS as usize
+            );
+        }
     }
 
     /// Le relevé de comportement, imprimé pour être lu.

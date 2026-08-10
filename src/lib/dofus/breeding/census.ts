@@ -26,8 +26,9 @@
  */
 
 import { carriedGeneration } from './naming';
+import { matingOutcomes, pairTargetGeneration, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
-import type { Stable } from './stable';
+import type { Sex, Stable } from './stable';
 
 /** Générations 1 à 10. L'entrée 0 n'existe pas et reste à zéro. */
 export const MAX_GENERATION = 10;
@@ -74,7 +75,48 @@ export type EconomyView = {
   topValueRange: [number, number];
   /** Ce qu'une monture de cette couleur vaut à la liquidation, couleur par couleur. */
   valueOf: (colorId: string) => number;
+  /** Prix d'une Optimakina par génération visée, index 0 à 10. */
+  optimakina: number[];
+  /** Ce que l'Optimakina ajoute au taux de réussite. */
+  optimakinaBonus: number;
+  /** Prix d'une gen 1 anonyme à l'hôtel de vente. */
+  starterPrice: number;
 };
+
+/**
+ * Le taux de réussite d'un croisement.
+ *
+ * `0,3 + 0,0015 × 2 × niveau`, plafonné à 1 — relevé en jeu, et le niveau est
+ * celui de la **fournée** : la Mangeoire monte le lot d'un bloc, donc les deux
+ * parents partagent le même.
+ */
+export const successRate = (level: number, economy: EconomyView, optimakina: boolean): number =>
+  Math.min(1, 0.3 + 0.0015 * (2 * level) + (optimakina ? economy.optimakinaBonus : 0));
+
+/**
+ * Génétons rendus par une monture de ce rang. Relevé en jeu. Une gen 10 n'en rend
+ * pas : elle ne peut plus s'accoupler.
+ */
+const GENETONS_BY_GENERATION = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 0];
+
+/**
+ * Les génétons d'un croisement **réussi**.
+ *
+ * Ils suivent les **parents directs** et non la cible : deux gen 2 visant la gen 4
+ * — parce que leur ascendance porte une gen 3 — rendent 4 génétons et non 16.
+ *
+ * Zéro quand aucune couleur ne nomme la cible : purifier et recopier ne rapportent
+ * rien, ce que la fenêtre du jeu affiche noir sur blanc.
+ */
+export const genetonsForCrossing = (
+  maleGeneration: number,
+  femaleGeneration: number,
+  namesTarget: boolean
+): number =>
+  namesTarget
+    ? GENETONS_BY_GENERATION[Math.min(maleGeneration, 10)] +
+      GENETONS_BY_GENERATION[Math.min(femaleGeneration, 10)]
+    : 0;
 
 /** Le milieu d'une fourchette, ou la valeur courante si elle est absente. */
 const mid = (low: number, high: number, fallback: number) =>
@@ -245,3 +287,233 @@ export const featuresOf = (
 
   return out;
 };
+
+/* ------------------------------------------------------------------ delta -- */
+
+/**
+ * L'effet attendu d'un croisement sur le recensement.
+ *
+ * Précalculé une fois par paire de signatures : deux montures de même couleur et
+ * même ascendance produisent exactement la même distribution, et la recherche
+ * réemploie la paire des dizaines de fois.
+ *
+ * Tout y est en **espérance**, pas en tirage — chaque issue entre au prorata de
+ * sa probabilité. C'est ce qui rend deux évaluations d'un même candidat
+ * identiques, donc la recherche compare des compositions au lieu de comparer des
+ * coups de dés.
+ */
+export type PairDelta = {
+  maleGeneration: number;
+  femaleGeneration: number;
+  maleCarried: number;
+  femaleCarried: number;
+  maleColor: string;
+  femaleColor: string;
+  /** `(couleur, probabilité, génération portée par le bébé)`. */
+  births: [string, number, number][];
+  /** Ce que la naissance vaut en espérance, à la liquidation. */
+  expectedValue: number;
+  targetGeneration: number;
+  optimakinaCost: number;
+  genetonKamas: number;
+};
+
+/** La génération qu'une monture **porte**, ascendance comprise. */
+const ancestryGeneration = (mate: Mate, generations: Map<string, number>): number => {
+  const own = generations.get(mate.colorId) ?? 1;
+  if (!mate.parents) return own;
+  return Math.max(
+    own,
+    generations.get(mate.parents[0]) ?? 1,
+    generations.get(mate.parents[1]) ?? 1
+  );
+};
+
+/**
+ * L'effet d'un croisement, ou `null` quand le jeu ne propose pas l'accouplement.
+ *
+ * `level` est celui de la **fournée** et non des montures : la Mangeoire monte le
+ * lot d'un bloc. C'est pour ça que le taux est imposé à `matingOutcomes` au lieu
+ * d'être déduit des niveaux — voir la surcharge, côté Rust comme ici.
+ */
+export const pairDelta = (
+  male: Mate,
+  female: Mate,
+  colors: BreedingColor[],
+  generations: Map<string, number>,
+  economy: EconomyView,
+  level: number,
+  optimakinaFrom: number
+): PairDelta | null => {
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+  const targetGeneration = pairTargetGeneration(male, female, generations);
+  if (targetGeneration === null) return null;
+
+  const withOptimakina = targetGeneration >= optimakinaFrom && targetGeneration <= top;
+  const optimakinaCost = withOptimakina
+    ? (economy.optimakina[Math.min(targetGeneration, 10)] ?? 0)
+    : 0;
+  const rate = successRate(level, economy, withOptimakina);
+
+  const outcomes = matingOutcomes(male, female, colors, generations, rate);
+  if (outcomes.length === 0) return null;
+
+  // La masse de réussite vaut `rate` quand une couleur nomme la cible, et zéro
+  // sinon — c'est exactement la condition des génétons.
+  const namesTarget = outcomes.some((outcome) => outcome.kind === 'target');
+  const maleGeneration = generations.get(male.colorId) ?? 1;
+  const femaleGeneration = generations.get(female.colorId) ?? 1;
+  const genetonKamas =
+    rate *
+    genetonsForCrossing(maleGeneration, femaleGeneration, namesTarget) *
+    economy.genetonValue;
+
+  const births: [string, number, number][] = [];
+  let expectedValue = 0;
+  for (const outcome of outcomes) {
+    // La génération que le bébé **porte** : sa couleur, et celles de ses deux
+    // parents — c'est exactement l'ascendance que le jeu retient, et c'est elle
+    // qui décide de ce qu'il pourra viser.
+    const carried = Math.max(
+      generations.get(outcome.colorId) ?? 1,
+      maleGeneration,
+      femaleGeneration
+    );
+    births.push([outcome.colorId, outcome.probability, carried]);
+    expectedValue += outcome.probability * economy.valueOf(outcome.colorId);
+  }
+
+  return {
+    maleGeneration,
+    femaleGeneration,
+    maleCarried: ancestryGeneration(male, generations),
+    femaleCarried: ancestryGeneration(female, generations),
+    maleColor: male.colorId,
+    femaleColor: female.colorId,
+    births,
+    expectedValue,
+    targetGeneration,
+    optimakinaCost,
+    genetonKamas,
+  };
+};
+
+/* --------------------------------------------------------------- l'algèbre -- */
+
+/**
+ * Les mutations du recensement, toutes **réversibles au signe près**.
+ *
+ * La recherche défait ses coups des milliers de fois par fournée ; un compteur
+ * qu'on ne sait pas décrémenter exactement fait dériver le recensement, et on
+ * finit par évaluer un état qui n'existe pas. C'est pour ça que chaque opération
+ * porte un `sign` plutôt que d'avoir une jumelle écrite à part.
+ */
+const bump = (census: Census, colorId: string, by: number) =>
+  census.held.set(colorId, (census.held.get(colorId) ?? 0) + by);
+
+/** Un croisement. Les deux parents deviennent stériles, le bébé arrive en espérance. */
+export const applyCrossing = (
+  census: Census,
+  delta: PairDelta,
+  generations: Map<string, number>,
+  sign = 1
+): void => {
+  const rank = (colorId: string) => Math.min(generations.get(colorId) ?? 1, MAX_GENERATION);
+  census.fertileMales[delta.maleGeneration] -= sign;
+  census.fertileFemales[delta.femaleGeneration] -= sign;
+  census.steriles[delta.maleGeneration] += sign;
+  census.steriles[delta.femaleGeneration] += sign;
+  census.carried[delta.maleCarried] -= sign;
+  census.carried[delta.femaleCarried] -= sign;
+  bump(census, delta.maleColor, -sign);
+  bump(census, delta.femaleColor, -sign);
+
+  for (const [colorId, probability, carried] of delta.births) {
+    // Le sexe tombe à pile ou face, donc la naissance attendue est une
+    // demi-monture de chaque côté. C'est ce qui permet à la recherche de voir
+    // qu'un croisement de plus rééquilibre le parc.
+    census.fertileMales[rank(colorId)] += sign * probability * 0.5;
+    census.fertileFemales[rank(colorId)] += sign * probability * 0.5;
+    census.carried[carried] += sign * probability;
+    bump(census, colorId, sign * probability);
+  }
+  census.headcount += sign;
+  census.kamas += sign * delta.genetonKamas;
+  census.liquidation += sign * delta.expectedValue;
+};
+
+/** Un gen 1 anonyme entre au parc. */
+export const purchase = (
+  census: Census,
+  colorId: string,
+  sex: Sex,
+  price: number,
+  sign = 1
+): void => {
+  if (sex === 'M') census.fertileMales[1] += sign;
+  else census.fertileFemales[1] += sign;
+  census.carried[1] += sign;
+  bump(census, colorId, sign);
+  census.headcount += sign;
+  census.kamas -= sign * price;
+};
+
+/** Une monture part en ambre. */
+export const sacrifice = (
+  census: Census,
+  generation: number,
+  carried: number,
+  colorId: string,
+  sex: Sex | null,
+  value: number,
+  sign = 1
+): void => {
+  if (sex === null) {
+    census.steriles[generation] -= sign;
+  } else {
+    if (sex === 'M') census.fertileMales[generation] -= sign;
+    else census.fertileFemales[generation] -= sign;
+    census.carried[carried] -= sign;
+    bump(census, colorId, -sign);
+  }
+  census.headcount -= sign;
+  census.kamas += sign * value;
+  census.liquidation -= sign * value;
+};
+
+/** Un clonage : deux stériles entrent, une fertile ressort. */
+export const cloning = (
+  census: Census,
+  generation: number,
+  carried: number,
+  colorId: string,
+  value: number,
+  sign = 1
+): void => {
+  census.steriles[generation] -= 2 * sign;
+  // Le sexe du survivant n'est pas choisi par la recherche : à ce niveau de
+  // résumé on répartit une demi-monture de chaque côté.
+  census.fertileMales[generation] += 0.5 * sign;
+  census.fertileFemales[generation] += 0.5 * sign;
+  census.carried[carried] += sign;
+  bump(census, colorId, sign);
+  census.headcount -= sign;
+  // Le clonage consomme deux stériles et en rend une : une monture part.
+  census.liquidation -= sign * value;
+};
+
+/** Une fertile passe féconde, ou l'inverse quand on défait. */
+export const cycle = (census: Census, generation: number, sex: Sex, by: number): void => {
+  const slot = Math.min(generation, MAX_GENERATION);
+  if (sex === 'M') census.cycledMales[slot] += by;
+  else census.cycledFemales[slot] += by;
+};
+
+/**
+ * Ce que l'écurie rendrait si on la liquidait maintenant, solde compris.
+ *
+ * C'est **exactement la fonction de score** de la partie, évaluée sur l'état
+ * attendu — la valeur myope, celle qui ne voit que ce que la fournée rapporte
+ * tout de suite. Le point de comparaison honnête pour la valeur apprise.
+ */
+export const expectedScore = (census: Census): number => census.kamas + census.liquidation;

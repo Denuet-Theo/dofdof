@@ -521,7 +521,16 @@ export const matingOutcomes = (
   male: Mate,
   female: Mate,
   colors: BreedingColor[],
-  generations: Map<string, number>
+  generations: Map<string, number>,
+  /**
+   * Taux de réussite imposé, ou `undefined` pour celui que les niveaux donnent.
+   *
+   * Sert au portage de la recherche : le taux y suit le **niveau de la fournée**,
+   * que la Mangeoire monte d'un bloc, et non le niveau propre de chaque monture.
+   * Voir `PairDelta` — côté Rust c'est `mating_outcomes_at` qui porte la même
+   * surcharge, pour la même raison.
+   */
+  rate?: number
 ): MatingOutcome[] => {
   const outlook = pairOutlook(male, female, colors, generations);
   if (!outlook) return [];
@@ -535,7 +544,8 @@ export const matingOutcomes = (
 
   // Sans couleur à la génération visée, il n'y a pas de réussite possible : toute
   // la masse revient à la recopie.
-  const targetMass = outlook.targetColors.length > 0 ? outlook.successRate : 0;
+  const successRate = rate ?? outlook.successRate;
+  const targetMass = outlook.targetColors.length > 0 ? successRate : 0;
   const totalWeight = outlook.targetColors.reduce((sum, color) => sum + color.weight, 0);
   for (const color of outlook.targetColors) {
     add(

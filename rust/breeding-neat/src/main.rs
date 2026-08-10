@@ -76,6 +76,15 @@ struct Options {
     /// refaire. Huit heures de recherche jetées à chaque lancement était une
     /// perte qu'on ne peut pas se permettre.
     resume: Option<String>,
+    /// Ouvrir le jeu scellé. **Faux par défaut, et c'est tout l'intérêt.**
+    ///
+    /// Il était mesuré et imprimé à chaque exécution. Personne n'y sélectionnait
+    /// rien — mais un chiffre qu'on relit à chaque manche finit par guider les
+    /// manches suivantes, et c'est exactement la fuite que le jeu scellé existe
+    /// pour empêcher. On ne peut pas décider de ne pas savoir ce qu'on a lu.
+    ///
+    /// À réserver à la mesure publiée, une fois le chantier fini.
+    sealed: bool,
 }
 
 impl Options {
@@ -87,11 +96,20 @@ impl Options {
             iterations: 600,
             seed: 20_260_808,
             resume: None,
+            sealed: false,
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
         let mut index = 0;
-        while index + 1 < args.len() {
-            let value = &args[index + 1];
+        while index < args.len() {
+            // Les drapeaux sans valeur d'abord. Le parseur avance par paires, donc
+            // un drapeau nu décalerait tout ce qui le suit — c'est le piège que
+            // le skill signale, et il se referme en silence.
+            if args[index] == "--sealed" {
+                options.sealed = true;
+                index += 1;
+                continue;
+            }
+            let Some(value) = args.get(index + 1) else { break };
             match args[index].as_str() {
                 "--minutes" => options.minutes = value.parse().unwrap_or(options.minutes),
                 "--population" => {
@@ -343,7 +361,15 @@ fn main() {
         "NEAT — population {}, {} graines par génération, {} mutations de recherche par fournée",
         options.population, options.seeds, options.iterations
     );
-    println!("Budget : {:.0} minutes. Graines de test scellées : {TEST_SEEDS:?}\n", options.minutes);
+    println!(
+        "Budget : {:.0} minutes. Départage : {VALIDATION_SEEDS:?}. Scellé {TEST_SEEDS:?} : {}\n",
+        options.minutes,
+        if options.sealed {
+            "OUVERT — c'est la mesure finale, elle ne se rejoue pas"
+        } else {
+            "gardé fermé"
+        }
+    );
 
     let mut rng = Rng::new(options.seed);
     let mut innovations = Innovations::new();
@@ -738,9 +764,21 @@ fn main() {
     let (_, best, training_score) = finalists[winner].clone();
 
 
-    // --- la porte : les graines scellées -----------------------------------
-
-    println!("\n--- graines scellées ({} parties) ---", TEST_SEEDS.len());
+    // --- les portes : départage toujours, scellé sur demande ----------------
+    //
+    // Le scellé était mesuré et imprimé à chaque manche. C'était l'inverse de son
+    // rôle : un jeu réservé à la mesure finale qu'on relit toutes les heures
+    // renseigne les manches suivantes, et il n'en reste plus de chiffre
+    // indépendant à publier. Il est donc derrière `--sealed`.
+    //
+    // Le **départage** prend sa place comme baromètre de manche. C'est le bon
+    // choix : ces cent graines ne sont ni apprises ni le juge final, et elles
+    // servent déjà à choisir le vainqueur, donc les lire ne coûte rien de plus.
+    //
+    // Une nuance à garder en tête en les lisant : le vainqueur a été **choisi**
+    // sur ce jeu, donc sa ligne y est optimiste. Le glouton et la valeur myope,
+    // eux, n'y sont sélectionnés sur rien — leurs chiffres sont donc les mêmes
+    // qu'ailleurs, et c'est l'écart qui reste lisible.
     let network = Network::compile(&best);
     let evaluate = |label: &str, scores: &mut Vec<f64>| -> f64 {
         let (p10, median, p90) = distribution(scores);
@@ -753,89 +791,102 @@ fn main() {
         median
     };
 
-    let mut floor: Vec<f64> = TEST_SEEDS
-        .clone()
-        .map(|seed| play(&catalog, &economy, &mut NeverBreeds, seed).score as f64)
-        .collect();
-    // Les **trois** objectifs du glouton, et c'est le meilleur qui sert de
-    // porte. Se comparer à `gen10_balanced` seul reviendrait à se féliciter
-    // d'avoir battu un adversaire handicapé : depuis que chaque couleur de
-    // gen 10 a son prix, `profit` — qui classe sur la valeur — passe devant lui
-    // de huit millions, parce qu'il vise les couleurs chères là où l'autre prend
-    // n'importe quelle gen 10.
-    let objectives = [
-        ("glouton / profit", Objective::Profit),
-        ("glouton / gen10_profit", Objective::Gen10Profit),
-        ("glouton / gen10_balanced", Objective::Gen10Balanced),
-    ];
-    let mut greedy_runs: Vec<(&str, Vec<f64>)> = objectives
-        .iter()
-        .map(|&(label, objective)| {
-            let scores: Vec<f64> = TEST_SEEDS
-                .clone()
-                .collect::<Vec<u32>>()
-                .par_iter()
-                .map(|&seed| {
-                    play(&catalog, &economy, &mut Greedy::new(objective), seed).score as f64
-                })
-                .collect();
-            (label, scores)
-        })
-        .collect();
-    // Le meilleur des trois, à la médiane.
-    greedy_runs.sort_by(|a, b| {
-        let median = |scores: &Vec<f64>| {
-            let mut sorted = scores.clone();
-            distribution(&mut sorted).1
-        };
-        median(&b.1)
-            .partial_cmp(&median(&a.1))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let (greedy_label, mut greedy) = greedy_runs.remove(0);
-    let mut myopic: Vec<f64> = TEST_SEEDS
-        .clone()
-        .collect::<Vec<u32>>()
-        .par_iter()
-        .map(|&seed| {
-            let mut policy = Searching::with_iterations(Myopic, options.iterations);
-            play(&catalog, &economy, &mut policy, seed).score as f64
-        })
-        .collect();
-    let mut evolved: Vec<f64> = TEST_SEEDS
-        .clone()
-        .collect::<Vec<u32>>()
-        .par_iter()
-        .map(|&seed| {
-            let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
-                .with_strategies(best.strategies);
-            play(&catalog, &economy, &mut policy, seed).score as f64
-        })
-        .collect();
+    let gate = |title: &str, seeds: &[u32]| -> f64 {
+        println!("\n--- {title} ({} parties) ---", seeds.len());
 
-    evaluate("ne rien faire", &mut floor);
-    let greedy_median = evaluate(&format!("{greedy_label} (la baseline)"), &mut greedy);
-    for (label, scores) in &mut greedy_runs {
-        evaluate(&format!("  {label}"), scores);
-    }
-    let myopic_median = evaluate("recherche / valeur myope", &mut myopic);
-    let evolved_median = evaluate("recherche / valeur NEAT", &mut evolved);
+        let mut floor: Vec<f64> = seeds
+            .iter()
+            .map(|&seed| play(&catalog, &economy, &mut NeverBreeds, seed).score as f64)
+            .collect();
+
+        // Les **trois** objectifs du glouton, et c'est le meilleur qui sert de
+        // porte. Se comparer à `gen10_balanced` seul reviendrait à se féliciter
+        // d'avoir battu un adversaire handicapé : depuis que chaque couleur de
+        // gen 10 a son prix, `profit` — qui classe sur la valeur — passe devant
+        // lui de huit millions, parce qu'il vise les couleurs chères là où
+        // l'autre prend n'importe quelle gen 10.
+        let objectives = [
+            ("glouton / profit", Objective::Profit),
+            ("glouton / gen10_profit", Objective::Gen10Profit),
+            ("glouton / gen10_balanced", Objective::Gen10Balanced),
+        ];
+        let mut greedy_runs: Vec<(&str, Vec<f64>)> = objectives
+            .iter()
+            .map(|&(label, objective)| {
+                let scores: Vec<f64> = seeds
+                    .par_iter()
+                    .map(|&seed| {
+                        play(&catalog, &economy, &mut Greedy::new(objective), seed).score as f64
+                    })
+                    .collect();
+                (label, scores)
+            })
+            .collect();
+        greedy_runs.sort_by(|a, b| {
+            let median = |scores: &Vec<f64>| {
+                let mut sorted = scores.clone();
+                distribution(&mut sorted).1
+            };
+            median(&b.1)
+                .partial_cmp(&median(&a.1))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let (greedy_label, mut greedy) = greedy_runs.remove(0);
+        let mut myopic: Vec<f64> = seeds
+            .par_iter()
+            .map(|&seed| {
+                let mut policy = Searching::with_iterations(Myopic, options.iterations);
+                play(&catalog, &economy, &mut policy, seed).score as f64
+            })
+            .collect();
+        let mut evolved: Vec<f64> = seeds
+            .par_iter()
+            .map(|&seed| {
+                let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
+                    .with_strategies(best.strategies);
+                play(&catalog, &economy, &mut policy, seed).score as f64
+            })
+            .collect();
+
+        evaluate("ne rien faire", &mut floor);
+        let greedy_median = evaluate(&format!("{greedy_label} (la baseline)"), &mut greedy);
+        for (label, scores) in &mut greedy_runs {
+            evaluate(&format!("  {label}"), scores);
+        }
+        let myopic_median = evaluate("recherche / valeur myope", &mut myopic);
+        let evolved_median = evaluate("recherche / valeur NEAT", &mut evolved);
+
+        println!(
+            "écart au glouton : {:+.2} M ({:+.0} %) · écart à la valeur myope : {:+.2} M ({:+.0} %)",
+            (evolved_median - greedy_median) / 1e6,
+            (evolved_median - greedy_median) / greedy_median * 100.0,
+            (evolved_median - myopic_median) / 1e6,
+            (evolved_median - myopic_median) / myopic_median * 100.0
+        );
+        evolved_median
+    };
 
     println!(
         "\nchampion : entraîné à {}, topologie {:?}, {generation} générations",
         millions(training_score),
         best.size()
     );
-    println!(
-        "écart au glouton : {:+.2} M ({:+.0} %)",
-        (evolved_median - greedy_median) / 1e6,
-        (evolved_median - greedy_median) / greedy_median * 100.0
-    );
-    println!(
-        "écart à la valeur myope : {:+.2} M ({:+.0} %)",
-        (evolved_median - myopic_median) / 1e6,
-        (evolved_median - myopic_median) / myopic_median * 100.0
-    );
+
+    let validation_seeds: Vec<u32> = VALIDATION_SEEDS.collect();
+    gate("départage", &validation_seeds);
+
+    // `None` quand le jeu n'a pas été ouvert, et l'artefact doit le dire : un
+    // champion sans mesure scellée n'est pas un champion mesuré à zéro.
+    let sealed_median = if options.sealed {
+        let test_seeds: Vec<u32> = TEST_SEEDS.collect();
+        Some(gate("graines scellées", &test_seeds))
+    } else {
+        println!(
+            "\ngraines scellées {TEST_SEEDS:?} : **non ouvertes**. `--sealed` pour la porte \
+             finale — et une seule fois, sinon il n'en reste aucun chiffre indépendant."
+        );
+        None
+    };
 
     for unit in 0..economy.unit_count() {
         let strategy = best.strategies[unit];
@@ -948,7 +999,7 @@ fn main() {
         })).collect::<Vec<_>>(),
         "training_score": training_score,
         "validation_score": validated,
-        "test_median": evolved_median,
+        "test_median": sealed_median,
         "generations": generation,
     });
     if std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default()).is_ok() {

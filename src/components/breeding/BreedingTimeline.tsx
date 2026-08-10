@@ -42,6 +42,7 @@ import {
   modelPlan,
   type ModelPlan,
 } from '@/lib/dofus/breeding/model-plan';
+import type { Loadout } from '@/lib/dofus/breeding/loadout';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -80,6 +81,19 @@ import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
  * toutes jauges en bande haute : quand le plan du modèle surprend — et il
  * surprend, il laisse les cinq enclos synchronisés en bande basse — c'est à lui
  * qu'on le compare.
+ *
+ * ## Pourquoi la fournée réelle est ici
+ *
+ * Le plan du modèle dit **quand** charger l'enclos, et il ne peut pas dire
+ * **quoi** : il est joué sur une graine, donc ses montures sont celles d'une
+ * partie simulée. « Charger l'enclos ×10 » n'envoie personne devant son coffre.
+ *
+ * Ce que l'écurie réelle permet de charger, `buildLoadout` le sait et le nomme.
+ * Les deux réponses vont ensemble — c'est ce que disait déjà le panneau de
+ * fournée avant d'être masqué. On en reprend ici la seule partie qui soit sûre :
+ * **ce qu'on sort de l'écurie**. Pas la liste d'achats, qui propose des couleurs
+ * qui ne s'achètent pas (#105) et qui est la raison pour laquelle le panneau
+ * entier a été retiré.
  */
 
 type Props = {
@@ -92,6 +106,12 @@ type Props = {
    * ne peut pas honorer. Voir `model-plan.ts`.
    */
   enclosCount: number;
+  /**
+   * La fournée que l'écurie permet de charger, ou `null` si aucune couleur n'a
+   * de plan. Sert à répondre au « quoi » que le plan du modèle laisse ouvert.
+   */
+  fill?: Loadout | null;
+  nameOf: (colorId: string) => string;
 };
 
 /* ------------------------------------------------------------ vocabulaire -- */
@@ -455,14 +475,17 @@ const Agenda = ({
               </span>
             </div>
 
-            {/* La liste de courses s'affiche, elle ne se survole pas.
+            {/* La consigne s'affiche, elle ne se survole pas.
                 Ailleurs le `detail` explique un geste qu'on comprend déjà par
-                son libellé, et le tooltip suffit ; ici il **est** la consigne —
-                « acheter 6 montures » n'envoie personne à l'HDV, « 2 Muldo
-                Indigo femelle, 2 Muldo Doré femelle » oui. Et c'est le seul
-                genre dont l'échéance se prépare : il faut pouvoir la lire sans
-                avoir la souris sur la ligne. */}
-            {event.kind === 'buy' && event.detail && (
+                son libellé, et le tooltip suffit ; pour ces deux genres il
+                **est** la consigne — « acheter 6 montures » n'envoie personne à
+                l'HDV, « 2 Muldo Indigo femelle, 2 Muldo Doré femelle » oui.
+                Même chose pour le chargement : « Charger l'enclos ×10 » ne dit
+                pas quelle part de la fournée tombe ici, et c'est justement ce
+                qui empêche de verser les vingt croisements dans le premier
+                enclos. Ce sont aussi les deux seuls genres qui se préparent, donc
+                ceux qu'il faut pouvoir lire sans la souris sur la ligne. */}
+            {(event.kind === 'buy' || event.kind === 'mate') && event.detail && (
               <p
                 className={`pl-[6.5rem] pr-2 pb-1 text-[11px] leading-snug text-dark-500
                   ${past ? 'opacity-45' : ''}`}
@@ -489,6 +512,75 @@ const Agenda = ({
     </div>
   );
 };
+
+/* -------------------------------------------------------------- fournée ---- */
+
+/**
+ * Ce qu'on sort de l'écurie pour charger, montures nommées.
+ *
+ * Une fois pour tout le parc, et non sur chaque piste : la fournée se dimensionne
+ * sur les places du parc entier (`enclos × 10`), donc la répéter sous les six
+ * « Charger l'enclos » ferait lire six fois le même travail — l'erreur exacte que
+ * `per_enclos` évite côté Rust.
+ *
+ * Les sexes sont détaillés parce qu'ils ne sont pas interchangeables : deux Doré
+ * mâles ne remplacent pas un mâle et une femelle, et c'est devant le coffre qu'on
+ * s'en aperçoit.
+ */
+const Fill = ({
+  fill,
+  nameOf,
+}: {
+  fill: Loadout;
+  nameOf: (colorId: string) => string;
+}) => (
+  <div className="space-y-1.5 px-3 py-2.5 rounded-xl bg-info/8 border border-info/20">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <Heart size={13} className="text-info shrink-0" />
+      <span className="text-[11px] text-dark-300">
+        À sortir de l&apos;écurie pour la prochaine fournée —{' '}
+        <strong className="text-dark-100">{nameOf(fill.targetColorId)}</strong>
+      </span>
+      <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
+        {fill.crossings} accouplement{fill.crossings > 1 ? 's' : ''} · {fill.used}/{fill.slots}{' '}
+        places
+      </span>
+    </div>
+
+    {fill.pull.length > 0 ? (
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {fill.pull.map((pull) => (
+          <span key={pull.colorId} className="text-xs text-dark-300">
+            {nameOf(pull.colorId)}{' '}
+            <span className="text-dark-100 tabular-nums font-semibold">
+              {pull.males > 0 && `${pull.males}♂`}
+              {pull.males > 0 && pull.females > 0 && ' '}
+              {pull.females > 0 && `${pull.females}♀`}
+            </span>
+            {pull.exhausts && (
+              <span
+                className="text-[10px] text-amber-400/70"
+                title="La fournée vide cette couleur : il n'en restera aucune fertile."
+              >
+                {' '}
+                vidée
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+    ) : (
+      /* Une fournée à zéro croisement se dit, plutôt que de laisser un cadre vide
+         qu'on prendrait pour un défaut d'affichage. C'est le cas quand l'écurie
+         ne porte aucun couple de la recette suivante — il faut alors élever ou
+         acheter les parents avant de pouvoir charger quoi que ce soit. */
+      <p className="text-[11px] text-dark-500">
+        L&apos;écurie ne permet aucun accouplement de ce plan pour l&apos;instant : les parents
+        des prochaines étapes manquent.
+      </p>
+    )}
+  </div>
+);
 
 /* ------------------------------------------------------------ chargement --- */
 
@@ -633,7 +725,7 @@ const PlanLoader = ({
 
 /* -------------------------------------------------------------- le panneau - */
 
-const BreedingTimeline = ({ timeline, enclosCount }: Props) => {
+const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
   /**
@@ -780,6 +872,12 @@ const BreedingTimeline = ({ timeline, enclosCount }: Props) => {
       )}
 
       <Ribbon plan={plan} elapsed={elapsed} paused={paused} />
+
+      {/* Entre le ruban et l'agenda : le ruban dit quand l'enclos se recharge,
+          l'agenda égrène les gestes, et c'est entre les deux qu'on se demande ce
+          qu'on met dedans. Absent quand aucune couleur n'a de plan — il n'y a
+          alors rien à charger, et l'annoncer serait inventer une consigne. */}
+      {fill && <Fill fill={fill} nameOf={nameOf} />}
 
       <Agenda events={upcoming} elapsed={elapsed} clock={clock} now={now} />
 

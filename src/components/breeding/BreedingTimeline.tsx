@@ -32,6 +32,7 @@ import {
   pausedForSeconds,
   planHorizon,
   samplePlan,
+  STABLE_TRACK,
   wallClockAt,
   type EventKind,
   type PlacedEvent,
@@ -271,7 +272,14 @@ const Ribbon = ({
       if (list) list.push(event);
       else byTrack.set(event.trackId, [event]);
     }
-    return plan.tracks.map((track) => {
+    // L'écurie mène le ruban : ses gestes ne dépendent d'aucun enclos et se font
+    // tout de suite. La laisser en bas, sous cinq pistes de jauges, enterrait ce
+    // par quoi on commence — et c'est justement ce que `plan.rs` émet en tête.
+    const ordered = [...plan.tracks].sort(
+      (a, b) =>
+        Number(b.id === STABLE_TRACK) - Number(a.id === STABLE_TRACK)
+    );
+    return ordered.map((track) => {
       const trackLanes = lanes.get(track.id) ?? new Map<string, number>();
       return {
         id: track.id,
@@ -489,15 +497,17 @@ const Agenda = ({
 
             {/* La consigne s'affiche, elle ne se survole pas.
                 Ailleurs le `detail` explique un geste qu'on comprend déjà par
-                son libellé, et le tooltip suffit ; pour ces deux genres il
+                son libellé, et le tooltip suffit ; pour ces trois genres il
                 **est** la consigne — « acheter 6 montures » n'envoie personne à
                 l'HDV, « 2 Muldo Indigo femelle, 2 Muldo Doré femelle » oui.
                 Même chose pour le chargement : « Charger l'enclos ×10 » ne dit
                 pas quelle part de la fournée tombe ici, et c'est justement ce
                 qui empêche de verser les vingt croisements dans le premier
-                enclos. Ce sont aussi les deux seuls genres qui se préparent, donc
-                ceux qu'il faut pouvoir lire sans la souris sur la ligne. */}
-            {(event.kind === 'buy' || event.kind === 'mate') && event.detail && (
+                enclos. Et « Cloner 8 stériles » ne dit pas lesquelles — or deux
+                stériles ne se clonent qu'à génération affichée égale, donc le
+                choix n'est pas libre et il faut le lire. */}
+            {(event.kind === 'buy' || event.kind === 'mate' || event.kind === 'clone') &&
+              event.detail && (
               <p
                 className={`pl-[6.5rem] pr-2 pb-1 text-[11px] leading-snug text-dark-500
                   ${past ? 'opacity-45' : ''}`}

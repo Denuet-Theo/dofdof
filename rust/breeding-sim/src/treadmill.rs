@@ -182,8 +182,8 @@ impl Default for TreadmillConfig {
 /// **pourquoi**, ce qu'un score seul ne dit jamais.
 #[derive(Clone, Debug, Default)]
 pub struct TreadmillOutcome {
-    /// La fitness, en kamas : les génétons vendus au prix du jour, moins le
-    /// débordement.
+    /// La fitness, en kamas : les génétons vendus au prix du jour, **plus la
+    /// récolte à son prix par couleur**, moins le débordement.
     ///
     /// Portée par le résultat et non recalculée par l'appelant, parce que le prix
     /// du jour est **tiré dans l'appel** : le lui faire reconvertir avec l'économie
@@ -196,6 +196,18 @@ pub struct TreadmillOutcome {
     pub births: usize,
     /// Gen 10 retirées et comptées, tous cycles confondus.
     pub gen10_harvested: usize,
+    /// Ce que la récolte a rapporté, **couleur par couleur**.
+    ///
+    /// Une gen 10 vaut entre 300 000 et 1 000 000 selon la couleur, et
+    /// `economy.top_values` tire ce prix pour chacune — « c'est ce qui rend le
+    /// choix de la couleur stratégique et pas seulement celui du rang ».
+    ///
+    /// Sans ce terme dans la fitness, les gen 10 étaient comptées puis jetées :
+    /// rien ne poussait à viser la chère plutôt que n'importe laquelle, alors même
+    /// que le recensement porte la différence — `Census::liquidation` est suivie
+    /// en incrémental et exacte, précisément pour ne pas écraser les cinquante
+    /// prix de gen 10 en un seul.
+    pub harvest_value: i64,
     /// Croisements dont les deux parents étaient de génération 1.
     ///
     /// Le symptôme à surveiller : deux gen 1 rendent 2 génétons, sans risque et
@@ -373,6 +385,10 @@ pub fn play_treadmill_with(
             .map(|(index, _)| index)
             .collect();
         outcome.gen10_harvested += harvested.len();
+        outcome.harvest_value += harvested
+            .iter()
+            .map(|&index| economy.value_of(catalog, stable.mounts[index].color))
+            .sum::<i64>();
         stable.remove_all(&harvested);
 
         // --- 6. le débordement ------------------------------------------------
@@ -392,7 +408,8 @@ pub fn play_treadmill_with(
     // sont en kamas et aucun taux n'est inventé — c'est ce qui rend
     // `PRICE_GENETON` utile au réseau : un géneton vaut plus certains jours, donc
     // croiser vaut plus certains jours.
-    outcome.kamas = outcome.genetons as f64 * economy.geneton_value - outcome.overflow_paid as f64;
+    outcome.kamas = outcome.genetons as f64 * economy.geneton_value + outcome.harvest_value as f64
+        - outcome.overflow_paid as f64;
     outcome.top_generation = stable.top_generation(catalog);
     outcome.mounts_end = stable.len();
     outcome

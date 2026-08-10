@@ -92,6 +92,7 @@
 //! laquelle la longueur est un paramètre et non une constante.
 
 use crate::economy::{Draws, Economy, MAX_UNITS, Policy, Rng, Strategy, UnitView, apply_plan};
+use crate::loading::{Loader, RandomLoader};
 use crate::stable::{Mount, Sex, Stable};
 use crate::trees::{Catalog, ColorId};
 
@@ -108,8 +109,13 @@ pub struct TreadmillConfig {
     /// produites, donc la montée redevient instrumentale. On mesure les deux au
     /// lieu de décréter.
     pub cycles: usize,
-    /// Les débits possibles de la promotion, tirés à chaque cycle.
-    pub promotions: [usize; 3],
+    /// Places d'enclos d'**une seule fournée**, toutes disponibles au même moment.
+    ///
+    /// Le parc ne se pilote plus en deux unités désynchronisées : deux vagues à
+    /// suivre, c'est déjà trop pour qui joue en guilde. Un chargement par cycle,
+    /// sur `enclos × 10` places — et remplir est dominant, puisque le transfert se
+    /// paie à l'enclos et que les dix places en profitent également.
+    pub places: usize,
     /// Fertiles à maintenir pour chaque couleur de génération 1.
     pub gen1_target: usize,
     /// Bornes du niveau tiré à la promotion.
@@ -148,7 +154,7 @@ impl Default for TreadmillConfig {
             // apprendre quelque chose.
             mounts: 250,
             cycles: 30,
-            promotions: [20, 80, 100],
+            places: 50,
             gen1_target: 20,
             promotion_levels: (1, 200),
             stable_cap: 250,
@@ -225,6 +231,22 @@ pub fn play_treadmill(
     catalog: &Catalog,
     economy: &Economy,
     policy: &mut dyn Policy,
+    seed: u32,
+    config: &TreadmillConfig,
+) -> TreadmillOutcome {
+    play_treadmill_with(catalog, economy, policy, &mut RandomLoader, seed, config)
+}
+
+/// Le même tapis, avec un chargeur au choix.
+///
+/// C'est le point d'entrée de l'étape 2 : ce qui décidait au hasard devient une
+/// décision, et `loading.rs` en propose plusieurs pour qu'on puisse les comparer
+/// avant d'en apprendre une.
+pub fn play_treadmill_with(
+    catalog: &Catalog,
+    economy: &Economy,
+    policy: &mut dyn Policy,
+    loader: &mut dyn Loader,
     seed: u32,
     config: &TreadmillConfig,
 ) -> TreadmillOutcome {
@@ -306,9 +328,20 @@ pub fn play_treadmill(
             }
         }
 
-        // --- 3. la promotion, qui tient lieu d'enclos -------------------------
-        let quota = config.promotions[index_in(&mut rng, config.promotions.len())];
-        promote(&mut stable, &mut rng, quota, config.promotion_levels);
+        // --- 3. le chargement -------------------------------------------------
+        //
+        // Une fournée, toutes les places. Le chargeur choisit **lesquelles**, pas
+        // combien : remplir est dominant.
+        let chosen = loader.choose(catalog, economy, &stable, config.places, &mut rng);
+        for index in chosen {
+            let mount = &mut stable.mounts[index];
+            debug_assert!(mount.fertile && !mount.cycled, "le chargeur a désigné une monture inéligible");
+            mount.cycled = true;
+            // Le niveau est **retiré** au passage : le cycle passe par la
+            // Mangeoire, et c'est là qu'une monture monte. Garder l'ancien
+            // reviendrait à supposer la montée gratuite.
+            mount.level = draw_level(&mut rng, config.promotion_levels);
+        }
 
         // --- 4. compléter le vivier de gen 1 ----------------------------------
         top_up_gen1(&mut stable, catalog, &mut rng, &gen1, config.gen1_target);
@@ -425,31 +458,6 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         });
     }
     stable
-}
-
-/// Passe `quota` fertiles en fécondes, tirées uniformément, niveau retiré au
-/// passage.
-///
-/// Le niveau est **retiré** et non conservé : le cycle passe par la Mangeoire, et
-/// c'est là qu'une monture monte. Garder l'ancien reviendrait à supposer que la
-/// montée est gratuite.
-fn promote(stable: &mut Stable, rng: &mut Rng, quota: usize, levels: (u16, u16)) {
-    let mut candidates: Vec<usize> = stable
-        .mounts
-        .iter()
-        .enumerate()
-        .filter(|(_, mount)| mount.fertile && !mount.cycled)
-        .map(|(index, _)| index)
-        .collect();
-
-    for _ in 0..quota.min(candidates.len()) {
-        // Tirage sans remise : `swap_remove` suffit, l'ordre du vivier n'a aucun
-        // sens à préserver.
-        let at = index_in(rng, candidates.len());
-        let chosen = candidates.swap_remove(at);
-        stable.mounts[chosen].cycled = true;
-        stable.mounts[chosen].level = draw_level(rng, levels);
-    }
 }
 
 /// Ramène chaque couleur de génération 1 à son effectif de fertiles.

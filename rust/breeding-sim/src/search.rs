@@ -692,7 +692,7 @@ fn random_action(
         for _ in 0..8 {
             let index = pick(rng, candidates.len());
             let candidate = &candidates[index];
-            if available(state, candidate)
+            if available(state, candidate, fertile)
                 && state.places + places_of(candidate, fertile) <= capacity
             {
                 return Some(Action::Cross(index));
@@ -763,9 +763,31 @@ fn random_action(
     })
 }
 
-fn available(state: &State, candidate: &Candidate) -> bool {
+/// Un candidat dont les deux parents sont encore à prendre.
+///
+/// « Encore à prendre » demande **deux** compteurs, et l'oubli du second a coûté
+/// cher. `fertile_free` dit ce qui n'a pas encore été croisé ni sacrifié ;
+/// `cyclable_free` dit ce qui n'a été ni croisé ni **mis en banque**. Un groupe
+/// dont toutes les montures ont été fécondées dans cette fournée a donc encore du
+/// `fertile_free` — la fécondation ne consomme pas la reproduction — mais plus une
+/// seule monture disponible.
+///
+/// Croiser quand même faisait tomber `cyclable_free` sous zéro. Il est `usize` :
+/// il repassait par le haut, à `usize::MAX`, et le groupe restait « fécondable »
+/// pour toujours. La recherche banquait alors des montures qui n'existent pas,
+/// `materialise` les laissait tomber faute de membre à nommer, et la fonction de
+/// valeur notait une écurie que le plan ne produit pas — exactement ce que ce
+/// module se promet de ne jamais faire.
+///
+/// Une monture **déjà féconde** est le cas normal où les deux compteurs
+/// divergent : son cycle est payé, `cyclable_free` vaut zéro par construction, et
+/// il ne dit donc rien de sa disponibilité.
+fn available(state: &State, candidate: &Candidate, fertile: &[Group]) -> bool {
     let free = |side: Side| match side {
-        Side::Have(group) => state.fertile_free[group] > 0,
+        Side::Have(group) => {
+            state.fertile_free[group] > 0
+                && (fertile[group].cycled || state.cyclable_free[group] > 0)
+        }
         Side::Buy(_) => true,
     };
     free(candidate.male) && free(candidate.female)
@@ -948,6 +970,73 @@ mod tests {
             searched > floor,
             "recherche {searched} contre plancher {floor}"
         );
+    }
+
+    /// La sonde linéaire, en fonction de valeur.
+    ///
+    /// `Myopic` ne lit que les kamas et la liquidation, or féconder ne touche ni
+    /// l'un ni l'autre : la note ne bouge pas, la mutation n'améliore pas, elle est
+    /// rejetée. Aucun test bâti sur la valeur myope ne peut donc voir une
+    /// fécondation, et c'est ce trou qui a laissé passer le débordement de
+    /// `cyclable_free` — voir `available`.
+    struct Probe;
+
+    impl ValueFn for Probe {
+        fn value(&self, census: &Census, _catalog: &Catalog, _economy: &Economy) -> f64 {
+            census.linear_probe()
+        }
+    }
+
+    /// Une monture ne se dépense qu'une fois par fournée.
+    ///
+    /// Elle peut être croisée, mise en banque, clonée ou sacrifiée — pas deux à la
+    /// fois, et l'enclos ne l'accueille qu'une fois. Tous les indices d'un plan sont
+    /// donc distincts, et un doublon est le symptôme visible d'un compteur qui a
+    /// débordé.
+    ///
+    /// Ce test travaille sur deux fronts. L'assertion attrape le doublon ; la
+    /// compilation de test, qui vérifie les débordements d'entier, attrape la cause
+    /// une exécution plus tôt en faisant paniquer `cyclable_free`. En `--release`
+    /// il n'y a pas de panique — le compteur repasse simplement par le haut, et
+    /// c'est ainsi que le défaut a vécu.
+    #[test]
+    fn un_plan_ne_nomme_jamais_deux_fois_la_meme_monture() {
+        let catalog = muldo();
+        let economy = Economy::default();
+        let config = crate::sample::SampleConfig::default();
+
+        for seed in [2u32, 5, 11, 23, 47, 96] {
+            let stable = crate::sample::sample_stable(
+                &catalog,
+                &mut Rng::new(seed.wrapping_mul(2_654_435_761)),
+                &config,
+            );
+            let view = UnitView {
+                catalog: &catalog,
+                economy: &economy,
+                stable: &stable,
+                kamas: 30_000_000,
+                unit: 0,
+                strategy: Strategy::default(),
+                capacity: 25,
+            };
+            let plan = Searcher::default().plan(&view, &mut Rng::new(seed), &Probe);
+
+            let mut seen = std::collections::HashSet::new();
+            let mut named: Vec<usize> = plan.cycles.clone();
+            named.extend(plan.sacrifices.iter().copied());
+            named.extend(plan.clonings.iter().flatten().copied());
+            named.extend(plan.crossings.iter().flatten().copied());
+            for index in named {
+                assert!(
+                    seen.insert(index),
+                    "graine {seed} : la monture {index} est dépensée deux fois — \
+                     {} croisements, {} fécondations",
+                    plan.crossings.len(),
+                    plan.cycles.len(),
+                );
+            }
+        }
     }
 
     /// Le recensement doit revenir exactement où il était quand une mutation est

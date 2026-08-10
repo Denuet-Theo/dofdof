@@ -63,7 +63,10 @@ let missing = 0;
 
 const compare = (label, at, mine, theirs) => {
   const gap = Math.abs(mine - theirs);
-  if (gap > worst) worst = gap, (worstAt = { case: at, label, mine, theirs });
+  if (gap > worst) {
+    worst = gap;
+    worstAt = { case: at, label, mine, theirs };
+  }
 };
 
 for (const [at, testCase] of fixture.cases.entries()) {

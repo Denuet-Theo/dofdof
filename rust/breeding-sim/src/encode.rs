@@ -514,6 +514,42 @@ impl Census {
         self.kamas + self.liquidation
     }
 
+    /// Une sonde linéaire sur **tous** les champs, pour le portage TypeScript.
+    ///
+    /// `check-search.mjs` compare des plans entiers, donc les deux recherches
+    /// doivent prendre exactement les mêmes décisions d'acceptation. Le champion
+    /// fait cela très bien, mais il ne dit pas *où* il regarde : sa note résume les
+    /// 74 entrées en un nombre, et deux erreurs opposées s'y annulent.
+    ///
+    /// La valeur myope ne convient pas non plus, pour la raison inverse : elle ne
+    /// lit que `kamas` et `liquidation`, si bien qu'une erreur sur `cycled_males`
+    /// ou sur `carried` lui est rigoureusement invisible — c'est ce trou-là qui a
+    /// laissé vivre le débordement de `cyclable_free` que `available` décrit.
+    ///
+    /// D'où cette sonde : elle touche chaque champ, chaque génération et chaque
+    /// couleur, et n'emploie que `*` et `+`, qui sont correctement arrondis. Deux
+    /// implémentations qui lui rendent le même plan tiennent donc le même
+    /// recensement, champ par champ, sur les quatre cents mutations d'une fournée.
+    ///
+    /// Les poids n'ont aucun sens d'élevage : ils sont seulement distincts, pour
+    /// qu'aucune permutation entre deux champs ne se compense.
+    pub fn linear_probe(&self) -> f64 {
+        let mut sum = self.kamas * 1e-6 + self.liquidation * 1e-6 + self.headcount;
+        for generation in 0..=MAX_GENERATION {
+            let weight = (generation + 1) as f64;
+            sum += self.fertile_males[generation] * weight;
+            sum += self.fertile_females[generation] * (weight + 11.0);
+            sum += self.steriles[generation] * (weight + 23.0);
+            sum += self.carried[generation] * (weight + 37.0);
+            sum += self.cycled_males[generation] * (weight + 53.0);
+            sum += self.cycled_females[generation] * (weight + 71.0);
+        }
+        for (color, count) in self.held.iter().enumerate() {
+            sum += count * (color + 1) as f64;
+        }
+        sum
+    }
+
     #[inline]
     pub fn kamas(&self) -> f64 {
         self.kamas

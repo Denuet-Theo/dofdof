@@ -38,6 +38,7 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, NeverBreeds, play};
 use breeding_sim::encode::{Census, FEATURES};
 use breeding_sim::search::{Myopic, Searching, ValueFn};
+use breeding_sim::treadmill::{TreadmillConfig, play_treadmill};
 use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
 
@@ -66,6 +67,16 @@ impl ValueFn for NetValue<'_> {
     }
 }
 
+/// Sur quoi les génomes sont notés.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Env {
+    /// La partie complète : kamas, heures d'enclos, horizon. Sept leviers.
+    Economy,
+    /// Le tapis roulant : l'appariement et le clonage seuls, notés en génétons.
+    /// Voir `treadmill.rs` sur ce qu'il retire et pourquoi.
+    Treadmill,
+}
+
 struct Options {
     minutes: f64,
     population: usize,
@@ -76,6 +87,9 @@ struct Options {
     /// refaire. Huit heures de recherche jetées à chaque lancement était une
     /// perte qu'on ne peut pas se permettre.
     resume: Option<String>,
+    env: Env,
+    /// Cycles d'un épisode de tapis. Sans effet sur l'économie complète.
+    cycles: usize,
     /// Ouvrir le jeu scellé. **Faux par défaut, et c'est tout l'intérêt.**
     ///
     /// Il était mesuré et imprimé à chaque exécution. Personne n'y sélectionnait
@@ -96,6 +110,8 @@ impl Options {
             iterations: 600,
             seed: 20_260_808,
             resume: None,
+            env: Env::Economy,
+            cycles: 30,
             sealed: false,
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
@@ -119,6 +135,13 @@ impl Options {
                 "--iterations" => options.iterations = value.parse().unwrap_or(options.iterations),
                 "--seed" => options.seed = value.parse().unwrap_or(options.seed),
                 "--resume" => options.resume = Some(value.clone()),
+                "--env" => {
+                    options.env = match value.as_str() {
+                        "treadmill" | "tapis" => Env::Treadmill,
+                        _ => Env::Economy,
+                    }
+                }
+                "--cycles" => options.cycles = value.parse().unwrap_or(options.cycles),
                 _ => {}
             }
             index += 2;
@@ -128,12 +151,33 @@ impl Options {
 }
 
 /// Le score moyen d'un génome sur un jeu de graines.
+/// La politique d'un génome, câblée pour l'environnement demandé.
+///
+/// L'ambre est **fermée** sur le tapis : elle convertit du stock en kamas, donc
+/// c'est un arbitrage économique, et le tapis n'a pas d'économie. Voir
+/// `SearchConfig::sacrifices`.
+fn policy_of<'a>(
+    network: &'a Network,
+    genome: &Genome,
+    iterations: usize,
+    env: Env,
+) -> Searching<NetValue<'a>> {
+    let policy = Searching::with_iterations(NetValue(network), iterations)
+        .with_strategies(genome.strategies);
+    match env {
+        Env::Economy => policy,
+        Env::Treadmill => policy.without_sacrifices(),
+    }
+}
+
 fn fitness(
     catalog: &Catalog,
     economy: &Economy,
     genome: &Genome,
     seeds: &[u32],
     iterations: usize,
+    env: Env,
+    cycles: usize,
 ) -> f64 {
     let network = Network::compile(genome);
     if !network.is_connected() {
@@ -142,12 +186,22 @@ fn fitness(
         // tout de suite plutôt que de payer cent parties pour l'apprendre.
         return f64::NEG_INFINITY;
     }
+    let config = TreadmillConfig {
+        cycles,
+        ..Default::default()
+    };
     let total: f64 = seeds
         .iter()
         .map(|&seed| {
-            let mut policy = Searching::with_iterations(NetValue(&network), iterations)
-                .with_strategies(genome.strategies);
-            play(catalog, economy, &mut policy, seed).score as f64
+            let mut policy = policy_of(&network, genome, iterations, env);
+            match env {
+                Env::Economy => play(catalog, economy, &mut policy, seed).score as f64,
+                // Les génétons, et rien d'autre. Ils ne tombent qu'à la naissance
+                // réussie, donc ils ne comptent que les reproductions.
+                Env::Treadmill => {
+                    play_treadmill(catalog, economy, &mut policy, seed, &config).genetons as f64
+                }
+            }
         })
         .sum();
     total / seeds.len() as f64
@@ -177,6 +231,64 @@ struct Behaviour {
     clonings: f64,
     purchases: f64,
     gen10: f64,
+}
+
+/// Ce qu'une politique fait **sur le tapis**. Les colonnes de la partie complète
+/// n'y ont pas de sens : ni achats, ni fournées, ni unité libre.
+struct TreadmillBehaviour {
+    genetons: f64,
+    crossings: f64,
+    clonings: f64,
+    gen1_share: f64,
+    harvested: f64,
+    /// Génétons du dernier cinquième de l'épisode, rapportés au premier.
+    ///
+    /// La forme, pas le total : c'est elle qui dit si la politique **tient** un
+    /// régime ou si elle liquide la dotation de départ. Proche de 1, le tapis
+    /// tourne ; proche de 0, il s'éteint.
+    tail_ratio: f64,
+}
+
+fn treadmill_behaviour(
+    catalog: &Catalog,
+    economy: &Economy,
+    genome: &Genome,
+    seeds: &[u32],
+    iterations: usize,
+    cycles: usize,
+) -> TreadmillBehaviour {
+    let network = Network::compile(genome);
+    let config = TreadmillConfig {
+        cycles,
+        ..Default::default()
+    };
+    let runs: Vec<_> = seeds
+        .par_iter()
+        .map(|&seed| {
+            let mut policy = policy_of(&network, genome, iterations, Env::Treadmill);
+            play_treadmill(catalog, economy, &mut policy, seed, &config)
+        })
+        .collect();
+    let n = runs.len().max(1) as f64;
+    let slice = (cycles / 5).max(1);
+    let head: f64 = runs
+        .iter()
+        .map(|r| r.per_cycle.iter().take(slice).sum::<i64>() as f64)
+        .sum();
+    let tail: f64 = runs
+        .iter()
+        .map(|r| r.per_cycle.iter().rev().take(slice).sum::<i64>() as f64)
+        .sum();
+    let crossings: f64 = runs.iter().map(|r| r.crossings as f64).sum::<f64>();
+    TreadmillBehaviour {
+        genetons: runs.iter().map(|r| r.genetons as f64).sum::<f64>() / n,
+        crossings: crossings / n,
+        clonings: runs.iter().map(|r| r.clonings as f64).sum::<f64>() / n,
+        gen1_share: runs.iter().map(|r| r.gen1_crossings as f64).sum::<f64>()
+            / crossings.max(1.0),
+        harvested: runs.iter().map(|r| r.gen10_harvested as f64).sum::<f64>() / n,
+        tail_ratio: if head > 0.0 { tail / head } else { 0.0 },
+    }
 }
 
 fn behaviour(
@@ -456,7 +568,12 @@ fn main() {
         // --- évaluation, en parallèle sur les douze cœurs ------------------
         let scores: Vec<f64> = population
             .par_iter()
-            .map(|genome| fitness(&catalog, &economy, genome, &seeds, options.iterations))
+            .map(|genome| {
+                fitness(
+                    &catalog, &economy, genome, &seeds, options.iterations, options.env,
+                    options.cycles,
+                )
+            })
             .collect();
 
         let best_at = scores
@@ -682,7 +799,15 @@ fn main() {
         .map(|(index, (_, genome, _))| {
             (
                 index,
-                fitness(&catalog, &economy, genome, &validation, options.iterations),
+                fitness(
+                    &catalog,
+                    &economy,
+                    genome,
+                    &validation,
+                    options.iterations,
+                    options.env,
+                    options.cycles,
+                ),
             )
         })
         .collect();
@@ -706,6 +831,43 @@ fn main() {
         "\n--- le meilleur de chaque espèce ({} espèces) ---",
         best_per_species.len()
     );
+    if options.env == Env::Treadmill {
+        println!(
+            "{:>7} {:>10} {:>10} {:>9} {:>9} {:>9} {:>9} {:>8}",
+            "espèce", "départage", "génétons", "crois.", "clones", "gen1×gen1", "gen10", "queue"
+        );
+        println!("{}", "-".repeat(80));
+        for &(species_of, index, score) in best_per_species.iter().take(12) {
+            let acts = treadmill_behaviour(
+                &catalog,
+                &economy,
+                &finalists[index].1,
+                &validation[..40],
+                options.iterations,
+                options.cycles,
+            );
+            println!(
+                "{:>7} {:>10.0} {:>10.0} {:>9.0} {:>9.0} {:>8.1} % {:>9.1} {:>7.2}",
+                if species_of == usize::MAX {
+                    "hist.".to_string()
+                } else {
+                    species_of.to_string()
+                },
+                // Des génétons, pas des kamas : les formater en millions
+                // afficherait « 0.02 M » pour vingt-quatre mille.
+                score,
+                acts.genetons,
+                acts.crossings,
+                acts.clonings,
+                acts.gen1_share * 100.0,
+                acts.harvested,
+                acts.tail_ratio
+            );
+        }
+        println!("  (« queue » : génétons du dernier cinquième sur ceux du premier —");
+        println!("   proche de 1 le tapis tourne, proche de 0 il s'éteint)");
+        println!("  (comportement moyenné sur 40 graines de départage)");
+    } else {
     println!(
         "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>7}",
         "espèce", "départage", "bloc", "libre", "opti", "crois.", "féc.tot", "féc.lib", "clones",
@@ -752,6 +914,7 @@ fn main() {
     }
     println!("  (bandes Baffeur Caresseur Foudroyeur Dragofesse Abreuvoir Mangeoire / niveau)");
     println!("  (comportement moyenné sur 40 graines de départage)");
+    }
 
     println!(
         "\n--- départage complet sur {} graines dédiées ({VALIDATION_SEEDS:?}) ---",
@@ -890,16 +1053,89 @@ fn main() {
 
     println!(
         "\nchampion : entraîné à {}, topologie {:?}, {generation} générations",
-        millions(training_score),
+        if options.env == Env::Treadmill {
+            format!("{training_score:.0} génétons")
+        } else {
+            millions(training_score)
+        },
         best.size()
     );
 
     let validation_seeds: Vec<u32> = VALIDATION_SEEDS.collect();
-    gate("départage", &validation_seeds);
+
+    // Sur le tapis, la porte de la partie complète ne veut rien dire : ni glouton,
+    // ni plancher « ne rien faire », ni kamas. Le témoin y reste la **valeur
+    // myope** — une valeur apprise qui ne la bat pas n'a rien appris — et la
+    // lecture qui compte est la **forme** de la trajectoire, pas son total.
+    if options.env == Env::Treadmill {
+        let config = TreadmillConfig {
+            cycles: options.cycles,
+            ..Default::default()
+        };
+        let bands = |per_cycle: &[i64]| {
+            let width = (options.cycles / 6).max(1);
+            (0..6)
+                .map(|band| {
+                    per_cycle
+                        .iter()
+                        .skip(band * width)
+                        .take(width)
+                        .sum::<i64>()
+                        / width as i64
+                })
+                .collect::<Vec<i64>>()
+        };
+        let run = |label: &str, learned: bool| {
+            let network = Network::compile(&best);
+            let runs: Vec<_> = validation_seeds
+                .par_iter()
+                .map(|&seed| {
+                    if learned {
+                        let mut policy =
+                            policy_of(&network, &best, options.iterations, Env::Treadmill);
+                        play_treadmill(&catalog, &economy, &mut policy, seed, &config)
+                    } else {
+                        let mut policy = Searching::with_iterations(Myopic, options.iterations)
+                            .without_sacrifices();
+                        play_treadmill(&catalog, &economy, &mut policy, seed, &config)
+                    }
+                })
+                .collect();
+            let n = runs.len().max(1) as f64;
+            let mean = |f: fn(&breeding_sim::treadmill::TreadmillOutcome) -> f64| {
+                runs.iter().map(f).sum::<f64>() / n
+            };
+            let mut summed = vec![0i64; options.cycles];
+            for outcome in &runs {
+                for (at, &g) in outcome.per_cycle.iter().enumerate() {
+                    summed[at] += g;
+                }
+            }
+            let per_cycle: Vec<i64> = summed.iter().map(|&g| g / runs.len() as i64).collect();
+            println!(
+                "{label:<26} {:>9.0} génétons · {:>6.0} crois. · {:>6.0} clones · trajectoire {:?}",
+                mean(|o| o.genetons as f64),
+                mean(|o| o.crossings as f64),
+                mean(|o| o.clonings as f64),
+                bands(&per_cycle)
+            );
+            mean(|o| o.genetons as f64)
+        };
+        println!("\n--- tapis, départage ({} parties) ---", validation_seeds.len());
+        let myopic = run("recherche / valeur myope", false);
+        let evolved = run("recherche / valeur NEAT", true);
+        println!(
+            "écart à la valeur myope : {:+.0} génétons ({:+.0} %)",
+            evolved - myopic,
+            (evolved - myopic) / myopic.max(1.0) * 100.0
+        );
+    } else {
+        gate("départage", &validation_seeds);
+    }
 
     // `None` quand le jeu n'a pas été ouvert, et l'artefact doit le dire : un
     // champion sans mesure scellée n'est pas un champion mesuré à zéro.
-    let sealed_median = if options.sealed {
+    let sealed_median = if options.sealed && options.env == Env::Economy {
         let test_seeds: Vec<u32> = TEST_SEEDS.collect();
         Some(gate("graines scellées", &test_seeds))
     } else {
@@ -910,7 +1146,9 @@ fn main() {
         None
     };
 
-    for unit in 0..economy.unit_count() {
+    // Les réglages d'unité ne veulent rien dire sur le tapis : ni jauges, ni
+    // niveau à payer, ni enclos.
+    for unit in 0..if options.env == Env::Treadmill { 0 } else { economy.unit_count() } {
         let strategy = best.strategies[unit];
         let (cost, hours) = economy.unit_load(unit, strategy);
         let bands: Vec<String> = strategy.bands.iter().map(|b| b.to_string()).collect();

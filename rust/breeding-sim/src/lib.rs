@@ -33,6 +33,7 @@ pub mod economy;
 pub mod encode;
 pub mod lineage;
 pub mod pairing;
+pub mod sample;
 pub mod schedule;
 pub mod search;
 pub mod stable;

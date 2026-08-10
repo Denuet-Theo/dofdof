@@ -143,6 +143,12 @@ fn fitness(
 /// séparent surtout par leur assiduité à recycler.
 struct Behaviour {
     crossings: f64,
+    /// Fécondations posées **sans croisement**, moyennées.
+    ///
+    /// La colonne qui dit si la politique banque sa fécondité ou si elle continue
+    /// de tout croiser sur place. À zéro, le découplage n'a rien changé au
+    /// comportement — et un écart de score serait alors à chercher ailleurs.
+    cycles: f64,
     clonings: f64,
     purchases: f64,
     gen10: f64,
@@ -167,6 +173,7 @@ fn behaviour(
     let n = runs.len().max(1) as f64;
     Behaviour {
         crossings: runs.iter().map(|r| r.crossings as f64).sum::<f64>() / n,
+        cycles: runs.iter().map(|r| r.cycles as f64).sum::<f64>() / n,
         clonings: runs.iter().map(|r| r.clonings as f64).sum::<f64>() / n,
         purchases: runs.iter().map(|r| r.purchases as f64).sum::<f64>() / n,
         gen10: runs.iter().map(|r| r.gen10_held as f64).sum::<f64>() / n,
@@ -662,10 +669,11 @@ fn main() {
         best_per_species.len()
     );
     println!(
-        "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>7}",
-        "espèce", "départage", "bloc", "libre", "opti", "crois.", "clones", "achats", "gen10"
+        "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8} {:>8} {:>8} {:>8} {:>7}",
+        "espèce", "départage", "bloc", "libre", "opti", "crois.", "fécond.", "clones", "achats",
+        "gen10"
     );
-    println!("{}", "-".repeat(92));
+    println!("{}", "-".repeat(101));
     for &(species_of, index, score) in best_per_species.iter().take(12) {
         let genome = &finalists[index].1;
         let acts = behaviour(&catalog, &economy, genome, &validation[..40], options.iterations);
@@ -682,7 +690,7 @@ fn main() {
             )
         };
         println!(
-            "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.0} {:>7.1}",
+            "{:>7} {:>10} {:<13} {:<13} {:>5} {:>8.0} {:>8.0} {:>8.0} {:>8.0} {:>7.1}",
             if species_of == usize::MAX {
                 "hist.".to_string()
             } else {
@@ -697,6 +705,7 @@ fn main() {
                 genome.strategies[0].optimakina_from.to_string()
             },
             acts.crossings,
+            acts.cycles,
             acts.clonings,
             acts.purchases,
             acts.gen10

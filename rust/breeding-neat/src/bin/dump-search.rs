@@ -69,6 +69,13 @@ impl ValueFn for NetValue<'_> {
     }
 }
 
+/// Le nom du fichier seul, pour que la référence ne dépende pas du répertoire
+/// depuis lequel on l'a produite. Un chemin absolu y faisait bouger une ligne à
+/// chaque régénération sans que rien d'autre ne change.
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 /// Le plan tel que le portage le compare : des listes d'entiers, rien d'autre.
 fn plan_json(catalog: &Catalog, plan: &UnitPlan) -> serde_json::Value {
     serde_json::json!({
@@ -218,7 +225,7 @@ fn main() {
 
     let document = serde_json::json!({
         "features": breeding_sim::encode::FEATURES,
-        "champion": champion_path,
+        "champion": basename(&champion_path),
         "cases": cases,
     });
     match std::fs::write(&target, serde_json::to_string(&document).unwrap_or_default()) {

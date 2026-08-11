@@ -20,10 +20,13 @@
  * ## Régénérer la référence
  *
  * ```sh
- * cd rust
- * cargo run --release -p breeding-neat --bin dump-network -- champion-t2.json \
- *   ../scripts/fixtures/network-parity.json
+ * npm run parity                     # depuis rust/champion.json
+ * npm run parity -- rust/champion-t3.json
  * ```
+ *
+ * Une seule commande pour les quatre, et c'est délibéré : elle réinstalle aussi
+ * l'artefact dans `src/`, si bien qu'on ne peut plus refaire les références sans
+ * déployer le champion qui les a produites. Voir `refresh-parity.mjs`.
  *
  * À refaire quand le champion change **ou** quand `FEATURES` bouge : l'artefact
  * porte son arité, donc un vecteur d'une autre taille est refusé plutôt que lu de

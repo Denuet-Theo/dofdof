@@ -14,7 +14,10 @@
     "db:link": "supabase link",
     "db:migration:new": "supabase migration new",
     "db:push": "supabase db push",
-    "db:diff": "supabase db diff"
+    "db:diff": "supabase db diff",
+    "parity": "node scripts/refresh-parity.mjs",
+    "parity:check": "node scripts/refresh-parity.mjs --check",
+    "policy:report": "node scripts/policy-report.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

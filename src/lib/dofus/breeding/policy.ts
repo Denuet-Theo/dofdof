@@ -220,7 +220,18 @@ export type PullLine = {
 };
 
 export type StablePlan = {
-  /** Les accouplements, groupés par couple identique. */
+  /**
+   * Les accouplements, groupés par couple identique et **les immédiats d'abord**.
+   *
+   * « Immédiat » veut dire zéro place d'enclos : les deux parents sont déjà
+   * féconds, donc l'accouplement est un clic, avec ce qu'on tient. Les faire passer
+   * après une liste d'achats revient à faire attendre ce qui ne demande rien
+   * derrière ce qui demande une course à l'hôtel de vente — c'est déjà la raison
+   * pour laquelle la piste « Écurie » ouvre le ruban de la timeline.
+   *
+   * À coût égal, l'ordre de la recherche est conservé : il n'a pas de sens en
+   * lui-même, et le brasser rendrait deux lectures successives incomparables.
+   */
   couples: CoupleLine[];
   /**
    * Les montures mises en enclos **sans être croisées** : elles en sortent
@@ -473,7 +484,7 @@ const readPlan = (
   }
 
   return {
-    couples: [...couples.values()],
+    couples: [...couples.values()].sort((a, b) => a.places - b.places),
     cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
     clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),
     purchases: [...purchases.values()],

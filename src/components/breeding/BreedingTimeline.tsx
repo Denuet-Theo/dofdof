@@ -635,6 +635,44 @@ const Fill = ({
     </span>
   );
 
+  /**
+   * Une ligne de couple. Extraite parce qu'elle sert deux fois — les immédiats et
+   * la fournée — et qu'un copier-coller les aurait laissés diverger.
+   */
+  const couple = (line: StablePlan['couples'][number], key: string) => (
+    <div key={key} className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
+        {line.count} ×
+      </span>
+      {side('♂', line.male.colorId, line.male.mountIds, `m-${key}`)}
+      <span className="text-dark-600">+</span>
+      {side('♀', line.female.colorId, line.female.mountIds, `f-${key}`)}
+      {line.targetGeneration !== null ? (
+        <span
+          className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+          title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
+        >
+          GEN. {line.targetGeneration}
+        </span>
+      ) : (
+        /* Deux Ébène visent bien la génération 2, mais aucune recette ne s'écrit
+           `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et aucun géneton.
+           Le dire, parce que ça change ce qu'on fait de ses places d'enclos. */
+        <span
+          className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
+          title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
+        >
+          RECOPIE
+        </span>
+      )}
+    </div>
+  );
+
+  /** Les couples qui ne coûtent aucune place, ou ceux qui en coûtent. */
+  const couplesOf = (places: 0 | 1) =>
+    fill.couples.filter((line) => (places === 0 ? line.places === 0 : line.places > 0));
+  const immediate = couplesOf(0).reduce((total, line) => total + line.count, 0);
+
   const nothing =
     fill.couples.length === 0 &&
     fill.cycles.length === 0 &&
@@ -646,7 +684,8 @@ const Fill = ({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Heart size={13} className="text-info shrink-0" />
         <span className="text-[11px] text-dark-300">
-          La prochaine fournée — <strong className="text-dark-100">la politique entraînée</strong>
+          Ce que la politique ferait de{' '}
+          <strong className="text-dark-100">cette écurie</strong>
         </span>
         <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
           {fill.raw.crossings.length} accouplement{fill.raw.crossings.length > 1 ? 's' : ''} ·{' '}
@@ -670,49 +709,36 @@ const Fill = ({
               qu'elle est suivie — deux montures de même couleur n'ont pas la
               même ascendance, et c'est l'ascendance qui décide de ce que le
               croisement vise. */}
-          {fill.couples.length > 0 && (
+          {couplesOf(0).length > 0 && (
             <div className="space-y-0.5">
-              {fill.couples.map((line, index) => (
-                <div
-                  key={`${line.male.colorId}-${line.female.colorId}-${index}`}
-                  className="flex flex-wrap items-center gap-2 text-xs"
-                >
-                  <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-                    {line.count} ×
-                  </span>
-                  {side('♂', line.male.colorId, line.male.mountIds, `m-${index}`)}
-                  <span className="text-dark-600">+</span>
-                  {side('♀', line.female.colorId, line.female.mountIds, `f-${index}`)}
-                  {line.targetGeneration !== null ? (
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-                      title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
-                    >
-                      GEN. {line.targetGeneration}
-                    </span>
-                  ) : (
-                    /* Le cas qu'on annonçait « gen 2 » à tort. Deux Ébène visent
-                       bien la génération 2, mais aucune recette ne s'écrit
-                       `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et
-                       aucun géneton. Le dire, parce que ça change ce qu'on fait
-                       de ses places d'enclos. */
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
-                      title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
-                    >
-                      RECOPIE
-                    </span>
-                  )}
-                  {line.places === 0 && (
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold"
-                      title="Les deux parents sont déjà féconds : l'accouplement est un clic, il n'occupe aucune place d'enclos."
-                    >
-                      SANS ENCLOS
-                    </span>
-                  )}
-                </div>
-              ))}
+              {/* Ce qui ne demande rien : les deux parents sont déjà féconds, donc
+                  l'accouplement est un clic. En tête parce que c'est ce qu'on fait
+                  en ouvrant le jeu, avant même de penser à l'enclos ou à l'hôtel de
+                  vente — le ruban range la piste « Écurie » en premier pour la même
+                  raison. */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[11px] font-semibold text-emerald-300">
+                  D’abord, sans enclos
+                </span>
+                <span className="text-[10px] text-dark-500">
+                  {immediate} accouplement{immediate > 1 ? 's' : ''} d’un clic, avec ce que tu as
+                </span>
+              </div>
+              {couplesOf(0).map((line, index) => couple(line, `now-${index}`))}
+            </div>
+          )}
+
+          {couplesOf(1).length > 0 && (
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 pt-1 border-t border-info/15">
+                <span className="text-[11px] font-semibold text-dark-300">
+                  Puis la fournée à charger
+                </span>
+                <span className="text-[10px] text-dark-500">
+                  {fill.places}/{fill.capacity} places d’enclos
+                </span>
+              </div>
+              {couplesOf(1).map((line, index) => couple(line, `load-${index}`))}
             </div>
           )}
 

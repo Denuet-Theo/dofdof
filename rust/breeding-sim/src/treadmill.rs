@@ -188,6 +188,22 @@ pub struct TreadmillConfig {
     /// jeu le prend : les jauges tournent pour l'enclos entier, et dix montures s'y
     /// partagent la même dépense.
     pub cycle_kamas: i64,
+    /// Ce qu'une place **vide** coûte, en génétons, sur une fournée chargée.
+    ///
+    /// C'est le levier qui manquait. Une fournée coûtait le même prix qu'elle soit
+    /// pleine ou vide, donc rien ne poussait à la remplir : sur un départ frais, la
+    /// politique occupait **une place et demie sur cinquante** et le tapis tournait
+    /// à vide trente fois de suite sans que le score s'en ressente.
+    ///
+    /// Compté en génétons et non en kamas parce que c'est l'unité de ce qu'une
+    /// place produit : une place vide, c'est un croisement qu'on n'a pas fait, donc
+    /// des génétons qu'on n'a pas eus. Le prix du jour fait le reste de la
+    /// conversion, et la politique le lit déjà par `PRICE_GENETON`.
+    ///
+    /// Facturé **seulement si la fournée est chargée** : ne rien mettre en enclos
+    /// est une décision légitime — il n'y a pas toujours de bon coup à jouer — et
+    /// la taxer forcerait à charger pour ne rien faire.
+    pub empty_place_genetons: f64,
     /// Les départs à tirer, un par partie. Vide = celui que ce `config` décrit.
     ///
     /// Une politique qui ne voit qu'un seul départ ne sait jouer que celui-là, et
@@ -229,6 +245,7 @@ impl Default for TreadmillConfig {
             state: StartState::Drawn,
             residual_value: 1.0,
             cycle_kamas: 0,
+            empty_place_genetons: 1.0,
             starts: &[],
         }
     }
@@ -345,8 +362,13 @@ pub struct TreadmillOutcome {
     /// Ce que l'écurie restante vaut à la casse, avant pondération. Porté à part
     /// pour qu'on puisse lire d'où vient un score.
     pub residual: i64,
-    /// Ce que les chargements d'enclos ont coûté, tous cycles confondus.
+    /// Ce que les chargements d'enclos ont coûté, tous cycles confondus —
+    /// forfait et places vides.
     pub loads_paid: i64,
+    /// Places payées et laissées vides, tous cycles confondus. Portée à part parce
+    /// que c'est le chiffre qu'on vient lire : une fournée à moitié pleine ne se
+    /// voit pas dans un total.
+    pub empty_places: usize,
     /// Génétons cycle par cycle.
     ///
     /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
@@ -468,8 +490,14 @@ pub fn play_treadmill_with(
                 // fournée serve à croiser ou seulement à féconder. C'est ce qui
                 // rend le banquage arbitrable : il prenait une place et ne coûtait
                 // pas un kama, donc rien n'obligeait à choisir.
-                if applied.crossings > 0 || !plan.cycles.is_empty() {
+                if applied.places > 0 {
                     outcome.loads_paid += config.cycle_kamas;
+                    // Les places qu'on a payées sans les employer.
+                    let empty = config.places.saturating_sub(applied.places);
+                    outcome.empty_places += empty;
+                    outcome.loads_paid += (empty as f64
+                        * config.empty_place_genetons
+                        * economy.geneton_value) as i64;
                 }
                 outcome.per_cycle.push(applied.genetons);
                 outcome.genetons += applied.genetons;

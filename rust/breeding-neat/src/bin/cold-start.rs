@@ -69,6 +69,11 @@ struct Row {
     crossings: f64,
     clonings: f64,
     gen10: f64,
+    /// Le rang le plus haut que l'écurie porte à la fin. C'est **la** réponse à
+    /// « jusqu'où monte-t-on », qu'un compte de gen 10 à zéro laissait entière :
+    /// zéro récolte peut vouloir dire « bloqué en gen 2 » comme « arrivé en gen 9 ».
+    top: f64,
+    mounts_end: f64,
     trajectory: Vec<f64>,
 }
 
@@ -99,6 +104,8 @@ fn measure(
         crossings: mean(&|r| r.crossings as f64),
         clonings: mean(&|r| r.clonings as f64),
         gen10: mean(&|r| r.gen10_harvested as f64),
+        top: mean(&|r| r.top_generation as f64),
+        mounts_end: mean(&|r| r.mounts_end as f64),
         trajectory: (0..steps)
             .map(|step| runs.iter().map(|r| r.per_cycle[step] as f64).sum::<f64>() / n)
             .collect(),
@@ -107,14 +114,22 @@ fn measure(
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "champion.json".into());
-    let genome = champion::load(&path, 0).unwrap_or_else(|error| {
-        eprintln!("{error}");
-        std::process::exit(1);
-    });
+    // Le champion est **facultatif** : quand l'encodage vient de changer, aucun
+    // artefact n'est chargeable, et la question « jusqu'où monte-t-on depuis un
+    // départ frais » se pose quand même — la valeur myope y répond seule.
+    let genome = match champion::load(&path, 0) {
+        Ok(genome) => Some(genome),
+        Err(error) => {
+            eprintln!("{error}\n→ on ne mesure que la valeur myope.\n");
+            None
+        }
+    };
     // Fuite assumée : le réseau vit aussi longtemps que le programme, et
     // `Box<dyn Policy>` réclame `'static`. Un `Arc` ferait le même effet en plus
     // long, pour un binaire de mesure qui se termine juste après.
-    let network: &'static Network = Box::leak(Box::new(Network::compile(&genome)));
+    let network: Option<&'static Network> = genome
+        .as_ref()
+        .map(|genome| &*Box::leak(Box::new(Network::compile(genome))));
 
     let catalog = muldo();
     // Jamais `Economy::default()` : les leviers y sont inertes et le niveau achète
@@ -156,8 +171,9 @@ fn main() {
         ITERATIONS
     );
     println!(
-        "\n{:<12} {:<10} {:>11} {:>10} {:>8} {:>8} {:>7}",
-        "départ", "politique", "kamas", "génétons", "crois.", "clones", "gen10"
+        "\n{:<12} {:<10} {:>11} {:>10} {:>8} {:>8} {:>7} {:>9} {:>9}",
+        "départ", "politique", "kamas", "génétons", "crois.", "clones", "gen10", "rang max",
+        "montures"
     );
     println!("{}", "-".repeat(72));
 
@@ -165,26 +181,34 @@ fn main() {
     for (label, config) in [("entraînement", &base), ("départ frais", &fresh)] {
         let mut scores = Vec::new();
         for (name, learned) in [("NEAT", true), ("myope", false)] {
+            if learned && network.is_none() {
+                continue;
+            }
             let row = measure(&catalog, &economy, config, &|| {
                 if learned {
                     Box::new(
-                        Searching::with_iterations(NetValue(network), ITERATIONS)
-                            .without_sacrifices()
-                            .with_strategies(genome.strategies),
+                        Searching::with_iterations(
+                            NetValue(network.expect("réseau présent")),
+                            ITERATIONS,
+                        )
+                        .without_sacrifices()
+                        .with_strategies(genome.as_ref().expect("génome présent").strategies),
                     )
                 } else {
                     Box::new(Searching::with_iterations(Myopic, ITERATIONS).without_sacrifices())
                 }
             });
             println!(
-                "{:<12} {:<10} {:>9.2} M {:>10.0} {:>8.0} {:>8.0} {:>7.1}",
+                "{:<12} {:<10} {:>9.2} M {:>10.0} {:>8.0} {:>8.0} {:>7.1} {:>9.1} {:>9.0}",
                 if scores.is_empty() { label } else { "" },
                 name,
                 row.kamas / 1e6,
                 row.genetons,
                 row.crossings,
                 row.clonings,
-                row.gen10
+                row.gen10,
+                row.top,
+                row.mounts_end
             );
             let step = (row.trajectory.len() / 12).max(1);
             let sampled: Vec<String> = row

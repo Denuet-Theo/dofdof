@@ -728,6 +728,9 @@ struct Applied {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppliedSummary {
     pub genetons: i64,
+    /// Places d'enclos réellement occupées. Une par parent qui doit son cycle,
+    /// une par fécondation, zéro pour un couple de fécondes.
+    pub places: usize,
     pub crossings: usize,
     pub clonings: usize,
     pub sacrifices: usize,
@@ -764,6 +767,7 @@ pub fn apply_plan(
     }
     Ok(AppliedSummary {
         genetons: applied.genetons,
+        places: applied.places,
         crossings: applied.crossings,
         clonings: applied.clonings,
         sacrifices: applied.sacrifices,

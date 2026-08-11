@@ -22,6 +22,21 @@ pub fn load(path: &str, rank: usize) -> Result<Genome, String> {
     // `finalists.json` est un tableau ; `champion.json` un objet. Accepter les
     // deux permet de rejouer une stratégie alternative sans convertir le
     // fichier à la main.
+    // L'arité, avant de reconstruire quoi que ce soit. Un génome numérote ses
+    // nœuds depuis la couche d'entrée — le biais vaut `FEATURES`, la sortie
+    // `FEATURES + 1` — donc un artefact d'une autre arité ne se lit pas de
+    // travers : il se lit **sans rien dire**, et tous ses liens pointent à côté.
+    if let Some(features) = parsed["features"].as_u64() {
+        if features as usize != breeding_sim::encode::FEATURES {
+            return Err(format!(
+                "{path} : champion à {features} entrées, le simulateur en déclare {}. \
+                 Il faut réentraîner — un génome n'est pas transposable d'un encodage \
+                 à l'autre.",
+                breeding_sim::encode::FEATURES
+            ));
+        }
+    }
+
     let root = match parsed.as_array() {
         Some(list) => list
             .get(rank.saturating_sub(1))

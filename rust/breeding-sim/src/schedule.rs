@@ -181,7 +181,7 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
         .sum();
 
     let rate = |gauge: usize| economy.band_rate(bands[gauge]);
-    let (seconds, _, _) = makespan(&tasks, &rate);
+    let seconds = makespan(&tasks, &rate).total;
     Schedule {
         hours: seconds / 3600.0,
         cost_per_enclos,
@@ -197,17 +197,19 @@ pub fn slots(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Vec<S
     let (climber, _) = climb_and_return(economy, bands);
     let tasks = task_list(climber, other_serenity(climber), xp_points);
     let rate = |gauge: usize| economy.band_rate(bands[gauge]);
-    let (_, started, finished) = makespan(&tasks, &rate);
-
-    let mut placed: Vec<Slot> = tasks
-        .iter()
-        .zip(started.iter().zip(finished.iter()))
-        .filter(|(task, (start, _))| task.points > 0.0 && start.is_finite())
-        .map(|(task, (&start, &end))| Slot {
-            gauge: task.gauge,
-            points: task.points,
+    // Une entrée par **tranche continue** et non par tâche : une jauge qui
+    // s'interrompt puis reprend produit deux créneaux, ce qui est la vérité de
+    // l'enclos. L'écran comme la frise en dépendent — un créneau unique étalé sur
+    // les trous annoncerait une jauge qui tourne alors qu'elle est à l'arrêt.
+    let mut placed: Vec<Slot> = makespan(&tasks, &rate)
+        .segments
+        .into_iter()
+        .filter(|&(index, start, end, _)| tasks[index].points > 0.0 && end > start)
+        .map(|(index, start, end, points)| Slot {
+            gauge: tasks[index].gauge,
+            points,
             start,
-            end: if end.is_finite() { end } else { start },
+            end,
         })
         .collect();
     placed.sort_by(|a, b| {
@@ -315,17 +317,40 @@ fn task_list(climber: usize, returner: usize, xp_points: f64) -> [Task; TASKS] {
 /// un placement discret. Les deux heuristiques encadrent cet optimum sans
 /// l'atteindre — mesuré, il reste de l'ordre de dix pour cent sur les cas où la
 /// Mangeoire est longue.
-fn makespan(
-    tasks: &[Task; TASKS],
-    rate: &impl Fn(usize) -> f64,
-) -> (f64, [f64; TASKS], [f64; TASKS]) {
+fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
     let mut best = makespan_blocking(tasks, rate);
     for other in [makespan_preemptive(tasks, rate), makespan_shared(tasks, rate)] {
-        if other.0 < best.0 - 1e-9 {
+        if other.total < best.total - 1e-9 {
             best = other;
         }
     }
     best
+}
+
+/// Un ordonnancement rendu : sa durée, et **les segments réellement joués**.
+///
+/// Les segments et non le seul couple début/fin, parce qu'une tâche préemptée
+/// s'étale sur plus longtemps qu'elle ne travaille. La frise de `bin/bands` en
+/// tirait un bloc plein qui mentait sur ses trous ; l'écran, lui, veut savoir
+/// quand une jauge tourne pour de bon.
+pub struct Placement {
+    pub total: f64,
+    /// `(tâche, début, fin, points servis)` pour chaque tranche continue.
+    ///
+    /// Les points sont **portés** et non déduits de la durée : une tâche qui
+    /// partage une place avance à vitesse réduite, donc `durée × cadence` la
+    /// surcompterait — mesuré, l'Abreuvoir s'affichait à 31 272 points au lieu de
+    /// 20 000.
+    pub segments: Vec<(usize, f64, f64, f64)>,
+}
+
+impl Placement {
+    fn of(segments: Vec<(usize, f64, f64, f64)>) -> Self {
+        let total = segments
+            .iter()
+            .fold(0.0f64, |longest, &(_, _, end, _)| longest.max(end));
+        Self { total, segments }
+    }
 }
 
 /// L'ordonnancement d'un cycle avec **partage de capacité** : Muntz–Coffman.
@@ -351,10 +376,28 @@ fn makespan(
 /// porter deux tâches à la fois — une contrainte de ressource que l'algorithme
 /// d'origine ne connaît pas. D'où le garde-fou de `makespan` : on garde la plus
 /// courte des trois, jamais celle-ci par principe.
-fn makespan_shared(
-    tasks: &[Task; TASKS],
-    rate: &impl Fn(usize) -> f64,
-) -> (f64, [f64; TASKS], [f64; TASKS]) {
+fn makespan_shared(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
     let speed = |index: usize| rate(tasks[index].gauge);
     let length = |index: usize| {
         let rate = speed(index);
@@ -468,6 +511,7 @@ fn makespan_shared(
                 started[index] = now;
             }
             let served = (step * speed(index) * share[index]).min(remaining[index]);
+            record(index, now, now + step, served, &mut segments);
             done[index] += served;
             remaining[index] -= served;
             if remaining[index] <= 1e-9 {
@@ -478,11 +522,8 @@ fn makespan_shared(
         now += step;
     }
 
-    let total = finished
-        .iter()
-        .filter(|end| end.is_finite())
-        .fold(0.0f64, |longest, &end| longest.max(end));
-    (total, started, finished)
+    let _ = (&started, &finished);
+    Placement::of(segments)
 }
 
 /// L'ordonnancement d'un cycle, **préemptif**.
@@ -520,10 +561,28 @@ fn makespan_shared(
 /// deux places quand le graphe est une forêt. Le nôtre n'en est pas tout à fait
 /// une, mais la hauteur reste la bonne lecture : ce qui commande, c'est ce qui
 /// reste **après**.
-fn makespan_preemptive(
-    tasks: &[Task; TASKS],
-    rate: &impl Fn(usize) -> f64,
-) -> (f64, [f64; TASKS], [f64; TASKS]) {
+fn makespan_preemptive(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
     let speed = |index: usize| rate(tasks[index].gauge);
     let length = |index: usize| {
         let rate = speed(index);
@@ -632,6 +691,7 @@ fn makespan_preemptive(
                 started[index] = now;
             }
             let served = (step * speed(index)).min(remaining[index]);
+            record(index, now, now + step, served, &mut segments);
             done[index] += served;
             remaining[index] -= served;
             if remaining[index] <= 1e-9 {
@@ -642,17 +702,32 @@ fn makespan_preemptive(
         now += step;
     }
 
-    let total = finished
-        .iter()
-        .filter(|end| end.is_finite())
-        .fold(0.0f64, |longest, &end| longest.max(end));
-    (total, started, finished)
+    let _ = (&started, &finished);
+    Placement::of(segments)
 }
 
-fn makespan_blocking(
-    tasks: &[Task; TASKS],
-    rate: &impl Fn(usize) -> f64,
-) -> (f64, [f64; TASKS], [f64; TASKS]) {
+fn makespan_blocking(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
     let duration = |task: &Task| {
         let rate = rate(task.gauge);
         if rate > 0.0 { task.points / rate } else { 0.0 }
@@ -722,6 +797,7 @@ fn makespan_blocking(
             started[index] = now;
             let end = now + duration(&tasks[index]);
             finished[index] = end;
+            record(index, now, end, tasks[index].points, &mut segments);
             running.push((index, end));
             pending.retain(|&pending_index| pending_index != index);
         }
@@ -753,11 +829,8 @@ fn makespan_blocking(
         running.retain(|&(_, end)| end > now + 1e-9);
     }
 
-    let total = finished
-        .iter()
-        .filter(|end| end.is_finite())
-        .fold(0.0f64, |longest, &end| longest.max(end));
-    (total, started, finished)
+    let _ = (&started, &finished);
+    Placement::of(segments)
 }
 
 #[cfg(test)]

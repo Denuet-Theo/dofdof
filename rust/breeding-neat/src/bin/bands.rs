@@ -39,11 +39,18 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{MAX_MOUNT_LEVEL, mount_xp_for_level};
 use breeding_sim::schedule::{GAUGE_NAMES, PARALLEL_SLOTS, Slot, schedule, slots};
 
-/// La frise : une ligne par jauge, le temps en abscisse.
+/// La frise : **une ligne par jauge**, le temps en abscisse.
 ///
-/// Les jauges sont rangées par **ordre de démarrage** et non par indice, parce que
-/// c'est l'enchaînement qu'on vient lire — qui attend quoi. Une jauge qui porte
-/// deux tâches, comme la sérénité coupée en deux, apparaît deux fois.
+/// Une ligne par jauge et non par tâche, parce que c'est la jauge qu'on manipule :
+/// la sérénité descend en deux fois, mais c'est le même Caresseur qu'on va
+/// recharger. Deux lignes pour lui donnaient à lire deux jauges là où il n'y en a
+/// qu'une.
+///
+/// Les créneaux viennent maintenant de l'ordonnanceur tranche par tranche, donc
+/// une jauge qui s'interrompt montre ses **vrais trous** au lieu d'un bloc plein
+/// assorti d'un avertissement. C'est ce que le partage de capacité rend visible :
+/// deux jauges qui se relaient dessinent deux pointillés en alternance, et ce
+/// dessin-là est la consigne.
 fn frieze(
     placed: &[Slot],
     hours: f64,
@@ -51,57 +58,64 @@ fn frieze(
     economy: &breeding_sim::economy::Economy,
     bands: [usize; 6],
 ) {
-    // Le temps de travail net d'une tâche, indépendant de ses interruptions : la
-    // colonne « heures » doit dire ce qu'elle coûte, pas ce qu'elle occupe.
-    let net_hours = |slot: &Slot| {
-        let rate = economy.band_rate(bands[slot.gauge]);
-        if rate > 0.0 { slot.points / rate / 3600.0 } else { 0.0 }
-    };
-
     if placed.is_empty() || hours <= 0.0 {
         return;
     }
     const WIDTH: usize = 54;
     let total = hours * 3600.0;
 
-    let mut rows: Vec<&Slot> = placed.iter().collect();
-    rows.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    // Regroupées par jauge, dans l'ordre où elles entrent en scène.
+    let mut order: Vec<usize> = Vec::new();
+    for slot in placed {
+        if !order.contains(&slot.gauge) {
+            order.push(slot.gauge);
+        }
+    }
 
     println!("\n  {title} — {hours:.2} h sur {PARALLEL_SLOTS} places");
-    let mut interrupted = false;
-    for slot in rows {
-        let cell = |seconds: f64| ((seconds / total) * WIDTH as f64).round() as usize;
-        let from = cell(slot.start).min(WIDTH);
-        let to = cell(slot.end).clamp(from + 1, WIDTH);
-        // `Slot` ne porte que le premier départ et la dernière fin. Une tâche
-        // préemptée s'étend donc sur plus longtemps qu'elle ne travaille, et la
-        // tracer pleine mentirait. On ne sait pas **où** sont les trous — il
-        // faudrait que `slots` rende les segments — mais on sait qu'il y en a, et
-        // le dire vaut mieux que dessiner un bloc faux.
-        let worked = (slot.end - slot.start) / 3600.0;
-        let broken = worked > net_hours(slot) + 1e-6;
-        interrupted |= broken;
-        let fill = if broken { '▒' } else { '█' };
+    for gauge in order {
+        let mine: Vec<&Slot> = placed.iter().filter(|slot| slot.gauge == gauge).collect();
+        // Une case est pleine dès qu'un créneau la recouvre à moitié : à
+        // cinquante-quatre colonnes pour dix heures, une case vaut onze minutes, et
+        // exiger le recouvrement entier effacerait les tranches courtes.
         let bar: String = (0..WIDTH)
-            .map(|column| if column >= from && column < to { fill } else { '·' })
+            .map(|column| {
+                let from = column as f64 / WIDTH as f64 * total;
+                let to = (column + 1) as f64 / WIDTH as f64 * total;
+                let covered: f64 = mine
+                    .iter()
+                    .map(|slot| (slot.end.min(to) - slot.start.max(from)).max(0.0))
+                    .sum();
+                if covered >= (to - from) * 0.5 { '█' } else { '·' }
+            })
             .collect();
+        let rate = economy.band_rate(bands[gauge]);
+        let worked: f64 = if rate > 0.0 {
+            mine.iter().map(|slot| slot.points).sum::<f64>() / rate
+        } else {
+            0.0
+        };
+        let points: f64 = mine.iter().map(|slot| slot.points).sum();
+        let span = mine.last().map(|slot| slot.end).unwrap_or(0.0)
+            - mine.first().map(|slot| slot.start).unwrap_or(0.0);
+        // La colonne dit ce que la barre montre : le temps que la jauge occupe. Le
+        // temps de **travail** n'apparaît que quand il diffère — une jauge qui
+        // partage sa place avance à vitesse réduite, donc elle occupe plus
+        // longtemps qu'elle ne travaille, et confondre les deux ferait croire à un
+        // besoin de points plus gros qu'il n'est.
+        let net = if span > worked + 60.0 {
+            format!("  dont {:.2} h de travail", worked / 3600.0)
+        } else {
+            String::new()
+        };
         println!(
-            "  {:<11} {bar} {:>5.2} h  {:>7.0} pts{}",
-            GAUGE_NAMES[slot.gauge],
-            net_hours(slot),
-            slot.points,
-            if broken { "  ⋯" } else { "" }
+            "  {:<11} {bar} {:>5.2} h  {:>7.0} pts{net}",
+            GAUGE_NAMES[gauge],
+            span / 3600.0,
+            points
         );
     }
-    if interrupted {
-        println!(
-            "  {:<11} ▒ = tâche interrompue puis reprise : elle s'étale sur cette \
-             plage sans l'occuper entière.",
-            ""
-        );
-    }
-    // Une graduation plutôt qu'une légende : lire « où est la moitié » demande
-    // sinon de compter les caractères.
+
     let axis: String = (0..WIDTH)
         .map(|column| if column % 9 == 0 { '┬' } else { '─' })
         .collect();

@@ -12,7 +12,7 @@
  * Changer de champion demande cinq gestes : copier l'artefact dans `src/`, refaire
  * les deux références qui en dépendent — le réseau et la recherche — refaire les
  * deux qui n'en dépendent pas mais que `FEATURES` peut invalider, et rejouer les
- * quatre gardes. Les faire à la main, c'est en oublier un ; et l'oubli qui compte
+ * cinq gardes. Les faire à la main, c'est en oublier un ; et l'oubli qui compte
  * ne se voit pas.
  *
  * Le pire est celui-ci : régénérer les références **sans** copier l'artefact. Les
@@ -115,6 +115,8 @@ if (!checkOnly) {
       'dump-delta',
       '--bin',
       'dump-search',
+      '--bin',
+      'dump-schedule',
     ],
     RUST
   );
@@ -128,6 +130,9 @@ if (!checkOnly) {
     ['dump-census', [target('census-parity.json')]],
     ['dump-delta', [target('delta-parity.json')]],
     ['dump-search', [source, target('search-parity.json')]],
+    // Celle-ci ne dépend d'aucun champion — c'est de l'ordonnancement pur — mais
+    // elle dépend de `schedule.rs`, et la refaire coûte deux secondes.
+    ['dump-schedule', [target('schedule-parity.json')]],
   ];
   say('\n--- références ---');
   for (const [binary, args] of dumps) {
@@ -139,7 +144,7 @@ if (!checkOnly) {
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search']) {
+for (const guard of ['network', 'census', 'delta', 'search', 'schedule']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {
@@ -154,4 +159,4 @@ if (failed > 0) {
   );
   process.exit(1);
 }
-say('\nles quatre gardes passent — le portage rejoue ce champion-ci');
+say('\nles cinq gardes passent — le portage rejoue ce champion-ci');

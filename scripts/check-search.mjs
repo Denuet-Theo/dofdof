@@ -8,8 +8,7 @@
  * Quatrième et dernier garde-fou du portage. Les trois précédents comparaient des
  * nombres à une tolérance près — le réseau à 2,8 × 10⁻¹⁴, les 74 entrées à
  * 8,9 × 10⁻¹⁶, l'effet d'un croisement à zéro. Celui-ci compare des listes
- * d'entiers, donc il n'admet aucune tolérance : le plan est identique ou il ne
- * l'est pas.
+ * d'entiers, donc sans tolérance : le plan est identique ou il ne l'est pas.
  *
  * ## Pourquoi c'est possible
  *
@@ -21,12 +20,31 @@
  * sur une branche, même une qui ne sert à rien, décale toute la suite. Aucune des
  * deux recherches n'est fausse alors, et rien ne le signale — sauf ceci.
  *
- * ## Ce qu'il couvre en plus des trois autres
+ * ## Deux juges exigés, un troisième seulement observé
  *
- * La chaîne complète, dans l'ordre où l'app l'emploie : recensement de l'écurie,
- * encodage, réseau, effet d'un croisement, et la recherche qui appelle tout ça
- * quatre cents fois. La fonction de valeur est le **champion** et non la valeur
- * myope, pour cette raison précisément.
+ * Chaque cas est rejoué avec trois fonctions de valeur, et les deux premières
+ * sont le contrat :
+ *
+ * - la **myope**, qui ne lit que les kamas et la liquidation ;
+ * - la **sonde**, qui lit chaque champ, chaque génération et chaque couleur, et
+ *   n'emploie que `*` et `+`, correctement arrondis.
+ *
+ * Ensemble elles couvrent tout ce que le portage possède : l'algèbre du
+ * recensement champ par champ, et la mécanique de la recherche — tirage, ordre des
+ * groupes, application et annulation des mutations, matérialisation. Elles doivent
+ * être exactes, et elles le sont.
+ *
+ * Le **champion** est joué en plus, et son accord n'est pas exigé. Il ajoute
+ * `log1p` dans l'encodage et `tanh` dans le réseau, et aucune norme n'oblige deux
+ * bibliothèques mathématiques à s'accorder au dernier bit sur celles-là. Mesuré :
+ * les deux valeurs s'écartent de **6 ulp**. Sur quatre cents comparaisons
+ * `scored > best` par fournée, il suffit que deux états candidats se tiennent dans
+ * ces 6 ulp pour que les deux recherches bifurquent — sans qu'aucune ait tort.
+ *
+ * Exiger l'égalité là serait exiger que V8 et la libm de Rust rendent le même bit
+ * sur une transcendante. `check-network.mjs` borne déjà cet écart ; ce qui reste
+ * ici n'est pas mesurable autrement, donc on le **compte et on l'affiche** plutôt
+ * que de faire semblant de le garder.
  *
  * ## Régénérer la référence
  *
@@ -108,6 +126,7 @@ const shape = (plan) =>
 
 let matched = 0;
 let acted = 0;
+let agreed = 0;
 const failures = [];
 
 for (const [at, testCase] of fixture.cases.entries()) {
@@ -153,12 +172,16 @@ for (const [at, testCase] of fixture.cases.entries()) {
   for (const [label, value, expected] of [
     ['myope', myopic, testCase.myopic],
     ['sonde', linearProbe(colors), testCase.probe],
-    ['champion', (census) => evaluate(network, featuresOf(census, colors, economy)), testCase.plan],
   ]) {
     const theirs = shape(expected);
-    if (shape(run(value)) === theirs) matched += 1;
-    else failures.push({ at, label, mine: shape(run(value)), theirs });
+    const mine = shape(run(value));
+    if (mine === theirs) matched += 1;
+    else failures.push({ at, label, mine, theirs });
   }
+
+  // Observé, pas exigé — voir l'en-tête.
+  const champion = run((census) => evaluate(network, featuresOf(census, colors, economy)));
+  if (shape(champion) === shape(testCase.plan)) agreed += 1;
 
   const actions =
     testCase.plan.crossings.length +
@@ -174,7 +197,12 @@ for (const [at, testCase] of fixture.cases.entries()) {
 }
 
 console.log(
-  `${matched}/${fixture.cases.length * 3} plans identiques · ${acted} cas non vides`
+  `${matched}/${fixture.cases.length * 2} plans identiques (myope, sonde) · ` +
+    `${acted} cas non vides`
+);
+console.log(
+  `${agreed}/${fixture.cases.length} avec le champion — observé, non exigé : ` +
+    `\`log1p\` et \`tanh\` s'écartent de 6 ulp entre les deux libm`
 );
 for (const failure of failures.slice(0, 3)) {
   console.error(`\ncas ${failure.at} (${failure.label})\n  portage : ${failure.mine}\n  rust    : ${failure.theirs}`);

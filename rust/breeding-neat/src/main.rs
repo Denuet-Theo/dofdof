@@ -391,6 +391,139 @@ const HALL_SIZE: usize = 16;
 /// Combien de temps entre deux points de reprise, en secondes.
 const SAVE_EVERY_SECONDS: f64 = 600.0;
 
+/// Combien de graines de départage la sonde de généralisation emploie.
+///
+/// Quarante et non cent : elle tourne à chaque sauvegarde, sur douze espèces et
+/// trois départs, soit 1 440 parties. À la cadence observée c'est une douzaine de
+/// secondes toutes les dix minutes — deux pour cent du budget. Cent graines
+/// tripleraient la facture pour resserrer un intervalle qu'on lit de toute façon
+/// comme une tendance, pas comme un classement.
+const PROBE_SEEDS: usize = 40;
+
+/// Les trois départs sur lesquels on observe une politique.
+///
+/// L'entraînement se fait sur le **chargé** et rien d'autre : c'est la
+/// distribution qui produit les 97,89 M, et la remplacer parierait la manche sur
+/// une distribution qu'on ne comprend pas encore. Les deux autres sont
+/// **observés**, pas appris — on regarde, à chaque sauvegarde, si une espèce sait
+/// faire ailleurs que chez elle.
+///
+/// - `chargé` — le tirage habituel, poids nul sur la gen 1 ;
+/// - `élargi` — le même avec la gen 1 admise, donc un mélange ;
+/// - `frais` — vingt gen 1 anonymes et fertiles, le premier jour d'un éleveur.
+///
+/// Mesuré sur le champion de la manche précédente : 97,89 M sur le chargé, 0,01 M
+/// sur le frais, quarante-sept croisements en trente cycles. Il ne sait pas
+/// démarrer, et rien dans son entraînement ne le lui a demandé.
+fn starts(base: &TreadmillConfig) -> [(&'static str, TreadmillConfig); 3] {
+    [
+        ("chargé", base.clone()),
+        (
+            "élargi",
+            TreadmillConfig {
+                weights: [0, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+                ..base.clone()
+            },
+        ),
+        (
+            "frais",
+            TreadmillConfig {
+                mounts: 20,
+                weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                fresh: true,
+                ..base.clone()
+            },
+        ),
+    ]
+}
+
+/// Ce que chaque espèce donne sur les trois départs, à un instant de la manche.
+///
+/// Écrit en JSON ligne à ligne dans `generalisation.jsonl` **en plus** d'être
+/// affiché : une tendance sur trois heures ne se lit pas dans un terminal qui
+/// défile, et c'est une tendance qu'on cherche — le moment où une espèce commence
+/// à savoir démarrer, s'il vient.
+fn probe_generalisation(
+    catalog: &Catalog,
+    economy: &Economy,
+    base: &TreadmillConfig,
+    survivors: &[(usize, Genome, f64)],
+    generation: usize,
+    elapsed: f64,
+) {
+    // Un candidat par espèce : `survivors` en porte trois, et les deux autres sont
+    // des quasi-clones qui ne diraient rien de plus.
+    let mut best: Vec<(usize, &Genome)> = Vec::new();
+    for (species_of, genome, _) in survivors {
+        if !best.iter().any(|(seen, _)| seen == species_of) {
+            best.push((*species_of, genome));
+        }
+    }
+    best.truncate(12);
+    if best.is_empty() {
+        return;
+    }
+
+    let seeds: Vec<u32> = VALIDATION_SEEDS.take(PROBE_SEEDS).collect();
+    let configs = starts(base);
+    let rows: Vec<(usize, Vec<f64>)> = best
+        .par_iter()
+        .map(|(species_of, genome)| {
+            let network = Network::compile(genome);
+            let scores = configs
+                .iter()
+                .map(|(_, config)| {
+                    seeds
+                        .iter()
+                        .map(|&seed| {
+                            let mut policy =
+                                Searching::with_iterations(NetValue(&network), 600)
+                                    .without_sacrifices()
+                                    .with_strategies(genome.strategies);
+                            play_treadmill(catalog, economy, &mut policy, seed, config).kamas
+                        })
+                        .sum::<f64>()
+                        / seeds.len() as f64
+                })
+                .collect();
+            (*species_of, scores)
+        })
+        .collect();
+
+    println!(
+        "  --- généralisation (gén {generation}, {} graines) ---",
+        seeds.len()
+    );
+    println!("  {:>7} {:>11} {:>11} {:>11}", "espèce", "chargé", "élargi", "frais");
+    for (species_of, scores) in &rows {
+        println!(
+            "  {species_of:>7} {:>11} {:>11} {:>11}",
+            millions(scores[0]),
+            millions(scores[1]),
+            millions(scores[2])
+        );
+    }
+
+    let line = serde_json::json!({
+        "generation": generation,
+        "seconds": elapsed,
+        "species": rows.iter().map(|(species_of, scores)| serde_json::json!({
+            "species": species_of,
+            "charge": scores[0],
+            "elargi": scores[1],
+            "frais": scores[2],
+        })).collect::<Vec<_>>(),
+    });
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("generalisation.jsonl")
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
 /// Un point de reprise, écrit **pendant** la manche et non seulement à la fin.
 ///
 /// Une manche de six heures interrompue à la cinquième ne rendait rien du tout :
@@ -676,6 +809,14 @@ fn main() {
     };
     let mut species: Vec<Species> = Vec::new();
 
+    // Le tapis tel que la fitness le voit — la sonde de généralisation part de
+    // celui-là et n'en change que le tirage de départ.
+    let config_treadmill = TreadmillConfig {
+        cycles: options.cycles,
+        mounts: options.mounts,
+        ..Default::default()
+    };
+
     let started = Instant::now();
     let budget = options.minutes * 60.0;
     let mut generation = 0usize;
@@ -722,19 +863,6 @@ fn main() {
         // génération et un unique rescapé.
         remember(&mut hall, &population[best_at], scores[best_at]);
 
-        // Un point de reprise en cours de route. Sans lui, une manche de six
-        // heures interrompue à la cinquième ne rend rien.
-        if last_saved.elapsed().as_secs_f64() >= SAVE_EVERY_SECONDS {
-            write_checkpoint(
-                &population,
-                &innovations,
-                threshold,
-                resumed_from + generation,
-                champion.as_ref(),
-                &hall,
-            );
-            last_saved = Instant::now();
-        }
 
         // --- spéciation ----------------------------------------------------
         for entry in &mut species {
@@ -899,6 +1027,33 @@ fn main() {
 
         population = next;
         generation += 1;
+
+        // Un point de reprise en cours de route — sans lui, une manche de six
+        // heures interrompue à la cinquième ne rend rien — et, à la même cadence,
+        // la sonde de généralisation. Les deux sont ici plutôt qu'en tête de boucle
+        // parce que `survivors` vient d'être recalculé : la sonde regarde donc les
+        // espèces de **cette** génération et non de la précédente.
+        if last_saved.elapsed().as_secs_f64() >= SAVE_EVERY_SECONDS {
+            write_checkpoint(
+                &population,
+                &innovations,
+                threshold,
+                resumed_from + generation,
+                champion.as_ref(),
+                &hall,
+            );
+            if options.env == Env::Treadmill {
+                probe_generalisation(
+                    &catalog,
+                    &economy,
+                    &config_treadmill,
+                    &survivors,
+                    resumed_from + generation,
+                    started.elapsed().as_secs_f64(),
+                );
+            }
+            last_saved = Instant::now();
+        }
 
         let mut finite: Vec<f64> = scores.iter().copied().filter(|s| s.is_finite()).collect();
         let (_, median, _) = if finite.is_empty() {

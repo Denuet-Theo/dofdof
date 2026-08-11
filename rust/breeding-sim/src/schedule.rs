@@ -319,9 +319,170 @@ fn makespan(
     tasks: &[Task; TASKS],
     rate: &impl Fn(usize) -> f64,
 ) -> (f64, [f64; TASKS], [f64; TASKS]) {
-    let blocking = makespan_blocking(tasks, rate);
-    let preemptive = makespan_preemptive(tasks, rate);
-    if preemptive.0 <= blocking.0 { preemptive } else { blocking }
+    let mut best = makespan_blocking(tasks, rate);
+    for other in [makespan_preemptive(tasks, rate), makespan_shared(tasks, rate)] {
+        if other.0 < best.0 - 1e-9 {
+            best = other;
+        }
+    }
+    best
+}
+
+/// L'ordonnancement d'un cycle avec **partage de capacité** : Muntz–Coffman.
+///
+/// Les deux autres heuristiques placent des tâches ; celle-ci répartit du débit.
+/// Quand deux tâches prêtes se disputent une seule place, les servir l'une après
+/// l'autre laisse la seconde place chômer à la fin — alors que les faire avancer
+/// **ensemble à mi-vitesse** les amène à égalité, si bien qu'elles finissent de
+/// front dès qu'une place se libère.
+///
+/// C'est le mainteneur qui l'a vu, et sur un cas où ça se chiffre : « si je coupe
+/// l'Abreuvoir à son milieu et lance le Foudroyeur, quand le Foudroyeur arrive à
+/// son milieu je peux relancer l'Abreuvoir ». Une place libre pendant 2,43 h puis
+/// deux places, pour 5,56 h de travail restant, donne `(5,56 − 2,43) / 2 = 1,57 h`
+/// après la Mangeoire — 8,87 h au lieu de 10,08.
+///
+/// Une part fractionnaire n'est pas une fiction physique : c'est l'alternance que
+/// le jeu autorise, une jauge se mettant en pause et reprenant où elle en était.
+/// À la limite continue, alterner et partager donnent la même date de fin.
+///
+/// Muntz–Coffman est **optimal** pour deux machines préemptives à contraintes de
+/// précédence. Il reste ici une approximation, parce qu'une jauge ne peut pas
+/// porter deux tâches à la fois — une contrainte de ressource que l'algorithme
+/// d'origine ne connaît pas. D'où le garde-fou de `makespan` : on garde la plus
+/// courte des trois, jamais celle-ci par principe.
+fn makespan_shared(
+    tasks: &[Task; TASKS],
+    rate: &impl Fn(usize) -> f64,
+) -> (f64, [f64; TASKS], [f64; TASKS]) {
+    let speed = |index: usize| rate(tasks[index].gauge);
+    let length = |index: usize| {
+        let rate = speed(index);
+        if rate > 0.0 { tasks[index].points / rate } else { 0.0 }
+    };
+
+    let mut height = [0.0f64; TASKS];
+    for index in (0..TASKS).rev() {
+        let mut below = 0.0f64;
+        for successor in 0..TASKS {
+            if let Some((predecessor, _)) = tasks[successor].after {
+                if predecessor == index {
+                    below = below.max(height[successor]);
+                }
+            }
+        }
+        height[index] = length(index) + below;
+    }
+
+    let mut remaining = [0.0f64; TASKS];
+    let mut done = [0.0f64; TASKS];
+    let mut started = [f64::INFINITY; TASKS];
+    let mut finished = [f64::INFINITY; TASKS];
+    for index in 0..TASKS {
+        remaining[index] = if speed(index) > 0.0 { tasks[index].points } else { 0.0 };
+    }
+
+    let mut now = 0.0f64;
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 512, "l'ordonnancement partagé doit converger");
+
+        let mut ready: Vec<usize> = (0..TASKS)
+            .filter(|&index| remaining[index] > 1e-9)
+            .filter(|&index| match tasks[index].after {
+                None => true,
+                Some((predecessor, progress)) => done[predecessor] >= progress - 1e-9,
+            })
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+        ready.sort_by(|&a, &b| {
+            height[b]
+                .partial_cmp(&height[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.cmp(&b))
+        });
+
+        // Une jauge ne porte qu'une tâche : on écarte les doublons avant de
+        // répartir, sans quoi on lui donnerait deux parts qu'elle ne peut pas
+        // servir.
+        let mut eligible: Vec<usize> = Vec::new();
+        for &index in &ready {
+            if !eligible
+                .iter()
+                .any(|&other| tasks[other].gauge == tasks[index].gauge)
+            {
+                eligible.push(index);
+            }
+        }
+
+        // La part de chacun : les plus hautes d'abord, et le palier qui déborde se
+        // partage également ce qui reste.
+        let mut share = [0.0f64; TASKS];
+        let mut free = PARALLEL_SLOTS as f64;
+        let mut at = 0usize;
+        while at < eligible.len() && free > 1e-9 {
+            let mut tier = vec![eligible[at]];
+            while at + tier.len() < eligible.len()
+                && (height[eligible[at + tier.len()]] - height[eligible[at]]).abs() < 1e-9
+            {
+                tier.push(eligible[at + tier.len()]);
+            }
+            let each = (free / tier.len() as f64).min(1.0);
+            for &index in &tier {
+                share[index] = each;
+            }
+            free -= each * tier.len() as f64;
+            at += tier.len();
+        }
+
+        // Le prochain instant utile : une tâche qui finit, ou un seuil franchi.
+        let mut step = f64::INFINITY;
+        for index in 0..TASKS {
+            if share[index] > 1e-9 {
+                step = step.min(remaining[index] / (speed(index) * share[index]));
+            }
+        }
+        for index in 0..TASKS {
+            if remaining[index] <= 1e-9 {
+                continue;
+            }
+            if let Some((predecessor, progress)) = tasks[index].after {
+                if done[predecessor] < progress && share[predecessor] > 1e-9 {
+                    let missing = progress - done[predecessor];
+                    step = step.min(missing / (speed(predecessor) * share[predecessor]));
+                }
+            }
+        }
+        if !step.is_finite() || step <= 0.0 {
+            break;
+        }
+
+        for index in 0..TASKS {
+            if share[index] <= 1e-9 {
+                continue;
+            }
+            if !started[index].is_finite() {
+                started[index] = now;
+            }
+            let served = (step * speed(index) * share[index]).min(remaining[index]);
+            done[index] += served;
+            remaining[index] -= served;
+            if remaining[index] <= 1e-9 {
+                remaining[index] = 0.0;
+                finished[index] = now + step;
+            }
+        }
+        now += step;
+    }
+
+    let total = finished
+        .iter()
+        .filter(|end| end.is_finite())
+        .fold(0.0f64, |longest, &end| longest.max(end));
+    (total, started, finished)
 }
 
 /// L'ordonnancement d'un cycle, **préemptif**.

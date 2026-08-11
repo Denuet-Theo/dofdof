@@ -369,6 +369,30 @@ export const packLanes = (events: TimelineEvent[]): Map<string, number> => {
 export const nextAction = (plan: TimelinePlan, elapsed: number): PlacedEvent | null =>
   allEvents(plan).find((event) => isActionable(event.kind) && event.at >= elapsed) ?? null;
 
+/**
+ * Les instants où **ce qui tourne change** : un début ou une fin de jauge.
+ *
+ * C'est ce qui demande une présence, et ce n'est pas la même chose que l'agenda.
+ * L'agenda liste les gestes — recharger, récupérer, accoupler ; ceci liste les
+ * bascules, y compris celle qui consiste à déplacer une monture d'une jauge vers
+ * la suivante, laquelle n'est un « geste » nulle part et se rate pourtant.
+ *
+ * Les deux bornes et pas seulement les débuts : une jauge qui s'arrête libère une
+ * place, et c'est l'instant où l'on a quelque chose à y mettre. Depuis que
+ * l'ordonnanceur sait interrompre une jauge et la reprendre, une même jauge peut
+ * en produire plusieurs — c'est voulu, ce sont bien autant de passages devant
+ * l'enclos.
+ */
+export const gaugeChanges = (plan: TimelinePlan): number[] => {
+  const instants = new Set<number>();
+  for (const event of allEvents(plan)) {
+    if (event.kind !== 'gauge') continue;
+    instants.add(event.at);
+    if (event.duration > 0) instants.add(event.at + event.duration);
+  }
+  return [...instants].sort((a, b) => a - b);
+};
+
 /** Jusqu'où le plan porte : son horizon déclaré, ou son dernier événement. */
 export const planHorizon = (plan: TimelinePlan): number =>
   plan.horizon ??

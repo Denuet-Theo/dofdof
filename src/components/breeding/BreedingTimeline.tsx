@@ -8,6 +8,8 @@ import {
   Egg,
   Fuel,
   Heart,
+  Bell,
+  BellOff,
   Pause,
   Play,
   RotateCcw,
@@ -24,6 +26,7 @@ import {
   elapsedSeconds,
   formatCountdown,
   formatWallClock,
+  gaugeChanges,
   inRibbon,
   isPaused,
   nextAction,
@@ -44,6 +47,7 @@ import {
   type ModelPlan,
 } from '@/lib/dofus/breeding/model-plan';
 import CopyableText from '@/components/ui/CopyableText';
+import { chime, unlock } from '@/lib/dofus/breeding/alarm';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { StablePlan } from '@/lib/dofus/breeding/policy';
 import type { Individual } from '@/lib/dofus/breeding/stable';
@@ -965,6 +969,21 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
    */
   const [fromModel, setFromModel] = useState<ModelPlan | null>(null);
 
+  /**
+   * Le rappel sonore, une minute avant qu'une jauge change.
+   *
+   * Éteint par défaut, et pas seulement par politesse : aucun navigateur ne laisse
+   * partir un son avant un geste de l'utilisateur, donc un réglage « allumé » au
+   * chargement serait un mensonge — le premier rappel ne sonnerait pas.
+   */
+  const [alerting, setAlerting] = useState(false);
+  /**
+   * Le dernier changement annoncé, pour ne pas sonner à chaque battement
+   * d'horloge. Un instant du plan, en secondes — donc stable d'un rendu à l'autre,
+   * là où une date le serait moins.
+   */
+  const rung = useRef<number | null>(null);
+
   useEffect(() => {
     let current = true;
     modelPlan(enclosCount).then((loaded) => {
@@ -976,6 +995,30 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
       current = false;
     };
   }, [enclosCount]);
+
+  /**
+   * Les bascules de jauge du plan courant, calculées une fois.
+   *
+   * Elles ne bougent qu'avec le plan, alors que l'horloge bat chaque seconde :
+   * les recalculer à chaque tic ferait parcourir toutes les pistes soixante fois
+   * par minute pour un résultat identique.
+   */
+  const changes = useMemo(() => (plan ? gaugeChanges(plan) : []), [plan]);
+
+  useEffect(() => {
+    if (!alerting || !clock || now === null || isPaused(clock)) return;
+    const elapsed = elapsedSeconds(clock, now);
+    // Le prochain changement à venir, et la fenêtre d'une minute avant lui. La
+    // borne basse évite de sonner pour un changement qu'on a déjà dépassé quand
+    // l'onglet revient au premier plan après une longue absence.
+    const next = changes.find((at) => at > elapsed);
+    if (next === undefined) return;
+    const remaining = next - elapsed;
+    if (remaining > 60 || remaining < 0) return;
+    if (rung.current === next) return;
+    rung.current = next;
+    chime();
+  }, [alerting, changes, clock, now]);
 
   // `now` reste nul jusqu'au montage — voir `useBreedingTimeline` sur l'écart
   // d'hydratation qu'un `Date.now()` initial produirait.
@@ -1051,6 +1094,33 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
           <span className="text-[11px] text-dark-500 tabular-nums">
             {paused ? 'en pause' : `démarrée il y a ${formatCountdown(elapsed)}`}
           </span>
+          {/* Le rappel sonore. L'activation **est** le geste que le navigateur
+              exige avant tout son : on réveille le contexte audio là, pas au
+              premier rappel, sinon celui-là serait muet. */}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              if (alerting) {
+                setAlerting(false);
+                return;
+              }
+              const ready = await unlock();
+              setAlerting(ready);
+              // Sonner une fois à l'activation : c'est le seul moyen de savoir que
+              // le son passe, et à quel volume, avant de compter dessus.
+              if (ready) chime();
+            }}
+            title={
+              alerting
+                ? 'Rappel sonore actif : deux notes une minute avant chaque changement de jauge.'
+                : 'Sonner une minute avant chaque changement de jauge.'
+            }
+          >
+            {alerting ? <Bell size={13} /> : <BellOff size={13} />}
+            {alerting ? 'Rappel actif' : 'Rappel'}
+          </Button>
+
           {/* Le seul bouton qui compte, donc le seul en teinte pleine. */}
           <Button size="sm" variant={paused ? 'primary' : 'secondary'} onClick={paused ? resume : pause}>
             {paused ? <Play size={13} /> : <Pause size={13} />}

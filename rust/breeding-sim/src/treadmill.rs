@@ -151,6 +151,14 @@ pub struct TreadmillConfig {
     /// autres. La tirer en plus donnerait au départ une manne qui n'existe nulle
     /// part ailleurs dans l'épisode.
     pub weights: [usize; 11],
+    /// Les montures tirées arrivent **fertiles et non fécondes**.
+    ///
+    /// Le tirage ordinaire rend un tiers de fertiles, un tiers de fécondes et un
+    /// tiers de stériles, ce qui décrit une écurie déjà en marche. Ce n'est pas ce
+    /// qu'on achète : une gen 1 prise à l'hôtel de vente arrive entière, et un
+    /// **départ frais** est vingt de celles-là. Un tiers de stériles d'entrée de jeu
+    /// changerait la question posée.
+    pub fresh: bool,
 }
 
 impl Default for TreadmillConfig {
@@ -174,6 +182,7 @@ impl Default for TreadmillConfig {
             overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+            fresh: false,
         }
     }
 }
@@ -247,8 +256,14 @@ pub struct TreadmillOutcome {
 /// couleur à chaque tour — et les facturer reviendrait à taxer ce qu'on injecte
 /// soi-même. Elles sont aussi ce qu'on remplace le plus facilement en jeu : sans
 /// généalogie, elles sont interchangeables.
+/// L'ascendance est lue **canoniquement** : un Ébène né de deux Ébène ne porte
+/// aucune généalogie utile, et le jeu ne le distingue pas d'un Ébène acheté. Le
+/// tester littéralement faisait payer le plafond pour une monture qu'on remplace
+/// d'un clic à l'hôtel de vente — et la recopie est justement ce que la politique
+/// produit en masse, si bien que la taxe portait surtout sur elle.
 fn chargeable(catalog: &Catalog, mount: &Mount) -> bool {
-    !(mount.parents.is_none() && catalog.generation(mount.color) == 1)
+    let anonymous = crate::pairing::canonical_parents(mount.color, mount.parents).is_none();
+    !(anonymous && catalog.generation(mount.color) == 1)
 }
 
 /// Fait tourner un épisode et rend ce qu'il a produit.
@@ -481,7 +496,11 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         } else {
             Some(recipes[index_in(rng, recipes.len())])
         };
-        let (fertile, cycled) = draw_state(rng);
+        let (fertile, cycled) = if config.fresh {
+            (true, false)
+        } else {
+            draw_state(rng)
+        };
         stable.push(Mount {
             color,
             sex: draw_sex(rng),

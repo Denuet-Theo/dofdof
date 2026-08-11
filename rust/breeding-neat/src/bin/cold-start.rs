@@ -135,11 +135,17 @@ fn main() {
         .and_then(|arg| arg.parse().ok())
         .unwrap_or(TreadmillConfig::default().cycles);
     let base = TreadmillConfig { cycles, ..TreadmillConfig::default() };
-    // L'écurie de tout le monde au premier jour : du vrac de gen 1, deux ou trois
-    // lignées entamées, rien au-delà. Les poids sont relatifs, seule leur forme
-    // compte.
-    let beginner = TreadmillConfig {
-        weights: [0, 40, 6, 2, 0, 0, 0, 0, 0, 0, 0],
+    // Un **départ frais**, tel qu'il se présente en jeu : vingt gen 1 anonymes,
+    // achetées donc fertiles, et rien d'autre. Ni gen 2 entamée, ni stérile, ni
+    // féconde — c'est le premier jour.
+    //
+    // La première version de cette mesure en tirait 250 dont un tiers de stériles,
+    // à hauteur exacte du plafond d'écurie : le débordement se payait dès la
+    // première naissance et la question posée n'était pas la bonne.
+    let fresh = TreadmillConfig {
+        mounts: 20,
+        weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        fresh: true,
         ..base
     };
 
@@ -156,7 +162,7 @@ fn main() {
     println!("{}", "-".repeat(72));
 
     let mut summary: Vec<(String, f64, f64)> = Vec::new();
-    for (label, config) in [("entraînement", &base), ("débutant", &beginner)] {
+    for (label, config) in [("entraînement", &base), ("départ frais", &fresh)] {
         let mut scores = Vec::new();
         for (name, learned) in [("NEAT", true), ("myope", false)] {
             let row = measure(&catalog, &economy, config, &|| {

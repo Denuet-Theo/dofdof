@@ -104,7 +104,7 @@ for (const color of colors.filter((c) => c.generation === 3).slice(0, 2)) {
 const stable = { bulk, individuals };
 const price = (generation) => Math.round(1000 * 2 ** (generation - 1));
 const market = {
-  valueOf: (colorId) => {
+  marketPrice: (colorId) => {
     const color = colors.find((entry) => entry.id === colorId);
     return color ? price(color.generation) : 0;
   },

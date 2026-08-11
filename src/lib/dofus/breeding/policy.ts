@@ -76,11 +76,14 @@ export const TRAINING_SCALES = {
 /** Ce que la politique réclame au marché du jour, tel que l'app le connaît. */
 export type BreederMarket = {
   /**
-   * Prix HDV du poulain, couleur par couleur — ce qu'une monture vaut si on la
-   * liquide. Une couleur sans prix saisi vaut zéro, donc la politique ne
-   * cherchera pas à la produire : c'est honnête, mais ça vaut d'être su.
+   * Prix HDV du poulain, couleur par couleur. Une couleur sans prix saisi vaut
+   * zéro, donc la politique ne cherchera pas à la produire : c'est honnête, mais
+   * ça vaut d'être su.
+   *
+   * Ce n'est **pas** ce qu'une monture vaut : voir `liquidationValue`, qui prend
+   * le plus haut entre ce prix et l'extraction en ambre.
    */
-  valueOf: (colorId: string) => number;
+  marketPrice: (colorId: string) => number;
   /** Ce qu'un géneton rapporte, via le meilleur parchemin d'échange. */
   genetonValue: number;
   /** Prix d'une unité de la ressource de sacrifice — l'ambre, pour le muldo. */
@@ -88,6 +91,9 @@ export type BreederMarket = {
   /** Prix d'une Optimakina par génération visée, index 0 à 10. */
   optimakina: number[];
 };
+
+const generationsOf = (colors: BreedingColor[]) =>
+  new Map(colors.map((color) => [color.id, color.generation]));
 
 /**
  * Le prix d'une gen 1 anonyme.
@@ -98,10 +104,10 @@ export type BreederMarket = {
  * minimum ferait paraître tous les achats aussi bon marché que la couleur la
  * moins chère, y compris ceux qui portent sur une autre.
  */
-const starterPriceOf = (colors: BreedingColor[], valueOf: (colorId: string) => number): number => {
+const starterPriceOf = (colors: BreedingColor[], marketPrice: (colorId: string) => number): number => {
   const prices = colors
     .filter((color) => color.generation === 1)
-    .map((color) => valueOf(color.id))
+    .map((color) => marketPrice(color.id))
     .filter((price) => price > 0)
     .sort((a, b) => a - b);
   if (prices.length === 0) return 0;
@@ -126,6 +132,41 @@ const topValueOf = (colors: BreedingColor[], valueOf: (colorId: string) => numbe
   return prices.reduce((sum, price) => sum + price, 0) / prices.length;
 };
 
+/**
+ * Ce qu'une monture vaut quand on s'en sépare : **le plus haut** entre son prix à
+ * l'hôtel de vente et ce que son extraction en ambre rend.
+ *
+ * On ne fait pas les deux — extraire détruit la monture, vendre aussi — donc c'est
+ * un maximum et jamais une somme. L'app ne lisait que le marché, ce qui sous-évalue
+ * les rangs intermédiaires : une gen 5 rend cinq unités d'ambre, soit cent mille
+ * kamas au cours ordinaire, quand son prix de poulain est souvent bien moindre.
+ *
+ * ## La gen 1 reste à zéro, et c'est délibéré
+ *
+ * Le modèle la compte pour rien — `value_at_generation` rend `0` en deçà de la
+ * gen 2 — et le réseau a été noté sur cette convention. Une écurie d'éleveur porte
+ * surtout du vrac de gen 1 : leur donner leur prix de poulain gonflerait l'entrée
+ * `LIQUIDATION` d'un facteur que le réseau n'a jamais vu, sur le rang le plus
+ * peuplé. On corrige ce qu'on peut corriger sans déplacer l'échelle.
+ *
+ * ## Côté Rust, ce maximum est sans effet
+ *
+ * Le modèle ne connaît pas de prix de marché sous la gen 10, donc `max(ambre,
+ * marché)` y vaut toujours l'ambre. Les deux côtés disent donc la même chose dès
+ * que l'app applique la même règle — et le jour où le Rust portera les cinquante
+ * prix intermédiaires, la règle sera déjà la bonne des deux côtés.
+ */
+export const liquidationValue = (
+  market: BreederMarket,
+  generations: Map<string, number>,
+  colorId: string
+): number => {
+  const generation = generations.get(colorId) ?? 1;
+  if (generation <= 1) return 0;
+  const amber = generation * market.amberPerGeneration;
+  return Math.max(market.marketPrice(colorId), amber);
+};
+
 /** Assemble la vue du marché que l'encodage réclame. */
 export const economyView = (colors: BreedingColor[], market: BreederMarket): EconomyView => ({
   startingKamas: TRAINING_SCALES.startingKamas,
@@ -133,12 +174,12 @@ export const economyView = (colors: BreedingColor[], market: BreederMarket): Eco
   amberRange: TRAINING_SCALES.amberRange,
   genetonValue: market.genetonValue,
   genetonRange: TRAINING_SCALES.genetonRange,
-  topValue: topValueOf(colors, market.valueOf),
+  topValue: topValueOf(colors, (colorId) => market.marketPrice(colorId)),
   topValueRange: TRAINING_SCALES.topValueRange,
-  valueOf: market.valueOf,
+  valueOf: (colorId) => liquidationValue(market, generationsOf(colors), colorId),
   optimakina: market.optimakina,
   optimakinaBonus: TRAINING_SCALES.optimakinaBonus,
-  starterPrice: starterPriceOf(colors, market.valueOf),
+  starterPrice: starterPriceOf(colors, market.marketPrice),
 });
 
 /* --------------------------------------------------------------- le plan -- */

@@ -379,7 +379,9 @@ const BreedingPage = () => {
       stable,
       colors,
       market: {
-        valueOf: (colorId) => level0.get(colorId) ?? 0,
+        // Le prix de vente, pas la valeur : `liquidationValue` prend le plus haut
+        // entre lui et l'extraction en ambre, parce qu'on ne fait pas les deux.
+        marketPrice: (colorId: string) => level0.get(colorId) ?? 0,
         genetonValue: genetonValuation?.valuePerGeneton ?? 0,
         amberPerGeneration: sacrificePrice,
         optimakina,

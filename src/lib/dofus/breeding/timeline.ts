@@ -198,6 +198,24 @@ export const RIBBON_SECONDS = LEAD_IN_SECONDS + WINDOW_SECONDS;
 export type TimelineClock = {
   /** Départ du plan, en millisecondes epoch. */
   startedAt: number;
+  /**
+   * L'horloge propre d'une piste, quand elle en a une.
+   *
+   * Le parc ne se charge pas d'un bloc : le temps de nommer les poulains et de
+   * chercher les montures dans le coffre, le premier enclos a une heure d'avance
+   * sur le dernier.
+   *
+   * Il ne s'arrête pas d'un bloc non plus, et la raison est mécanique. Le Baffeur
+   * et le Caresseur portent la **sérénité**, qui ouvre et ferme les fenêtres des
+   * autres jauges — une jauge hors de sa fenêtre s'arrête net au lieu de ralentir.
+   * La Mangeoire occupe une des deux places. Un enclos qui attend l'une de ces
+   * trois-là ne progressera plus sans l'éleveur, donc son compteur doit s'arrêter
+   * avec lui. L'Abreuvoir, le Foudroyeur et la Dragofesse vont au bout seuls : cet
+   * enclos-là peut tourner pendant qu'on dort.
+   *
+   * Une piste absente suit l'horloge du plan.
+   */
+  tracks?: Record<string, { startedAt: number; pausedAt: number | null; pausedSeconds: number }>;
   /** Instant de la pause en cours, ou `null` si la timeline tourne. */
   pausedAt: number | null;
   /** Cumul des pauses **terminées**, en secondes. La pause en cours n'y est pas. */
@@ -213,6 +231,55 @@ export const isPaused = (clock: TimelineClock) => clock.pausedAt !== null;
  * arrêtée, et tout le reste — comptes à rebours, curseur, fenêtre — en découle
  * sans avoir à connaître l'état de pause.
  */
+/**
+ * Le temps écoulé **pour une piste**, qui peut avoir son propre départ.
+ *
+ * La pause, elle, reste globale : on ne quitte pas le jeu enclos par enclos, et
+ * décompter les pauses piste par piste demanderait de savoir laquelle tournait
+ * quand — une complication pour une distinction qui n'existe pas.
+ */
+export const elapsedFor = (clock: TimelineClock, trackId: string, now: number): number => {
+  const own = clock.tracks?.[trackId];
+  if (!own) return elapsedSeconds(clock, now);
+  const stopped = own.pausedAt ?? now;
+  return Math.max(0, (stopped - own.startedAt) / 1000 - own.pausedSeconds);
+};
+
+/** Cette piste-là est-elle arrêtée ? À défaut d'horloge propre, celle du plan. */
+export const isTrackPaused = (clock: TimelineClock, trackId: string): boolean =>
+  (clock.tracks?.[trackId]?.pausedAt ?? clock.pausedAt) !== null;
+
+/**
+ * Les jauges qui **réclament l'éleveur** : sans lui, l'enclos ne progresse plus.
+ *
+ * La sérénité ouvre et ferme les fenêtres des autres, et la Mangeoire occupe une
+ * place. Les trois stats, elles, vont au bout toutes seules — un enclos qui n'attend
+ * qu'elles peut tourner la nuit.
+ */
+export const BLOCKING_GAUGES: ReadonlySet<GaugeId> = new Set<GaugeId>([
+  'baffeur',
+  'caresseur',
+  'mangeoire',
+]);
+
+/**
+ * La prochaine jauge qu'une piste attend, si c'en est une qui bloque.
+ *
+ * C'est la question qu'on se pose à l'heure du coucher : est-ce que cet enclos-là
+ * a besoin de moi pour continuer ? On répond avec le plan plutôt qu'en laissant
+ * l'éleveur la reconstituer jauge par jauge.
+ */
+export const blockedOn = (
+  plan: TimelinePlan,
+  trackId: string,
+  elapsed: number
+): GaugeId | null => {
+  const next = allEvents(plan)
+    .filter((event) => event.trackId === trackId && event.gauge && event.at >= elapsed)
+    .sort((a, b) => a.at - b.at)[0];
+  return next?.gauge && BLOCKING_GAUGES.has(next.gauge) ? next.gauge : null;
+};
+
 export const elapsedSeconds = (clock: TimelineClock, now: number): number =>
   Math.max(0, ((clock.pausedAt ?? now) - clock.startedAt) / 1000 - clock.pausedSeconds);
 
@@ -307,21 +374,29 @@ const precedence = (event: { kind: EventKind; trackId: string }) => {
  */
 export const agenda = (
   plan: TimelinePlan,
-  elapsed: number,
+  elapsed: number | ((trackId: string) => number),
   { window = WINDOW_SECONDS, grace = LEAD_IN_SECONDS } = {}
-): PlacedEvent[] =>
-  allEvents(plan).filter(
-    (event) =>
-      isActionable(event.kind) && event.at >= elapsed - grace && event.at <= elapsed + window
-  );
+): PlacedEvent[] => {
+  // Un `elapsed` par piste depuis qu'un enclos peut partir sans les autres : les
+  // offsets d'un événement se comptent depuis le départ de **sa** piste, donc les
+  // comparer tous au même « maintenant » décalerait chaque enclos de son avance.
+  const at = typeof elapsed === 'function' ? elapsed : () => elapsed;
+  return allEvents(plan).filter((event) => {
+    const now = at(event.trackId);
+    return isActionable(event.kind) && event.at >= now - grace && event.at <= now + window;
+  });
+};
 
 /** Ce que le ruban dessine : tout ce qui recoupe la fenêtre, jauges comprises. */
-export const inRibbon = (plan: TimelinePlan, elapsed: number): PlacedEvent[] => {
-  const from = elapsed - LEAD_IN_SECONDS;
-  const to = elapsed + WINDOW_SECONDS;
-  return allEvents(plan).filter(
-    (event) => event.at + event.duration >= from && event.at <= to
-  );
+export const inRibbon = (
+  plan: TimelinePlan,
+  elapsed: number | ((trackId: string) => number)
+): PlacedEvent[] => {
+  const at = typeof elapsed === 'function' ? elapsed : () => elapsed;
+  return allEvents(plan).filter((event) => {
+    const now = at(event.trackId);
+    return event.at + event.duration >= now - LEAD_IN_SECONDS && event.at <= now + WINDOW_SECONDS;
+  });
 };
 
 /**
@@ -366,8 +441,16 @@ export const packLanes = (events: TimelineEvent[]): Map<string, number> => {
 };
 
 /** Le prochain geste, celui qui commande. `null` si la fenêtre est vide. */
-export const nextAction = (plan: TimelinePlan, elapsed: number): PlacedEvent | null =>
-  allEvents(plan).find((event) => isActionable(event.kind) && event.at >= elapsed) ?? null;
+export const nextAction = (
+  plan: TimelinePlan,
+  elapsed: number | ((trackId: string) => number)
+): PlacedEvent | null => {
+  const at = typeof elapsed === 'function' ? elapsed : () => elapsed;
+  return (
+    allEvents(plan).find((event) => isActionable(event.kind) && event.at >= at(event.trackId)) ??
+    null
+  );
+};
 
 /**
  * Les instants où **ce qui tourne change** : un début ou une fin de jauge.

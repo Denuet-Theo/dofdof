@@ -261,6 +261,7 @@ impl Searcher {
             places: 0,
             optimakina_cost: 0,
         };
+        state.census.set_places(0, view.capacity);
         let mut best = value.value(&state.census, catalog, economy);
 
         for _ in 0..self.config.iterations {
@@ -278,6 +279,11 @@ impl Searcher {
             };
 
             mutation.apply(&mut state, &candidates, &fertile, &sterile, economy);
+            // Les places engagées entrent dans le recensement juste avant qu'on le
+            // note. Posées et non suivies : `state.places` en tient déjà le compte,
+            // et deux compteurs à garder d'accord sur des milliers d'annulations
+            // finiraient par diverger sans que rien ne le dise.
+            state.census.set_places(state.places, view.capacity);
             let scored = if feasible(&state, economy, view.unit, strategy, view.capacity) {
                 value.value(&state.census, catalog, economy)
             } else {

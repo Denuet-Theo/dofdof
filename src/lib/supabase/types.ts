@@ -342,6 +342,20 @@ export type BreedingTimeline = {
   paused_at: string | null;
   /** Cumul des pauses **terminées**, en secondes. */
   paused_seconds: number;
+  /**
+   * L'horloge propre de chaque piste, indexée par identifiant.
+   *
+   * Le parc ne se charge pas d'un bloc, et il ne s'arrête pas d'un bloc non plus :
+   * un enclos bloqué sur la sérénité ou la Mangeoire ne progresse plus sans
+   * l'éleveur, là où un enclos qui n'attend qu'une stat va au bout tout seul. On
+   * coupe donc les premiers et on laisse finir les seconds.
+   *
+   * Une piste absente suit l'horloge du plan (migration 20260811173000).
+   */
+  track_clocks: Record<
+    string,
+    { started_at: string; paused_at: string | null; paused_seconds: number }
+  >;
   updated_at: string;
 };
 
@@ -363,6 +377,16 @@ export type UserBreedingMount = {
   color_id: string;
   males: number;
   females: number;
+  /**
+   * Parmi `males`, combien sont **fécondes** : leur cycle est payé, donc elles
+   * s'accouplent sans repasser par l'enclos (migration 20260811140000).
+   *
+   * Un sous-ensemble et non une partition, comme `cycled` l'est pour un individu.
+   * Le vrac l'ignorait, et la politique voyait alors une écurie qui doit son cycle
+   * alors qu'il était payé.
+   */
+  cycled_males: number;
+  cycled_females: number;
   updated_at: string;
 };
 
@@ -469,6 +493,10 @@ export interface Database {
           started_at?: string;
           paused_at?: string | null;
           paused_seconds?: number;
+          track_clocks?: Record<
+            string,
+            { started_at: string; paused_at: string | null; paused_seconds: number }
+          >;
           updated_at?: string;
         };
         Update: {
@@ -476,6 +504,10 @@ export interface Database {
           started_at?: string;
           paused_at?: string | null;
           paused_seconds?: number;
+          track_clocks?: Record<
+            string,
+            { started_at: string; paused_at: string | null; paused_seconds: number }
+          >;
           updated_at?: string;
         };
         Relationships: [];
@@ -488,11 +520,15 @@ export interface Database {
           color_id: string;
           males?: number;
           females?: number;
+          cycled_males?: number;
+          cycled_females?: number;
           updated_at?: string;
         };
         Update: {
           males?: number;
           females?: number;
+          cycled_males?: number;
+          cycled_females?: number;
           updated_at?: string;
         };
         Relationships: [];

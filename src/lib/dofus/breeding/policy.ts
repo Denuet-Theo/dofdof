@@ -46,7 +46,7 @@ import {
 import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
-import type { Individual, Sex, Stable } from './stable';
+import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
  * Les échelles du marché sur lequel le réseau a appris.
@@ -76,11 +76,14 @@ export const TRAINING_SCALES = {
 /** Ce que la politique réclame au marché du jour, tel que l'app le connaît. */
 export type BreederMarket = {
   /**
-   * Prix HDV du poulain, couleur par couleur — ce qu'une monture vaut si on la
-   * liquide. Une couleur sans prix saisi vaut zéro, donc la politique ne
-   * cherchera pas à la produire : c'est honnête, mais ça vaut d'être su.
+   * Prix HDV du poulain, couleur par couleur. Une couleur sans prix saisi vaut
+   * zéro, donc la politique ne cherchera pas à la produire : c'est honnête, mais
+   * ça vaut d'être su.
+   *
+   * Ce n'est **pas** ce qu'une monture vaut : voir `liquidationValue`, qui prend
+   * le plus haut entre ce prix et l'extraction en ambre.
    */
-  valueOf: (colorId: string) => number;
+  marketPrice: (colorId: string) => number;
   /** Ce qu'un géneton rapporte, via le meilleur parchemin d'échange. */
   genetonValue: number;
   /** Prix d'une unité de la ressource de sacrifice — l'ambre, pour le muldo. */
@@ -88,6 +91,9 @@ export type BreederMarket = {
   /** Prix d'une Optimakina par génération visée, index 0 à 10. */
   optimakina: number[];
 };
+
+const generationsOf = (colors: BreedingColor[]) =>
+  new Map(colors.map((color) => [color.id, color.generation]));
 
 /**
  * Le prix d'une gen 1 anonyme.
@@ -98,10 +104,10 @@ export type BreederMarket = {
  * minimum ferait paraître tous les achats aussi bon marché que la couleur la
  * moins chère, y compris ceux qui portent sur une autre.
  */
-const starterPriceOf = (colors: BreedingColor[], valueOf: (colorId: string) => number): number => {
+const starterPriceOf = (colors: BreedingColor[], marketPrice: (colorId: string) => number): number => {
   const prices = colors
     .filter((color) => color.generation === 1)
-    .map((color) => valueOf(color.id))
+    .map((color) => marketPrice(color.id))
     .filter((price) => price > 0)
     .sort((a, b) => a - b);
   if (prices.length === 0) return 0;
@@ -126,6 +132,41 @@ const topValueOf = (colors: BreedingColor[], valueOf: (colorId: string) => numbe
   return prices.reduce((sum, price) => sum + price, 0) / prices.length;
 };
 
+/**
+ * Ce qu'une monture vaut quand on s'en sépare : **le plus haut** entre son prix à
+ * l'hôtel de vente et ce que son extraction en ambre rend.
+ *
+ * On ne fait pas les deux — extraire détruit la monture, vendre aussi — donc c'est
+ * un maximum et jamais une somme. L'app ne lisait que le marché, ce qui sous-évalue
+ * les rangs intermédiaires : une gen 5 rend cinq unités d'ambre, soit cent mille
+ * kamas au cours ordinaire, quand son prix de poulain est souvent bien moindre.
+ *
+ * ## La gen 1 reste à zéro, et c'est délibéré
+ *
+ * Le modèle la compte pour rien — `value_at_generation` rend `0` en deçà de la
+ * gen 2 — et le réseau a été noté sur cette convention. Une écurie d'éleveur porte
+ * surtout du vrac de gen 1 : leur donner leur prix de poulain gonflerait l'entrée
+ * `LIQUIDATION` d'un facteur que le réseau n'a jamais vu, sur le rang le plus
+ * peuplé. On corrige ce qu'on peut corriger sans déplacer l'échelle.
+ *
+ * ## Côté Rust, ce maximum est sans effet
+ *
+ * Le modèle ne connaît pas de prix de marché sous la gen 10, donc `max(ambre,
+ * marché)` y vaut toujours l'ambre. Les deux côtés disent donc la même chose dès
+ * que l'app applique la même règle — et le jour où le Rust portera les cinquante
+ * prix intermédiaires, la règle sera déjà la bonne des deux côtés.
+ */
+export const liquidationValue = (
+  market: BreederMarket,
+  generations: Map<string, number>,
+  colorId: string
+): number => {
+  const generation = generations.get(colorId) ?? 1;
+  if (generation <= 1) return 0;
+  const amber = generation * market.amberPerGeneration;
+  return Math.max(market.marketPrice(colorId), amber);
+};
+
 /** Assemble la vue du marché que l'encodage réclame. */
 export const economyView = (colors: BreedingColor[], market: BreederMarket): EconomyView => ({
   startingKamas: TRAINING_SCALES.startingKamas,
@@ -133,12 +174,12 @@ export const economyView = (colors: BreedingColor[], market: BreederMarket): Eco
   amberRange: TRAINING_SCALES.amberRange,
   genetonValue: market.genetonValue,
   genetonRange: TRAINING_SCALES.genetonRange,
-  topValue: topValueOf(colors, market.valueOf),
+  topValue: topValueOf(colors, (colorId) => market.marketPrice(colorId)),
   topValueRange: TRAINING_SCALES.topValueRange,
-  valueOf: market.valueOf,
+  valueOf: (colorId) => liquidationValue(market, generationsOf(colors), colorId),
   optimakina: market.optimakina,
   optimakinaBonus: TRAINING_SCALES.optimakinaBonus,
-  starterPrice: starterPriceOf(colors, market.valueOf),
+  starterPrice: starterPriceOf(colors, market.marketPrice),
 });
 
 /* --------------------------------------------------------------- le plan -- */
@@ -165,6 +206,14 @@ export type CoupleLine = {
    * et c'est celui qu'on annonçait « gen 2 » à tort.
    */
   targetGeneration: number | null;
+  /**
+   * La couleur la plus probable **au rang visé**, ou `null` sur une recopie.
+   *
+   * Le croisement rend une distribution et non une couleur : celle-ci n'est donc
+   * pas une promesse, c'est ce qu'on écrit dans « viser » faute de mieux. La
+   * saisie de naissance, elle, propose toutes les issues.
+   */
+  targetColorId: string | null;
   /** Places d'enclos que la ligne engage : une par parent qui doit son cycle. */
   places: number;
 };
@@ -179,7 +228,18 @@ export type PullLine = {
 };
 
 export type StablePlan = {
-  /** Les accouplements, groupés par couple identique. */
+  /**
+   * Les accouplements, groupés par couple identique et **les immédiats d'abord**.
+   *
+   * « Immédiat » veut dire zéro place d'enclos : les deux parents sont déjà
+   * féconds, donc l'accouplement est un clic, avec ce qu'on tient. Les faire passer
+   * après une liste d'achats revient à faire attendre ce qui ne demande rien
+   * derrière ce qui demande une course à l'hôtel de vente — c'est déjà la raison
+   * pour laquelle la piste « Écurie » ouvre le ruban de la timeline.
+   *
+   * À coût égal, l'ordre de la recherche est conservé : il n'a pas de sens en
+   * lui-même, et le brasser rendrait deux lectures successives incomparables.
+   */
   couples: CoupleLine[];
   /**
    * Les montures mises en enclos **sans être croisées** : elles en sortent
@@ -340,6 +400,31 @@ const readPlan = (
 ): StablePlan => {
   const bought = (index: number) => plan.purchases[index - mounts.length] ?? null;
 
+  /**
+   * Ce que le couple vise : le rang, et la couleur la plus probable à ce rang.
+   *
+   * `null` sur une recopie — aucune couleur ne nomme le rang, donc il n'y a rien à
+   * viser. La couleur n'est pas une promesse : le croisement rend une distribution,
+   * et c'est la saisie de naissance qui propose toutes les issues.
+   */
+  const aimedAt = (maleMate: Mate | null, femaleMate: Mate | null) => {
+    if (!maleMate || !femaleMate) return null;
+    const delta = pairDelta(
+      maleMate,
+      femaleMate,
+      input.colors,
+      generations,
+      economy,
+      strategy.level,
+      strategy.optimakinaFrom
+    );
+    if (!delta?.namesTarget) return null;
+    const best = delta.births
+      .filter(([colorId]) => (generations.get(colorId) ?? 1) === delta.targetGeneration)
+      .sort((a, b) => b[1] - a[1])[0];
+    return { generation: delta.targetGeneration, colorId: best?.[0] ?? null };
+  };
+
   const couples = new Map<string, CoupleLine>();
   let places = 0;
 
@@ -364,6 +449,7 @@ const readPlan = (
 
     const [male, maleMate, maleCycled] = side(maleIndex, 'M');
     const [female, femaleMate, femaleCycled] = side(femaleIndex, 'F');
+    const aimed = aimedAt(maleMate, femaleMate);
     const cost = (maleCycled ? 0 : 1) + (femaleCycled ? 0 : 1);
     places += cost;
 
@@ -383,19 +469,8 @@ const readPlan = (
       // Le rang visé n'est affichable que si une couleur le nomme : sinon le
       // couple recopie, et l'annoncer serait promettre une génération qui ne
       // viendra pas. `PairDelta` porte le drapeau, on le lui redemande.
-      targetGeneration: (() => {
-        if (!maleMate || !femaleMate) return null;
-        const delta = pairDelta(
-          maleMate,
-          femaleMate,
-          input.colors,
-          generations,
-          economy,
-          strategy.level,
-          strategy.optimakinaFrom
-        );
-        return delta?.namesTarget ? delta.targetGeneration : null;
-      })(),
+      targetGeneration: aimed?.generation ?? null,
+      targetColorId: aimed?.colorId ?? null,
       places: cost,
     });
   }
@@ -432,7 +507,7 @@ const readPlan = (
   }
 
   return {
-    couples: [...couples.values()],
+    couples: [...couples.values()].sort((a, b) => a.places - b.places),
     cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
     clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),
     purchases: [...purchases.values()],
@@ -443,6 +518,74 @@ const readPlan = (
     mounts,
   };
 };
+
+/**
+ * Le plan déroulé en croisements **un par un**, pour la saisie.
+ *
+ * `CoupleLine` regroupe les couples identiques parce qu'on lit une liste ; la
+ * fenêtre d'accouplement, elle, en traite un à la fois — c'est le geste du jeu, et
+ * chaque naissance a sa couleur et son sexe. On déplie donc, en gardant l'ordre du
+ * plan : les immédiats d'abord.
+ *
+ * Un parent acheté porte `mountId: null`, ce qui est exactement ce que la saisie
+ * attend d'une monture de vrac — sans généalogie, interchangeable, sans nom à
+ * chercher.
+ */
+export const couplesToRecord = (plan: StablePlan): Couple[] => {
+  const out: Couple[] = [];
+  for (const line of plan.couples) {
+    for (let index = 0; index < line.count; index += 1) {
+      out.push({
+        // Faute de cible nommée — une recopie — on met la couleur du mâle : le
+        // champ ne sert qu'à intituler la fenêtre, et mentir sur un rang serait
+        // pire que de nommer ce qu'on a sous la main.
+        targetColorId: line.targetColorId ?? line.male.colorId,
+        male: {
+          colorId: line.male.colorId,
+          sex: 'M',
+          mountId: line.male.mountIds[index] ?? null,
+        },
+        female: {
+          colorId: line.female.colorId,
+          sex: 'F',
+          mountId: line.female.mountIds[index] ?? null,
+        },
+      });
+    }
+  }
+  return out;
+};
+
+/**
+ * Les clonages déroulés un par un, chacun avec ses deux stériles.
+ *
+ * Deux stériles ne se clonent qu'à génération affichée égale, et il en sort **une**
+ * monture : c'est celle des deux dont on garde le nom, et l'éleveur choisit
+ * laquelle. D'où une paire et non une monture — la fenêtre doit pouvoir proposer
+ * les deux.
+ */
+export type CloningToRecord = {
+  generation: number;
+  first: string;
+  second: string;
+};
+
+export const cloningsToRecord = (
+  plan: StablePlan,
+  generations: Map<string, number>
+): CloningToRecord[] =>
+  plan.raw.clonings
+    .map(([first, second]) => {
+      const a = plan.mounts[first];
+      const b = plan.mounts[second];
+      if (!a || !b) return null;
+      return {
+        generation: generations.get(a.colorId) ?? 1,
+        first: a.id,
+        second: b.id,
+      };
+    })
+    .filter((entry): entry is CloningToRecord => entry !== null);
 
 /**
  * Ce qu'on va chercher dans l'écurie, une fois pour toute la fournée.

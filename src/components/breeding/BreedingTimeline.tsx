@@ -25,8 +25,11 @@ import {
   agenda,
   elapsedSeconds,
   formatCountdown,
+  elapsedFor,
+  blockedOn,
   formatWallClock,
   gaugeChanges,
+  isTrackPaused,
   inRibbon,
   isPaused,
   nextAction,
@@ -37,7 +40,9 @@ import {
   samplePlan,
   STABLE_TRACK,
   wallClockAt,
+  GAUGE_LABELS,
   type EventKind,
+  type GaugeId,
   type PlacedEvent,
   type TimelinePlan,
 } from '@/lib/dofus/breeding/timeline';
@@ -48,9 +53,17 @@ import {
 } from '@/lib/dofus/breeding/model-plan';
 import CopyableText from '@/components/ui/CopyableText';
 import { chime, unlock } from '@/lib/dofus/breeding/alarm';
+import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
+import BreedingCloneDialog from '@/components/breeding/BreedingCloneDialog';
+import {
+  cloningsToRecord,
+  couplesToRecord,
+  type StablePlan,
+} from '@/lib/dofus/breeding/policy';
+import type { BirthEntry } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
-import type { StablePlan } from '@/lib/dofus/breeding/policy';
 import type { Individual } from '@/lib/dofus/breeding/stable';
+import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -124,6 +137,17 @@ type Props = {
    * `policy.ts`.
    */
   fill?: StablePlan | null;
+  /**
+   * Les couleurs et leurs générations, pour la saisie des naissances et des
+   * clonages — la fenêtre d'accouplement propose les issues, donc elle a besoin du
+   * catalogue et pas seulement des noms.
+   */
+  colors?: BreedingColor[];
+  generations?: Map<string, number>;
+  /** Enregistre les naissances saisies. Sans lui, le parcours n'est que lecture. */
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  /** Enregistre les clonages : deux stériles partent, une fertile entre. */
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -249,14 +273,28 @@ const LABEL_THRESHOLD = 7;
 const Ribbon = ({
   plan,
   elapsed,
+  elapsedOf,
   paused,
 }: {
   plan: TimelinePlan;
+  /** L'avance de la piste la plus avancée : c'est elle qui cadre le ruban. */
   elapsed: number;
+  /** L'avance d'une piste donnée — un enclos lancé plus tard est plus en retard. */
+  elapsedOf: (trackId: string) => number;
   paused: boolean;
 }) => {
   const from = elapsed - LEAD_IN_SECONDS;
   const pct = (seconds: number) => ((seconds - from) / RIBBON_SECONDS) * 100;
+  /**
+   * Un offset de piste, ramené sur l'échelle du ruban.
+   *
+   * Le ruban a **une** abscisse — sinon on ne verrait plus quel enclos travaille
+   * pendant qu'un autre attend — mais chaque piste compte son temps depuis son
+   * propre départ. On décale donc ses événements de son retard sur la piste de
+   * tête, ce qui les remet tous sur la même horloge murale.
+   */
+  const shifted = (trackId: string, seconds: number) =>
+    seconds + (elapsed - elapsedOf(trackId));
   const nowPct = pct(elapsed);
 
   /**
@@ -276,7 +314,7 @@ const Ribbon = ({
   // enclos changent de ligne d'une minute à l'autre et on ne suit plus.
   const rows = useMemo(() => {
     const byTrack = new Map<string, PlacedEvent[]>();
-    for (const event of inRibbon(plan, elapsed)) {
+    for (const event of inRibbon(plan, elapsedOf)) {
       const list = byTrack.get(event.trackId);
       if (list) list.push(event);
       else byTrack.set(event.trackId, [event]);
@@ -300,6 +338,10 @@ const Ribbon = ({
         events: byTrack.get(track.id) ?? [],
       };
     });
+    // `elapsedOf` est recréé à chaque rendu — c'est une fermeture sur `now`, qui
+    // bat chaque seconde — donc le mettre en dépendance reviendrait à ne rien
+    // mémoïser. `elapsed` change au même rythme et suffit à dire quand recalculer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, elapsed, lanes]);
 
   return (
@@ -341,8 +383,11 @@ const Ribbon = ({
                   // seulement une fois terminée — une jauge en cours n'est pas
                   // du passé, elle tourne.
                   const done = event.at + event.duration < elapsed;
-                  const left = clamp(pct(event.at));
-                  const width = clamp(pct(event.at + event.duration)) - left;
+                  // Décalé du retard de sa piste : le ruban a une seule abscisse,
+                  // les pistes ont chacune leur départ.
+                  const at = shifted(event.trackId, event.at);
+                  const left = clamp(pct(at));
+                  const width = clamp(pct(at + event.duration)) - left;
                   const title = [event.label, event.detail].filter(Boolean).join(' — ');
 
                   if (event.duration > 0) {
@@ -575,11 +620,70 @@ const Fill = ({
   fill,
   nameOf,
   individuals = [],
+  colors,
+  generations,
+  onRecordBirths,
+  onRecordClonings,
+  enclosTracks = [],
+  onStartTrack,
+  onToggleTrack,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
+  colors?: BreedingColor[];
+  generations?: Map<string, number>;
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  /** Les enclos du plan, leur état, et ce qui les bloque. */
+  enclosTracks?: {
+    id: string;
+    label: string;
+    started: boolean;
+    paused: boolean;
+    blocked: GaugeId | null;
+  }[];
+  onStartTrack?: (trackId: string) => Promise<void>;
+  onToggleTrack?: (trackId: string) => Promise<void>;
 }) => {
+  /**
+   * Où en est le parcours : accoupler, cloner, charger.
+   *
+   * Trois temps et non trois panneaux ouverts en même temps, parce que c'est
+   * l'ordre dans lequel on joue — on accouple ce qui est déjà fécond, on clone ce
+   * qui ne sert plus, et **ensuite** on charge l'enclos avec ce qui reste. Chaque
+   * phase se fait dans le jeu, une monture à la fois, en cherchant un nom.
+   */
+  const [step, setStep] = useState<'mate' | 'clone' | 'load'>('mate');
+  const [open, setOpen] = useState<'mate' | 'clone' | null>(null);
+
+  const toRecord = useMemo(() => couplesToRecord(fill), [fill]);
+  const toClone = useMemo(
+    () => (generations ? cloningsToRecord(fill, generations) : []),
+    [fill, generations]
+  );
+
+  /**
+   * Ce qu'on met en enclos, **par ordre alphabétique du nom en jeu**.
+   *
+   * Pas dans l'ordre du plan : devant le coffre on cherche des noms, et l'écurie du
+   * jeu les trie. Suivre son tri évite de la reparcourir à chaque monture.
+   */
+  const toLoad = useMemo(() => {
+    const names = new Map<string, number>();
+    const add = (id: string) => {
+      const mount = individuals.find((entry) => entry.id === id);
+      const name = mount?.name ?? ANONYMOUS_NAME;
+      names.set(name, (names.get(name) ?? 0) + 1);
+    };
+    for (const [male, female] of fill.raw.crossings) {
+      const at = (index: number) => fill.mounts[index];
+      if (at(male)) add(at(male).id);
+      if (at(female)) add(at(female).id);
+    }
+    for (const index of fill.raw.cycles) if (fill.mounts[index]) add(fill.mounts[index].id);
+    return [...names].sort(([a], [b]) => a.localeCompare(b, 'fr'));
+  }, [fill, individuals]);
   /**
    * Le nom qu'une monture suivie porte en jeu.
    *
@@ -635,6 +739,44 @@ const Fill = ({
     </span>
   );
 
+  /**
+   * Une ligne de couple. Extraite parce qu'elle sert deux fois — les immédiats et
+   * la fournée — et qu'un copier-coller les aurait laissés diverger.
+   */
+  const couple = (line: StablePlan['couples'][number], key: string) => (
+    <div key={key} className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
+        {line.count} ×
+      </span>
+      {side('♂', line.male.colorId, line.male.mountIds, `m-${key}`)}
+      <span className="text-dark-600">+</span>
+      {side('♀', line.female.colorId, line.female.mountIds, `f-${key}`)}
+      {line.targetGeneration !== null ? (
+        <span
+          className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+          title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
+        >
+          GEN. {line.targetGeneration}
+        </span>
+      ) : (
+        /* Deux Ébène visent bien la génération 2, mais aucune recette ne s'écrit
+           `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et aucun géneton.
+           Le dire, parce que ça change ce qu'on fait de ses places d'enclos. */
+        <span
+          className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
+          title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
+        >
+          RECOPIE
+        </span>
+      )}
+    </div>
+  );
+
+  /** Les couples qui ne coûtent aucune place, ou ceux qui en coûtent. */
+  const couplesOf = (places: 0 | 1) =>
+    fill.couples.filter((line) => (places === 0 ? line.places === 0 : line.places > 0));
+  const immediate = couplesOf(0).reduce((total, line) => total + line.count, 0);
+
   const nothing =
     fill.couples.length === 0 &&
     fill.cycles.length === 0 &&
@@ -646,13 +788,150 @@ const Fill = ({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Heart size={13} className="text-info shrink-0" />
         <span className="text-[11px] text-dark-300">
-          La prochaine fournée — <strong className="text-dark-100">la politique entraînée</strong>
+          Ce que la politique ferait de{' '}
+          <strong className="text-dark-100">cette écurie</strong>
         </span>
         <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
           {fill.raw.crossings.length} accouplement{fill.raw.crossings.length > 1 ? 's' : ''} ·{' '}
           {fill.places}/{fill.capacity} places
         </span>
       </div>
+
+      {/* Le parcours : un bouton qui dit ce qu'il reste à faire et l'ouvre. Les
+          listes en dessous restent lisibles — on veut pouvoir tout voir d'un coup
+          d'œil — mais c'est ce bouton qui mène le geste, phase après phase. */}
+      {!nothing && colors && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+          bg-dark-800/60 border border-dark-600/50">
+          {step === 'mate' && toRecord.length > 0 && (
+            <>
+              <Button size="sm" variant="primary" onClick={() => setOpen('mate')}>
+                <Heart size={13} />
+                {toRecord.length} reproduction{toRecord.length > 1 ? 's' : ''} à faire
+              </Button>
+              <span className="text-[11px] text-dark-500">
+                un couple à la fois, avec le nom du poulain à copier
+              </span>
+            </>
+          )}
+          {(step === 'clone' || (step === 'mate' && toRecord.length === 0)) &&
+            toClone.length > 0 && (
+              <>
+                <Button size="sm" variant="primary" onClick={() => setOpen('clone')}>
+                  <Dna size={13} />
+                  {toClone.length} clonage{toClone.length > 1 ? 's' : ''} à faire
+                </Button>
+                <span className="text-[11px] text-dark-500">
+                  deux stériles, une survivante — c’est toi qui choisis laquelle
+                </span>
+              </>
+            )}
+          {(step === 'load' || (toRecord.length === 0 && toClone.length === 0)) && (
+            <>
+              <span className="text-[11px] font-semibold text-dark-200">
+                {toLoad.reduce((total, [, count]) => total + count, 0)} montures à mettre en
+                enclos
+              </span>
+              <span className="text-[11px] text-dark-500">par ordre alphabétique</span>
+              {/* Un bouton par enclos, et pas un seul pour le parc : on en remplit
+                  un, on le lance, on passe au suivant. Le temps de chercher les
+                  montures dans le coffre, le premier a une heure d'avance sur le
+                  dernier — et c'est cette avance qui décide de l'ordre dans lequel
+                  on ira les récupérer. */}
+              {onStartTrack && enclosTracks.length > 0 && (
+                <span className="w-full flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] text-dark-400">chargé :</span>
+                  {enclosTracks.map(({ id, label, started, paused, blocked }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => (started ? onToggleTrack?.(id) : onStartTrack(id))}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border
+                        transition-all cursor-pointer ${
+                          !started
+                            ? 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50'
+                            : paused
+                              ? 'bg-dark-900/60 text-dark-400 border-dark-600/50 hover:border-kamas/50'
+                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:border-emerald-400/60'
+                        }`}
+                      title={
+                        !started
+                          ? `Lancer le compteur de ${label} — il vient d’être chargé.`
+                          : paused
+                            ? `${label} est arrêté. Le relancer.`
+                            : blocked
+                              ? `${label} attend ${GAUGE_LABELS[blocked]}, qui ne tourne pas sans toi — l’arrêter avant de partir.`
+                              : `${label} tourne. Il n’attend qu’une stat, il ira au bout tout seul.`
+                      }
+                    >
+                      {label}
+                      {started && (paused ? ' ⏸' : blocked ? ' ⚠' : ' ✓')}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </>
+          )}
+          {step !== 'load' && (
+            <button
+              type="button"
+              onClick={() => setStep(step === 'mate' ? 'clone' : 'load')}
+              className="ml-auto text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer"
+            >
+              passer →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* La liste de chargement, quand on y est : des noms à chercher, triés comme
+          l'écurie du jeu les trie. */}
+      {step === 'load' && toLoad.length > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 py-2 rounded-xl
+          bg-emerald-500/5 border border-emerald-500/20">
+          {toLoad.map(([name, count]) => (
+            <span key={name} className="inline-flex items-center gap-1">
+              {name === ANONYMOUS_NAME ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500">
+                  {name}
+                </span>
+              ) : (
+                <CopyableText value={name} title={`Copier « ${name} »`} />
+              )}
+              {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {colors && onRecordBirths && (
+        <BreedingBirthDialog
+          isOpen={open === 'mate'}
+          onClose={() => setOpen(null)}
+          couples={toRecord}
+          individuals={individuals}
+          colors={colors}
+          nameOf={nameOf}
+          onRecord={async (entries) => {
+            await onRecordBirths(entries);
+            setStep('clone');
+          }}
+        />
+      )}
+      {colors && (
+        <BreedingCloneDialog
+          isOpen={open === 'clone'}
+          onClose={() => setOpen(null)}
+          clonings={toClone}
+          individuals={individuals}
+          colors={colors}
+          nameOf={nameOf}
+          onRecord={async (entries) => {
+            await onRecordClonings?.(entries);
+            setStep('load');
+          }}
+        />
+      )}
 
       {nothing ? (
         /* Une fournée vide se dit, plutôt que de laisser un cadre vide qu'on
@@ -670,49 +949,36 @@ const Fill = ({
               qu'elle est suivie — deux montures de même couleur n'ont pas la
               même ascendance, et c'est l'ascendance qui décide de ce que le
               croisement vise. */}
-          {fill.couples.length > 0 && (
+          {couplesOf(0).length > 0 && (
             <div className="space-y-0.5">
-              {fill.couples.map((line, index) => (
-                <div
-                  key={`${line.male.colorId}-${line.female.colorId}-${index}`}
-                  className="flex flex-wrap items-center gap-2 text-xs"
-                >
-                  <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-                    {line.count} ×
-                  </span>
-                  {side('♂', line.male.colorId, line.male.mountIds, `m-${index}`)}
-                  <span className="text-dark-600">+</span>
-                  {side('♀', line.female.colorId, line.female.mountIds, `f-${index}`)}
-                  {line.targetGeneration !== null ? (
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-                      title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
-                    >
-                      GEN. {line.targetGeneration}
-                    </span>
-                  ) : (
-                    /* Le cas qu'on annonçait « gen 2 » à tort. Deux Ébène visent
-                       bien la génération 2, mais aucune recette ne s'écrit
-                       `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et
-                       aucun géneton. Le dire, parce que ça change ce qu'on fait
-                       de ses places d'enclos. */
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
-                      title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
-                    >
-                      RECOPIE
-                    </span>
-                  )}
-                  {line.places === 0 && (
-                    <span
-                      className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold"
-                      title="Les deux parents sont déjà féconds : l'accouplement est un clic, il n'occupe aucune place d'enclos."
-                    >
-                      SANS ENCLOS
-                    </span>
-                  )}
-                </div>
-              ))}
+              {/* Ce qui ne demande rien : les deux parents sont déjà féconds, donc
+                  l'accouplement est un clic. En tête parce que c'est ce qu'on fait
+                  en ouvrant le jeu, avant même de penser à l'enclos ou à l'hôtel de
+                  vente — le ruban range la piste « Écurie » en premier pour la même
+                  raison. */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <span className="text-[11px] font-semibold text-emerald-300">
+                  D’abord, sans enclos
+                </span>
+                <span className="text-[10px] text-dark-500">
+                  {immediate} accouplement{immediate > 1 ? 's' : ''} d’un clic, avec ce que tu as
+                </span>
+              </div>
+              {couplesOf(0).map((line, index) => couple(line, `now-${index}`))}
+            </div>
+          )}
+
+          {couplesOf(1).length > 0 && (
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 pt-1 border-t border-info/15">
+                <span className="text-[11px] font-semibold text-dark-300">
+                  Puis la fournée à charger
+                </span>
+                <span className="text-[10px] text-dark-500">
+                  {fill.places}/{fill.capacity} places d’enclos
+                </span>
+              </div>
+              {couplesOf(1).map((line, index) => couple(line, `load-${index}`))}
             </div>
           )}
 
@@ -955,7 +1221,17 @@ const PlanLoader = ({
 
 /* -------------------------------------------------------------- le panneau - */
 
-const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: Props) => {
+const BreedingTimeline = ({
+  timeline,
+  enclosCount,
+  fill,
+  nameOf,
+  individuals,
+  colors,
+  generations,
+  onRecordBirths,
+  onRecordClonings,
+}: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
   /**
@@ -1076,9 +1352,25 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
 
   const paused = isPaused(clock);
   const elapsed = elapsedSeconds(clock, now);
+  /**
+   * Le temps écoulé **pour une piste**, qui peut avoir son propre départ.
+   *
+   * Un enclos se lance quand il finit d'être chargé, donc le premier a souvent une
+   * heure d'avance sur le dernier. Tout ce qui se lit sur le ruban, dans l'agenda
+   * ou dans le rappel sonore doit passer par ici — sinon chaque enclos serait
+   * affiché avec l'avance d'un autre.
+   */
+  const elapsedOf = (trackId: string) => elapsedFor(clock, trackId, now);
+  /**
+   * L'avance de la piste la plus avancée : c'est elle qui cadre le ruban.
+   *
+   * Prendre l'horloge du plan ferait sortir du cadre les enclos lancés plus tôt,
+   * qui sont pourtant ceux qu'on va récupérer en premier.
+   */
+  const leading = Math.max(elapsed, ...plan.tracks.map((track) => elapsedOf(track.id)));
   const horizon = planHorizon(plan);
-  const upcoming = agenda(plan, elapsed);
-  const next = nextAction(plan, elapsed);
+  const upcoming = agenda(plan, elapsedOf);
+  const next = nextAction(plan, elapsedOf);
   const nextDate = next ? wallClockAt(clock, next.at, now) : null;
   const NextIcon = next ? KIND_ICON[next.kind] : CalendarClock;
   const exhausted = elapsed >= horizon;
@@ -1167,13 +1459,36 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
         </div>
       )}
 
-      <Ribbon plan={plan} elapsed={elapsed} paused={paused} />
+      <Ribbon plan={plan} elapsed={leading} elapsedOf={elapsedOf} paused={paused} />
 
       {/* Entre le ruban et l'agenda : le ruban dit quand l'enclos se recharge,
           l'agenda égrène les gestes, et c'est entre les deux qu'on se demande ce
           qu'on met dedans. Absent quand aucune couleur n'a de plan — il n'y a
           alors rien à charger, et l'annoncer serait inventer une consigne. */}
-      {fill && <Fill fill={fill} nameOf={nameOf} individuals={individuals} />}
+      {fill && (
+        <Fill
+          fill={fill}
+          nameOf={nameOf}
+          individuals={individuals}
+          colors={colors}
+          generations={generations}
+          onRecordBirths={onRecordBirths}
+          onRecordClonings={onRecordClonings}
+          enclosTracks={plan.tracks
+            .filter((track) => track.id.startsWith('enclos'))
+            .map((track) => ({
+              id: track.id,
+              label: track.label,
+              started: clock.tracks?.[track.id] !== undefined,
+              paused: isTrackPaused(clock, track.id),
+              // La jauge qui la bloque, s'il y en a une : c'est la question qu'on
+              // se pose à l'heure du coucher.
+              blocked: blockedOn(plan, track.id, elapsedOf(track.id)),
+            }))}
+          onStartTrack={timeline.startTrack}
+          onToggleTrack={timeline.toggleTrack}
+        />
+      )}
 
       <Agenda events={upcoming} elapsed={elapsed} clock={clock} now={now} />
 

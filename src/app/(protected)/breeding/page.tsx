@@ -119,6 +119,7 @@ const BreedingPage = () => {
     updateIndividual,
     removeIndividual,
     recordBirths,
+    recordClonings,
     saveItemStock,
   } = useBreeding(family, targetCount);
 
@@ -379,7 +380,9 @@ const BreedingPage = () => {
       stable,
       colors,
       market: {
-        valueOf: (colorId) => level0.get(colorId) ?? 0,
+        // Le prix de vente, pas la valeur : `liquidationValue` prend le plus haut
+        // entre lui et l'extraction en ambre, parce qu'on ne fait pas les deux.
+        marketPrice: (colorId: string) => level0.get(colorId) ?? 0,
         genetonValue: genetonValuation?.valuePerGeneton ?? 0,
         amberPerGeneration: sacrificePrice,
         optimakina,
@@ -530,6 +533,14 @@ const BreedingPage = () => {
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.
         individuals={stable.individuals}
+        // Le parcours guidé a besoin du catalogue : la fenêtre d'accouplement
+        // propose les issues possibles, pas seulement des noms.
+        colors={tree?.colors ?? []}
+        generations={
+          new Map((tree?.colors ?? []).map((color) => [color.id, color.generation]))
+        }
+        onRecordBirths={recordBirths}
+        onRecordClonings={recordClonings}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

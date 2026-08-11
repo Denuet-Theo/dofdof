@@ -50,7 +50,13 @@ fn main() {
         // Un solde qui varie d'un cas à l'autre : `KAMAS` est normalisé sur la
         // mise de départ, et le laisser constant ne vérifierait pas la division.
         let kamas = (case as i64 % 7) * 3_000_000;
-        let census = Census::of(&catalog, &economy, &stable, kamas);
+        let mut census = Census::of(&catalog, &economy, &stable, kamas);
+        // Les places engagées : elles ne viennent pas de l'écurie mais de la
+        // fournée en cours, donc il faut les poser ici pour que la référence
+        // exerce l'entrée `PLACES`. Les laisser à zéro la figerait à zéro partout
+        // et ne vérifierait rien de la division.
+        let capacity = 10 + (case as usize % 5) * 10;
+        census.set_places(case as usize % (capacity + 1), capacity);
 
         let mounts: Vec<serde_json::Value> = stable
             .mounts
@@ -68,6 +74,8 @@ fn main() {
 
         cases.push(serde_json::json!({
             "kamas": kamas,
+            "places": case as usize % (10 + (case as usize % 5) * 10 + 1),
+            "capacity": 10 + (case as usize % 5) * 10,
             // Tout ce que l'encodage réclame au marché, pour que le portage n'ait
             // rien à deviner de l'économie qui a produit ces entrées.
             "economy": {

@@ -31,12 +31,15 @@ import type { CloningToRecord } from '@/lib/dofus/breeding/policy';
  * moment du clic — c'est ce qu'on ira chercher devant le coffre, et c'est la raison
  * d'être de cet écran autant que la saisie elle-même.
  *
- * ## Ce qu'il n'enregistre pas
+ * ## Ce qu'il enregistre
  *
- * Rien, pour l'instant. Un clonage consomme deux stériles et rend une fertile, ce
- * que l'écurie devrait refléter — mais la saisie des stériles n'existe pas encore
- * côté vrac, et inventer un enregistrement à moitié juste vaut moins qu'un compteur
- * honnête. `onDone` ne fait donc qu'avancer.
+ * Les deux stériles disparaissent, une fertile prend la place de celle qu'on a
+ * gardée — même couleur, même ascendance, même nom, mais sa reproduction retrouvée.
+ * Pas « une des deux redevient fertile » : un clonage consomme bien **deux**
+ * montures pour en rendre une, et laisser la seconde traîner fausserait le compte.
+ *
+ * Une stérile est toujours une monture suivie — le vrac ne porte que des fertiles,
+ * par construction du type — donc il n'y a jamais rien à deviner.
  */
 
 type Props = {
@@ -48,7 +51,8 @@ type Props = {
   individuals: Individual[];
   colors: BreedingColor[];
   nameOf: (colorId: string) => string;
-  onDone: () => void;
+  /** Enregistre les clonages tranchés : deux stériles partent, une fertile entre. */
+  onRecord: (entries: { keep: string; drop: string }[]) => Promise<void>;
 };
 
 const BreedingCloneDialog = ({
@@ -58,10 +62,11 @@ const BreedingCloneDialog = ({
   individuals,
   colors,
   nameOf,
-  onDone,
+  onRecord,
 }: Props) => {
-  /** Les clonages déjà tranchés, par indice, avec le nom retenu. */
-  const [kept, setKept] = useState<Map<number, string>>(new Map());
+  const [saving, setSaving] = useState(false);
+  /** Les clonages tranchés : l'indice, et **quelle** des deux on garde. */
+  const [kept, setKept] = useState<Map<number, 'first' | 'second'>>(new Map());
 
   const byId = useMemo(
     () => new Map(individuals.map((mount) => [mount.id, mount])),
@@ -93,7 +98,7 @@ const BreedingCloneDialog = ({
     return (
       <button
         type="button"
-        onClick={() => setKept((current) => new Map(current).set(at, mount.name ?? ANONYMOUS_NAME))}
+        onClick={() => setKept((current) => new Map(current).set(at, side === 'left' ? 'first' : 'second'))}
         className={`flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-2xl border
           transition-all cursor-pointer bg-dark-800/60 border-dark-600/50
           hover:border-kamas/50 hover:bg-dark-800 ${side === 'left' ? 'text-left' : 'text-right'}`}
@@ -146,7 +151,11 @@ const BreedingCloneDialog = ({
               l’écurie du jeu :
             </p>
             <div className="flex flex-wrap gap-2">
-              {[...kept.values()].map((name, index) =>
+              {[...kept].map(([index, choice]) => {
+                const entry = clonings[index];
+                const id = choice === 'first' ? entry.first : entry.second;
+                return byId.get(id)?.name ?? ANONYMOUS_NAME;
+              }).map((name, index) =>
                 name === ANONYMOUS_NAME ? (
                   <span
                     key={`${name}-${index}`}
@@ -191,8 +200,18 @@ const BreedingCloneDialog = ({
             size="sm"
             variant={current ? 'secondary' : 'primary'}
             className="ml-auto"
-            onClick={() => {
-              onDone();
+            disabled={saving}
+            onClick={async () => {
+              setSaving(true);
+              await onRecord(
+                [...kept].map(([index, choice]) => {
+                  const entry = clonings[index];
+                  return choice === 'first'
+                    ? { keep: entry.first, drop: entry.second }
+                    : { keep: entry.second, drop: entry.first };
+                })
+              );
+              setSaving(false);
               onClose();
             }}
           >

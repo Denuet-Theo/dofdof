@@ -119,6 +119,7 @@ const BreedingPage = () => {
     updateIndividual,
     removeIndividual,
     recordBirths,
+    recordClonings,
     saveItemStock,
   } = useBreeding(family, targetCount);
 
@@ -539,6 +540,7 @@ const BreedingPage = () => {
           new Map((tree?.colors ?? []).map((color) => [color.id, color.generation]))
         }
         onRecordBirths={recordBirths}
+        onRecordClonings={recordClonings}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

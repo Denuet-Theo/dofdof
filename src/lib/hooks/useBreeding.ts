@@ -1047,6 +1047,79 @@ export const useBreeding = (
   );
 
   /** Retire une monture de l'écurie — vendue, sacrifiée, ou saisie par erreur. */
+  /**
+   * Un clonage : deux stériles disparaissent, une fertile prend la place de celle
+   * qu'on a gardée.
+   *
+   * Le clone **est** la monture choisie — même couleur, même ascendance, même nom —
+   * à ceci près qu'elle a retrouvé sa reproduction. On ne pouvait donc pas se
+   * contenter de rendre une des deux fertile : les deux originales partent, et une
+   * troisième entre. C'est ce que le jeu fait, et c'est ce qui laisse le compte
+   * juste — un clonage consomme bien deux montures pour en rendre une.
+   *
+   * Une stérile est toujours une monture **suivie** : le vrac ne porte que des
+   * fertiles, par construction du type. Il n'y a donc jamais rien à deviner ici.
+   */
+  const recordClonings = useCallback(
+    async (entries: { keep: string; drop: string }[]) => {
+      if (entries.length === 0) return;
+      const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+      const kept = entries
+        .map((entry) => byId.get(entry.keep))
+        .filter((mount): mount is Individual => mount !== undefined);
+      const gone = entries.flatMap((entry) => [entry.keep, entry.drop]);
+
+      const supabase = createClient();
+      const [, insertResult] = await Promise.all([
+        supabase.from('user_breeding_individuals').delete().in('id', gone),
+        supabase
+          .from('user_breeding_individuals')
+          .insert(
+            kept.map((mount) => ({
+              family,
+              color_id: mount.colorId,
+              name: mount.name,
+              sex: mount.sex,
+              level: mount.level,
+              // Le clone naît **fertile et non fécond** : son cycle est à payer,
+              // comme celui d'un poulain.
+              fertile: true,
+              cycled: false,
+              parent_a_color: mount.parents?.[0] ?? null,
+              parent_b_color: mount.parents?.[1] ?? null,
+            }))
+          )
+          .select(),
+      ]);
+
+      if (insertResult.error) {
+        console.error('[breeding] clonage non enregistré:', insertResult.error);
+        return;
+      }
+
+      setStable((current) => ({
+        ...current,
+        individuals: [
+          ...current.individuals.filter((mount) => !gone.includes(mount.id)),
+          ...(insertResult.data ?? []).map((row) => ({
+            id: row.id,
+            colorId: row.color_id,
+            name: row.name,
+            sex: row.sex as Sex,
+            level: row.level,
+            fertile: true,
+            cycled: false,
+            parents:
+              row.parent_a_color && row.parent_b_color
+                ? ([row.parent_a_color, row.parent_b_color] as [string, string])
+                : null,
+          })),
+        ],
+      }));
+    },
+    [family, stable.individuals]
+  );
+
   const removeIndividual = useCallback(async (id: string) => {
     setStable((current) => ({
       ...current,
@@ -1160,6 +1233,7 @@ export const useBreeding = (
     updateIndividual,
     removeIndividual,
     recordBirths,
+    recordClonings,
     saveItemStock,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,
     // `loaded` couvre le tout premier rendu, avant que la transition démarre :

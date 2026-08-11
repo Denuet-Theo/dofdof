@@ -141,6 +141,8 @@ type Props = {
   generations?: Map<string, number>;
   /** Enregistre les naissances saisies. Sans lui, le parcours n'est que lecture. */
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  /** Enregistre les clonages : deux stériles partent, une fertile entre. */
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -595,6 +597,7 @@ const Fill = ({
   colors,
   generations,
   onRecordBirths,
+  onRecordClonings,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
@@ -602,6 +605,7 @@ const Fill = ({
   colors?: BreedingColor[];
   generations?: Map<string, number>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
 }) => {
   /**
    * Où en est le parcours : accoupler, cloner, charger.
@@ -846,7 +850,10 @@ const Fill = ({
           individuals={individuals}
           colors={colors}
           nameOf={nameOf}
-          onDone={() => setStep('load')}
+          onRecord={async (entries) => {
+            await onRecordClonings?.(entries);
+            setStep('load');
+          }}
         />
       )}
 
@@ -1147,6 +1154,7 @@ const BreedingTimeline = ({
   colors,
   generations,
   onRecordBirths,
+  onRecordClonings,
 }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
@@ -1373,6 +1381,7 @@ const BreedingTimeline = ({
           colors={colors}
           generations={generations}
           onRecordBirths={onRecordBirths}
+          onRecordClonings={onRecordClonings}
         />
       )}
 

@@ -18,7 +18,8 @@ use std::time::Instant;
 
 use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
-use breeding_sim::economy::{Economy, NeverBreeds, Policy, RunOutcome, play};
+use breeding_sim::economy::{Economy, MAX_UNITS, NeverBreeds, Policy, RunOutcome, Strategy, play};
+use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
 use breeding_sim::search::{Myopic, Searching};
 use breeding_sim::trees::muldo;
 
@@ -125,6 +126,35 @@ fn main() {
         measure("recherche / valeur myope", &economy, || {
             Box::new(Searching::new(Myopic))
         }),
+        {
+            // L'échelle applique un plan déduit de l'arbre au lieu de chercher.
+            // Ce qu'on lui demande ici, c'est autant de ne rien gâcher que de
+            // marquer : elle ne propose **aucun** croisement sans cible, ce que
+            // `rejected_loads` ne dit pas et que le binaire `audit` compte.
+            let shared = Ladder::of(&muldo(), Route::Shared);
+            measure("echelle / cas 1 (pivot)", &economy, move || {
+                Box::new(LadderPolicy::with_ladder(shared.clone()))
+            })
+        },
+        {
+            let disjoint = Ladder::of(&muldo(), Route::Disjoint);
+            measure("echelle / cas 2 (disjoint)", &economy, move || {
+                Box::new(LadderPolicy::with_ladder(disjoint.clone()))
+            })
+        },
+        {
+            // Le niveau des montures se paie en points de jauge, donc en heures,
+            // donc en fournées. `tuned_for` prend le dernier cran gratuit — voir
+            // sa doc pour le balayage qui montre l'effondrement au-delà.
+            let ladder = Ladder::of(&muldo(), Route::Shared);
+            measure("echelle / niveau réglé", &economy, move || {
+                Box::new(
+                    LadderPolicy::with_ladder(ladder.clone())
+                        .with_strategies([Strategy::default(); MAX_UNITS])
+                        .tuned_for(&economy),
+                )
+            })
+        },
     ];
 
     println!(
@@ -145,8 +175,10 @@ fn main() {
         );
     }
 
-    println!("\n{:<26} {:>9} {:>9} {:>9} {:>9} {:>9} {:>10}",
-        "politique", "crois.", "fournées", "gen max", "gen10", "sacrif.", "µs/partie");
+    println!(
+        "\n{:<26} {:>9} {:>9} {:>9} {:>9} {:>9} {:>10}",
+        "politique", "crois.", "fournées", "gen max", "gen10", "sacrif.", "µs/partie"
+    );
     println!("{}", "-".repeat(84));
     for report in &reports {
         let mean = |f: fn(&RunOutcome) -> f64| -> f64 {

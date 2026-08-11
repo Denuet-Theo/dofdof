@@ -158,7 +158,7 @@ pub struct TreadmillConfig {
     /// qu'on achète : une gen 1 prise à l'hôtel de vente arrive entière, et un
     /// **départ frais** est vingt de celles-là. Un tiers de stériles d'entrée de jeu
     /// changerait la question posée.
-    pub fresh: bool,
+    pub state: StartState,
     /// Ce que l'écurie **qui reste** compte dans la fitness, en part de sa valeur
     /// de recyclage. `0.0` l'ignore, comme avant.
     ///
@@ -177,6 +177,17 @@ pub struct TreadmillConfig {
     /// `value_at_generation` et déjà lu par le recensement. On ne l'invente pas, on
     /// arrête de le jeter.
     pub residual_value: f64,
+    /// Ce que coûte un chargement d'enclos, dès qu'une place est occupée.
+    ///
+    /// Le tapis ne facturait rien : une fécondation prenait une place et ne coûtait
+    /// pas un kama, donc banquer était gratuit et rien n'obligeait à arbitrer. Or
+    /// charger l'enclos consomme du carburant, que la fournée serve à croiser ou à
+    /// féconder.
+    ///
+    /// Facturé au **chargement** et non à la place, parce que c'est ainsi que le
+    /// jeu le prend : les jauges tournent pour l'enclos entier, et dix montures s'y
+    /// partagent la même dépense.
+    pub cycle_kamas: i64,
     /// Les départs à tirer, un par partie. Vide = celui que ce `config` décrit.
     ///
     /// Une politique qui ne voit qu'un seul départ ne sait jouer que celui-là, et
@@ -215,8 +226,9 @@ impl Default for TreadmillConfig {
             overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-            fresh: false,
+            state: StartState::Drawn,
             residual_value: 1.0,
+            cycle_kamas: 0,
             starts: &[],
         }
     }
@@ -227,8 +239,25 @@ impl Default for TreadmillConfig {
 pub struct StartProfile {
     pub mounts: usize,
     pub weights: [usize; 11],
-    /// Les montures arrivent fertiles et non fécondes — ce qu'on achète.
-    pub fresh: bool,
+    pub state: StartState,
+}
+
+/// Dans quel état l'écurie de départ se présente.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartState {
+    /// Un tiers de fertiles, un tiers de fécondes, un tiers de stériles : une
+    /// écurie déjà en marche, prise à un moment quelconque.
+    Drawn,
+    /// Tout fertile et rien de fécond — ce qu'on achète à l'hôtel de vente.
+    Fresh,
+    /// Tout **fécond** : l'écurie au sortir de l'enclos, quand la fournée vient
+    /// d'être récupérée et qu'aucune monture n'a encore été accouplée.
+    ///
+    /// C'est l'état d'un éleveur qui ouvre l'app après avoir vidé son parc, et le
+    /// tapis ne le produisait jamais — `Drawn` en tire un tiers. Mesuré sur une
+    /// écurie réelle à 87 % de fécondes : le champion y prenait **zéro**
+    /// accouplement gratuit là où la valeur myope en trouvait quarante-neuf.
+    OutOfEnclosure,
 }
 
 /// Les trois départs de l'entraînement : déjà monté, mélangé, et le premier jour.
@@ -236,21 +265,26 @@ pub struct StartProfile {
 /// Le troisième est celui de tout le monde au début — vingt gen 1 anonymes — et
 /// c'est celui que le champion précédent ne savait pas jouer : quarante-sept
 /// croisements en trente cycles, trois pour cent des places offertes.
-pub const MIXED_STARTS: [StartProfile; 3] = [
+pub const MIXED_STARTS: [StartProfile; 4] = [
     StartProfile {
         mounts: 250,
         weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-        fresh: false,
+        state: StartState::Drawn,
     },
     StartProfile {
         mounts: 250,
         weights: [0, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-        fresh: false,
+        state: StartState::Drawn,
     },
     StartProfile {
         mounts: 20,
         weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        fresh: true,
+        state: StartState::Fresh,
+    },
+    StartProfile {
+        mounts: 250,
+        weights: [0, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        state: StartState::OutOfEnclosure,
     },
 ];
 
@@ -311,6 +345,8 @@ pub struct TreadmillOutcome {
     /// Ce que l'écurie restante vaut à la casse, avant pondération. Porté à part
     /// pour qu'on puisse lire d'où vient un score.
     pub residual: i64,
+    /// Ce que les chargements d'enclos ont coûté, tous cycles confondus.
+    pub loads_paid: i64,
     /// Génétons cycle par cycle.
     ///
     /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
@@ -428,6 +464,13 @@ pub fn play_treadmill_with(
             cycle as u32,
         ) {
             Ok(applied) => {
+                // Le chargement se paie dès qu'une place est occupée, que la
+                // fournée serve à croiser ou seulement à féconder. C'est ce qui
+                // rend le banquage arbitrable : il prenait une place et ne coûtait
+                // pas un kama, donc rien n'obligeait à choisir.
+                if applied.crossings > 0 || !plan.cycles.is_empty() {
+                    outcome.loads_paid += config.cycle_kamas;
+                }
                 outcome.per_cycle.push(applied.genetons);
                 outcome.genetons += applied.genetons;
                 outcome.crossings += applied.crossings;
@@ -505,7 +548,8 @@ pub fn play_treadmill_with(
     outcome.kamas = outcome.genetons as f64 * economy.geneton_value
         + outcome.harvest_value as f64
         + outcome.residual as f64 * config.residual_value
-        - outcome.overflow_paid as f64;
+        - outcome.overflow_paid as f64
+        - outcome.loads_paid as f64;
     outcome.top_generation = stable.top_generation(catalog);
     outcome.mounts_end = stable.len();
     outcome
@@ -540,7 +584,7 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         StartProfile {
             mounts: config.mounts,
             weights: config.weights,
-            fresh: config.fresh,
+            state: config.state,
         }
     } else {
         config.starts[index_in(rng, config.starts.len())]
@@ -591,10 +635,10 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         } else {
             Some(recipes[index_in(rng, recipes.len())])
         };
-        let (fertile, cycled) = if profile.fresh {
-            (true, false)
-        } else {
-            draw_state(rng)
+        let (fertile, cycled) = match profile.state {
+            StartState::Fresh => (true, false),
+            StartState::OutOfEnclosure => (true, true),
+            StartState::Drawn => draw_state(rng),
         };
         stable.push(Mount {
             color,

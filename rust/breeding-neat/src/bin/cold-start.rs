@@ -145,7 +145,7 @@ fn main() {
     let fresh = TreadmillConfig {
         mounts: 20,
         weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        fresh: true,
+        state: breeding_sim::treadmill::StartState::Fresh,
         ..base
     };
 

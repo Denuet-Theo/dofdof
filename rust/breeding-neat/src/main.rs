@@ -38,7 +38,7 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, NeverBreeds, play};
 use breeding_sim::encode::{Census, FEATURES};
 use breeding_sim::search::{Myopic, Searching, ValueFn};
-use breeding_sim::treadmill::{TreadmillConfig, play_treadmill};
+use breeding_sim::treadmill::{StartState, TreadmillConfig, play_treadmill};
 use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
 
@@ -200,6 +200,10 @@ fn fitness(
         // n'en voit qu'un ne sait jouer que celui-là — mesuré, et c'est tout
         // l'objet de la manche.
         starts: &breeding_sim::treadmill::MIXED_STARTS,
+        // Le chargement se paie. Le forfait de l'économie, qui est le prix d'un
+        // chargement du bloc : sans lui, banquer une place était gratuit et rien
+        // n'obligeait la politique à choisir entre féconder et croiser.
+        cycle_kamas: economy.batch_cost,
         ..Default::default()
     };
     let total: f64 = seeds
@@ -434,7 +438,7 @@ fn starts(base: &TreadmillConfig) -> [(&'static str, TreadmillConfig); 3] {
             TreadmillConfig {
                 mounts: 20,
                 weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                fresh: true,
+                state: StartState::Fresh,
                 ..base.clone()
             },
         ),
@@ -555,6 +559,7 @@ fn write_checkpoint(
             "links": links,
             "splits": splits,
         },
+        "features": FEATURES,
         "threshold": threshold,
         "generations": generations,
         // Le champion voyage avec le reste, sinon chaque reprise recommence à le
@@ -618,6 +623,29 @@ struct Checkpoint {
 fn read_checkpoint(path: &str) -> Result<Checkpoint, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path} : {e}"))?;
     let root: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path} : {e}"))?;
+
+    // L'arité, avant tout le reste. Un génome numérote ses nœuds à partir de la
+    // couche d'entrée — le biais vaut `FEATURES`, la sortie `FEATURES + 1` — donc
+    // un point de reprise d'une autre arité ne se lit pas de travers : il se lit
+    // **sans rien dire**, et l'entraînement repart sur des liens qui ne pointent
+    // plus où ils croient.
+    //
+    // Un fichier **sans** ce champ est refusé aussi, et ce n'est pas de la rigueur
+    // mal placée : il est antérieur au champ, donc antérieur au dernier changement
+    // d'encodage, donc d'une autre arité. Le laisser passer serait garder le trou
+    // ouvert précisément pour les fichiers qui tombent dedans.
+    let features = root["features"].as_u64();
+    if features != Some(FEATURES as u64) {
+        return Err(format!(
+            "{path} : point de reprise {}, le simulateur en déclare \
+             {FEATURES}. Un génome numérote ses nœuds depuis la couche d'entrée — \
+             le biais vaut `FEATURES`, la sortie `FEATURES + 1` — donc le relire \
+             ne le lirait pas de travers, ça le lirait **sans rien dire**. Repartir \
+             d'une population neuve : retirer `--resume`.",
+            features
+                .map(|value| format!("à {value} entrées")).unwrap_or_else(|| "sans arité déclarée".into())
+        ));
+    }
 
     // Un tableau nu est l'ancien format « population seule » ; on l'accepte
     // encore, en reconstituant ce qu'on peut.
@@ -821,6 +849,7 @@ fn main() {
         // La sonde repart de celui-là et n'en change que le tirage de départ,
         // donc elle le veut **sans** mélange : elle mesure un départ à la fois.
         starts: &[],
+        cycle_kamas: economy.batch_cost,
         ..Default::default()
     };
 

@@ -34,7 +34,7 @@ import { cycledOf, type Sex, type Stable } from './stable';
 export const MAX_GENERATION = 10;
 
 /** La taille du vecteur. Doit valoir `FEATURES` côté Rust, ou rien ne va. */
-export const FEATURES = 74;
+export const FEATURES = 75;
 
 const FERTILE_MALES = 0;
 const FERTILE_FEMALES = 10;
@@ -52,6 +52,20 @@ const PRICE_TOP = 52;
 const LIQUIDATION = 53;
 const CYCLED_MALES = 54;
 const CYCLED_FEMALES = 64;
+/**
+ * Les places d'enclos **déjà engagées**, en part de celles du parc.
+ *
+ * La seule entrée qui ne décrive pas l'écurie mais la fournée en cours, et elle
+ * manquait cruellement : un croisement gratuit — deux fécondes, un clic — et un
+ * croisement payant laissent exactement la même écurie derrière eux. La valeur
+ * d'état ne pouvait donc pas les départager, et l'économie de place, qui est toute
+ * la raison d'être du découplage du cycle, lui était invisible.
+ *
+ * Mesuré avant de l'ajouter : sur une écurie de 160 montures dont 140 fécondes, le
+ * champion prenait **zéro** accouplement gratuit là où la valeur myope en trouvait
+ * quarante-neuf. Il achetait quarante gen 1 à la place.
+ */
+const PLACES = 74;
 
 /**
  * Ce que l'encodage réclame au marché.
@@ -135,6 +149,15 @@ export type Census = {
   headcount: number;
   kamas: number;
   liquidation: number;
+  /**
+   * Places engagées par la fournée en cours, et celles du parc.
+   *
+   * Posées par la recherche avant chaque évaluation plutôt que suivies ici : elle
+   * en tient déjà le compte exact, et deux compteurs à garder d'accord sur des
+   * milliers d'annulations finiraient par diverger sans que rien ne le dise.
+   */
+  places: number;
+  capacity: number;
 };
 
 const zeroes = () => new Array<number>(MAX_GENERATION + 1).fill(0);
@@ -167,6 +190,8 @@ export const censusOf = (
     headcount: 0,
     kamas,
     liquidation: 0,
+    places: 0,
+    capacity: 0,
   };
 
   const slot = (value: number) => Math.min(Math.max(value, 0), MAX_GENERATION);
@@ -290,6 +315,7 @@ export const featuresOf = (
   out[PRICE_GENETON] = economy.genetonValue / Math.max(geneton, 1e-9);
   out[PRICE_TOP] = economy.topValue / top;
   out[LIQUIDATION] = census.liquidation / scale;
+  out[PLACES] = census.capacity > 0 ? census.places / census.capacity : 0;
 
   return out;
 };

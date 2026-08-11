@@ -95,7 +95,12 @@ for (const [at, testCase] of fixture.cases.entries()) {
     })),
   };
 
-  const features = featuresOf(censusOf(stable, colors, economy, testCase.kamas), colors, economy);
+  const census = censusOf(stable, colors, economy, testCase.kamas);
+  // Les places viennent de la fournée en cours, pas de l'écurie : la recherche
+  // les pose avant chaque évaluation, et la référence les fige.
+  census.places = testCase.places;
+  census.capacity = testCase.capacity;
+  const features = featuresOf(census, colors, economy);
   for (const [index, expected] of testCase.features.entries()) {
     const gap = Math.abs(features[index] - expected);
     if (gap > worst) {

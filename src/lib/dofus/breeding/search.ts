@@ -957,6 +957,8 @@ export const planUnit = (
     places: 0,
     optimakinaCost: 0,
   };
+  state.census.places = 0;
+  state.census.capacity = view.capacity;
   let best = value(state.census);
 
   for (let iteration = 0; iteration < searcher.config.iterations; iteration += 1) {
@@ -972,6 +974,9 @@ export const planUnit = (
     if (!mutation) continue;
 
     applyMutation(state, mutation, candidates, fertile, sterile, view);
+    // Les places engagées entrent dans le recensement juste avant qu'on le note.
+    // Posées et non suivies : `state.places` en tient déjà le compte.
+    state.census.places = state.places;
     const scored = feasible(state, view) ? value(state.census) : Number.NEGATIVE_INFINITY;
 
     if (scored > best) best = scored;

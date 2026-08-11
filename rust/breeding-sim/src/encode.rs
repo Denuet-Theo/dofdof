@@ -50,7 +50,7 @@ pub const MAX_GENERATION: usize = 10;
 /// n'a pas la bonne arité. C'est assumé — sans cette séparation, une politique ne
 /// peut pas préférer une écurie dont le cycle est déjà payé à une écurie qui le
 /// doit encore, et tout le pré-fécondage lui est invisible.
-pub const FEATURES: usize = 74;
+pub const FEATURES: usize = 75;
 
 const FERTILE_MALES: usize = 0;
 const FERTILE_FEMALES: usize = 10;
@@ -96,6 +96,22 @@ const LIQUIDATION: usize = 53;
 /// que le réseau peut lire seul.
 const CYCLED_MALES: usize = 54;
 const CYCLED_FEMALES: usize = 64;
+/// Les places d'enclos **déjà engagées**, en part de celles du parc.
+///
+/// La seule entrée qui ne décrive pas l'écurie mais la fournée en cours de
+/// composition, et elle manquait cruellement : un croisement gratuit — deux
+/// fécondes, un clic — et un croisement payant laissent exactement la même
+/// écurie derrière eux. La valeur d'état ne pouvait donc pas les départager, et
+/// l'économie de place, qui est toute la raison d'être du découplage du cycle,
+/// lui était invisible.
+///
+/// Mesuré avant de l'ajouter : sur une écurie de 160 montures dont 140 fécondes,
+/// le champion prenait **zéro** accouplement gratuit là où la valeur myope en
+/// trouvait quarante-neuf. Il achetait quarante gen 1 à la place.
+///
+/// Rapportée à la capacité plutôt qu'en absolu : ce qui compte n'est pas d'avoir
+/// engagé douze places, c'est qu'il en reste ou non.
+const PLACES: usize = 74;
 
 /// Le recensement d'une écurie, en comptes bruts et fractionnaires.
 #[derive(Clone, Debug)]
@@ -124,6 +140,14 @@ pub struct Census {
     /// Suivie en incrémental et **exacte** : sommer par génération écraserait
     /// les cinquante prix de gen 10 en un seul.
     liquidation: f64,
+    /// Places engagées par la fournée en cours, et celles du parc.
+    ///
+    /// Posées par la recherche avant chaque évaluation plutôt que suivies ici :
+    /// `search.rs` en tient déjà le compte exact, et le dupliquer dans le
+    /// recensement, c'est se donner deux compteurs à garder d'accord sur des
+    /// milliers d'applications et d'annulations.
+    places: f64,
+    capacity: f64,
     /// La génération de chaque couleur, recopiée à plat.
     ///
     /// Sans elle, chaque naissance appliquée referait une indirection dans le
@@ -145,6 +169,8 @@ impl Census {
             headcount: 0.0,
             kamas: kamas as f64,
             liquidation: 0.0,
+            places: 0.0,
+            capacity: 0.0,
             generations: (0..catalog.len() as ColorId)
                 .map(|color| catalog.generation(color))
                 .collect(),
@@ -185,6 +211,13 @@ impl Census {
     /// Ne touche pas `fertile_*` : la monture gardait déjà sa reproduction avant le
     /// cycle, elle la garde après. Seule sa disponibilité immédiate change.
     #[inline]
+    /// Ce que la fournée en cours a déjà engagé. Voir `PLACES`.
+    #[inline]
+    pub fn set_places(&mut self, places: usize, capacity: usize) {
+        self.places = places as f64;
+        self.capacity = capacity as f64;
+    }
+
     pub fn cycle(&mut self, generation: usize, sex: Sex, by: f64) {
         let slot = generation.min(MAX_GENERATION);
         match sex {
@@ -272,6 +305,11 @@ impl Census {
         out[PRICE_GENETON] = economy.geneton_value / geneton.max(1e-9);
         out[PRICE_TOP] = economy.top_value as f64 / top;
         out[LIQUIDATION] = self.liquidation / economy.starting_kamas.max(1) as f64;
+        out[PLACES] = if self.capacity > 0.0 {
+            self.places / self.capacity
+        } else {
+            0.0
+        };
 
         out
     }

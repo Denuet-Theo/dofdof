@@ -25,6 +25,7 @@ import {
   agenda,
   elapsedSeconds,
   formatCountdown,
+  elapsedFor,
   formatWallClock,
   gaugeChanges,
   inRibbon,
@@ -268,14 +269,28 @@ const LABEL_THRESHOLD = 7;
 const Ribbon = ({
   plan,
   elapsed,
+  elapsedOf,
   paused,
 }: {
   plan: TimelinePlan;
+  /** L'avance de la piste la plus avancée : c'est elle qui cadre le ruban. */
   elapsed: number;
+  /** L'avance d'une piste donnée — un enclos lancé plus tard est plus en retard. */
+  elapsedOf: (trackId: string) => number;
   paused: boolean;
 }) => {
   const from = elapsed - LEAD_IN_SECONDS;
   const pct = (seconds: number) => ((seconds - from) / RIBBON_SECONDS) * 100;
+  /**
+   * Un offset de piste, ramené sur l'échelle du ruban.
+   *
+   * Le ruban a **une** abscisse — sinon on ne verrait plus quel enclos travaille
+   * pendant qu'un autre attend — mais chaque piste compte son temps depuis son
+   * propre départ. On décale donc ses événements de son retard sur la piste de
+   * tête, ce qui les remet tous sur la même horloge murale.
+   */
+  const shifted = (trackId: string, seconds: number) =>
+    seconds + (elapsed - elapsedOf(trackId));
   const nowPct = pct(elapsed);
 
   /**
@@ -295,7 +310,7 @@ const Ribbon = ({
   // enclos changent de ligne d'une minute à l'autre et on ne suit plus.
   const rows = useMemo(() => {
     const byTrack = new Map<string, PlacedEvent[]>();
-    for (const event of inRibbon(plan, elapsed)) {
+    for (const event of inRibbon(plan, elapsedOf)) {
       const list = byTrack.get(event.trackId);
       if (list) list.push(event);
       else byTrack.set(event.trackId, [event]);
@@ -319,6 +334,10 @@ const Ribbon = ({
         events: byTrack.get(track.id) ?? [],
       };
     });
+    // `elapsedOf` est recréé à chaque rendu — c'est une fermeture sur `now`, qui
+    // bat chaque seconde — donc le mettre en dépendance reviendrait à ne rien
+    // mémoïser. `elapsed` change au même rythme et suffit à dire quand recalculer.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan, elapsed, lanes]);
 
   return (
@@ -360,8 +379,11 @@ const Ribbon = ({
                   // seulement une fois terminée — une jauge en cours n'est pas
                   // du passé, elle tourne.
                   const done = event.at + event.duration < elapsed;
-                  const left = clamp(pct(event.at));
-                  const width = clamp(pct(event.at + event.duration)) - left;
+                  // Décalé du retard de sa piste : le ruban a une seule abscisse,
+                  // les pistes ont chacune leur départ.
+                  const at = shifted(event.trackId, event.at);
+                  const left = clamp(pct(at));
+                  const width = clamp(pct(at + event.duration)) - left;
                   const title = [event.label, event.detail].filter(Boolean).join(' — ');
 
                   if (event.duration > 0) {
@@ -598,6 +620,8 @@ const Fill = ({
   generations,
   onRecordBirths,
   onRecordClonings,
+  enclosTracks = [],
+  onStartTrack,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
@@ -606,6 +630,9 @@ const Fill = ({
   generations?: Map<string, number>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  /** Les enclos du plan, et si leur compteur tourne déjà. */
+  enclosTracks?: { id: string; label: string; started: boolean }[];
+  onStartTrack?: (trackId: string) => Promise<void>;
 }) => {
   /**
    * Où en est le parcours : accoupler, cloner, charger.
@@ -794,6 +821,38 @@ const Fill = ({
                 enclos
               </span>
               <span className="text-[11px] text-dark-500">par ordre alphabétique</span>
+              {/* Un bouton par enclos, et pas un seul pour le parc : on en remplit
+                  un, on le lance, on passe au suivant. Le temps de chercher les
+                  montures dans le coffre, le premier a une heure d'avance sur le
+                  dernier — et c'est cette avance qui décide de l'ordre dans lequel
+                  on ira les récupérer. */}
+              {onStartTrack && enclosTracks.length > 0 && (
+                <span className="w-full flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] text-dark-400">chargé :</span>
+                  {enclosTracks.map(({ id, label, started }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      disabled={started}
+                      onClick={() => onStartTrack(id)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border
+                        transition-all ${
+                          started
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 cursor-default'
+                            : 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50 cursor-pointer'
+                        }`}
+                      title={
+                        started
+                          ? `${label} : le compteur tourne.`
+                          : `Lancer le compteur de ${label} — il vient d’être chargé.`
+                      }
+                    >
+                      {label}
+                      {started && ' ✓'}
+                    </button>
+                  ))}
+                </span>
+              )}
             </>
           )}
           {step !== 'load' && (
@@ -1276,9 +1335,25 @@ const BreedingTimeline = ({
 
   const paused = isPaused(clock);
   const elapsed = elapsedSeconds(clock, now);
+  /**
+   * Le temps écoulé **pour une piste**, qui peut avoir son propre départ.
+   *
+   * Un enclos se lance quand il finit d'être chargé, donc le premier a souvent une
+   * heure d'avance sur le dernier. Tout ce qui se lit sur le ruban, dans l'agenda
+   * ou dans le rappel sonore doit passer par ici — sinon chaque enclos serait
+   * affiché avec l'avance d'un autre.
+   */
+  const elapsedOf = (trackId: string) => elapsedFor(clock, trackId, now);
+  /**
+   * L'avance de la piste la plus avancée : c'est elle qui cadre le ruban.
+   *
+   * Prendre l'horloge du plan ferait sortir du cadre les enclos lancés plus tôt,
+   * qui sont pourtant ceux qu'on va récupérer en premier.
+   */
+  const leading = Math.max(elapsed, ...plan.tracks.map((track) => elapsedOf(track.id)));
   const horizon = planHorizon(plan);
-  const upcoming = agenda(plan, elapsed);
-  const next = nextAction(plan, elapsed);
+  const upcoming = agenda(plan, elapsedOf);
+  const next = nextAction(plan, elapsedOf);
   const nextDate = next ? wallClockAt(clock, next.at, now) : null;
   const NextIcon = next ? KIND_ICON[next.kind] : CalendarClock;
   const exhausted = elapsed >= horizon;
@@ -1367,7 +1442,7 @@ const BreedingTimeline = ({
         </div>
       )}
 
-      <Ribbon plan={plan} elapsed={elapsed} paused={paused} />
+      <Ribbon plan={plan} elapsed={leading} elapsedOf={elapsedOf} paused={paused} />
 
       {/* Entre le ruban et l'agenda : le ruban dit quand l'enclos se recharge,
           l'agenda égrène les gestes, et c'est entre les deux qu'on se demande ce
@@ -1382,6 +1457,14 @@ const BreedingTimeline = ({
           generations={generations}
           onRecordBirths={onRecordBirths}
           onRecordClonings={onRecordClonings}
+          enclosTracks={plan.tracks
+            .filter((track) => track.id.startsWith('enclos'))
+            .map((track) => ({
+              id: track.id,
+              label: track.label,
+              started: clock.trackStarts?.[track.id] !== undefined,
+            }))}
+          onStartTrack={timeline.startTrack}
         />
       )}
 

@@ -342,6 +342,14 @@ export type BreedingTimeline = {
   paused_at: string | null;
   /** Cumul des pauses **terminées**, en secondes. */
   paused_seconds: number;
+  /**
+   * Le départ propre à chaque piste, indexé par identifiant — `{"enclos-1": …}`.
+   *
+   * Le parc ne se charge pas d'un bloc : on remplit un enclos, on le lance, on
+   * passe au suivant. Une piste absente retombe sur `started_at`, ce qui est le
+   * comportement d'avant (migration 20260811170000).
+   */
+  track_starts: Record<string, string>;
   updated_at: string;
 };
 
@@ -479,6 +487,7 @@ export interface Database {
           started_at?: string;
           paused_at?: string | null;
           paused_seconds?: number;
+          track_starts?: Record<string, string>;
           updated_at?: string;
         };
         Update: {
@@ -486,6 +495,7 @@ export interface Database {
           started_at?: string;
           paused_at?: string | null;
           paused_seconds?: number;
+          track_starts?: Record<string, string>;
           updated_at?: string;
         };
         Relationships: [];

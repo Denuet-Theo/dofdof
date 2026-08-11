@@ -61,12 +61,24 @@ export type BreedingTimelineState = {
   resume: () => Promise<void>;
   /** Repart du début du même plan, pauses remises à zéro. */
   restart: () => Promise<void>;
+  /**
+   * Lance le compteur d'une piste — un enclos qu'on vient de finir de charger.
+   *
+   * Le parc ne se charge pas d'un bloc : le temps de nommer les poulains et de
+   * chercher les montures dans le coffre, le premier enclos a une heure d'avance
+   * sur le dernier. Une horloge unique obligeait à les faire partir ensemble, ce
+   * qui n'arrive jamais.
+   */
+  startTrack: (trackId: string) => Promise<void>;
   clear: () => Promise<void>;
 };
 
 /** L'horloge telle que la ligne la porte. */
 const clockOf = (row: BreedingTimeline): TimelineClock => ({
   startedAt: new Date(row.started_at).getTime(),
+  trackStarts: Object.fromEntries(
+    Object.entries(row.track_starts ?? {}).map(([id, at]) => [id, new Date(at).getTime()])
+  ),
   pausedAt: row.paused_at === null ? null : new Date(row.paused_at).getTime(),
   pausedSeconds: row.paused_seconds,
 });
@@ -168,6 +180,8 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
       started_at: string;
       paused_at: string | null;
       paused_seconds: number;
+      /** Le départ propre de chaque piste. Voir `startTrack`. */
+      track_starts?: Record<string, string>;
     }) => {
       const supabase = createClient();
       const { data, error: failure } = await supabase
@@ -190,6 +204,30 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
     [family]
   );
 
+  const startTrack = useCallback(
+    async (trackId: string) => {
+      const at = new Date().toISOString();
+      setRow((current) =>
+        current ? { ...current, track_starts: { ...current.track_starts, [trackId]: at } } : current
+      );
+      // La carte entière part à chaque fois plutôt qu'un `jsonb_set` : une
+      // douzaine de dates, réécrites ensemble quand le plan change, et jamais
+      // interrogées séparément.
+      // La ligne entière repart : un `upsert` ne met à jour que les colonnes
+      // fournies, mais il **insère** avec les autres à vide si la ligne n'existe
+      // pas encore. Renvoyer le plan et l'horloge coûte un JSON et ferme le cas.
+      if (!row) return;
+      await persist({
+        plan: row.plan,
+        started_at: row.started_at,
+        paused_at: row.paused_at,
+        paused_seconds: row.paused_seconds,
+        track_starts: { ...row.track_starts, [trackId]: at },
+      });
+    },
+    [persist, row]
+  );
+
   const load = useCallback(
     async (next: TimelinePlan) => {
       const startedAt = new Date().toISOString();
@@ -201,6 +239,9 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         started_at: startedAt,
         paused_at: null,
         paused_seconds: 0,
+        // Un plan neuf part sans départ propre : chaque enclos suivra celui du
+        // plan tant qu'on ne l'aura pas lancé pour lui-même.
+        track_starts: {},
         updated_at: startedAt,
       }));
 
@@ -209,6 +250,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         started_at: startedAt,
         paused_at: null,
         paused_seconds: 0,
+        track_starts: {},
       });
     },
     [family, persist]
@@ -282,6 +324,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
     pause,
     resume,
     restart,
+    startTrack,
     clear,
   };
 };

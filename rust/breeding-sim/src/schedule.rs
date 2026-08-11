@@ -297,7 +297,198 @@ fn task_list(climber: usize, returner: usize, xp_points: f64) -> [Task; TASKS] {
 /// Rend la durée totale en secondes, puis le départ et la fin de chaque tâche —
 /// une tâche jamais lancée gardant `INFINITY`, ce qui la distingue d'une tâche
 /// instantanée.
+/// La durée d'un cycle : la meilleure des deux heuristiques.
+///
+/// Aucune ne domine l'autre, et c'est mesuré plutôt que supposé. Sur les 4 096
+/// répartitions de bandes et quatre niveaux — 16 384 comparaisons — la préemptive
+/// raccourcit **2 193** fournées, jusqu'à un quart, et en allonge **512**, jusqu'à
+/// un cinquième.
+///
+/// Une régression sur cinq cents cas n'est pas acceptable pour un gain sur deux
+/// mille : on calcule donc les deux et on garde la plus courte. Deux
+/// ordonnancements de sept tâches coûtent quelques microsecondes, contre des
+/// heures de fournée en jeu.
+///
+/// Ce n'est pas une élégance, c'est un aveu utile : le problème est
+/// l'ordonnancement préemptif à contraintes de précédence sur deux machines, dont
+/// l'optimum se calcule (Muntz–Coffman) mais demande du partage de capacité, pas
+/// un placement discret. Les deux heuristiques encadrent cet optimum sans
+/// l'atteindre — mesuré, il reste de l'ordre de dix pour cent sur les cas où la
+/// Mangeoire est longue.
 fn makespan(
+    tasks: &[Task; TASKS],
+    rate: &impl Fn(usize) -> f64,
+) -> (f64, [f64; TASKS], [f64; TASKS]) {
+    let blocking = makespan_blocking(tasks, rate);
+    let preemptive = makespan_preemptive(tasks, rate);
+    if preemptive.0 <= blocking.0 { preemptive } else { blocking }
+}
+
+/// L'ordonnancement d'un cycle, **préemptif**.
+///
+/// Une jauge se met en pause et reprend où elle en était : c'est une règle du jeu,
+/// et le modèle faisait l'hypothèse inverse. Il plaçait chaque tâche d'un bloc, si
+/// bien qu'une place libérée à mi-parcours ne servait à rien tant que la tâche en
+/// cours n'avait pas fini — l'Abreuvoir monopolisait la seule place libre pendant
+/// que le Foudroyeur attendait la Mangeoire, alors que les deux pouvaient se
+/// partager le temps disponible et finir ensemble.
+///
+/// Mesuré sur `221111` au niveau 60 : 10,35 h non préemptif contre 8,87 h ici, soit
+/// **quatorze pour cent** de chaque fournée. Ce n'est pas un raffinement : c'est
+/// une durée fausse dans tout ce qui la lit — le prix d'un chargement, le choix des
+/// bandes, l'horizon d'une partie.
+///
+/// ## Ce que la préemption change au calcul des dépendances
+///
+/// `after` porte un **seuil de points** sur la tâche qui précède, pas un délai.
+/// Sans préemption on pouvait le convertir en date une fois pour toutes —
+/// `début + seuil / vitesse`. Une tâche qui s'interrompt casse cette formule : le
+/// seuil se franchit quand le **cumul** l'atteint, ce qui dépend des segments
+/// réellement joués. On suit donc l'avancement, et on recalcule.
+///
+/// ## La priorité est le chemin restant, pas le travail restant
+///
+/// Servir la tâche la plus longue d'abord (LRPT) est optimal sans contrainte de
+/// précédence, et franchement mauvais avec : la Mangeoire est de loin la plus
+/// longue, donc elle monopolise une place et affame la chaîne
+/// Baffeur → Dragofesse → sérénité → Foudroyeur qui décide de la fin. Essayé :
+/// le niveau que la Mangeoire livre gratuitement tombait de 43 à 26.
+///
+/// On classe donc par **hauteur** — la durée d'une tâche plus le plus long chemin
+/// qui en dépend — ce qui est la priorité de Hu, et l'ordonnancement optimal pour
+/// deux places quand le graphe est une forêt. Le nôtre n'en est pas tout à fait
+/// une, mais la hauteur reste la bonne lecture : ce qui commande, c'est ce qui
+/// reste **après**.
+fn makespan_preemptive(
+    tasks: &[Task; TASKS],
+    rate: &impl Fn(usize) -> f64,
+) -> (f64, [f64; TASKS], [f64; TASKS]) {
+    let speed = |index: usize| rate(tasks[index].gauge);
+    let length = |index: usize| {
+        let rate = speed(index);
+        if rate > 0.0 { tasks[index].points / rate } else { 0.0 }
+    };
+
+    // La hauteur de chaque tâche : sa durée plus le plus long chemin qui en
+    // dépend. Calculée à rebours — les tâches sont déjà rangées par dépendance,
+    // donc un simple parcours arrière suffit et l'assertion le vérifie.
+    let mut height = [0.0f64; TASKS];
+    for index in (0..TASKS).rev() {
+        let mut below = 0.0f64;
+        for successor in 0..TASKS {
+            if let Some((predecessor, _)) = tasks[successor].after {
+                if predecessor == index {
+                    debug_assert!(successor > index, "les tâches doivent être rangées par dépendance");
+                    below = below.max(height[successor]);
+                }
+            }
+        }
+        height[index] = length(index) + below;
+    }
+
+    let mut remaining = [0.0f64; TASKS];
+    let mut done = [0.0f64; TASKS];
+    let mut started = [f64::INFINITY; TASKS];
+    let mut finished = [f64::INFINITY; TASKS];
+    for index in 0..TASKS {
+        remaining[index] = if speed(index) > 0.0 { tasks[index].points } else { 0.0 };
+    }
+
+    let mut now = 0.0f64;
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 256, "l'ordonnancement doit converger");
+
+        // Ce qui peut tourner : du travail restant, et le seuil de la tâche qui
+        // précède déjà franchi.
+        let mut ready: Vec<usize> = (0..TASKS)
+            .filter(|&index| remaining[index] > 1e-9)
+            .filter(|&index| match tasks[index].after {
+                None => true,
+                Some((predecessor, progress)) => done[predecessor] >= progress - 1e-9,
+            })
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+
+        // Le plus de travail restant d'abord, et jamais deux tâches sur la même
+        // jauge : les deux segments de descente sont sur la sérénité, et rien
+        // d'autre ne l'interdisait — l'ordonnancement les lançait ensemble et
+        // rendait une fournée plus courte que le parc ne peut la faire.
+        ready.sort_by(|&a, &b| {
+            height[b]
+                .partial_cmp(&height[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                // À hauteur égale, le plus de travail restant : c'est LRPT, qui
+                // départage bien ce que la précédence ne départage plus.
+                .then_with(|| {
+                    let left = remaining[b] / speed(b).max(1e-9);
+                    let right = remaining[a] / speed(a).max(1e-9);
+                    left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then(a.cmp(&b))
+        });
+        let mut running: Vec<usize> = Vec::with_capacity(PARALLEL_SLOTS);
+        for index in ready {
+            if running.len() >= PARALLEL_SLOTS {
+                break;
+            }
+            if running.iter().any(|&other| tasks[other].gauge == tasks[index].gauge) {
+                continue;
+            }
+            running.push(index);
+        }
+        if running.is_empty() {
+            break;
+        }
+
+        // Le prochain instant utile : une tâche qui finit, ou un seuil qu'une
+        // tâche en cours fait franchir — ce dernier peut libérer une dépendance
+        // et rendre le placement courant obsolète avant la fin de quoi que ce soit.
+        let mut step = f64::INFINITY;
+        for &index in &running {
+            step = step.min(remaining[index] / speed(index));
+        }
+        for index in 0..TASKS {
+            if remaining[index] <= 1e-9 {
+                continue;
+            }
+            if let Some((predecessor, progress)) = tasks[index].after {
+                if done[predecessor] < progress && running.contains(&predecessor) {
+                    let missing = progress - done[predecessor];
+                    step = step.min(missing / speed(predecessor));
+                }
+            }
+        }
+        if !step.is_finite() || step <= 0.0 {
+            break;
+        }
+
+        for &index in &running {
+            if !started[index].is_finite() {
+                started[index] = now;
+            }
+            let served = (step * speed(index)).min(remaining[index]);
+            done[index] += served;
+            remaining[index] -= served;
+            if remaining[index] <= 1e-9 {
+                remaining[index] = 0.0;
+                finished[index] = now + step;
+            }
+        }
+        now += step;
+    }
+
+    let total = finished
+        .iter()
+        .filter(|end| end.is_finite())
+        .fold(0.0f64, |longest, &end| longest.max(end));
+    (total, started, finished)
+}
+
+fn makespan_blocking(
     tasks: &[Task; TASKS],
     rate: &impl Fn(usize) -> f64,
 ) -> (f64, [f64; TASKS], [f64; TASKS]) {

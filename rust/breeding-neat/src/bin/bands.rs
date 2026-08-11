@@ -44,7 +44,20 @@ use breeding_sim::schedule::{GAUGE_NAMES, PARALLEL_SLOTS, Slot, schedule, slots}
 /// Les jauges sont rangées par **ordre de démarrage** et non par indice, parce que
 /// c'est l'enchaînement qu'on vient lire — qui attend quoi. Une jauge qui porte
 /// deux tâches, comme la sérénité coupée en deux, apparaît deux fois.
-fn frieze(placed: &[Slot], hours: f64, title: &str) {
+fn frieze(
+    placed: &[Slot],
+    hours: f64,
+    title: &str,
+    economy: &breeding_sim::economy::Economy,
+    bands: [usize; 6],
+) {
+    // Le temps de travail net d'une tâche, indépendant de ses interruptions : la
+    // colonne « heures » doit dire ce qu'elle coûte, pas ce qu'elle occupe.
+    let net_hours = |slot: &Slot| {
+        let rate = economy.band_rate(bands[slot.gauge]);
+        if rate > 0.0 { slot.points / rate / 3600.0 } else { 0.0 }
+    };
+
     if placed.is_empty() || hours <= 0.0 {
         return;
     }
@@ -55,18 +68,36 @@ fn frieze(placed: &[Slot], hours: f64, title: &str) {
     rows.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
 
     println!("\n  {title} — {hours:.2} h sur {PARALLEL_SLOTS} places");
+    let mut interrupted = false;
     for slot in rows {
         let cell = |seconds: f64| ((seconds / total) * WIDTH as f64).round() as usize;
         let from = cell(slot.start).min(WIDTH);
         let to = cell(slot.end).clamp(from + 1, WIDTH);
+        // `Slot` ne porte que le premier départ et la dernière fin. Une tâche
+        // préemptée s'étend donc sur plus longtemps qu'elle ne travaille, et la
+        // tracer pleine mentirait. On ne sait pas **où** sont les trous — il
+        // faudrait que `slots` rende les segments — mais on sait qu'il y en a, et
+        // le dire vaut mieux que dessiner un bloc faux.
+        let worked = (slot.end - slot.start) / 3600.0;
+        let broken = worked > net_hours(slot) + 1e-6;
+        interrupted |= broken;
+        let fill = if broken { '▒' } else { '█' };
         let bar: String = (0..WIDTH)
-            .map(|column| if column >= from && column < to { '█' } else { '·' })
+            .map(|column| if column >= from && column < to { fill } else { '·' })
             .collect();
         println!(
-            "  {:<11} {bar} {:>5.2} h  {:>7.0} pts",
+            "  {:<11} {bar} {:>5.2} h  {:>7.0} pts{}",
             GAUGE_NAMES[slot.gauge],
-            (slot.end - slot.start) / 3600.0,
-            slot.points
+            net_hours(slot),
+            slot.points,
+            if broken { "  ⋯" } else { "" }
+        );
+    }
+    if interrupted {
+        println!(
+            "  {:<11} ▒ = tâche interrompue puis reprise : elle s'étale sur cette \
+             plage sans l'occuper entière.",
+            ""
         );
     }
     // Une graduation plutôt qu'une légende : lire « où est la moitié » demande
@@ -134,10 +165,10 @@ fn main() {
         economy.success_rate(free, false) * 100.0
     );
 
-    frieze(&slots(&economy, fixed, 0.0), floor.hours, "au plancher, niveau 0");
+    frieze(&slots(&economy, fixed, 0.0), floor.hours, "au plancher, niveau 0", &economy, fixed);
     let offered = slots(&economy, fixed, mount_xp_for_level(free));
     let offered_hours = schedule(&economy, fixed, mount_xp_for_level(free)).hours;
-    frieze(&offered, offered_hours, &format!("au niveau offert, {free}"));
+    frieze(&offered, offered_hours, &format!("au niveau offert, {free}"), &economy, fixed);
 
     // Une frise à la demande, pour voir la Mangeoire cesser de tenir dans les
     // creux et devenir elle-même le chemin critique. C'est ce que la colonne
@@ -148,6 +179,8 @@ fn main() {
             &slots(&economy, fixed, xp),
             schedule(&economy, fixed, xp).hours,
             &format!("au niveau demandé, {level}"),
+            &economy,
+            fixed,
         );
     }
 

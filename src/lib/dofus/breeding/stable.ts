@@ -143,7 +143,28 @@ export const tracksIndividually = (
 export type BulkStock = {
   males: number;
   females: number;
+  /**
+   * Parmi `males`, combien sont **fécondes** — leur cycle est payé, donc elles
+   * s'accouplent sans repasser par l'enclos.
+   *
+   * Un sous-ensemble et non une partition : `males` continue de compter tout ce
+   * qui garde sa reproduction, exactement comme `FERTILE_*` face à `CYCLED_*`
+   * dans l'encodage du réseau. La différence des deux est la dette de cycle.
+   *
+   * Le vrac l'ignorait, et ça se payait : le seuil de suivi individuel commence à
+   * la génération 2, donc une gen 1 féconde n'avait nulle part où être dite. La
+   * politique la voyait fertile ordinaire, lui réservait une place d'enclos, et
+   * proposait d'acheter des gen 1 pendant que les fécondes attendaient.
+   */
+  cycledMales?: number;
+  cycledFemales?: number;
 };
+
+/** Les fécondes d'un stock de vrac, absentes valant zéro. */
+export const cycledOf = (stock: BulkStock): { males: number; females: number } => ({
+  males: Math.min(stock.cycledMales ?? 0, stock.males),
+  females: Math.min(stock.cycledFemales ?? 0, stock.females),
+});
 
 /**
  * Une monture suivie individuellement.

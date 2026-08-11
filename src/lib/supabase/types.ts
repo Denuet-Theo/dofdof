@@ -363,6 +363,16 @@ export type UserBreedingMount = {
   color_id: string;
   males: number;
   females: number;
+  /**
+   * Parmi `males`, combien sont **fécondes** : leur cycle est payé, donc elles
+   * s'accouplent sans repasser par l'enclos (migration 20260811140000).
+   *
+   * Un sous-ensemble et non une partition, comme `cycled` l'est pour un individu.
+   * Le vrac l'ignorait, et la politique voyait alors une écurie qui doit son cycle
+   * alors qu'il était payé.
+   */
+  cycled_males: number;
+  cycled_females: number;
   updated_at: string;
 };
 
@@ -488,11 +498,15 @@ export interface Database {
           color_id: string;
           males?: number;
           females?: number;
+          cycled_males?: number;
+          cycled_females?: number;
           updated_at?: string;
         };
         Update: {
           males?: number;
           females?: number;
+          cycled_males?: number;
+          cycled_females?: number;
           updated_at?: string;
         };
         Relationships: [];

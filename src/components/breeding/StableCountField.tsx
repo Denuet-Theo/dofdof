@@ -1,6 +1,6 @@
 'use client';
 
-import { INDIVIDUAL_TRACKING_FROM, type BulkStock } from '@/lib/dofus/breeding/stable';
+import { INDIVIDUAL_TRACKING_FROM, cycledOf, type BulkStock } from '@/lib/dofus/breeding/stable';
 
 /**
  * Le « j'en ai » des lignes de plan, désormais sexé.
@@ -19,7 +19,12 @@ type Props = {
   colorId: string;
   generation: number;
   stockBySex: Map<string, BulkStock>;
-  onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
+  onSaveBulk: (
+    colorId: string,
+    males: number,
+    females: number,
+    cycled?: { males: number; females: number }
+  ) => Promise<void>;
   /** Compact : sans le libellé, pour les lignes de plan déjà chargées. */
   compact?: boolean;
 };
@@ -54,6 +59,7 @@ const StableCountField = ({
   compact = false,
 }: Props) => {
   const counts = stockBySex.get(colorId) ?? { males: 0, females: 0 };
+  const banked = cycledOf(counts);
   const tracked = generation >= INDIVIDUAL_TRACKING_FROM;
 
   if (tracked) {
@@ -72,16 +78,60 @@ const StableCountField = ({
     );
   }
 
+  /**
+   * Deux lignes : les fertiles, puis **combien d'entre elles sont fécondes**.
+   *
+   * Un sous-ensemble et non une catégorie à part, d'où la saisie en second et le
+   * mot « dont ». Une féconde reste une fertile — elle garde sa reproduction —
+   * mais son cycle est payé, donc elle s'accouple d'un clic sans occuper de place
+   * d'enclos. C'est toute la différence, et le vrac ne savait pas la dire.
+   */
   return (
-    <span className="flex items-center gap-1.5 shrink-0">
-      {!compact && <span className="text-[10px] text-dark-500">j&apos;en ai</span>}
-      <span className="text-[10px] text-dark-500">♂</span>
-      {sexInput(counts.males, 'Mâles fertiles en écurie', (next) =>
-        onSaveBulk(colorId, next, counts.females)
-      )}
-      <span className="text-[10px] text-dark-500">♀</span>
-      {sexInput(counts.females, 'Femelles fertiles en écurie', (next) =>
-        onSaveBulk(colorId, counts.males, next)
+    <span className="flex flex-col gap-1 shrink-0">
+      <span className="flex items-center gap-1.5">
+        {!compact && <span className="text-[10px] text-dark-500">j&apos;en ai</span>}
+        <span className="text-[10px] text-dark-500">♂</span>
+        {sexInput(counts.males, 'Mâles fertiles en écurie', (next) =>
+          onSaveBulk(colorId, next, counts.females)
+        )}
+        <span className="text-[10px] text-dark-500">♀</span>
+        {sexInput(counts.females, 'Femelles fertiles en écurie', (next) =>
+          onSaveBulk(colorId, counts.males, next)
+        )}
+      </span>
+      {counts.males + counts.females > 0 && (
+        <span className="flex items-center gap-1.5">
+          {!compact && (
+            <span
+              className="text-[10px] text-emerald-400/70"
+              title="Sorties d'enclos sans avoir été accouplées : leur cycle est payé, donc elles s'accouplent d'un clic sans occuper de place."
+            >
+              dont fécondes
+            </span>
+          )}
+          <span className="text-[10px] text-dark-500">♂</span>
+          {sexInput(
+            banked.males,
+            'Mâles fécondes — accouplables sans enclos',
+            (next) =>
+              onSaveBulk(colorId, counts.males, counts.females, {
+                males: next,
+                females: banked.females,
+              }),
+            counts.males === 0
+          )}
+          <span className="text-[10px] text-dark-500">♀</span>
+          {sexInput(
+            banked.females,
+            'Femelles fécondes — accouplables sans enclos',
+            (next) =>
+              onSaveBulk(colorId, counts.males, counts.females, {
+                males: banked.males,
+                females: next,
+              }),
+            counts.females === 0
+          )}
+        </span>
       )}
     </span>
   );

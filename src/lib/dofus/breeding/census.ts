@@ -28,7 +28,7 @@
 import { carriedGeneration } from './naming';
 import { matingOutcomes, pairTargetGeneration, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
-import type { Sex, Stable } from './stable';
+import { cycledOf, type Sex, type Stable } from './stable';
 
 /** Générations 1 à 10. L'entrée 0 n'existe pas et reste à zéro. */
 export const MAX_GENERATION = 10;
@@ -181,6 +181,12 @@ export const censusOf = (
     census.liquidation += economy.valueOf(colorId) * total;
     census.fertileMales[rank] += counts.males;
     census.fertileFemales[rank] += counts.females;
+    // Les fécondes du vrac. Elles étaient perdues ici, et le réseau lisait donc
+    // une écurie qui doit son cycle alors qu'il était payé — c'est la différence
+    // entre « je peux accoupler d'un clic » et « il me faut une place d'enclos ».
+    const banked = cycledOf(counts);
+    census.cycledMales[rank] += banked.males;
+    census.cycledFemales[rank] += banked.females;
     census.carried[rank] += total;
     hold(colorId, total);
   }

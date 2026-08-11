@@ -41,6 +41,7 @@ import { planWaves, wavesByStep, type Wave } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
+  cycledOf,
   stableBySex,
   statusFlags,
   tracksIndividually,
@@ -262,7 +263,17 @@ export const useBreeding = (
           bulk: new Map(
             ((mountRows.data ?? []) as UserBreedingMount[])
               .filter((row) => row.males > 0 || row.females > 0)
-              .map((row) => [row.color_id, { males: row.males, females: row.females }])
+              .map((row) => [
+                row.color_id,
+                {
+                  males: row.males,
+                  females: row.females,
+                  // Absentes des lignes écrites avant la migration : `?? 0` vaut
+                  // « aucune féconde », ce qui est l'état d'avant.
+                  cycledMales: row.cycled_males ?? 0,
+                  cycledFemales: row.cycled_females ?? 0,
+                },
+              ])
           ),
           individuals: ((individualRows.data ?? []) as UserBreedingIndividual[]).map((row) => ({
             id: row.id,
@@ -722,7 +733,12 @@ export const useBreeding = (
    * saisie, et l'attendre du réseau rendrait la frappe poussive.
    */
   const saveBulkStock = useCallback(
-    async (colorId: string, totalMales: number, totalFemales: number) => {
+    async (
+      colorId: string,
+      totalMales: number,
+      totalFemales: number,
+      cycled?: { males: number; females: number }
+    ) => {
       const tracked = stable.individuals.filter(
         (mount) => mount.colorId === colorId && mount.fertile
       );
@@ -732,10 +748,17 @@ export const useBreeding = (
       const males = Math.max(0, totalMales - trackedMales);
       const females = Math.max(0, totalFemales - trackedFemales);
 
+      // Les fécondes sont un sous-ensemble : on ne peut pas en avoir plus que de
+      // fertiles, et un appel qui ne les mentionne pas garde celles qui sont là.
+      const kept = stable.bulk.get(colorId);
+      const cycledMales = Math.min(cycled?.males ?? kept?.cycledMales ?? 0, males);
+      const cycledFemales = Math.min(cycled?.females ?? kept?.cycledFemales ?? 0, females);
+
       setStable((current) => {
         const bulk = new Map(current.bulk);
-        if (males > 0 || females > 0) bulk.set(colorId, { males, females });
-        else bulk.delete(colorId);
+        if (males > 0 || females > 0) {
+          bulk.set(colorId, { males, females, cycledMales, cycledFemales });
+        } else bulk.delete(colorId);
         return { ...current, bulk };
       });
 
@@ -743,13 +766,21 @@ export const useBreeding = (
       const { error: saveError } = await supabase
         .from('user_breeding_mounts')
         .upsert(
-          { family, color_id: colorId, males, females, updated_at: new Date().toISOString() },
+          {
+            family,
+            color_id: colorId,
+            males,
+            females,
+            cycled_males: cycledMales,
+            cycled_females: cycledFemales,
+            updated_at: new Date().toISOString(),
+          },
           { onConflict: 'user_id,family,color_id' }
         );
 
       if (saveError) console.error('[breeding] monture non enregistrée:', saveError);
     },
-    [family, stable.individuals]
+    [family, stable.bulk, stable.individuals]
   );
 
   /**
@@ -926,14 +957,23 @@ export const useBreeding = (
       const nextBulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
       for (const [colorId, spent] of bulkSpent) {
         const current = nextBulk.get(colorId) ?? { males: 0, females: 0 };
+        // Les fécondes partent en premier, parce que c'est ce que le plan fait :
+        // un couple de fécondes ne coûte aucune place, donc la politique les
+        // dépense avant tout le reste. Le vrac n'a pas d'identité, donc on ne peut
+        // pas le savoir monture par monture — on suit la même règle qu'elle.
+        const banked = cycledOf(current);
         nextBulk.set(colorId, {
           males: Math.max(0, current.males - spent.males),
           females: Math.max(0, current.females - spent.females),
+          cycledMales: Math.max(0, banked.males - spent.males),
+          cycledFemales: Math.max(0, banked.females - spent.females),
         });
       }
       for (const [colorId, born] of bulkBorn) {
         const current = nextBulk.get(colorId) ?? { males: 0, females: 0 };
+        // Un poulain naît fertile et **non fécond** : son cycle est à payer.
         nextBulk.set(colorId, {
+          ...current,
           males: current.males + born.males,
           females: current.females + born.females,
         });
@@ -961,6 +1001,8 @@ export const useBreeding = (
               color_id: colorId,
               males: nextBulk.get(colorId)?.males ?? 0,
               females: nextBulk.get(colorId)?.females ?? 0,
+              cycled_males: nextBulk.get(colorId)?.cycledMales ?? 0,
+              cycled_females: nextBulk.get(colorId)?.cycledFemales ?? 0,
               updated_at: new Date().toISOString(),
             })),
             { onConflict: 'user_id,family,color_id' }

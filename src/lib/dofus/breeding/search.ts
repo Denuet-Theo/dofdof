@@ -64,7 +64,7 @@ import {
 import { carriedGeneration } from './naming';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
-import type { Individual, Sex, Stable } from './stable';
+import { cycledOf, type Individual, type Sex, type Stable } from './stable';
 
 /**
  * Les réglages qui ne viennent pas de la recherche.
@@ -319,7 +319,11 @@ export const createSearcher = (config: SearchConfig = DEFAULT_SEARCH): Searcher 
 export const flatten = (stable: Stable): Individual[] => {
   const out: Individual[] = [];
   for (const [colorId, counts] of stable.bulk) {
-    const push = (sex: Sex, count: number) => {
+    const cycled = cycledOf(counts);
+    // Les fécondes d'abord dans chaque sexe : elles sont interchangeables entre
+    // elles, donc l'ordre n'a pas de sens en soi — mais il en a un pour la
+    // lecture, `materialise` piochant les fécondations par le début.
+    const push = (sex: Sex, count: number, banked: number) => {
       for (let index = 0; index < count; index += 1) {
         out.push({
           id: `${colorId}#${sex}${index}`,
@@ -328,13 +332,13 @@ export const flatten = (stable: Stable): Individual[] => {
           sex,
           level: BULK_MATE_LEVEL,
           fertile: true,
-          cycled: false,
+          cycled: index < banked,
           parents: null,
         });
       }
     };
-    push('M', counts.males);
-    push('F', counts.females);
+    push('M', counts.males, cycled.males);
+    push('F', counts.females, cycled.females);
   }
   out.push(...stable.individuals);
   return out;

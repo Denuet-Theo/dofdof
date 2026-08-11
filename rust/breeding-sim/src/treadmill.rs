@@ -151,6 +151,32 @@ pub struct TreadmillConfig {
     /// autres. La tirer en plus donnerait au départ une manne qui n'existe nulle
     /// part ailleurs dans l'épisode.
     pub weights: [usize; 11],
+    /// Les montures tirées arrivent **fertiles et non fécondes**.
+    ///
+    /// Le tirage ordinaire rend un tiers de fertiles, un tiers de fécondes et un
+    /// tiers de stériles, ce qui décrit une écurie déjà en marche. Ce n'est pas ce
+    /// qu'on achète : une gen 1 prise à l'hôtel de vente arrive entière, et un
+    /// **départ frais** est vingt de celles-là. Un tiers de stériles d'entrée de jeu
+    /// changerait la question posée.
+    pub fresh: bool,
+    /// Ce que l'écurie **qui reste** compte dans la fitness, en part de sa valeur
+    /// de recyclage. `0.0` l'ignore, comme avant.
+    ///
+    /// Sans ce terme, la fitness ne compte que les génétons vendus et la récolte de
+    /// gen 10. Sur un départ chargé c'est suffisant — l'écurie porte déjà des gen 8
+    /// à 10, donc tout paie dès le premier cycle. Sur un départ frais, personne
+    /// n'atteint la gen 10 en trente cycles, donc **le score est plat quoi qu'on
+    /// fasse** et l'évolution n'a aucun gradient : elle ne peut pas apprendre à
+    /// monter si monter ne rapporte rien avant le sommet.
+    ///
+    /// Mesuré avant de le corriger : dix-sept relevés sur trois heures, dix à douze
+    /// espèces chacun, et **aucune n'a jamais dépassé un million** sur un départ
+    /// frais. Ce n'était pas faute d'avoir cherché.
+    ///
+    /// Le barème est celui de l'ambre — `génération × prix`, déjà porté par
+    /// `value_at_generation` et déjà lu par le recensement. On ne l'invente pas, on
+    /// arrête de le jeter.
+    pub residual_value: f64,
 }
 
 impl Default for TreadmillConfig {
@@ -174,6 +200,8 @@ impl Default for TreadmillConfig {
             overflow_kamas: 100,
             // 11 − génération, et zéro pour la gen 1.
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+            fresh: false,
+            residual_value: 1.0,
         }
     }
 }
@@ -232,6 +260,9 @@ pub struct TreadmillOutcome {
     /// Ils ne sont pas dans `genetons` : ce sont deux unités. `net_genetons` fait
     /// la conversion, au prix du géneton de l'économie du jour.
     pub overflow_paid: i64,
+    /// Ce que l'écurie restante vaut à la casse, avant pondération. Porté à part
+    /// pour qu'on puisse lire d'où vient un score.
+    pub residual: i64,
     /// Génétons cycle par cycle.
     ///
     /// C'est ce qui dit si l'épisode mesure un **régime établi** ou la liquidation
@@ -247,8 +278,14 @@ pub struct TreadmillOutcome {
 /// couleur à chaque tour — et les facturer reviendrait à taxer ce qu'on injecte
 /// soi-même. Elles sont aussi ce qu'on remplace le plus facilement en jeu : sans
 /// généalogie, elles sont interchangeables.
+/// L'ascendance est lue **canoniquement** : un Ébène né de deux Ébène ne porte
+/// aucune généalogie utile, et le jeu ne le distingue pas d'un Ébène acheté. Le
+/// tester littéralement faisait payer le plafond pour une monture qu'on remplace
+/// d'un clic à l'hôtel de vente — et la recopie est justement ce que la politique
+/// produit en masse, si bien que la taxe portait surtout sur elle.
 fn chargeable(catalog: &Catalog, mount: &Mount) -> bool {
-    !(mount.parents.is_none() && catalog.generation(mount.color) == 1)
+    let anonymous = crate::pairing::canonical_parents(mount.color, mount.parents).is_none();
+    !(anonymous && catalog.generation(mount.color) == 1)
 }
 
 /// Fait tourner un épisode et rend ce qu'il a produit.
@@ -408,7 +445,18 @@ pub fn play_treadmill_with(
     // sont en kamas et aucun taux n'est inventé — c'est ce qui rend
     // `PRICE_GENETON` utile au réseau : un géneton vaut plus certains jours, donc
     // croiser vaut plus certains jours.
-    outcome.kamas = outcome.genetons as f64 * economy.geneton_value + outcome.harvest_value as f64
+    // Ce que l'écurie vaut encore, à son prix de recyclage. Voir
+    // `TreadmillConfig::residual_value` : c'est ce terme qui donne une pente à
+    // celui qui part de vingt gen 1 et n'atteindra jamais la gen 10 à temps.
+    outcome.residual = stable
+        .mounts
+        .iter()
+        .map(|mount| economy.value_of(catalog, mount.color))
+        .sum();
+
+    outcome.kamas = outcome.genetons as f64 * economy.geneton_value
+        + outcome.harvest_value as f64
+        + outcome.residual as f64 * config.residual_value
         - outcome.overflow_paid as f64;
     outcome.top_generation = stable.top_generation(catalog);
     outcome.mounts_end = stable.len();
@@ -481,7 +529,11 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         } else {
             Some(recipes[index_in(rng, recipes.len())])
         };
-        let (fertile, cycled) = draw_state(rng);
+        let (fertile, cycled) = if config.fresh {
+            (true, false)
+        } else {
+            draw_state(rng)
+        };
         stable.push(Mount {
             color,
             sex: draw_sex(rng),

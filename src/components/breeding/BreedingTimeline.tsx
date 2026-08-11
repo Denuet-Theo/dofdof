@@ -8,6 +8,8 @@ import {
   Egg,
   Fuel,
   Heart,
+  Bell,
+  BellOff,
   Pause,
   Play,
   RotateCcw,
@@ -24,6 +26,7 @@ import {
   elapsedSeconds,
   formatCountdown,
   formatWallClock,
+  gaugeChanges,
   inRibbon,
   isPaused,
   nextAction,
@@ -44,8 +47,9 @@ import {
   type ModelPlan,
 } from '@/lib/dofus/breeding/model-plan';
 import CopyableText from '@/components/ui/CopyableText';
+import { chime, unlock } from '@/lib/dofus/breeding/alarm';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
-import type { Loadout } from '@/lib/dofus/breeding/loadout';
+import type { StablePlan } from '@/lib/dofus/breeding/policy';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
@@ -111,10 +115,15 @@ type Props = {
    */
   enclosCount: number;
   /**
-   * La fournée que l'écurie permet de charger, ou `null` si aucune couleur n'a
-   * de plan. Sert à répondre au « quoi » que le plan du modèle laisse ouvert.
+   * Ce que la politique entraînée ferait de l'écurie, ou `null` si elle ne peut
+   * pas répondre — écurie vide, ou artefact d'une autre arité.
+   *
+   * C'est la réponse au « quoi » que le plan du modèle laisse ouvert : lui est
+   * joué sur une graine, donc ses montures sont celles d'une partie simulée, et
+   * « Charger l'enclos ×10 » n'envoie personne devant son coffre. Voir
+   * `policy.ts`.
    */
-  fill?: Loadout | null;
+  fill?: StablePlan | null;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -538,23 +547,36 @@ const Agenda = ({
 /* -------------------------------------------------------------- fournée ---- */
 
 /**
- * Ce qu'on sort de l'écurie pour charger, montures nommées.
+ * Ce que la politique entraînée ferait de l'écurie, montures nommées.
  *
  * Une fois pour tout le parc, et non sur chaque piste : la fournée se dimensionne
  * sur les places du parc entier (`enclos × 10`), donc la répéter sous les six
  * « Charger l'enclos » ferait lire six fois le même travail — l'erreur exacte que
  * `per_enclos` évite côté Rust.
  *
- * Les sexes sont détaillés parce qu'ils ne sont pas interchangeables : deux Doré
- * mâles ne remplacent pas un mâle et une femelle, et c'est devant le coffre qu'on
- * s'en aperçoit.
+ * ## Ce n'est plus le plan de recettes
+ *
+ * Avant, ce cadre déroulait `buildLoadout` : viser telle couleur, donc croiser
+ * tels parents. Il répondait à « comment atteindre cette couleur-là ». Ce qu'on
+ * lit ici répond à « que faire de cette écurie-ci », sans cible imposée — c'est
+ * `policy.ts`, donc la recherche du Rust jouée sur votre écurie et vos prix.
+ *
+ * D'où quatre familles de gestes et non une seule. Les **accouplements** restent
+ * la décision principale ; les **fécondations** sont la nouveauté, et la moins
+ * intuitive — mettre une monture en enclos sans la croiser n'est pas un
+ * croisement de moins, c'est un croisement de plus au tour suivant, gratuit, dès
+ * que le partenaire existe. Les **clonages** et les **achats** suivent.
+ *
+ * Les sexes sont détaillés partout parce qu'ils ne sont pas interchangeables :
+ * deux Doré mâles ne remplacent pas un mâle et une femelle, et c'est devant le
+ * coffre qu'on s'en aperçoit.
  */
 const Fill = ({
   fill,
   nameOf,
   individuals = [],
 }: {
-  fill: Loadout;
+  fill: StablePlan;
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
 }) => {
@@ -569,7 +591,7 @@ const Fill = ({
     individuals.find((mount) => mount.id === mountId)?.name ?? ANONYMOUS_NAME;
 
   /**
-   * Les noms d'un côté de couple, dédoublonnés.
+   * Les noms d'un groupe de montures, dédoublonnés.
    *
    * Une ligne charge souvent plusieurs montures d'ascendance identique, dont
    * l'une a été renommée et l'autre pas : elles se comptent, elles ne se
@@ -605,62 +627,161 @@ const Fill = ({
       </span>
     );
 
+  const side = (label: string, colorId: string, ids: string[], key: string) => (
+    <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
+      {label} {ids.length === 0 ? <em className="not-italic text-dark-400">à acheter</em> : null}
+      {nameOf(colorId)}
+      {mountNames(ids).map(([name, count]) => nameChip(name, count, `${key}-${name}`))}
+    </span>
+  );
+
+  const nothing =
+    fill.couples.length === 0 &&
+    fill.cycles.length === 0 &&
+    fill.clonings.length === 0 &&
+    fill.purchases.length === 0;
+
   return (
     <div className="space-y-2 px-3 py-2.5 rounded-xl bg-info/8 border border-info/20">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Heart size={13} className="text-info shrink-0" />
         <span className="text-[11px] text-dark-300">
-          La prochaine fournée —{' '}
-          <strong className="text-dark-100">{nameOf(fill.targetColorId)}</strong>
+          La prochaine fournée — <strong className="text-dark-100">la politique entraînée</strong>
         </span>
         <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
-          {fill.crossings} accouplement{fill.crossings > 1 ? 's' : ''} · {fill.used}/{fill.slots}{' '}
-          places
+          {fill.raw.crossings.length} accouplement{fill.raw.crossings.length > 1 ? 's' : ''} ·{' '}
+          {fill.places}/{fill.capacity} places
         </span>
       </div>
 
-      {fill.lines.length > 0 ? (
+      {nothing ? (
+        /* Une fournée vide se dit, plutôt que de laisser un cadre vide qu'on
+           prendrait pour un défaut d'affichage. C'est le cas quand l'écurie n'a
+           aucune monture fertile, ou quand aucun prix n'est saisi — la politique
+           ne voit alors rien qui vaille quoi que ce soit. */
+        <p className="text-[11px] text-dark-500">
+          La politique ne propose rien sur cette écurie : soit elle n’a plus de monture fertile,
+          soit les prix ne sont pas saisis et tout lui paraît sans valeur.
+        </p>
+      ) : (
         <>
           {/* Les couples, et non seulement les couleurs. L'appariement **est** la
               consigne : quel mâle avec quelle femelle, et laquelle nommément dès
               qu'elle est suivie — deux montures de même couleur n'ont pas la
               même ascendance, et c'est l'ascendance qui décide de ce que le
               croisement vise. */}
-          <div className="space-y-0.5">
-            {fill.lines.map((line, index) => (
-              <div
-                key={`${line.step.colorId}-${line.male.colorId}-${line.female.colorId}-${index}`}
-                className="flex flex-wrap items-center gap-2 text-xs"
-              >
-                <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-                  {line.count} ×
-                </span>
-                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
-                  ♂ {nameOf(line.male.colorId)}
-                  {mountNames(line.male.mountIds).map(([name, count]) =>
-                    nameChip(name, count, `m-${index}-${name}`)
-                  )}
-                </span>
-                <span className="text-dark-600">+</span>
-                <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
-                  ♀ {nameOf(line.female.colorId)}
-                  {mountNames(line.female.mountIds).map(([name, count]) =>
-                    nameChip(name, count, `f-${index}-${name}`)
-                  )}
-                </span>
-                <span
-                  className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-                  title={`Étape du plan : produire ${nameOf(line.step.colorId)}, de génération ${line.step.generation}.`}
+          {fill.couples.length > 0 && (
+            <div className="space-y-0.5">
+              {fill.couples.map((line, index) => (
+                <div
+                  key={`${line.male.colorId}-${line.female.colorId}-${index}`}
+                  className="flex flex-wrap items-center gap-2 text-xs"
                 >
-                  GEN. {line.step.generation}
+                  <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
+                    {line.count} ×
+                  </span>
+                  {side('♂', line.male.colorId, line.male.mountIds, `m-${index}`)}
+                  <span className="text-dark-600">+</span>
+                  {side('♀', line.female.colorId, line.female.mountIds, `f-${index}`)}
+                  {line.targetGeneration !== null ? (
+                    <span
+                      className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+                      title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
+                    >
+                      GEN. {line.targetGeneration}
+                    </span>
+                  ) : (
+                    /* Le cas qu'on annonçait « gen 2 » à tort. Deux Ébène visent
+                       bien la génération 2, mais aucune recette ne s'écrit
+                       `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et
+                       aucun géneton. Le dire, parce que ça change ce qu'on fait
+                       de ses places d'enclos. */
+                    <span
+                      className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
+                      title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
+                    >
+                      RECOPIE
+                    </span>
+                  )}
+                  {line.places === 0 && (
+                    <span
+                      className="px-1.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold"
+                      title="Les deux parents sont déjà féconds : l'accouplement est un clic, il n'occupe aucune place d'enclos."
+                    >
+                      SANS ENCLOS
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Les fécondations. Le geste le moins intuitif du lot, d'où la
+              formulation longue : on met la monture en enclos et on ne la croise
+              pas, ce qui n'a l'air d'un gâchis que tant qu'on oublie que la
+              fécondité ne se perd qu'à la naissance. */}
+          {fill.cycles.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 border-t border-info/15 text-xs">
+              <span
+                className="text-[11px] text-dark-400"
+                title="En enclos sans croiser : elles en sortent fécondes et restent en écurie. C'est un croisement gratuit au tour suivant, dès que le partenaire existe."
+              >
+                À féconder sans croiser
+              </span>
+              {fill.cycles.map((entry) => (
+                <span
+                  key={entry.colorId}
+                  className="inline-flex flex-wrap items-center gap-1.5 text-dark-200"
+                >
+                  {nameOf(entry.colorId)}
+                  <span className="text-dark-100 tabular-nums font-semibold">
+                    ×{entry.mountIds.length}
+                  </span>
+                  {mountNames(entry.mountIds).map(([name, count]) =>
+                    nameChip(name, count, `c-${entry.colorId}-${name}`)
+                  )}
                 </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {fill.clonings.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-info/15 text-xs">
+              <span
+                className="text-[11px] text-dark-400"
+                title="Deux stériles ne se clonent qu'à génération affichée égale : le choix n'est pas libre."
+              >
+                À cloner
+              </span>
+              {fill.clonings.map((entry) => (
+                <span key={entry.generation} className="text-dark-200">
+                  gén. {entry.generation}{' '}
+                  <span className="text-dark-100 tabular-nums font-semibold">
+                    {entry.mountIds.length / 2} paire{entry.mountIds.length > 2 ? 's' : ''}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {fill.purchases.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-info/15 text-xs">
+              <span className="text-[11px] text-dark-400">À acheter</span>
+              {fill.purchases.map((entry) => (
+                <span key={entry.colorId} className="text-dark-200">
+                  {nameOf(entry.colorId)}{' '}
+                  <span className="text-dark-100 tabular-nums font-semibold">
+                    {entry.males > 0 && `${entry.males}♂`}
+                    {entry.males > 0 && entry.females > 0 && ' '}
+                    {entry.females > 0 && `${entry.females}♀`}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Le récapitulatif par couleur, qui se lit devant le coffre : on y va
-              une fois, pas une fois par couple. Les sexes restent détaillés
-              parce qu'ils ne sont pas interchangeables. */}
+              une fois, pas une fois par couple. */}
           {fill.pull.length > 0 && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-info/15">
               <span className="text-[11px] text-dark-400">À sortir de l&apos;écurie</span>
@@ -686,15 +807,6 @@ const Fill = ({
             </div>
           )}
         </>
-      ) : (
-        /* Une fournée à zéro croisement se dit, plutôt que de laisser un cadre vide
-           qu'on prendrait pour un défaut d'affichage. C'est le cas quand l'écurie
-           ne porte aucun couple de la recette suivante — il faut alors élever ou
-           acheter les parents avant de pouvoir charger quoi que ce soit. */
-        <p className="text-[11px] text-dark-500">
-          L&apos;écurie ne permet aucun accouplement de ce plan pour l&apos;instant : les parents
-          des prochaines étapes manquent.
-        </p>
       )}
     </div>
   );
@@ -857,6 +969,21 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
    */
   const [fromModel, setFromModel] = useState<ModelPlan | null>(null);
 
+  /**
+   * Le rappel sonore, une minute avant qu'une jauge change.
+   *
+   * Éteint par défaut, et pas seulement par politesse : aucun navigateur ne laisse
+   * partir un son avant un geste de l'utilisateur, donc un réglage « allumé » au
+   * chargement serait un mensonge — le premier rappel ne sonnerait pas.
+   */
+  const [alerting, setAlerting] = useState(false);
+  /**
+   * Le dernier changement annoncé, pour ne pas sonner à chaque battement
+   * d'horloge. Un instant du plan, en secondes — donc stable d'un rendu à l'autre,
+   * là où une date le serait moins.
+   */
+  const rung = useRef<number | null>(null);
+
   useEffect(() => {
     let current = true;
     modelPlan(enclosCount).then((loaded) => {
@@ -868,6 +995,30 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
       current = false;
     };
   }, [enclosCount]);
+
+  /**
+   * Les bascules de jauge du plan courant, calculées une fois.
+   *
+   * Elles ne bougent qu'avec le plan, alors que l'horloge bat chaque seconde :
+   * les recalculer à chaque tic ferait parcourir toutes les pistes soixante fois
+   * par minute pour un résultat identique.
+   */
+  const changes = useMemo(() => (plan ? gaugeChanges(plan) : []), [plan]);
+
+  useEffect(() => {
+    if (!alerting || !clock || now === null || isPaused(clock)) return;
+    const elapsed = elapsedSeconds(clock, now);
+    // Le prochain changement à venir, et la fenêtre d'une minute avant lui. La
+    // borne basse évite de sonner pour un changement qu'on a déjà dépassé quand
+    // l'onglet revient au premier plan après une longue absence.
+    const next = changes.find((at) => at > elapsed);
+    if (next === undefined) return;
+    const remaining = next - elapsed;
+    if (remaining > 60 || remaining < 0) return;
+    if (rung.current === next) return;
+    rung.current = next;
+    chime();
+  }, [alerting, changes, clock, now]);
 
   // `now` reste nul jusqu'au montage — voir `useBreedingTimeline` sur l'écart
   // d'hydratation qu'un `Date.now()` initial produirait.
@@ -943,6 +1094,33 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
           <span className="text-[11px] text-dark-500 tabular-nums">
             {paused ? 'en pause' : `démarrée il y a ${formatCountdown(elapsed)}`}
           </span>
+          {/* Le rappel sonore. L'activation **est** le geste que le navigateur
+              exige avant tout son : on réveille le contexte audio là, pas au
+              premier rappel, sinon celui-là serait muet. */}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              if (alerting) {
+                setAlerting(false);
+                return;
+              }
+              const ready = await unlock();
+              setAlerting(ready);
+              // Sonner une fois à l'activation : c'est le seul moyen de savoir que
+              // le son passe, et à quel volume, avant de compter dessus.
+              if (ready) chime();
+            }}
+            title={
+              alerting
+                ? 'Rappel sonore actif : deux notes une minute avant chaque changement de jauge.'
+                : 'Sonner une minute avant chaque changement de jauge.'
+            }
+          >
+            {alerting ? <Bell size={13} /> : <BellOff size={13} />}
+            {alerting ? 'Rappel actif' : 'Rappel'}
+          </Button>
+
           {/* Le seul bouton qui compte, donc le seul en teinte pleine. */}
           <Button size="sm" variant={paused ? 'primary' : 'secondary'} onClick={paused ? resume : pause}>
             {paused ? <Play size={13} /> : <Pause size={13} />}

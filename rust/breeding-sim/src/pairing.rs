@@ -60,11 +60,42 @@ pub fn target_generation_rate(level_a: u16, level_b: u16) -> f64 {
 /// Ce qui distingue une monture d'une autre du point de vue de l'appariement :
 /// sa couleur et son ascendance. À signature égale, deux montures visent
 /// exactement la même chose — c'est la clé de mémoïsation.
+///
+/// ## Une ascendance qui ne dit rien est une absence d'ascendance
+///
+/// Un Ébène né de deux Ébène porte `Some([ebene, ebene])` ; un Ébène acheté porte
+/// `None`. En jeu ce sont **la même monture** : même couleur, même ascendance
+/// utile, mêmes cibles. Et le modèle le savait déjà partout où ça compte —
+/// vérifié sur les 14 400 couples du catalogue, la loi d'appariement ne les
+/// distingue en rien, et les 74 entrées du recensement leur sont identiques au bit.
+///
+/// Seule cette clé les séparait, et elle décide du **regroupement** : deux montures
+/// interchangeables tombaient dans deux groupes, donc en deux candidats portant le
+/// même delta, et le stock se fragmentait à mesure que les recopies s'accumulaient.
+/// Le tirage de la recherche est uniforme sur les candidats : les doublons le
+/// diluent, et un candidat tiré sur un groupe épuisé gaspille un des huit essais.
+///
+/// La réduction est exacte et ne s'applique qu'à ce cas : `[a, a]` avec la couleur
+/// `a`. Une ascendance mixte, elle, ouvre des cibles et doit être gardée — un Ébène
+/// né d'Ébène × Doré porte du Doré, et c'est ce qui lui permet de viser plus haut.
 pub type MateSignature = (ColorId, Option<[ColorId; 2]>);
 
 #[inline]
 pub fn mate_signature(mate: &Mate) -> MateSignature {
-    (mate.color, mate.parents)
+    (mate.color, canonical_parents(mate.color, mate.parents))
+}
+
+/// `None` quand les deux parents sont de la couleur de la monture. Voir
+/// `MateSignature`.
+#[inline]
+pub fn canonical_parents(
+    color: ColorId,
+    parents: Option<[ColorId; 2]>,
+) -> Option<[ColorId; 2]> {
+    match parents {
+        Some([a, b]) if a == color && b == color => None,
+        other => other,
+    }
 }
 
 /// Une couleur que la recombinaison peut donner, et à quel point elle est

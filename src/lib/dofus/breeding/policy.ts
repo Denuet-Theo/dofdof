@@ -1,0 +1,500 @@
+/**
+ * La politique entraînée, jouée sur **votre** écurie et **vos** prix.
+ *
+ * C'est le point où le portage sert à quelque chose. Le Rust ne connaît ni votre
+ * écurie ni vos cours : il produit des poids, et rien d'autre. Ici on lit l'écurie
+ * saisie dans l'app, les prix du jour, et on fait tourner la même recherche —
+ * `check-search.mjs` vérifie qu'elle rend le plan que le Rust rendrait.
+ *
+ * ## Ce que la politique remplace
+ *
+ * `buildLoadout` déroule un **plan de recettes** : viser telle couleur, donc
+ * croiser tels parents. Il répond à « comment atteindre cette couleur-là ». La
+ * politique répond à autre chose : « que faire de cette écurie-ci », sans cible
+ * imposée. Elle apparie, elle met en banque, elle clone, elle achète — et le
+ * départage entre ces quatre-là est précisément ce que la neuroévolution a appris
+ * et qu'aucune heuristique n'a su écrire.
+ *
+ * ## Les échelles ne sont pas les vôtres, et c'est voulu
+ *
+ * Trois des 74 entrées sont des prix, normalisés sur le **milieu de leur
+ * fourchette**. Ces fourchettes décrivent le marché sur lequel le réseau a
+ * appris — trente jours de relevés dans `rust/economy.toml`. Les remplacer par
+ * les vôtres mettrait les trois entrées sur une échelle que le réseau n'a jamais
+ * vue, et il lirait « ambre au plus bas » là où vous avez saisi un cours normal.
+ *
+ * Vos prix, eux, entrent bien : ce sont les **numérateurs**. Voir `EconomyView`.
+ *
+ * ## L'ambre est fermée
+ *
+ * Le champion embarqué vient du tapis roulant, qui s'entraîne sans extraction —
+ * l'ambre y convertirait du stock en kamas dans un environnement qui n'a pas
+ * d'économie. Lui ouvrir l'action ici la lui proposerait dans une situation qu'il
+ * n'a jamais rencontrée. Voir `SearchConfig.sacrifices`.
+ */
+
+import championArtifact from './champion.json';
+import { compile, evaluate, isConnected, type Champion } from './network';
+import { featuresOf, pairDelta, type EconomyView } from './census';
+import {
+  createSearcher,
+  flatten,
+  planUnit,
+  type SearchStrategy,
+  type UnitPlan,
+} from './search';
+import { seededRandom } from './random';
+import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
+import type { BreedingColor } from './costs';
+import type { Individual, Sex, Stable } from './stable';
+
+/**
+ * Les échelles du marché sur lequel le réseau a appris.
+ *
+ * Recopiées de `rust/economy.toml`, section `[valeurs]` et `[genetons]`. Elles ne
+ * servent qu'à **normaliser** les trois entrées de prix : chacune est divisée par
+ * le milieu de sa fourchette, donc elle vaut environ 1 en marché ordinaire et
+ * s'écarte quand le cours s'écarte.
+ *
+ * Elles ne décrivent donc pas votre marché mais celui de l'entraînement, et il ne
+ * faut les toucher que si `economy.toml` change — auquel cas tous les champions
+ * antérieurs deviennent mal calibrés, ce qui se corrige en réentraînant, pas ici.
+ */
+export const TRAINING_SCALES = {
+  /** L'échelle des kamas : `KAMAS` et `LIQUIDATION` s'y rapportent. */
+  startingKamas: 10_000_000,
+  /** L'ambre a oscillé entre 11 000 et 30 000 sur trente jours. */
+  amberRange: [11_000, 30_000] as [number, number],
+  /** Le géneton, net de la taxe HDV, entre 490 et 980. */
+  genetonRange: [490, 980] as [number, number],
+  /** Une gen 10 entre 300 000 et 1 000 000 — la plus large des trois. */
+  topValueRange: [300_000, 1_000_000] as [number, number],
+  /** Ce que l'Optimakina ajoute au taux de réussite. */
+  optimakinaBonus: 0.1,
+};
+
+/** Ce que la politique réclame au marché du jour, tel que l'app le connaît. */
+export type BreederMarket = {
+  /**
+   * Prix HDV du poulain, couleur par couleur — ce qu'une monture vaut si on la
+   * liquide. Une couleur sans prix saisi vaut zéro, donc la politique ne
+   * cherchera pas à la produire : c'est honnête, mais ça vaut d'être su.
+   */
+  valueOf: (colorId: string) => number;
+  /** Ce qu'un géneton rapporte, via le meilleur parchemin d'échange. */
+  genetonValue: number;
+  /** Prix d'une unité de la ressource de sacrifice — l'ambre, pour le muldo. */
+  amberPerGeneration: number;
+  /** Prix d'une Optimakina par génération visée, index 0 à 10. */
+  optimakina: number[];
+};
+
+/**
+ * Le prix d'une gen 1 anonyme.
+ *
+ * Le modèle n'en connaît qu'**un**, alors que l'app connaît le prix de chaque
+ * couleur : la recherche facture le même montant quelle que soit la gen 1
+ * achetée. On prend la médiane des prix connus plutôt que le minimum — le
+ * minimum ferait paraître tous les achats aussi bon marché que la couleur la
+ * moins chère, y compris ceux qui portent sur une autre.
+ */
+const starterPriceOf = (colors: BreedingColor[], valueOf: (colorId: string) => number): number => {
+  const prices = colors
+    .filter((color) => color.generation === 1)
+    .map((color) => valueOf(color.id))
+    .filter((price) => price > 0)
+    .sort((a, b) => a - b);
+  if (prices.length === 0) return 0;
+  return prices[Math.floor(prices.length / 2)];
+};
+
+/**
+ * Ce que la valeur d'une gen 10 vaut « en général », pour l'entrée de prix.
+ *
+ * Le modèle porte un `topValue` unique là où l'app connaît les cinquante. La
+ * liquidation, elle, reste exacte : `valueOf` est consulté couleur par couleur.
+ * Cette moyenne-ci ne sert qu'à la troisième entrée de prix — « le marché des
+ * gen 10 est-il haut cette semaine » — qui est bien une question globale.
+ */
+const topValueOf = (colors: BreedingColor[], valueOf: (colorId: string) => number): number => {
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+  const prices = colors
+    .filter((color) => color.generation === top)
+    .map((color) => valueOf(color.id))
+    .filter((price) => price > 0);
+  if (prices.length === 0) return 0;
+  return prices.reduce((sum, price) => sum + price, 0) / prices.length;
+};
+
+/** Assemble la vue du marché que l'encodage réclame. */
+export const economyView = (colors: BreedingColor[], market: BreederMarket): EconomyView => ({
+  startingKamas: TRAINING_SCALES.startingKamas,
+  amberPerGeneration: market.amberPerGeneration,
+  amberRange: TRAINING_SCALES.amberRange,
+  genetonValue: market.genetonValue,
+  genetonRange: TRAINING_SCALES.genetonRange,
+  topValue: topValueOf(colors, market.valueOf),
+  topValueRange: TRAINING_SCALES.topValueRange,
+  valueOf: market.valueOf,
+  optimakina: market.optimakina,
+  optimakinaBonus: TRAINING_SCALES.optimakinaBonus,
+  starterPrice: starterPriceOf(colors, market.valueOf),
+});
+
+/* --------------------------------------------------------------- le plan -- */
+
+/** Un côté de couple : la couleur, et les montures nommément. */
+export type CoupleSide = {
+  colorId: string;
+  /** Identifiants des montures engagées. Vides pour un achat. */
+  mountIds: string[];
+  /** Le cycle est payé : l'accouplement est un clic, sans passer par l'enclos. */
+  cycled: boolean;
+};
+
+export type CoupleLine = {
+  male: CoupleSide;
+  female: CoupleSide;
+  count: number;
+  /**
+   * Le rang que le croisement **produira**, ou `null` s'il n'en produit aucun.
+   *
+   * `null` couvre deux cas qu'il faut lire pareil devant l'enclos : le jeu ne
+   * propose pas l'accouplement, ou aucune couleur ne nomme le rang visé. Le second
+   * est la **recopie** — deux Ébène visent la génération 2 et rendent un Ébène —
+   * et c'est celui qu'on annonçait « gen 2 » à tort.
+   */
+  targetGeneration: number | null;
+  /** Places d'enclos que la ligne engage : une par parent qui doit son cycle. */
+  places: number;
+};
+
+/** Une couleur à sortir de l'écurie, sexes détaillés — ils ne s'échangent pas. */
+export type PullLine = {
+  colorId: string;
+  males: number;
+  females: number;
+  /** La fournée vide cette couleur : il n'en restera aucune fertile. */
+  exhausts: boolean;
+};
+
+export type StablePlan = {
+  /** Les accouplements, groupés par couple identique. */
+  couples: CoupleLine[];
+  /**
+   * Les montures mises en enclos **sans être croisées** : elles en sortent
+   * fécondes et restent en écurie.
+   *
+   * C'est l'action que le découplage a ouverte, et elle n'a de sens que parce que
+   * la fécondité ne se perd qu'à la naissance : une place occupée ainsi n'est pas
+   * un croisement de moins, c'est un croisement de plus **au tour suivant**,
+   * gratuit, dès que le partenaire existe.
+   */
+  cycles: { colorId: string; mountIds: string[] }[];
+  /** Les clonages, par génération — deux stériles n'en font qu'à rang égal. */
+  clonings: { generation: number; mountIds: string[] }[];
+  /** Les gen 1 à acheter à l'hôtel de vente. */
+  purchases: { colorId: string; males: number; females: number }[];
+  pull: PullLine[];
+  /** Places engagées, sur celles du parc. */
+  places: number;
+  capacity: number;
+  /** Le plan brut, pour qui veut les indices. */
+  raw: UnitPlan;
+  /** L'écurie à plat, dans l'ordre auquel les indices se rapportent. */
+  mounts: Individual[];
+};
+
+export type PolicyInput = {
+  stable: Stable;
+  colors: BreedingColor[];
+  market: BreederMarket;
+  /** Places d'enclos du parc : dix par enclos, et non un croisement par enclos. */
+  capacity: number;
+  /** Ce que coûte le chargement dès qu'une place est occupée. */
+  loadKamas: number;
+  /** Le solde de l'éleveur. `0` vaut « pas de contrainte », comme ailleurs. */
+  kamas: number;
+  /**
+   * La graine de la montée de colline.
+   *
+   * Fixe par défaut : le même écran rouvert deux fois doit proposer la même
+   * fournée, sans quoi on ne saurait plus si on a déjà chargé celle d'avant.
+   */
+  seed?: number;
+  iterations?: number;
+};
+
+const DEFAULT_SEED = 1;
+
+/**
+ * Le nombre de mutations que la recherche tire par fournée.
+ *
+ * Six cents, qui est le défaut de `breeding-neat` — donc le régime dans lequel le
+ * champion a été noté. La recherche est stochastique et la fonction de valeur a
+ * été sélectionnée **pour ce budget-là** : lui en donner deux fois plus n'est pas
+ * « chercher mieux », c'est la mettre dans un régime qu'elle n'a pas connu.
+ */
+const TRAINING_ITERATIONS = 600;
+
+/**
+ * Ce que la politique ferait de cette écurie, ou `null` si elle ne peut pas
+ * répondre.
+ *
+ * Trois raisons de rendre `null`, et elles se disent : l'artefact n'a pas la bonne
+ * arité, sa sortie ne reçoit rien, ou l'écurie est vide. Aucune n'est un défaut
+ * d'affichage — mieux vaut ne rien montrer qu'une fournée inventée.
+ */
+export const stablePlan = (input: PolicyInput): StablePlan | null => {
+  const champion = championArtifact as Champion;
+  const mounts = flatten(input.stable);
+  if (mounts.length === 0) return null;
+
+  const network = compile(champion);
+  if (network.inputs !== champion.features || !isConnected(network)) return null;
+
+  const generations = new Map(input.colors.map((color) => [color.id, color.generation]));
+  const economy = economyView(input.colors, input.market);
+  const strategy = strategyOf(champion);
+
+  const plan = planUnit(
+    createSearcher({
+      iterations: input.iterations ?? TRAINING_ITERATIONS,
+      // Voir l'en-tête : le champion du tapis n'a jamais vu l'extraction.
+      sacrifices: false,
+    }),
+    {
+      mounts,
+      colors: input.colors,
+      generations,
+      economy,
+      strategy,
+      // Un solde à zéro veut dire « non renseigné », donc pas de contrainte —
+      // même lecture que `planFunding`. Refuser toute fournée à qui n'a pas saisi
+      // son budget serait la pire interprétation d'un champ vide.
+      kamas: input.kamas > 0 ? input.kamas : Number.MAX_SAFE_INTEGER,
+      capacity: input.capacity,
+      loadKamas: input.loadKamas,
+    },
+    seededRandom(input.seed ?? DEFAULT_SEED),
+    (census) => evaluate(network, featuresOf(census, input.colors, economy))
+  );
+
+  return readPlan(plan, mounts, input, generations, economy, strategy);
+};
+
+/**
+ * Les réglages que le génome porte, pour l'unité de tête.
+ *
+ * Ils ne viennent pas de la recherche mais de l'évolution : une bande rapide ne se
+ * justifie que par les chargements supplémentaires qu'elle laisse faire, ce qui
+ * n'apparaît nulle part dans l'écurie qu'un chargement laisse derrière lui. Seuls
+ * le niveau et le seuil d'Optimakina comptent ici — les bandes règlent les jauges,
+ * que cet écran-ci ne pilote pas.
+ */
+const strategyOf = (champion: Champion): SearchStrategy => {
+  const first = (champion.strategies ?? [])[0] as
+    | { level?: number; optimakina_from?: number }
+    | undefined;
+  return {
+    level: first?.level ?? 0,
+    optimakinaFrom: first?.optimakina_from ?? 11,
+  };
+};
+
+/**
+ * Regroupe deux montures interchangeables : même couleur, même ascendance, même
+ * état de cycle.
+ *
+ * La même réduction que la recherche, et il faut que ce soit la même : sans elle
+ * l'écran listerait deux lignes « ♂ Ébène + ♀ Ébène » là où la recherche n'a vu
+ * qu'un seul groupe, l'une pour les achetés et l'autre pour les nés de recopie.
+ * Voir `canonicalParents`.
+ */
+const signatureOf = (mount: Pick<Individual, 'colorId' | 'parents' | 'cycled'>) =>
+  `${mount.colorId}|${(canonicalParents(mount.colorId, mount.parents) ?? []).join('+')}` +
+  `|${mount.cycled ? 1 : 0}`;
+
+const mateOf = (mount: Individual): Mate => ({
+  id: mount.id,
+  colorId: mount.colorId,
+  sex: mount.sex,
+  level: BULK_MATE_LEVEL,
+  parents: mount.parents,
+});
+
+/**
+ * Le plan brut, relu en gestes.
+ *
+ * Les indices de `UnitPlan` sont virtuels : au-delà de `mounts.length` ils
+ * désignent un achat, dans l'ordre où les achats sont listés. C'est le contrat de
+ * `materialise`, et le seul endroit où il se dénoue.
+ */
+const readPlan = (
+  plan: UnitPlan,
+  mounts: Individual[],
+  input: PolicyInput,
+  generations: Map<string, number>,
+  economy: EconomyView,
+  strategy: SearchStrategy
+): StablePlan => {
+  const bought = (index: number) => plan.purchases[index - mounts.length] ?? null;
+
+  const couples = new Map<string, CoupleLine>();
+  let places = 0;
+
+  for (const [maleIndex, femaleIndex] of plan.crossings) {
+    const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {
+      const mount = mounts[index];
+      if (mount) {
+        return [
+          { colorId: mount.colorId, mountIds: [mount.id], cycled: mount.cycled },
+          mateOf(mount),
+          mount.cycled,
+        ];
+      }
+      const purchase = bought(index);
+      if (!purchase) return [{ colorId: '?', mountIds: [], cycled: false }, null, false];
+      return [
+        { colorId: purchase[0], mountIds: [], cycled: false },
+        { id: null, colorId: purchase[0], sex, level: BULK_MATE_LEVEL, parents: null },
+        false,
+      ];
+    };
+
+    const [male, maleMate, maleCycled] = side(maleIndex, 'M');
+    const [female, femaleMate, femaleCycled] = side(femaleIndex, 'F');
+    const cost = (maleCycled ? 0 : 1) + (femaleCycled ? 0 : 1);
+    places += cost;
+
+    const key = `${signatureOf({ colorId: male.colorId, parents: mounts[maleIndex]?.parents ?? null, cycled: male.cycled })}/${signatureOf({ colorId: female.colorId, parents: mounts[femaleIndex]?.parents ?? null, cycled: female.cycled })}`;
+    const line = couples.get(key);
+    if (line) {
+      line.count += 1;
+      line.male.mountIds.push(...male.mountIds);
+      line.female.mountIds.push(...female.mountIds);
+      line.places += cost;
+      continue;
+    }
+    couples.set(key, {
+      male,
+      female,
+      count: 1,
+      // Le rang visé n'est affichable que si une couleur le nomme : sinon le
+      // couple recopie, et l'annoncer serait promettre une génération qui ne
+      // viendra pas. `PairDelta` porte le drapeau, on le lui redemande.
+      targetGeneration: (() => {
+        if (!maleMate || !femaleMate) return null;
+        const delta = pairDelta(
+          maleMate,
+          femaleMate,
+          input.colors,
+          generations,
+          economy,
+          strategy.level,
+          strategy.optimakinaFrom
+        );
+        return delta?.namesTarget ? delta.targetGeneration : null;
+      })(),
+      places: cost,
+    });
+  }
+
+  // Une fécondation occupe une place et ne consomme pas la reproduction : c'est
+  // ce qui la distingue d'un croisement, et ce qui la rend lisible seulement si
+  // on la compte à part.
+  const cycles = new Map<string, string[]>();
+  for (const index of plan.cycles) {
+    const mount = mounts[index];
+    if (!mount) continue;
+    places += 1;
+    const list = cycles.get(mount.colorId) ?? [];
+    list.push(mount.id);
+    cycles.set(mount.colorId, list);
+  }
+
+  const clonings = new Map<number, string[]>();
+  for (const [first, second] of plan.clonings) {
+    const mount = mounts[first];
+    if (!mount) continue;
+    const generation = generations.get(mount.colorId) ?? 1;
+    const list = clonings.get(generation) ?? [];
+    list.push(mount.id, mounts[second]?.id ?? '');
+    clonings.set(generation, list.filter(Boolean));
+  }
+
+  const purchases = new Map<string, { colorId: string; males: number; females: number }>();
+  for (const [colorId, sex] of plan.purchases) {
+    const row = purchases.get(colorId) ?? { colorId, males: 0, females: 0 };
+    if (sex === 'M') row.males += 1;
+    else row.females += 1;
+    purchases.set(colorId, row);
+  }
+
+  return {
+    couples: [...couples.values()],
+    cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
+    clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),
+    purchases: [...purchases.values()],
+    pull: pullOf(plan, mounts),
+    places,
+    capacity: input.capacity,
+    raw: plan,
+    mounts,
+  };
+};
+
+/**
+ * Ce qu'on va chercher dans l'écurie, une fois pour toute la fournée.
+ *
+ * On y va une fois, pas une fois par couple — et les sexes restent détaillés
+ * parce qu'ils ne sont pas interchangeables : deux Doré mâles ne remplacent pas un
+ * mâle et une femelle, et c'est devant le coffre qu'on s'en aperçoit.
+ */
+const pullOf = (plan: UnitPlan, mounts: Individual[]): PullLine[] => {
+  const taken = new Map<string, { males: number; females: number }>();
+  const note = (index: number) => {
+    const mount = mounts[index];
+    if (!mount) return;
+    const row = taken.get(mount.colorId) ?? { males: 0, females: 0 };
+    if (mount.sex === 'M') row.males += 1;
+    else row.females += 1;
+    taken.set(mount.colorId, row);
+  };
+
+  // Ce qu'on sort du coffre : les croisements **et** les fécondations, puisque les
+  // deux passent par l'enclos.
+  const consumed = new Map<string, number>();
+  for (const [male, female] of plan.crossings) {
+    for (const index of [male, female]) {
+      note(index);
+      const mount = mounts[index];
+      // Seul un croisement consomme la reproduction. Une fécondation occupe une
+      // place et rend la monture telle quelle — la compter ici ferait annoncer
+      // « vidée » une couleur qu'on récupère entière.
+      if (mount) consumed.set(mount.colorId, (consumed.get(mount.colorId) ?? 0) + 1);
+    }
+  }
+  for (const index of plan.cycles) note(index);
+
+  // Ce qui reste fertile après la fournée, pour dire ce qu'elle vide. Une écurie
+  // vidée d'une couleur n'est pas une erreur, mais c'est ce qu'on veut voir venir.
+  const fertile = new Map<string, { males: number; females: number }>();
+  for (const mount of mounts) {
+    if (!mount.fertile) continue;
+    const row = fertile.get(mount.colorId) ?? { males: 0, females: 0 };
+    if (mount.sex === 'M') row.males += 1;
+    else row.females += 1;
+    fertile.set(mount.colorId, row);
+  }
+
+  return [...taken].map(([colorId, row]) => {
+    const held = fertile.get(colorId) ?? { males: 0, females: 0 };
+    return {
+      colorId,
+      males: row.males,
+      females: row.females,
+      exhausts: (consumed.get(colorId) ?? 0) >= held.males + held.females,
+    };
+  });
+};

@@ -25,6 +25,13 @@ use breeding_sim::encode::FEATURES;
 
 const CASES: usize = 500;
 
+/// Le nom du fichier seul, pour que la référence ne dépende pas du répertoire
+/// depuis lequel on l'a produite. Un chemin absolu y faisait bouger une ligne à
+/// chaque régénération sans que rien d'autre ne change.
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let source = args.next().unwrap_or_else(|| "champion.json".into());
@@ -57,7 +64,7 @@ fn main() {
 
     let document = serde_json::json!({
         "features": FEATURES,
-        "source": source,
+        "source": basename(&source),
         "cases": cases,
     });
     match std::fs::write(

@@ -181,7 +181,7 @@ pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Sc
         .sum();
 
     let rate = |gauge: usize| economy.band_rate(bands[gauge]);
-    let (seconds, _, _) = makespan(&tasks, &rate);
+    let seconds = makespan(&tasks, &rate).total;
     Schedule {
         hours: seconds / 3600.0,
         cost_per_enclos,
@@ -197,17 +197,19 @@ pub fn slots(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Vec<S
     let (climber, _) = climb_and_return(economy, bands);
     let tasks = task_list(climber, other_serenity(climber), xp_points);
     let rate = |gauge: usize| economy.band_rate(bands[gauge]);
-    let (_, started, finished) = makespan(&tasks, &rate);
-
-    let mut placed: Vec<Slot> = tasks
-        .iter()
-        .zip(started.iter().zip(finished.iter()))
-        .filter(|(task, (start, _))| task.points > 0.0 && start.is_finite())
-        .map(|(task, (&start, &end))| Slot {
-            gauge: task.gauge,
-            points: task.points,
+    // Une entrée par **tranche continue** et non par tâche : une jauge qui
+    // s'interrompt puis reprend produit deux créneaux, ce qui est la vérité de
+    // l'enclos. L'écran comme la frise en dépendent — un créneau unique étalé sur
+    // les trous annoncerait une jauge qui tourne alors qu'elle est à l'arrêt.
+    let mut placed: Vec<Slot> = makespan(&tasks, &rate)
+        .segments
+        .into_iter()
+        .filter(|&(index, start, end, _)| tasks[index].points > 0.0 && end > start)
+        .map(|(index, start, end, points)| Slot {
+            gauge: tasks[index].gauge,
+            points,
             start,
-            end: if end.is_finite() { end } else { start },
+            end,
         })
         .collect();
     placed.sort_by(|a, b| {
@@ -297,10 +299,466 @@ fn task_list(climber: usize, returner: usize, xp_points: f64) -> [Task; TASKS] {
 /// Rend la durée totale en secondes, puis le départ et la fin de chaque tâche —
 /// une tâche jamais lancée gardant `INFINITY`, ce qui la distingue d'une tâche
 /// instantanée.
-fn makespan(
-    tasks: &[Task; TASKS],
-    rate: &impl Fn(usize) -> f64,
-) -> (f64, [f64; TASKS], [f64; TASKS]) {
+/// La durée d'un cycle : la meilleure des deux heuristiques.
+///
+/// Aucune ne domine l'autre, et c'est mesuré plutôt que supposé. Sur les 4 096
+/// répartitions de bandes et quatre niveaux — 16 384 comparaisons — la préemptive
+/// raccourcit **2 193** fournées, jusqu'à un quart, et en allonge **512**, jusqu'à
+/// un cinquième.
+///
+/// Une régression sur cinq cents cas n'est pas acceptable pour un gain sur deux
+/// mille : on calcule donc les deux et on garde la plus courte. Deux
+/// ordonnancements de sept tâches coûtent quelques microsecondes, contre des
+/// heures de fournée en jeu.
+///
+/// Ce n'est pas une élégance, c'est un aveu utile : le problème est
+/// l'ordonnancement préemptif à contraintes de précédence sur deux machines, dont
+/// l'optimum se calcule (Muntz–Coffman) mais demande du partage de capacité, pas
+/// un placement discret. Les deux heuristiques encadrent cet optimum sans
+/// l'atteindre — mesuré, il reste de l'ordre de dix pour cent sur les cas où la
+/// Mangeoire est longue.
+fn makespan(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut best = makespan_blocking(tasks, rate);
+    for other in [makespan_preemptive(tasks, rate), makespan_shared(tasks, rate)] {
+        if other.total < best.total - 1e-9 {
+            best = other;
+        }
+    }
+    best
+}
+
+/// Un ordonnancement rendu : sa durée, et **les segments réellement joués**.
+///
+/// Les segments et non le seul couple début/fin, parce qu'une tâche préemptée
+/// s'étale sur plus longtemps qu'elle ne travaille. La frise de `bin/bands` en
+/// tirait un bloc plein qui mentait sur ses trous ; l'écran, lui, veut savoir
+/// quand une jauge tourne pour de bon.
+pub struct Placement {
+    pub total: f64,
+    /// `(tâche, début, fin, points servis)` pour chaque tranche continue.
+    ///
+    /// Les points sont **portés** et non déduits de la durée : une tâche qui
+    /// partage une place avance à vitesse réduite, donc `durée × cadence` la
+    /// surcompterait — mesuré, l'Abreuvoir s'affichait à 31 272 points au lieu de
+    /// 20 000.
+    pub segments: Vec<(usize, f64, f64, f64)>,
+}
+
+impl Placement {
+    fn of(segments: Vec<(usize, f64, f64, f64)>) -> Self {
+        let total = segments
+            .iter()
+            .fold(0.0f64, |longest, &(_, _, end, _)| longest.max(end));
+        Self { total, segments }
+    }
+}
+
+/// L'ordonnancement d'un cycle avec **partage de capacité** : Muntz–Coffman.
+///
+/// Les deux autres heuristiques placent des tâches ; celle-ci répartit du débit.
+/// Quand deux tâches prêtes se disputent une seule place, les servir l'une après
+/// l'autre laisse la seconde place chômer à la fin — alors que les faire avancer
+/// **ensemble à mi-vitesse** les amène à égalité, si bien qu'elles finissent de
+/// front dès qu'une place se libère.
+///
+/// C'est le mainteneur qui l'a vu, et sur un cas où ça se chiffre : « si je coupe
+/// l'Abreuvoir à son milieu et lance le Foudroyeur, quand le Foudroyeur arrive à
+/// son milieu je peux relancer l'Abreuvoir ». Une place libre pendant 2,43 h puis
+/// deux places, pour 5,56 h de travail restant, donne `(5,56 − 2,43) / 2 = 1,57 h`
+/// après la Mangeoire — 8,87 h au lieu de 10,08.
+///
+/// Une part fractionnaire n'est pas une fiction physique : c'est l'alternance que
+/// le jeu autorise, une jauge se mettant en pause et reprenant où elle en était.
+/// À la limite continue, alterner et partager donnent la même date de fin.
+///
+/// Muntz–Coffman est **optimal** pour deux machines préemptives à contraintes de
+/// précédence. Il reste ici une approximation, parce qu'une jauge ne peut pas
+/// porter deux tâches à la fois — une contrainte de ressource que l'algorithme
+/// d'origine ne connaît pas. D'où le garde-fou de `makespan` : on garde la plus
+/// courte des trois, jamais celle-ci par principe.
+fn makespan_shared(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
+    let speed = |index: usize| rate(tasks[index].gauge);
+    let length = |index: usize| {
+        let rate = speed(index);
+        if rate > 0.0 { tasks[index].points / rate } else { 0.0 }
+    };
+
+    let mut height = [0.0f64; TASKS];
+    for index in (0..TASKS).rev() {
+        let mut below = 0.0f64;
+        for successor in 0..TASKS {
+            if let Some((predecessor, _)) = tasks[successor].after {
+                if predecessor == index {
+                    below = below.max(height[successor]);
+                }
+            }
+        }
+        height[index] = length(index) + below;
+    }
+
+    let mut remaining = [0.0f64; TASKS];
+    let mut done = [0.0f64; TASKS];
+    let mut started = [f64::INFINITY; TASKS];
+    let mut finished = [f64::INFINITY; TASKS];
+    for index in 0..TASKS {
+        remaining[index] = if speed(index) > 0.0 { tasks[index].points } else { 0.0 };
+    }
+
+    let mut now = 0.0f64;
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 512, "l'ordonnancement partagé doit converger");
+
+        let mut ready: Vec<usize> = (0..TASKS)
+            .filter(|&index| remaining[index] > 1e-9)
+            .filter(|&index| match tasks[index].after {
+                None => true,
+                Some((predecessor, progress)) => done[predecessor] >= progress - 1e-9,
+            })
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+        ready.sort_by(|&a, &b| {
+            height[b]
+                .partial_cmp(&height[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.cmp(&b))
+        });
+
+        // Une jauge ne porte qu'une tâche : on écarte les doublons avant de
+        // répartir, sans quoi on lui donnerait deux parts qu'elle ne peut pas
+        // servir.
+        let mut eligible: Vec<usize> = Vec::new();
+        for &index in &ready {
+            if !eligible
+                .iter()
+                .any(|&other| tasks[other].gauge == tasks[index].gauge)
+            {
+                eligible.push(index);
+            }
+        }
+
+        // La part de chacun : les plus hautes d'abord, et le palier qui déborde se
+        // partage également ce qui reste.
+        let mut share = [0.0f64; TASKS];
+        let mut free = PARALLEL_SLOTS as f64;
+        let mut at = 0usize;
+        while at < eligible.len() && free > 1e-9 {
+            let mut tier = vec![eligible[at]];
+            while at + tier.len() < eligible.len()
+                && (height[eligible[at + tier.len()]] - height[eligible[at]]).abs() < 1e-9
+            {
+                tier.push(eligible[at + tier.len()]);
+            }
+            let each = (free / tier.len() as f64).min(1.0);
+            for &index in &tier {
+                share[index] = each;
+            }
+            free -= each * tier.len() as f64;
+            at += tier.len();
+        }
+
+        // Le prochain instant utile : une tâche qui finit, ou un seuil franchi.
+        let mut step = f64::INFINITY;
+        for index in 0..TASKS {
+            if share[index] > 1e-9 {
+                step = step.min(remaining[index] / (speed(index) * share[index]));
+            }
+        }
+        for index in 0..TASKS {
+            if remaining[index] <= 1e-9 {
+                continue;
+            }
+            if let Some((predecessor, progress)) = tasks[index].after {
+                if done[predecessor] < progress && share[predecessor] > 1e-9 {
+                    let missing = progress - done[predecessor];
+                    step = step.min(missing / (speed(predecessor) * share[predecessor]));
+                }
+            }
+        }
+        if !step.is_finite() || step <= 0.0 {
+            break;
+        }
+
+        // Les parts deviennent des créneaux : règle de McNaughton. On remplit la
+        // première place de bout en bout, puis la seconde, et une tâche qui
+        // déborde se coupe au passage.
+        //
+        // C'est la seconde moitié de Muntz–Coffman, et sans elle l'algorithme ne
+        // rend qu'un débit — « chacune à mi-vitesse » — dont on ne peut rien faire
+        // devant l'enclos. Ici on rend un emploi du temps : l'Abreuvoir jusque-là,
+        // puis le Foudroyeur, puis les deux.
+        //
+        // Une tâche ne se retrouve jamais sur deux places au même instant, et ce
+        // n'est pas un hasard : sa charge vaut au plus `step`, donc le morceau
+        // laissé sur la place suivante finit avant que le premier ne commence.
+        let mut cursor = 0.0f64;
+        for &index in &eligible {
+            if share[index] <= 1e-9 {
+                continue;
+            }
+            if !started[index].is_finite() {
+                started[index] = now;
+            }
+            let mut left = share[index] * step;
+            while left > 1e-12 {
+                let machine = (cursor / step).floor();
+                let within = cursor - machine * step;
+                let take = left.min(step - within);
+                if take <= 1e-12 {
+                    break;
+                }
+                record(
+                    index,
+                    now + within,
+                    now + within + take,
+                    take * speed(index),
+                    &mut segments,
+                );
+                cursor += take;
+                left -= take;
+            }
+
+            let served = (step * speed(index) * share[index]).min(remaining[index]);
+            done[index] += served;
+            remaining[index] -= served;
+            if remaining[index] <= 1e-9 {
+                remaining[index] = 0.0;
+                finished[index] = now + step;
+            }
+        }
+        now += step;
+    }
+
+    let _ = (&started, &finished);
+    Placement::of(segments)
+}
+
+/// L'ordonnancement d'un cycle, **préemptif**.
+///
+/// Une jauge se met en pause et reprend où elle en était : c'est une règle du jeu,
+/// et le modèle faisait l'hypothèse inverse. Il plaçait chaque tâche d'un bloc, si
+/// bien qu'une place libérée à mi-parcours ne servait à rien tant que la tâche en
+/// cours n'avait pas fini — l'Abreuvoir monopolisait la seule place libre pendant
+/// que le Foudroyeur attendait la Mangeoire, alors que les deux pouvaient se
+/// partager le temps disponible et finir ensemble.
+///
+/// Mesuré sur `221111` au niveau 60 : 10,35 h non préemptif contre 8,87 h ici, soit
+/// **quatorze pour cent** de chaque fournée. Ce n'est pas un raffinement : c'est
+/// une durée fausse dans tout ce qui la lit — le prix d'un chargement, le choix des
+/// bandes, l'horizon d'une partie.
+///
+/// ## Ce que la préemption change au calcul des dépendances
+///
+/// `after` porte un **seuil de points** sur la tâche qui précède, pas un délai.
+/// Sans préemption on pouvait le convertir en date une fois pour toutes —
+/// `début + seuil / vitesse`. Une tâche qui s'interrompt casse cette formule : le
+/// seuil se franchit quand le **cumul** l'atteint, ce qui dépend des segments
+/// réellement joués. On suit donc l'avancement, et on recalcule.
+///
+/// ## La priorité est le chemin restant, pas le travail restant
+///
+/// Servir la tâche la plus longue d'abord (LRPT) est optimal sans contrainte de
+/// précédence, et franchement mauvais avec : la Mangeoire est de loin la plus
+/// longue, donc elle monopolise une place et affame la chaîne
+/// Baffeur → Dragofesse → sérénité → Foudroyeur qui décide de la fin. Essayé :
+/// le niveau que la Mangeoire livre gratuitement tombait de 43 à 26.
+///
+/// On classe donc par **hauteur** — la durée d'une tâche plus le plus long chemin
+/// qui en dépend — ce qui est la priorité de Hu, et l'ordonnancement optimal pour
+/// deux places quand le graphe est une forêt. Le nôtre n'en est pas tout à fait
+/// une, mais la hauteur reste la bonne lecture : ce qui commande, c'est ce qui
+/// reste **après**.
+fn makespan_preemptive(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
+    let speed = |index: usize| rate(tasks[index].gauge);
+    let length = |index: usize| {
+        let rate = speed(index);
+        if rate > 0.0 { tasks[index].points / rate } else { 0.0 }
+    };
+
+    // La hauteur de chaque tâche : sa durée plus le plus long chemin qui en
+    // dépend. Calculée à rebours — les tâches sont déjà rangées par dépendance,
+    // donc un simple parcours arrière suffit et l'assertion le vérifie.
+    let mut height = [0.0f64; TASKS];
+    for index in (0..TASKS).rev() {
+        let mut below = 0.0f64;
+        for successor in 0..TASKS {
+            if let Some((predecessor, _)) = tasks[successor].after {
+                if predecessor == index {
+                    debug_assert!(successor > index, "les tâches doivent être rangées par dépendance");
+                    below = below.max(height[successor]);
+                }
+            }
+        }
+        height[index] = length(index) + below;
+    }
+
+    let mut remaining = [0.0f64; TASKS];
+    let mut done = [0.0f64; TASKS];
+    let mut started = [f64::INFINITY; TASKS];
+    let mut finished = [f64::INFINITY; TASKS];
+    for index in 0..TASKS {
+        remaining[index] = if speed(index) > 0.0 { tasks[index].points } else { 0.0 };
+    }
+
+    let mut now = 0.0f64;
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 256, "l'ordonnancement doit converger");
+
+        // Ce qui peut tourner : du travail restant, et le seuil de la tâche qui
+        // précède déjà franchi.
+        let mut ready: Vec<usize> = (0..TASKS)
+            .filter(|&index| remaining[index] > 1e-9)
+            .filter(|&index| match tasks[index].after {
+                None => true,
+                Some((predecessor, progress)) => done[predecessor] >= progress - 1e-9,
+            })
+            .collect();
+        if ready.is_empty() {
+            break;
+        }
+
+        // Le plus de travail restant d'abord, et jamais deux tâches sur la même
+        // jauge : les deux segments de descente sont sur la sérénité, et rien
+        // d'autre ne l'interdisait — l'ordonnancement les lançait ensemble et
+        // rendait une fournée plus courte que le parc ne peut la faire.
+        ready.sort_by(|&a, &b| {
+            height[b]
+                .partial_cmp(&height[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                // À hauteur égale, le plus de travail restant : c'est LRPT, qui
+                // départage bien ce que la précédence ne départage plus.
+                .then_with(|| {
+                    let left = remaining[b] / speed(b).max(1e-9);
+                    let right = remaining[a] / speed(a).max(1e-9);
+                    left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then(a.cmp(&b))
+        });
+        let mut running: Vec<usize> = Vec::with_capacity(PARALLEL_SLOTS);
+        for index in ready {
+            if running.len() >= PARALLEL_SLOTS {
+                break;
+            }
+            if running.iter().any(|&other| tasks[other].gauge == tasks[index].gauge) {
+                continue;
+            }
+            running.push(index);
+        }
+        if running.is_empty() {
+            break;
+        }
+
+        // Le prochain instant utile : une tâche qui finit, ou un seuil qu'une
+        // tâche en cours fait franchir — ce dernier peut libérer une dépendance
+        // et rendre le placement courant obsolète avant la fin de quoi que ce soit.
+        let mut step = f64::INFINITY;
+        for &index in &running {
+            step = step.min(remaining[index] / speed(index));
+        }
+        for index in 0..TASKS {
+            if remaining[index] <= 1e-9 {
+                continue;
+            }
+            if let Some((predecessor, progress)) = tasks[index].after {
+                if done[predecessor] < progress && running.contains(&predecessor) {
+                    let missing = progress - done[predecessor];
+                    step = step.min(missing / speed(predecessor));
+                }
+            }
+        }
+        if !step.is_finite() || step <= 0.0 {
+            break;
+        }
+
+        for &index in &running {
+            if !started[index].is_finite() {
+                started[index] = now;
+            }
+            let served = (step * speed(index)).min(remaining[index]);
+            record(index, now, now + step, served, &mut segments);
+            done[index] += served;
+            remaining[index] -= served;
+            if remaining[index] <= 1e-9 {
+                remaining[index] = 0.0;
+                finished[index] = now + step;
+            }
+        }
+        now += step;
+    }
+
+    let _ = (&started, &finished);
+    Placement::of(segments)
+}
+
+fn makespan_blocking(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Placement {
+    let mut segments: Vec<(usize, f64, f64, f64)> = Vec::new();
+    // Deux tranches consécutives d'une même tâche n'en font qu'une : c'est le
+    // découpage de la boucle d'événements, pas une interruption réelle.
+    let record =
+        |index: usize, from: f64, to: f64, points: f64, segments: &mut Vec<(usize, f64, f64, f64)>| {
+            if to <= from + 1e-9 {
+                return;
+            }
+            if let Some(last) = segments
+                .iter_mut()
+                .rev()
+                .find(|(task, _, _, _)| *task == index)
+            {
+                if (last.2 - from).abs() < 1e-9 {
+                    last.2 = to;
+                    last.3 += points;
+                    return;
+                }
+            }
+            segments.push((index, from, to, points));
+        };
     let duration = |task: &Task| {
         let rate = rate(task.gauge);
         if rate > 0.0 { task.points / rate } else { 0.0 }
@@ -370,6 +828,7 @@ fn makespan(
             started[index] = now;
             let end = now + duration(&tasks[index]);
             finished[index] = end;
+            record(index, now, end, tasks[index].points, &mut segments);
             running.push((index, end));
             pending.retain(|&pending_index| pending_index != index);
         }
@@ -401,15 +860,61 @@ fn makespan(
         running.retain(|&(_, end)| end > now + 1e-9);
     }
 
-    let total = finished
-        .iter()
-        .filter(|end| end.is_finite())
-        .fold(0.0f64, |longest, &end| longest.max(end));
-    (total, started, finished)
+    let _ = (&started, &finished);
+    Placement::of(segments)
 }
 
 #[cfg(test)]
 mod tests {
+    /// Un ordonnancement doit être **jouable** : jamais plus de créneaux
+    /// simultanés que l'enclos n'a de places, et jamais une jauge à deux endroits
+    /// à la fois.
+    ///
+    /// C'est l'invariant que la règle de McNaughton garantit, et qui n'a rien
+    /// d'évident quand on convertit des parts fractionnaires en créneaux réels :
+    /// une tâche servie à mi-vitesse sur deux places consécutives se retrouverait
+    /// à cheval sur elle-même si le découpage était naïf. Vérifié sur toutes les
+    /// répartitions de bandes plutôt que sur un cas.
+    #[test]
+    fn un_ordonnancement_tient_dans_les_places_de_lenclos() {
+        let economy = Economy::default();
+        for code in 0..4096u32 {
+            let mut bands = [0usize; GAUGES];
+            let mut rest = code;
+            for slot in bands.iter_mut() {
+                *slot = (rest % 4) as usize;
+                rest /= 4;
+            }
+            for level in [0u16, 42, 60, 120] {
+                let placed = slots(&economy, bands, crate::economy::mount_xp_for_level(level));
+
+                // Les bornes suffisent : le nombre de créneaux actifs ne change
+                // qu'à un début ou à une fin.
+                let mut instants: Vec<f64> = placed.iter().map(|slot| slot.start).collect();
+                instants.extend(placed.iter().map(|slot| slot.end));
+                for &at in &instants {
+                    let inside = |slot: &Slot| slot.start <= at + 1e-6 && slot.end > at + 1e-6;
+                    let busy = placed.iter().filter(|slot| inside(slot)).count();
+                    assert!(
+                        busy <= PARALLEL_SLOTS,
+                        "bandes {bands:?}, niveau {level} : {busy} créneaux à {at:.1} s"
+                    );
+                    for gauge in 0..GAUGES {
+                        let same = placed
+                            .iter()
+                            .filter(|slot| slot.gauge == gauge && inside(slot))
+                            .count();
+                        assert!(
+                            same <= 1,
+                            "bandes {bands:?}, niveau {level} : la jauge {gauge} tourne \
+                             {same} fois à {at:.1} s"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
     use crate::config::Prices;
 

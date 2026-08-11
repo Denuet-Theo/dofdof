@@ -18,10 +18,13 @@
  * ## Régénérer la référence
  *
  * ```sh
- * cd rust
- * cargo run --release -p breeding-neat --bin dump-delta -- \
- *   ../scripts/fixtures/delta-parity.json
+ * npm run parity                     # depuis rust/champion.json
+ * npm run parity -- rust/champion-t3.json
  * ```
+ *
+ * Une seule commande pour les quatre, et c'est délibéré : elle réinstalle aussi
+ * l'artefact dans `src/`, si bien qu'on ne peut plus refaire les références sans
+ * déployer le champion qui les a produites. Voir `refresh-parity.mjs`.
  */
 
 import { readFileSync, mkdtempSync } from 'node:fs';
@@ -100,6 +103,14 @@ for (const [at, testCase] of fixture.cases.entries()) {
   }
 
   const theirs = testCase.delta;
+  // Un booléen ne se compare pas à une tolérance : il est juste ou il ne l'est
+  // pas, et c'est lui qui distingue « monte d'un rang » de « recopie ».
+  if (delta.namesTarget !== theirs.namesTarget) {
+    console.error(
+      `cas ${at} : namesTarget ${delta.namesTarget} contre ${theirs.namesTarget}`
+    );
+    process.exit(1);
+  }
   for (const key of [
     'maleGeneration', 'femaleGeneration', 'maleCarried', 'femaleCarried',
     'targetGeneration', 'optimakinaCost', 'genetonKamas', 'expectedValue',

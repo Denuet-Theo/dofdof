@@ -297,6 +297,14 @@ pub struct PairDelta {
     /// La génération visée, et ce que coûte l'Optimakina qui va avec — zéro si
     /// la stratégie n'en achète pas à ce rang.
     pub target_generation: u8,
+    /// Une couleur **nomme** ce rang, donc le croisement peut y monter.
+    ///
+    /// Faux pour deux Ébène : la paire vise la génération 2, mais aucune recette
+    /// ne s'écrit `[ebene, ebene]`, et toute la masse retombe sur la recopie. Le
+    /// calcul le savait déjà — c'est la condition des génétons — mais il jetait
+    /// l'information, si bien qu'un affichage lisant `target_generation` seul
+    /// annonçait « gen 2 » là où il ne sortira qu'un Ébène de plus.
+    pub names_target: bool,
     pub optimakina_cost: i64,
     /// Ce que le croisement rapporte en génétons, **en espérance** : ils ne
     /// tombent qu'en cas de succès. C'est le lien sans lequel la recherche ne
@@ -372,6 +380,7 @@ impl PairDelta {
             births,
             expected_value,
             target_generation,
+            names_target,
             optimakina_cost,
             geneton_kamas,
         })

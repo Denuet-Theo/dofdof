@@ -19,9 +19,18 @@
 //! n'est pas l'arithmétique — c'est un `rng()` de plus ou de moins sur une branche,
 //! même une qui ne sert à rien, et cette erreur-là ne se voit sur aucun écran.
 //!
-//! Le champion sert de fonction de valeur plutôt que la valeur myope : c'est le
-//! chemin que l'app emprunte, et le seul qui fasse passer chaque état candidat par
-//! l'encodage et par le réseau.
+//! ## Trois juges, dont deux font foi
+//!
+//! Chaque cas est joué avec la valeur **myope**, avec la **sonde linéaire** et avec
+//! le **champion**. Les deux premières sont des sommes de flottants et rien
+//! d'autre : elles se comparent au bit, et ensemble elles lisent tout le
+//! recensement — la myope les kamas et la liquidation, la sonde chaque champ,
+//! chaque génération et chaque couleur. C'est ce qui fait le contrat.
+//!
+//! Le champion, lui, passe par `log1p` et par `tanh`, dont aucune norme n'impose
+//! l'arrondi au plus proche. Les deux libm s'écartent de 6 ulp, ce qui suffit à
+//! faire bifurquer une montée de colline sur quatre cents comparaisons. Son accord
+//! est donc compté et affiché, pas exigé — voir `check-search.mjs`.
 //!
 //! ## Ce que les cas font varier
 //!
@@ -67,6 +76,13 @@ impl ValueFn for NetValue<'_> {
     fn value(&self, census: &Census, catalog: &Catalog, economy: &Economy) -> f64 {
         self.0.value(&census.features(catalog, economy))
     }
+}
+
+/// Le nom du fichier seul, pour que la référence ne dépende pas du répertoire
+/// depuis lequel on l'a produite. Un chemin absolu y faisait bouger une ligne à
+/// chaque régénération sans que rien d'autre ne change.
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 /// Le plan tel que le portage le compare : des listes d'entiers, rien d'autre.
@@ -218,7 +234,7 @@ fn main() {
 
     let document = serde_json::json!({
         "features": breeding_sim::encode::FEATURES,
-        "champion": champion_path,
+        "champion": basename(&champion_path),
         "cases": cases,
     });
     match std::fs::write(&target, serde_json::to_string(&document).unwrap_or_default()) {

@@ -8,6 +8,7 @@ import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import BreedingTimeline from '@/components/breeding/BreedingTimeline';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
+import { stablePlan } from '@/lib/dofus/breeding/policy';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
@@ -342,6 +343,67 @@ const BreedingPage = () => {
   }, [selectedColorId, recommended, sorted]);
 
   /**
+   * Ce que la politique entraînée ferait de l'écurie.
+   *
+   * C'est la recherche du Rust, portée et rejouée ici — `check-search.mjs`
+   * verrouille qu'elle rend le même plan. Elle vit dans l'app et non dans le
+   * modèle pour une raison qui n'est pas d'architecture : le Rust produit des
+   * poids, mais l'écurie et les cours sont les vôtres, et les cours changent d'un
+   * jour à l'autre. Un plan compilé la veille répondrait sur le marché de la
+   * veille.
+   *
+   * Elle remplace `buildLoadout` dans la timeline. Les deux ne répondent pas à la
+   * même question : le chargement heuristique déroule un plan de recettes vers une
+   * couleur choisie, la politique décide quoi faire de l'écurie telle qu'elle est.
+   * Voir `policy.ts`.
+   */
+  const policyFill = useMemo(() => {
+    const colors = tree?.colors ?? [];
+    if (colors.length === 0) return null;
+
+    // Les prix du jour, tels que l'écran les porte. Une couleur sans prix vaut
+    // zéro, donc la politique ne cherchera pas à la produire — c'est le
+    // comportement honnête, mais il explique une fournée maigre sur une écurie
+    // dont les prix n'ont pas été saisis.
+    const level0 = new Map(rows.map((row) => [row.colorId, row.estimate.priceLevel0 ?? 0]));
+
+    // L'Optimakina, par génération visée. Une sans prix connu n'est pas gratuite,
+    // elle est indisponible : zéro la laisse simplement hors de portée.
+    const optimakina = Array.from({ length: 11 }, (_, generation) => {
+      const item = tree?.optimakinaByGeneration?.[String(generation)];
+      return item ? (itemPrices.get(item.id)?.price ?? 0) : 0;
+    });
+
+    const capacity = Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS;
+    return stablePlan({
+      stable,
+      colors,
+      market: {
+        valueOf: (colorId) => level0.get(colorId) ?? 0,
+        genetonValue: genetonValuation?.valuePerGeneton ?? 0,
+        amberPerGeneration: sacrificePrice,
+        optimakina,
+      },
+      capacity,
+      // Le carburant d'un cycle est chiffré **par monture** : une jauge se vide au
+      // rythme de l'enclos, pas de l'animal. Le chargement en coûte donc autant que
+      // de places occupées.
+      loadKamas: (supplies?.fuelCostPerCycle ?? 0) * capacity,
+      kamas: settings.kamas_available,
+    });
+  }, [
+    tree,
+    rows,
+    stable,
+    itemPrices,
+    genetonValuation,
+    sacrificePrice,
+    supplies,
+    settings.enclos_count,
+    settings.kamas_available,
+  ]);
+
+  /**
    * La fournée à charger : les étapes du plan que l'écurie permet de lancer.
    *
    * La route se calcule sur l'arbre des recettes une bonne fois, parents avant
@@ -463,7 +525,7 @@ const BreedingPage = () => {
       <BreedingTimeline
         timeline={timeline}
         enclosCount={settings.enclos_count}
-        fill={loadout}
+        fill={policyFill}
         nameOf={nameOf}
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.

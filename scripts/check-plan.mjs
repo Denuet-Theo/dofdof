@@ -40,12 +40,17 @@ const compile = () => {
       SOURCE,
       '--outDir',
       out,
+      // CommonJS et non ESM : `tsc` émet du `.js` dans un dossier sans
+      // `package.json`, donc Node le lit comme CommonJS quoi qu'on demande — et
+      // un `export` en tête faisait planter le garde-fou avant même qu'il lise le
+      // plan. Il était mort depuis, silencieusement.
       '--module',
-      'esnext',
+      'commonjs',
       '--target',
-      'es2022',
+      'es2020',
       '--moduleResolution',
-      'bundler',
+      'node',
+      '--esModuleInterop',
     ],
     { stdio: 'inherit' }
   );
@@ -56,9 +61,11 @@ const plural = (count, word) => `${count} ${word}${count > 1 ? 's' : ''}`;
 
 const out = compile();
 try {
-  const module = await import(pathToFileURL(join(out, 'timeline.js')).href);
+  // `timeline` et non `module` : ce nom-là est réservé en CommonJS, et le linter
+  // le refusait à juste titre.
+  const timeline = await import(pathToFileURL(join(out, 'timeline.js')).href);
   const raw = JSON.parse(readFileSync(planPath, 'utf8'));
-  const result = module.parsePlan(raw);
+  const result = timeline.parsePlan(raw);
 
   if (!result.ok) {
     console.error(`${planPath} refusé par parsePlan :\n  ${result.error}`);
@@ -67,8 +74,8 @@ try {
 
   const { plan } = result;
   const events = plan.tracks.flatMap((track) => track.events);
-  const actionable = events.filter((event) => module.isActionable(event.kind));
-  const horizon = plan.horizon ?? module.planHorizon(plan);
+  const actionable = events.filter((event) => timeline.isActionable(event.kind));
+  const horizon = plan.horizon ?? timeline.planHorizon(plan);
 
   // Le contrat autorise un `at` au-delà de l'horizon ; ce serait un plan qui
   // parle plus loin qu'il ne prétend avoir regardé, donc une erreur du Rust.

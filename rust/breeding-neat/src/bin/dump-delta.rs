@@ -116,6 +116,7 @@ fn main() {
                 "maleCarried": delta.male_carried,
                 "femaleCarried": delta.female_carried,
                 "targetGeneration": delta.target_generation,
+                "namesTarget": delta.names_target,
                 "optimakinaCost": delta.optimakina_cost,
                 "genetonKamas": delta.geneton_kamas,
                 "expectedValue": delta.expected_value,

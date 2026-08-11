@@ -196,6 +196,10 @@ fn fitness(
     let config = TreadmillConfig {
         cycles,
         mounts,
+        // L'entraînement voit les trois départs, un par partie. Une politique qui
+        // n'en voit qu'un ne sait jouer que celui-là — mesuré, et c'est tout
+        // l'objet de la manche.
+        starts: &breeding_sim::treadmill::MIXED_STARTS,
         ..Default::default()
     };
     let total: f64 = seeds
@@ -814,6 +818,9 @@ fn main() {
     let config_treadmill = TreadmillConfig {
         cycles: options.cycles,
         mounts: options.mounts,
+        // La sonde repart de celui-là et n'en change que le tirage de départ,
+        // donc elle le veut **sans** mélange : elle mesure un départ à la fois.
+        starts: &[],
         ..Default::default()
     };
 

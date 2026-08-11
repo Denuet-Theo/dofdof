@@ -177,6 +177,21 @@ pub struct TreadmillConfig {
     /// `value_at_generation` et déjà lu par le recensement. On ne l'invente pas, on
     /// arrête de le jeter.
     pub residual_value: f64,
+    /// Les départs à tirer, un par partie. Vide = celui que ce `config` décrit.
+    ///
+    /// Une politique qui ne voit qu'un seul départ ne sait jouer que celui-là, et
+    /// c'est mesuré : le champion entraîné sur des écuries déjà montées fait
+    /// quarante-sept croisements en trente cycles quand on le pose sur vingt gen 1.
+    /// Observer sa généralisation ne suffisait pas — il faut la lui demander.
+    ///
+    /// Trois profils à parts égales plutôt qu'un mélange pondéré : le départ frais
+    /// est le plus dur, donc le sous-représenter reviendrait à ne pas l'enseigner.
+    /// La graine du tirage est celle de la partie, donc deux politiques comparées
+    /// sur la même graine voient le **même** départ.
+    /// Une tranche statique et non un `Vec` : `TreadmillConfig` est `Copy`, et le
+    /// rendre allouant pour trois constantes ferait payer une copie à chaque
+    /// partie.
+    pub starts: &'static [StartProfile],
 }
 
 impl Default for TreadmillConfig {
@@ -202,9 +217,42 @@ impl Default for TreadmillConfig {
             weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
             fresh: false,
             residual_value: 1.0,
+            starts: &[],
         }
     }
 }
+
+/// Un départ possible : de quoi l'écurie est faite au premier cycle.
+#[derive(Clone, Copy, Debug)]
+pub struct StartProfile {
+    pub mounts: usize,
+    pub weights: [usize; 11],
+    /// Les montures arrivent fertiles et non fécondes — ce qu'on achète.
+    pub fresh: bool,
+}
+
+/// Les trois départs de l'entraînement : déjà monté, mélangé, et le premier jour.
+///
+/// Le troisième est celui de tout le monde au début — vingt gen 1 anonymes — et
+/// c'est celui que le champion précédent ne savait pas jouer : quarante-sept
+/// croisements en trente cycles, trois pour cent des places offertes.
+pub const MIXED_STARTS: [StartProfile; 3] = [
+    StartProfile {
+        mounts: 250,
+        weights: [0, 0, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        fresh: false,
+    },
+    StartProfile {
+        mounts: 250,
+        weights: [0, 9, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        fresh: false,
+    },
+    StartProfile {
+        mounts: 20,
+        weights: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        fresh: true,
+    },
+];
 
 /// Ce qu'un épisode a produit. `genetons` est la fitness ; le reste sert à lire
 /// **pourquoi**, ce qu'un score seul ne dit jamais.
@@ -484,6 +532,20 @@ pub fn play_treadmill_with(
 /// **rang** uniformément, puis une couleur dedans. Chaque génération pèse alors
 /// autant, quelle que soit la largeur de son étage.
 fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> Stable {
+    // Le départ, tiré avant tout le reste pour que la graine le décide : deux
+    // politiques comparées sur la même graine doivent partir de la même écurie,
+    // sans quoi l'écart mesuré serait autant celui des départs que celui des
+    // politiques.
+    let profile = if config.starts.is_empty() {
+        StartProfile {
+            mounts: config.mounts,
+            weights: config.weights,
+            fresh: config.fresh,
+        }
+    } else {
+        config.starts[index_in(rng, config.starts.len())]
+    };
+
     let mut stable = Stable::new();
     let top = catalog.top_generation() as usize;
     let by_generation: Vec<Vec<ColorId>> = (0..=top)
@@ -495,7 +557,7 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
             if by_generation[generation].is_empty() {
                 0
             } else {
-                config.weights.get(generation).copied().unwrap_or(0)
+                profile.weights.get(generation).copied().unwrap_or(0)
             }
         })
         .collect();
@@ -504,7 +566,7 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         return stable;
     }
 
-    for _ in 0..config.mounts {
+    for _ in 0..profile.mounts {
         // Le rang d'abord, pondéré ; la couleur ensuite, uniformément dedans.
         // Le poids porte donc sur la **génération** et non sur la couleur : les
         // cinquante gen 10 du muldo se partagent une part de 1, chacune est donc
@@ -529,7 +591,7 @@ fn random_stable(catalog: &Catalog, rng: &mut Rng, config: &TreadmillConfig) -> 
         } else {
             Some(recipes[index_in(rng, recipes.len())])
         };
-        let (fertile, cycled) = if config.fresh {
+        let (fertile, cycled) = if profile.fresh {
             (true, false)
         } else {
             draw_state(rng)

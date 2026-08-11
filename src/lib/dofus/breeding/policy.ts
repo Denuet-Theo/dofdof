@@ -302,9 +302,18 @@ const strategyOf = (champion: Champion): SearchStrategy => {
   };
 };
 
-/** Regroupe deux montures interchangeables : même couleur, même ascendance. */
+/**
+ * Regroupe deux montures interchangeables : même couleur, même ascendance, même
+ * état de cycle.
+ *
+ * La même réduction que la recherche, et il faut que ce soit la même : sans elle
+ * l'écran listerait deux lignes « ♂ Ébène + ♀ Ébène » là où la recherche n'a vu
+ * qu'un seul groupe, l'une pour les achetés et l'autre pour les nés de recopie.
+ * Voir `canonicalParents`.
+ */
 const signatureOf = (mount: Pick<Individual, 'colorId' | 'parents' | 'cycled'>) =>
-  `${mount.colorId}|${(mount.parents ?? []).join('+')}|${mount.cycled ? 1 : 0}`;
+  `${mount.colorId}|${(canonicalParents(mount.colorId, mount.parents) ?? []).join('+')}` +
+  `|${mount.cycled ? 1 : 0}`;
 
 const mateOf = (mount: Individual): Mate => ({
   id: mount.id,

@@ -503,15 +503,46 @@ fn makespan_shared(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Place
             break;
         }
 
-        for index in 0..TASKS {
+        // Les parts deviennent des créneaux : règle de McNaughton. On remplit la
+        // première place de bout en bout, puis la seconde, et une tâche qui
+        // déborde se coupe au passage.
+        //
+        // C'est la seconde moitié de Muntz–Coffman, et sans elle l'algorithme ne
+        // rend qu'un débit — « chacune à mi-vitesse » — dont on ne peut rien faire
+        // devant l'enclos. Ici on rend un emploi du temps : l'Abreuvoir jusque-là,
+        // puis le Foudroyeur, puis les deux.
+        //
+        // Une tâche ne se retrouve jamais sur deux places au même instant, et ce
+        // n'est pas un hasard : sa charge vaut au plus `step`, donc le morceau
+        // laissé sur la place suivante finit avant que le premier ne commence.
+        let mut cursor = 0.0f64;
+        for &index in &eligible {
             if share[index] <= 1e-9 {
                 continue;
             }
             if !started[index].is_finite() {
                 started[index] = now;
             }
+            let mut left = share[index] * step;
+            while left > 1e-12 {
+                let machine = (cursor / step).floor();
+                let within = cursor - machine * step;
+                let take = left.min(step - within);
+                if take <= 1e-12 {
+                    break;
+                }
+                record(
+                    index,
+                    now + within,
+                    now + within + take,
+                    take * speed(index),
+                    &mut segments,
+                );
+                cursor += take;
+                left -= take;
+            }
+
             let served = (step * speed(index) * share[index]).min(remaining[index]);
-            record(index, now, now + step, served, &mut segments);
             done[index] += served;
             remaining[index] -= served;
             if remaining[index] <= 1e-9 {
@@ -835,6 +866,55 @@ fn makespan_blocking(tasks: &[Task; TASKS], rate: &impl Fn(usize) -> f64) -> Pla
 
 #[cfg(test)]
 mod tests {
+    /// Un ordonnancement doit être **jouable** : jamais plus de créneaux
+    /// simultanés que l'enclos n'a de places, et jamais une jauge à deux endroits
+    /// à la fois.
+    ///
+    /// C'est l'invariant que la règle de McNaughton garantit, et qui n'a rien
+    /// d'évident quand on convertit des parts fractionnaires en créneaux réels :
+    /// une tâche servie à mi-vitesse sur deux places consécutives se retrouverait
+    /// à cheval sur elle-même si le découpage était naïf. Vérifié sur toutes les
+    /// répartitions de bandes plutôt que sur un cas.
+    #[test]
+    fn un_ordonnancement_tient_dans_les_places_de_lenclos() {
+        let economy = Economy::default();
+        for code in 0..4096u32 {
+            let mut bands = [0usize; GAUGES];
+            let mut rest = code;
+            for slot in bands.iter_mut() {
+                *slot = (rest % 4) as usize;
+                rest /= 4;
+            }
+            for level in [0u16, 42, 60, 120] {
+                let placed = slots(&economy, bands, crate::economy::mount_xp_for_level(level));
+
+                // Les bornes suffisent : le nombre de créneaux actifs ne change
+                // qu'à un début ou à une fin.
+                let mut instants: Vec<f64> = placed.iter().map(|slot| slot.start).collect();
+                instants.extend(placed.iter().map(|slot| slot.end));
+                for &at in &instants {
+                    let inside = |slot: &Slot| slot.start <= at + 1e-6 && slot.end > at + 1e-6;
+                    let busy = placed.iter().filter(|slot| inside(slot)).count();
+                    assert!(
+                        busy <= PARALLEL_SLOTS,
+                        "bandes {bands:?}, niveau {level} : {busy} créneaux à {at:.1} s"
+                    );
+                    for gauge in 0..GAUGES {
+                        let same = placed
+                            .iter()
+                            .filter(|slot| slot.gauge == gauge && inside(slot))
+                            .count();
+                        assert!(
+                            same <= 1,
+                            "bandes {bands:?}, niveau {level} : la jauge {gauge} tourne \
+                             {same} fois à {at:.1} s"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     use super::*;
     use crate::config::Prices;
 

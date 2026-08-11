@@ -199,16 +199,23 @@ export type TimelineClock = {
   /** Départ du plan, en millisecondes epoch. */
   startedAt: number;
   /**
-   * Le départ propre à chaque piste, quand elle en a un.
+   * L'horloge propre d'une piste, quand elle en a une.
    *
-   * Le parc ne se charge pas d'un bloc : on remplit un enclos, on le lance, on
-   * passe au suivant. Le temps de nommer les poulains et de chercher les montures
-   * dans le coffre, le premier a une heure d'avance sur le dernier — et une
-   * horloge unique obligeait à les faire partir ensemble, ce qui n'arrive jamais.
+   * Le parc ne se charge pas d'un bloc : le temps de nommer les poulains et de
+   * chercher les montures dans le coffre, le premier enclos a une heure d'avance
+   * sur le dernier.
    *
-   * Une piste absente suit `startedAt`, ce qui est le comportement d'avant.
+   * Il ne s'arrête pas d'un bloc non plus, et la raison est mécanique. Le Baffeur
+   * et le Caresseur portent la **sérénité**, qui ouvre et ferme les fenêtres des
+   * autres jauges — une jauge hors de sa fenêtre s'arrête net au lieu de ralentir.
+   * La Mangeoire occupe une des deux places. Un enclos qui attend l'une de ces
+   * trois-là ne progressera plus sans l'éleveur, donc son compteur doit s'arrêter
+   * avec lui. L'Abreuvoir, le Foudroyeur et la Dragofesse vont au bout seuls : cet
+   * enclos-là peut tourner pendant qu'on dort.
+   *
+   * Une piste absente suit l'horloge du plan.
    */
-  trackStarts?: Record<string, number>;
+  tracks?: Record<string, { startedAt: number; pausedAt: number | null; pausedSeconds: number }>;
   /** Instant de la pause en cours, ou `null` si la timeline tourne. */
   pausedAt: number | null;
   /** Cumul des pauses **terminées**, en secondes. La pause en cours n'y est pas. */
@@ -232,15 +239,45 @@ export const isPaused = (clock: TimelineClock) => clock.pausedAt !== null;
  * quand — une complication pour une distinction qui n'existe pas.
  */
 export const elapsedFor = (clock: TimelineClock, trackId: string, now: number): number => {
-  const started = clock.trackStarts?.[trackId];
-  if (started === undefined) return elapsedSeconds(clock, now);
-  const stopped = clock.pausedAt ?? now;
-  // `pausedSeconds` est le cumul du **plan**, pas celui de la piste : une pause
-  // antérieure au départ de cette piste-ci se retrouve donc retranchée à tort.
-  // C'est une approximation assumée — on lance un enclos juste après l'avoir
-  // chargé, et on part en week-end après, pas avant. La borne à zéro empêche le
-  // cas pathologique de produire un temps négatif.
-  return Math.max(0, (stopped - started) / 1000 - clock.pausedSeconds);
+  const own = clock.tracks?.[trackId];
+  if (!own) return elapsedSeconds(clock, now);
+  const stopped = own.pausedAt ?? now;
+  return Math.max(0, (stopped - own.startedAt) / 1000 - own.pausedSeconds);
+};
+
+/** Cette piste-là est-elle arrêtée ? À défaut d'horloge propre, celle du plan. */
+export const isTrackPaused = (clock: TimelineClock, trackId: string): boolean =>
+  (clock.tracks?.[trackId]?.pausedAt ?? clock.pausedAt) !== null;
+
+/**
+ * Les jauges qui **réclament l'éleveur** : sans lui, l'enclos ne progresse plus.
+ *
+ * La sérénité ouvre et ferme les fenêtres des autres, et la Mangeoire occupe une
+ * place. Les trois stats, elles, vont au bout toutes seules — un enclos qui n'attend
+ * qu'elles peut tourner la nuit.
+ */
+export const BLOCKING_GAUGES: ReadonlySet<GaugeId> = new Set<GaugeId>([
+  'baffeur',
+  'caresseur',
+  'mangeoire',
+]);
+
+/**
+ * La prochaine jauge qu'une piste attend, si c'en est une qui bloque.
+ *
+ * C'est la question qu'on se pose à l'heure du coucher : est-ce que cet enclos-là
+ * a besoin de moi pour continuer ? On répond avec le plan plutôt qu'en laissant
+ * l'éleveur la reconstituer jauge par jauge.
+ */
+export const blockedOn = (
+  plan: TimelinePlan,
+  trackId: string,
+  elapsed: number
+): GaugeId | null => {
+  const next = allEvents(plan)
+    .filter((event) => event.trackId === trackId && event.gauge && event.at >= elapsed)
+    .sort((a, b) => a.at - b.at)[0];
+  return next?.gauge && BLOCKING_GAUGES.has(next.gauge) ? next.gauge : null;
 };
 
 export const elapsedSeconds = (clock: TimelineClock, now: number): number =>

@@ -26,8 +26,10 @@ import {
   elapsedSeconds,
   formatCountdown,
   elapsedFor,
+  blockedOn,
   formatWallClock,
   gaugeChanges,
+  isTrackPaused,
   inRibbon,
   isPaused,
   nextAction,
@@ -38,7 +40,9 @@ import {
   samplePlan,
   STABLE_TRACK,
   wallClockAt,
+  GAUGE_LABELS,
   type EventKind,
+  type GaugeId,
   type PlacedEvent,
   type TimelinePlan,
 } from '@/lib/dofus/breeding/timeline';
@@ -622,6 +626,7 @@ const Fill = ({
   onRecordClonings,
   enclosTracks = [],
   onStartTrack,
+  onToggleTrack,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
@@ -630,9 +635,16 @@ const Fill = ({
   generations?: Map<string, number>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
-  /** Les enclos du plan, et si leur compteur tourne déjà. */
-  enclosTracks?: { id: string; label: string; started: boolean }[];
+  /** Les enclos du plan, leur état, et ce qui les bloque. */
+  enclosTracks?: {
+    id: string;
+    label: string;
+    started: boolean;
+    paused: boolean;
+    blocked: GaugeId | null;
+  }[];
   onStartTrack?: (trackId: string) => Promise<void>;
+  onToggleTrack?: (trackId: string) => Promise<void>;
 }) => {
   /**
    * Où en est le parcours : accoupler, cloner, charger.
@@ -829,26 +841,31 @@ const Fill = ({
               {onStartTrack && enclosTracks.length > 0 && (
                 <span className="w-full flex flex-wrap items-center gap-1.5 pt-1">
                   <span className="text-[11px] text-dark-400">chargé :</span>
-                  {enclosTracks.map(({ id, label, started }) => (
+                  {enclosTracks.map(({ id, label, started, paused, blocked }) => (
                     <button
                       key={id}
                       type="button"
-                      disabled={started}
-                      onClick={() => onStartTrack(id)}
+                      onClick={() => (started ? onToggleTrack?.(id) : onStartTrack(id))}
                       className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border
-                        transition-all ${
-                          started
-                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 cursor-default'
-                            : 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50 cursor-pointer'
+                        transition-all cursor-pointer ${
+                          !started
+                            ? 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50'
+                            : paused
+                              ? 'bg-dark-900/60 text-dark-400 border-dark-600/50 hover:border-kamas/50'
+                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:border-emerald-400/60'
                         }`}
                       title={
-                        started
-                          ? `${label} : le compteur tourne.`
-                          : `Lancer le compteur de ${label} — il vient d’être chargé.`
+                        !started
+                          ? `Lancer le compteur de ${label} — il vient d’être chargé.`
+                          : paused
+                            ? `${label} est arrêté. Le relancer.`
+                            : blocked
+                              ? `${label} attend ${GAUGE_LABELS[blocked]}, qui ne tourne pas sans toi — l’arrêter avant de partir.`
+                              : `${label} tourne. Il n’attend qu’une stat, il ira au bout tout seul.`
                       }
                     >
                       {label}
-                      {started && ' ✓'}
+                      {started && (paused ? ' ⏸' : blocked ? ' ⚠' : ' ✓')}
                     </button>
                   ))}
                 </span>
@@ -1462,9 +1479,14 @@ const BreedingTimeline = ({
             .map((track) => ({
               id: track.id,
               label: track.label,
-              started: clock.trackStarts?.[track.id] !== undefined,
+              started: clock.tracks?.[track.id] !== undefined,
+              paused: isTrackPaused(clock, track.id),
+              // La jauge qui la bloque, s'il y en a une : c'est la question qu'on
+              // se pose à l'heure du coucher.
+              blocked: blockedOn(plan, track.id, elapsedOf(track.id)),
             }))}
           onStartTrack={timeline.startTrack}
+          onToggleTrack={timeline.toggleTrack}
         />
       )}
 

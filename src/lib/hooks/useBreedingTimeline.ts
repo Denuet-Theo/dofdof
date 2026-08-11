@@ -70,14 +70,29 @@ export type BreedingTimelineState = {
    * qui n'arrive jamais.
    */
   startTrack: (trackId: string) => Promise<void>;
+  /**
+   * Arrête ou relance **une seule piste**.
+   *
+   * Un enclos bloqué sur la sérénité ou la Mangeoire ne progresse plus sans
+   * l'éleveur : à l'heure du coucher on le coupe, et on laisse finir celui qui
+   * n'attend qu'une stat. Voir `BLOCKING_GAUGES`.
+   */
+  toggleTrack: (trackId: string) => Promise<void>;
   clear: () => Promise<void>;
 };
 
 /** L'horloge telle que la ligne la porte. */
 const clockOf = (row: BreedingTimeline): TimelineClock => ({
   startedAt: new Date(row.started_at).getTime(),
-  trackStarts: Object.fromEntries(
-    Object.entries(row.track_starts ?? {}).map(([id, at]) => [id, new Date(at).getTime()])
+  tracks: Object.fromEntries(
+    Object.entries(row.track_clocks ?? {}).map(([id, own]) => [
+      id,
+      {
+        startedAt: new Date(own.started_at).getTime(),
+        pausedAt: own.paused_at === null ? null : new Date(own.paused_at).getTime(),
+        pausedSeconds: own.paused_seconds,
+      },
+    ])
   ),
   pausedAt: row.paused_at === null ? null : new Date(row.paused_at).getTime(),
   pausedSeconds: row.paused_seconds,
@@ -180,8 +195,11 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
       started_at: string;
       paused_at: string | null;
       paused_seconds: number;
-      /** Le départ propre de chaque piste. Voir `startTrack`. */
-      track_starts?: Record<string, string>;
+      /** L'horloge propre de chaque piste. Voir `startTrack` et `toggleTrack`. */
+      track_clocks?: Record<
+        string,
+        { started_at: string; paused_at: string | null; paused_seconds: number }
+      >;
     }) => {
       const supabase = createClient();
       const { data, error: failure } = await supabase
@@ -204,28 +222,57 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
     [family]
   );
 
-  const startTrack = useCallback(
-    async (trackId: string) => {
-      const at = new Date().toISOString();
-      setRow((current) =>
-        current ? { ...current, track_starts: { ...current.track_starts, [trackId]: at } } : current
-      );
-      // La carte entière part à chaque fois plutôt qu'un `jsonb_set` : une
-      // douzaine de dates, réécrites ensemble quand le plan change, et jamais
-      // interrogées séparément.
+  /** La ligne complète, plus une horloge de piste réécrite. */
+  const withTrack = useCallback(
+    async (
+      trackId: string,
+      next: { started_at: string; paused_at: string | null; paused_seconds: number }
+    ) => {
+      if (!row) return;
+      const clocks = { ...row.track_clocks, [trackId]: next };
+      setRow({ ...row, track_clocks: clocks });
       // La ligne entière repart : un `upsert` ne met à jour que les colonnes
       // fournies, mais il **insère** avec les autres à vide si la ligne n'existe
-      // pas encore. Renvoyer le plan et l'horloge coûte un JSON et ferme le cas.
-      if (!row) return;
+      // pas. Renvoyer le plan et l'horloge coûte un JSON et ferme le cas.
       await persist({
         plan: row.plan,
         started_at: row.started_at,
         paused_at: row.paused_at,
         paused_seconds: row.paused_seconds,
-        track_starts: { ...row.track_starts, [trackId]: at },
+        track_clocks: clocks,
       });
     },
     [persist, row]
+  );
+
+  const startTrack = useCallback(
+    async (trackId: string) =>
+      withTrack(trackId, {
+        started_at: new Date().toISOString(),
+        paused_at: null,
+        paused_seconds: 0,
+      }),
+    [withTrack]
+  );
+
+  const toggleTrack = useCallback(
+    async (trackId: string) => {
+      const own = row?.track_clocks?.[trackId];
+      // Une piste sans horloge propre n'a jamais été lancée : la mettre en pause
+      // n'aurait pas de sens, on la démarre plutôt.
+      if (!own) return startTrack(trackId);
+      const now = new Date();
+      if (own.paused_at === null) {
+        return withTrack(trackId, { ...own, paused_at: now.toISOString() });
+      }
+      const held = (now.getTime() - new Date(own.paused_at).getTime()) / 1000;
+      return withTrack(trackId, {
+        ...own,
+        paused_at: null,
+        paused_seconds: own.paused_seconds + Math.max(0, Math.round(held)),
+      });
+    },
+    [row, startTrack, withTrack]
   );
 
   const load = useCallback(
@@ -241,7 +288,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         paused_seconds: 0,
         // Un plan neuf part sans départ propre : chaque enclos suivra celui du
         // plan tant qu'on ne l'aura pas lancé pour lui-même.
-        track_starts: {},
+        track_clocks: {},
         updated_at: startedAt,
       }));
 
@@ -250,7 +297,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         started_at: startedAt,
         paused_at: null,
         paused_seconds: 0,
-        track_starts: {},
+        track_clocks: {},
       });
     },
     [family, persist]
@@ -325,6 +372,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
     resume,
     restart,
     startTrack,
+    toggleTrack,
     clear,
   };
 };

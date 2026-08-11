@@ -35,7 +35,7 @@
 
 import championArtifact from './champion.json';
 import { compile, evaluate, isConnected, type Champion } from './network';
-import { featuresOf, type EconomyView } from './census';
+import { featuresOf, pairDelta, type EconomyView } from './census';
 import {
   createSearcher,
   flatten,
@@ -44,7 +44,7 @@ import {
   type UnitPlan,
 } from './search';
 import { seededRandom } from './random';
-import { pairTargetGeneration, BULK_MATE_LEVEL, type Mate } from './pairing';
+import { BULK_MATE_LEVEL, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
 import type { Individual, Sex, Stable } from './stable';
 
@@ -156,7 +156,14 @@ export type CoupleLine = {
   male: CoupleSide;
   female: CoupleSide;
   count: number;
-  /** La génération que le couple vise, ou `null` si le jeu ne propose rien. */
+  /**
+   * Le rang que le croisement **produira**, ou `null` s'il n'en produit aucun.
+   *
+   * `null` couvre deux cas qu'il faut lire pareil devant l'enclos : le jeu ne
+   * propose pas l'accouplement, ou aucune couleur ne nomme le rang visé. Le second
+   * est la **recopie** — deux Ébène visent la génération 2 et rendent un Ébène —
+   * et c'est celui qu'on annonçait « gen 2 » à tort.
+   */
   targetGeneration: number | null;
   /** Places d'enclos que la ligne engage : une par parent qui doit son cycle. */
   places: number;
@@ -273,7 +280,7 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     (census) => evaluate(network, featuresOf(census, input.colors, economy))
   );
 
-  return readPlan(plan, mounts, input, generations);
+  return readPlan(plan, mounts, input, generations, economy, strategy);
 };
 
 /**
@@ -318,7 +325,9 @@ const readPlan = (
   plan: UnitPlan,
   mounts: Individual[],
   input: PolicyInput,
-  generations: Map<string, number>
+  generations: Map<string, number>,
+  economy: EconomyView,
+  strategy: SearchStrategy
 ): StablePlan => {
   const bought = (index: number) => plan.purchases[index - mounts.length] ?? null;
 
@@ -362,8 +371,22 @@ const readPlan = (
       male,
       female,
       count: 1,
-      targetGeneration:
-        maleMate && femaleMate ? pairTargetGeneration(maleMate, femaleMate, generations) : null,
+      // Le rang visé n'est affichable que si une couleur le nomme : sinon le
+      // couple recopie, et l'annoncer serait promettre une génération qui ne
+      // viendra pas. `PairDelta` porte le drapeau, on le lui redemande.
+      targetGeneration: (() => {
+        if (!maleMate || !femaleMate) return null;
+        const delta = pairDelta(
+          maleMate,
+          femaleMate,
+          input.colors,
+          generations,
+          economy,
+          strategy.level,
+          strategy.optimakinaFrom
+        );
+        return delta?.namesTarget ? delta.targetGeneration : null;
+      })(),
       places: cost,
     });
   }

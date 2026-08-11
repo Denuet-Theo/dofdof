@@ -139,7 +139,8 @@ for (const line of plan.couples.slice(0, 10)) {
   console.log(
     `  ${String(line.count).padStart(2)} ×  ♂ ${nameOf[line.male.colorId]} [${listed(line.male.mountIds)}]` +
       `  +  ♀ ${nameOf[line.female.colorId]} [${listed(line.female.mountIds)}]` +
-      `  → gen ${line.targetGeneration}${line.places === 0 ? '  (sans enclos)' : ''}`
+      `  → ${line.targetGeneration === null ? 'RECOPIE' : `gen ${line.targetGeneration}`}` +
+      `${line.places === 0 ? '  (sans enclos)' : ''}`
   );
 }
 if (plan.couples.length > 10) console.log(`  … ${plan.couples.length - 10} lignes de plus`);
@@ -193,4 +194,11 @@ if (plan.raw.crossings.length === 0 && control.crossings.length > 0) {
   );
   process.exit(1);
 }
+const recopies = plan.couples
+  .filter((line) => line.targetGeneration === null)
+  .reduce((sum, line) => sum + line.count, 0);
+console.log(
+  `\nsur ${plan.raw.crossings.length} accouplements, ${recopies} ne montent d'aucun rang ` +
+    `(${Math.round((recopies / Math.max(plan.raw.crossings.length, 1)) * 100)} %)`
+);
 console.log('\nla politique accouple — cet artefact est utilisable dans l’écran');

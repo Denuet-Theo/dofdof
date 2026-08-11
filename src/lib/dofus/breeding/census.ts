@@ -314,6 +314,16 @@ export type PairDelta = {
   /** Ce que la naissance vaut en espérance, à la liquidation. */
   expectedValue: number;
   targetGeneration: number;
+  /**
+   * Une couleur **nomme** ce rang, donc le croisement peut y monter.
+   *
+   * Faux pour deux Ébène : la paire vise la génération 2, mais aucune recette ne
+   * s'écrit `[ebene, ebene]`, et toute la masse retombe sur la recopie. Le calcul
+   * le savait déjà — c'est la condition des génétons — mais il jetait
+   * l'information, si bien qu'un affichage lisant `targetGeneration` seul
+   * annonçait « gen 2 » là où il ne sortira qu'un Ébène de plus.
+   */
+  namesTarget: boolean;
   optimakinaCost: number;
   genetonKamas: number;
 };
@@ -393,6 +403,7 @@ export const pairDelta = (
     births,
     expectedValue,
     targetGeneration,
+    namesTarget,
     optimakinaCost,
     genetonKamas,
   };

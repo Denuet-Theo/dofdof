@@ -679,12 +679,24 @@ const Fill = ({
                   {side('♂', line.male.colorId, line.male.mountIds, `m-${index}`)}
                   <span className="text-dark-600">+</span>
                   {side('♀', line.female.colorId, line.female.mountIds, `f-${index}`)}
-                  {line.targetGeneration !== null && (
+                  {line.targetGeneration !== null ? (
                     <span
                       className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-                      title={`Le couple vise la génération ${line.targetGeneration}.`}
+                      title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
                     >
                       GEN. {line.targetGeneration}
+                    </span>
+                  ) : (
+                    /* Le cas qu'on annonçait « gen 2 » à tort. Deux Ébène visent
+                       bien la génération 2, mais aucune recette ne s'écrit
+                       `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et
+                       aucun géneton. Le dire, parce que ça change ce qu'on fait
+                       de ses places d'enclos. */
+                    <span
+                      className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
+                      title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
+                    >
+                      RECOPIE
                     </span>
                   )}
                   {line.places === 0 && (

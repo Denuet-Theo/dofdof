@@ -103,6 +103,14 @@ for (const [at, testCase] of fixture.cases.entries()) {
   }
 
   const theirs = testCase.delta;
+  // Un booléen ne se compare pas à une tolérance : il est juste ou il ne l'est
+  // pas, et c'est lui qui distingue « monte d'un rang » de « recopie ».
+  if (delta.namesTarget !== theirs.namesTarget) {
+    console.error(
+      `cas ${at} : namesTarget ${delta.namesTarget} contre ${theirs.namesTarget}`
+    );
+    process.exit(1);
+  }
   for (const key of [
     'maleGeneration', 'femaleGeneration', 'maleCarried', 'femaleCarried',
     'targetGeneration', 'optimakinaCost', 'genetonKamas', 'expectedValue',

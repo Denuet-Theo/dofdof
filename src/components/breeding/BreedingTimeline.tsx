@@ -48,9 +48,17 @@ import {
 } from '@/lib/dofus/breeding/model-plan';
 import CopyableText from '@/components/ui/CopyableText';
 import { chime, unlock } from '@/lib/dofus/breeding/alarm';
+import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
+import BreedingCloneDialog from '@/components/breeding/BreedingCloneDialog';
+import {
+  cloningsToRecord,
+  couplesToRecord,
+  type StablePlan,
+} from '@/lib/dofus/breeding/policy';
+import type { BirthEntry } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
-import type { StablePlan } from '@/lib/dofus/breeding/policy';
 import type { Individual } from '@/lib/dofus/breeding/stable';
+import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
 /**
@@ -124,6 +132,15 @@ type Props = {
    * `policy.ts`.
    */
   fill?: StablePlan | null;
+  /**
+   * Les couleurs et leurs générations, pour la saisie des naissances et des
+   * clonages — la fenêtre d'accouplement propose les issues, donc elle a besoin du
+   * catalogue et pas seulement des noms.
+   */
+  colors?: BreedingColor[];
+  generations?: Map<string, number>;
+  /** Enregistre les naissances saisies. Sans lui, le parcours n'est que lecture. */
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -575,11 +592,55 @@ const Fill = ({
   fill,
   nameOf,
   individuals = [],
+  colors,
+  generations,
+  onRecordBirths,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
+  colors?: BreedingColor[];
+  generations?: Map<string, number>;
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
 }) => {
+  /**
+   * Où en est le parcours : accoupler, cloner, charger.
+   *
+   * Trois temps et non trois panneaux ouverts en même temps, parce que c'est
+   * l'ordre dans lequel on joue — on accouple ce qui est déjà fécond, on clone ce
+   * qui ne sert plus, et **ensuite** on charge l'enclos avec ce qui reste. Chaque
+   * phase se fait dans le jeu, une monture à la fois, en cherchant un nom.
+   */
+  const [step, setStep] = useState<'mate' | 'clone' | 'load'>('mate');
+  const [open, setOpen] = useState<'mate' | 'clone' | null>(null);
+
+  const toRecord = useMemo(() => couplesToRecord(fill), [fill]);
+  const toClone = useMemo(
+    () => (generations ? cloningsToRecord(fill, generations) : []),
+    [fill, generations]
+  );
+
+  /**
+   * Ce qu'on met en enclos, **par ordre alphabétique du nom en jeu**.
+   *
+   * Pas dans l'ordre du plan : devant le coffre on cherche des noms, et l'écurie du
+   * jeu les trie. Suivre son tri évite de la reparcourir à chaque monture.
+   */
+  const toLoad = useMemo(() => {
+    const names = new Map<string, number>();
+    const add = (id: string) => {
+      const mount = individuals.find((entry) => entry.id === id);
+      const name = mount?.name ?? ANONYMOUS_NAME;
+      names.set(name, (names.get(name) ?? 0) + 1);
+    };
+    for (const [male, female] of fill.raw.crossings) {
+      const at = (index: number) => fill.mounts[index];
+      if (at(male)) add(at(male).id);
+      if (at(female)) add(at(female).id);
+    }
+    for (const index of fill.raw.cycles) if (fill.mounts[index]) add(fill.mounts[index].id);
+    return [...names].sort(([a], [b]) => a.localeCompare(b, 'fr'));
+  }, [fill, individuals]);
   /**
    * Le nom qu'une monture suivie porte en jeu.
    *
@@ -692,6 +753,102 @@ const Fill = ({
           {fill.places}/{fill.capacity} places
         </span>
       </div>
+
+      {/* Le parcours : un bouton qui dit ce qu'il reste à faire et l'ouvre. Les
+          listes en dessous restent lisibles — on veut pouvoir tout voir d'un coup
+          d'œil — mais c'est ce bouton qui mène le geste, phase après phase. */}
+      {!nothing && colors && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+          bg-dark-800/60 border border-dark-600/50">
+          {step === 'mate' && toRecord.length > 0 && (
+            <>
+              <Button size="sm" variant="primary" onClick={() => setOpen('mate')}>
+                <Heart size={13} />
+                {toRecord.length} reproduction{toRecord.length > 1 ? 's' : ''} à faire
+              </Button>
+              <span className="text-[11px] text-dark-500">
+                un couple à la fois, avec le nom du poulain à copier
+              </span>
+            </>
+          )}
+          {(step === 'clone' || (step === 'mate' && toRecord.length === 0)) &&
+            toClone.length > 0 && (
+              <>
+                <Button size="sm" variant="primary" onClick={() => setOpen('clone')}>
+                  <Dna size={13} />
+                  {toClone.length} clonage{toClone.length > 1 ? 's' : ''} à faire
+                </Button>
+                <span className="text-[11px] text-dark-500">
+                  deux stériles, une survivante — c’est toi qui choisis laquelle
+                </span>
+              </>
+            )}
+          {(step === 'load' || (toRecord.length === 0 && toClone.length === 0)) && (
+            <>
+              <span className="text-[11px] font-semibold text-dark-200">
+                {toLoad.reduce((total, [, count]) => total + count, 0)} montures à mettre en
+                enclos
+              </span>
+              <span className="text-[11px] text-dark-500">par ordre alphabétique</span>
+            </>
+          )}
+          {step !== 'load' && (
+            <button
+              type="button"
+              onClick={() => setStep(step === 'mate' ? 'clone' : 'load')}
+              className="ml-auto text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer"
+            >
+              passer →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* La liste de chargement, quand on y est : des noms à chercher, triés comme
+          l'écurie du jeu les trie. */}
+      {step === 'load' && toLoad.length > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 py-2 rounded-xl
+          bg-emerald-500/5 border border-emerald-500/20">
+          {toLoad.map(([name, count]) => (
+            <span key={name} className="inline-flex items-center gap-1">
+              {name === ANONYMOUS_NAME ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500">
+                  {name}
+                </span>
+              ) : (
+                <CopyableText value={name} title={`Copier « ${name} »`} />
+              )}
+              {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {colors && onRecordBirths && (
+        <BreedingBirthDialog
+          isOpen={open === 'mate'}
+          onClose={() => setOpen(null)}
+          couples={toRecord}
+          individuals={individuals}
+          colors={colors}
+          nameOf={nameOf}
+          onRecord={async (entries) => {
+            await onRecordBirths(entries);
+            setStep('clone');
+          }}
+        />
+      )}
+      {colors && (
+        <BreedingCloneDialog
+          isOpen={open === 'clone'}
+          onClose={() => setOpen(null)}
+          clonings={toClone}
+          individuals={individuals}
+          colors={colors}
+          nameOf={nameOf}
+          onDone={() => setStep('load')}
+        />
+      )}
 
       {nothing ? (
         /* Une fournée vide se dit, plutôt que de laisser un cadre vide qu'on
@@ -981,7 +1138,16 @@ const PlanLoader = ({
 
 /* -------------------------------------------------------------- le panneau - */
 
-const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: Props) => {
+const BreedingTimeline = ({
+  timeline,
+  enclosCount,
+  fill,
+  nameOf,
+  individuals,
+  colors,
+  generations,
+  onRecordBirths,
+}: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
   /**
@@ -1199,7 +1365,16 @@ const BreedingTimeline = ({ timeline, enclosCount, fill, nameOf, individuals }: 
           l'agenda égrène les gestes, et c'est entre les deux qu'on se demande ce
           qu'on met dedans. Absent quand aucune couleur n'a de plan — il n'y a
           alors rien à charger, et l'annoncer serait inventer une consigne. */}
-      {fill && <Fill fill={fill} nameOf={nameOf} individuals={individuals} />}
+      {fill && (
+        <Fill
+          fill={fill}
+          nameOf={nameOf}
+          individuals={individuals}
+          colors={colors}
+          generations={generations}
+          onRecordBirths={onRecordBirths}
+        />
+      )}
 
       <Agenda events={upcoming} elapsed={elapsed} clock={clock} now={now} />
 

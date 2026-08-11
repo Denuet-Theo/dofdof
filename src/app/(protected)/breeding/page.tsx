@@ -532,6 +532,13 @@ const BreedingPage = () => {
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.
         individuals={stable.individuals}
+        // Le parcours guidé a besoin du catalogue : la fenêtre d'accouplement
+        // propose les issues possibles, pas seulement des noms.
+        colors={tree?.colors ?? []}
+        generations={
+          new Map((tree?.colors ?? []).map((color) => [color.id, color.generation]))
+        }
+        onRecordBirths={recordBirths}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

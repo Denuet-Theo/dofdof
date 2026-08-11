@@ -425,7 +425,32 @@ export const pairOutlook = (
  * sa couleur et son ascendance. À signature égale, deux montures visent
  * exactement la même chose.
  */
-export const mateSignature = (mate: Mate) => `${mate.colorId}|${(mate.parents ?? []).join('+')}`;
+/**
+ * Ce qui distingue une monture d'une autre du point de vue de l'appariement.
+ *
+ * ## Une ascendance qui ne dit rien est une absence d'ascendance
+ *
+ * Un Ébène né de deux Ébène porte `['ebene', 'ebene']` ; un Ébène acheté porte
+ * `null`. En jeu ce sont **la même monture**, et le modèle le savait déjà partout
+ * où ça compte — sur les 14 400 couples du catalogue la loi d'appariement ne les
+ * distingue en rien, et les 74 entrées du recensement leur sont identiques au bit.
+ *
+ * Seule cette clé les séparait, et elle décide du regroupement : deux montures
+ * interchangeables tombaient dans deux groupes, donc en deux candidats portant le
+ * même delta, et le stock se fragmentait à mesure que les recopies s'accumulaient.
+ *
+ * La réduction ne vaut que pour ce cas : `[a, a]` avec la couleur `a`. Une
+ * ascendance mixte ouvre des cibles et doit être gardée — un Ébène né d'Ébène ×
+ * Doré porte du Doré, et c'est ce qui lui permet de viser plus haut.
+ */
+export const canonicalParents = (
+  colorId: string,
+  parents: [string, string] | null
+): [string, string] | null =>
+  parents && parents[0] === colorId && parents[1] === colorId ? null : parents;
+
+export const mateSignature = (mate: Mate) =>
+  `${mate.colorId}|${(canonicalParents(mate.colorId, mate.parents) ?? []).join('+')}`;
 
 /** Des montures interchangeables, et combien l'écurie en porte. */
 export type MateGroup = {

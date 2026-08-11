@@ -44,7 +44,7 @@ import {
   type UnitPlan,
 } from './search';
 import { seededRandom } from './random';
-import { BULK_MATE_LEVEL, type Mate } from './pairing';
+import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
 import type { Individual, Sex, Stable } from './stable';
 

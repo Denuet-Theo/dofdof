@@ -572,26 +572,46 @@ const readPlan = (
  *
  * Un parent acheté porte `mountId: null`, ce qui est exactement ce que la saisie
  * attend d'une monture de vrac — sans généalogie, interchangeable, sans nom à
- * chercher.
+ * chercher. Il porte en plus `bought`, parce qu'il n'est **pas** dans le coffre.
+ *
+ * ## Seuls les couples réalisables **maintenant**
+ *
+ * Un accouplement demande deux fécondes. Un couple qui coûte une place d'enclos
+ * n'en a donc pas deux : il lui manque au moins un cycle, et cette monture-là est
+ * peut-être encore à l'hôtel de vente. Proposer d'en saisir la naissance revient
+ * à demander le résultat d'un croisement qui ne peut pas avoir eu lieu — c'est ce
+ * que la fenêtre faisait, jusqu'à afficher « Anonyme » du côté d'une gen 1 pas
+ * encore achetée.
+ *
+ * On ne déplie donc que les couples à **zéro place**. Les autres reviendront
+ * d'eux-mêmes : la sortie d'enclos passe leurs parents en fécondes, la politique
+ * recompose, et le couple retombe à zéro place — c'est-à-dire réalisable.
  */
 export const couplesToRecord = (plan: StablePlan): Couple[] => {
   const out: Couple[] = [];
   for (const line of plan.couples) {
+    if (line.places > 0) continue;
     for (let index = 0; index < line.count; index += 1) {
       out.push({
         // Faute de cible nommée — une recopie — on met la couleur du mâle : le
         // champ ne sert qu'à intituler la fenêtre, et mentir sur un rang serait
         // pire que de nommer ce qu'on a sous la main.
         targetColorId: line.targetColorId ?? line.male.colorId,
+        // `mountIds` vide veut dire achat : la politique a proposé une gen 1
+        // qu'on n'a pas encore. Le drapeau suit jusqu'à la fenêtre
+        // d'accouplement, qui affichait sinon « Anonyme » — indiscernable d'une
+        // monture du coffre.
         male: {
           colorId: line.male.colorId,
           sex: 'M',
           mountId: line.male.mountIds[index] ?? null,
+          bought: line.male.mountIds.length === 0,
         },
         female: {
           colorId: line.female.colorId,
           sex: 'F',
           mountId: line.female.mountIds[index] ?? null,
+          bought: line.female.mountIds.length === 0,
         },
       });
     }

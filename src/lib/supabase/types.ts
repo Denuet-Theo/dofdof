@@ -508,9 +508,35 @@ export type UserFarmFilters = {
   updated_at: string;
 };
 
+/**
+ * Une ligne de `user_breeding_availability` (migration 20260812160000).
+ *
+ * `availability` est laissé en `unknown` comme les filtres de farm : rien de ce
+ * contenu n'est lu par du SQL, et `AvailabilityState` en est la seule définition.
+ * Le client recolle ce qu'il relit et ignore ce qu'il ne reconnaît pas.
+ */
+export type UserBreedingAvailability = {
+  user_id: string;
+  availability: unknown;
+  updated_at: string;
+};
+
 export interface Database {
   public: {
     Tables: {
+      user_breeding_availability: {
+        Row: UserBreedingAvailability;
+        Insert: {
+          user_id?: string;
+          availability: unknown;
+          updated_at?: string;
+        };
+        Update: {
+          availability?: unknown;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       user_farm_filters: {
         Row: UserFarmFilters;
         Insert: {

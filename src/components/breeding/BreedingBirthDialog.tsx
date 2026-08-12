@@ -5,7 +5,7 @@ import { Check, RotateCcw } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
-import BreedingMatingPanel from '@/components/breeding/BreedingMatingPanel';
+import BreedingMatingPanel, { TO_BUY } from '@/components/breeding/BreedingMatingPanel';
 import {
   matingOutcomes,
   mateSignature,
@@ -160,9 +160,17 @@ const BreedingBirthDialog = ({
       }
     >();
 
-    /** Le nom porté **en jeu** par un côté de couple, « Anonyme » par défaut. */
+    /**
+     * Le nom porté **en jeu** par un côté de couple, « Anonyme » par défaut.
+     *
+     * Sauf quand le plan propose de l'acheter : elle n'est alors dans aucun
+     * coffre, et l'annoncer « Anonyme » envoyait l'éleveur chercher une monture
+     * qu'il n'a pas. Voir `Pairing.bought`.
+     */
     const gameNameOf = (side: Pairing) =>
-      (side.mountId ? byId.get(side.mountId)?.name : null) ?? ANONYMOUS_NAME;
+      side.bought && !side.mountId
+        ? TO_BUY
+        : ((side.mountId ? byId.get(side.mountId)?.name : null) ?? ANONYMOUS_NAME);
 
     couples.forEach((couple, index) => {
       const male = mateOf(couple.male);

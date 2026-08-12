@@ -444,6 +444,16 @@ export type Pairing = {
   colorId: string;
   sex: Sex;
   mountId: string | null;
+  /**
+   * Cette monture-là **n'est pas encore à nous** : le plan propose de l'acheter.
+   *
+   * Sans ce drapeau elle se confond avec une monture de vrac — les deux ont un
+   * `mountId` nul — et les écrans le montraient : la fenêtre d'accouplement
+   * affichait « Anonyme, prends-en une dans le tas » pour une gen 1 qu'il fallait
+   * d'abord aller chercher à l'hôtel de vente. L'éleveur cherchait dans son
+   * coffre une monture qu'il n'avait pas.
+   */
+  bought?: boolean;
 };
 
 export type Couple = {

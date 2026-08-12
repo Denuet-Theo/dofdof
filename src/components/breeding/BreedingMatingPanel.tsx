@@ -4,6 +4,16 @@ import { Egg } from 'lucide-react';
 import CopyableText from '@/components/ui/CopyableText';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+
+/**
+ * Ce qu'on affiche à la place d'un nom quand la monture **reste à acheter**.
+ *
+ * Ce n'est pas un nom : c'est le contraire d'un nom, puisqu'il n'y a rien à
+ * chercher dans le coffre. Voir `Pairing.bought` — la fenêtre annonçait
+ * « Anonyme » pour une gen 1 qu'il fallait d'abord aller acheter, et « prends-en
+ * une dans le tas » pour un tas qui n'existait pas.
+ */
+export const TO_BUY = 'à acheter';
 import type { Mate, MatingOutcome } from '@/lib/dofus/breeding/pairing';
 import type { Sex } from '@/lib/dofus/breeding/stable';
 
@@ -71,7 +81,16 @@ const MountCard = ({ mate, sex, names, nameOf, generationOf, iconOf, codeOf }: C
               monture-là dans la barre de recherche de l'écurie du jeu, et le
               retaper de mémoire est le geste qui rate. */}
           {names.map((name) =>
-            name === ANONYMOUS_NAME ? (
+            name === TO_BUY ? (
+              <span
+                key={name}
+                className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300
+                  border border-amber-500/30"
+                title="Cette monture n'est pas dans ton écurie : le plan propose de l'acheter à l'hôtel de vente."
+              >
+                {name}
+              </span>
+            ) : name === ANONYMOUS_NAME ? (
               <code
                 key={name}
                 className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"

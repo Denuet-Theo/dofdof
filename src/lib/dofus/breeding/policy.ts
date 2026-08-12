@@ -290,6 +290,15 @@ export type PolicyInput = {
   /** Le solde de l'éleveur. `0` vaut « pas de contrainte », comme ailleurs. */
   kamas: number;
   /**
+   * Autoriser la politique à **acheter** des gen 1 pour compléter la fournée.
+   *
+   * Faux par défaut, et c'est l'inverse du modèle : l'écran répond à « que
+   * puis-je faire avec mon stock », pas à « que faudrait-il acheter ». Une
+   * monture achetée arrive fertile, donc elle ne s'accouple pas avant un cycle
+   * d'enclos entier — la proposer en premier geste répond à côté.
+   */
+  purchases?: boolean;
+  /**
    * La graine de la montée de colline.
    *
    * Fixe par défaut : le même écran rouvert deux fois doit proposer la même
@@ -336,6 +345,11 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       iterations: input.iterations ?? TRAINING_ITERATIONS,
       // Voir l'en-tête : le champion du tapis n'a jamais vu l'extraction.
       sacrifices: false,
+      // L'écran commence par ce que l'écurie permet. Une monture achetée arrive
+      // **fertile** : elle doit un enclos, du carburant et des heures avant de
+      // pouvoir s'accoupler, alors que la question posée est « qu'est-ce que je
+      // peux faire maintenant, avec ce que j'ai ». Voir `SearchConfig.purchases`.
+      purchases: input.purchases ?? false,
     }),
     {
       mounts,

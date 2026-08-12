@@ -871,7 +871,17 @@ const Fill = ({
    * l'écurie du jeu, et les noms suivent pour désigner **lesquelles**.
    */
   const loadRows = () => {
-    const rows = new Map<string, { colorId: string; sex: Sex; ids: string[]; buys: number }>();
+    const rows = new Map<
+      string,
+      { colorId: string; sex: Sex; ids: string[]; buys: number; banked: string[] }
+    >();
+    const rowFor = (colorId: string, sex: Sex) => {
+      const key = `${colorId}|${sex}`;
+      const row = rows.get(key) ?? { colorId, sex, ids: [], buys: 0, banked: [] };
+      rows.set(key, row);
+      return row;
+    };
+
     for (const line of fill.couples) {
       for (const [sex, sideOf] of [
         ['M', line.male],
@@ -879,19 +889,52 @@ const Fill = ({
       ] as const) {
         // Le cycle est déjà payé : elle ne passe pas par l'enclos.
         if (sideOf.cycled) continue;
-        const key = `${sideOf.colorId}|${sex}`;
-        const row = rows.get(key) ?? { colorId: sideOf.colorId, sex, ids: [], buys: 0 };
-        if (sideOf.mountIds.length > 0) row.ids.push(...sideOf.mountIds);
-        else row.buys += line.count;
-        rows.set(key, row);
+        const row = rowFor(sideOf.colorId, sex);
+        // Une ligne regroupe les couples de même signature, et une gen 1 achetée
+        // porte la même qu'une gen 1 du coffre — même couleur, pas d'ascendance,
+        // pas de cycle. Elle peut donc en mêler : ce qui n'est pas nommé est à
+        // procurer, et compter `count` entier ferait un total plus grand que les
+        // places engagées.
+        row.ids.push(...sideOf.mountIds);
+        row.buys += Math.max(0, line.count - sideOf.mountIds.length);
       }
     }
+
+    // Les fécondations sans croisement occupent une place chacune et vont dans le
+    // même enclos. Les compter ailleurs faisait dire « 38 montures » sous
+    // « 40/40 places », deux vrais chiffres qui ne parlent pas de la même chose.
+    for (const entry of fill.cycles) {
+      for (const id of entry.mountIds) {
+        const mount = individuals.find((candidate) => candidate.id === id);
+        rowFor(entry.colorId, mount?.sex ?? 'M').banked.push(id);
+      }
+    }
+
     return [...rows.values()].sort(
-      (a, b) =>
-        b.ids.length + b.buys - (a.ids.length + a.buys) ||
-        nameOf(a.colorId).localeCompare(nameOf(b.colorId))
+      (a, b) => sizeOfRow(b) - sizeOfRow(a) || nameOf(a.colorId).localeCompare(nameOf(b.colorId))
     );
   };
+
+  /** Combien de montures une ligne de chargement engage, tous régimes confondus. */
+  const sizeOfRow = (row: { ids: string[]; buys: number; banked: string[] }) =>
+    row.ids.length + row.buys + row.banked.length;
+
+  /**
+   * Le total du chargement, et **d'où** viennent les montures.
+   *
+   * Trois compteurs se contredisaient à l'écran : « 17 montures à mettre en
+   * enclos » comptait ce qui sort du coffre sans les montures à procurer, « 38
+   * montures » comptait les parents de croisement sans les fécondations, et
+   * « 40/40 places » comptait tout. Trois chiffres vrais dont aucun ne disait ce
+   * qu'il comptait — et pour l'éleveur devant son parc, il n'y a qu'une question :
+   * combien de montures entrent dans l'enclos, et où je les trouve.
+   */
+  const loadTotals = (() => {
+    const rows = loadRows();
+    const owned = rows.reduce((total, row) => total + row.ids.length + row.banked.length, 0);
+    const buys = rows.reduce((total, row) => total + row.buys, 0);
+    return { mounts: owned + buys, owned, buys };
+  })();
   const immediate = couplesOf(0).reduce((total, line) => total + line.count, 0);
 
   const nothing =
@@ -971,10 +1014,18 @@ const Fill = ({
           {(step === 'load' || (toRecord.length === 0 && toClone.length === 0)) && (
             <>
               <span className="text-[11px] font-semibold text-dark-200">
-                {toLoad.reduce((total, [, count]) => total + count, 0)} montures à mettre en
-                enclos
+                {loadTotals.mounts} montures à mettre en enclos
               </span>
-              <span className="text-[11px] text-dark-500">par ordre alphabétique</span>
+              {/* Le total ne se lisait que sur les noms, donc il ignorait les
+                  montures à procurer — « 17 » sous une fournée de quarante
+                  places. La liste alphabétique, elle, reste ce qu'elle est : les
+                  noms qu'on cherche **dans le coffre**, et rien d'autre ne s'y
+                  cherche. */}
+              <span className="text-[11px] text-dark-500">
+                {toLoad.reduce((total, [, count]) => total + count, 0)} à chercher dans le coffre,
+                par ordre alphabétique
+                {loadTotals.buys > 0 && ` · ${loadTotals.buys} à procurer`}
+              </span>
               {/* La sortie, qui ferme la boucle : sans elle le chargement ne
                   laissait aucune trace, et l'éleveur recochait quarante cases
                   « Féconde » à la main dans Mes stocks — quand il y pensait. */}
@@ -1136,11 +1187,15 @@ const Fill = ({
                   Puis la fournée à charger
                 </span>
                 <span className="text-[10px] text-dark-500 tabular-nums">
-                  {loadRows().reduce((total, row) => total + row.ids.length + row.buys, 0)} monture
-                  {loadRows().reduce((total, row) => total + row.ids.length + row.buys, 0) > 1
-                    ? 's'
-                    : ''}{' '}
-                  · {fill.places}/{fill.capacity} places d’enclos
+                  {loadTotals.mounts} monture{loadTotals.mounts > 1 ? 's' : ''} ·{' '}
+                  {fill.places}/{fill.capacity} places d’enclos
+                </span>
+                {/* La décomposition, parce que les deux moitiés ne se cherchent
+                    pas au même endroit : l’une est dans le coffre, l’autre à
+                    l’hôtel de vente ou au filet. */}
+                <span className="text-[10px] text-dark-500">
+                  {loadTotals.owned} du coffre
+                  {loadTotals.buys > 0 && ` · ${loadTotals.buys} à procurer`}
                 </span>
                 <span
                   className="text-[10px] text-dark-600"
@@ -1155,7 +1210,7 @@ const Fill = ({
                   className="flex flex-wrap items-center gap-2 text-xs"
                 >
                   <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-                    {row.ids.length + row.buys} ×
+                    {sizeOfRow(row)} ×
                   </span>
                   <span
                     className={row.sex === 'M' ? 'text-info' : 'text-loss-light'}
@@ -1169,7 +1224,15 @@ const Fill = ({
                       dont {row.buys} à procurer — achat ou capture
                     </em>
                   )}
-                  {mountNames(row.ids).map(([name, count]) =>
+                  {row.banked.length > 0 && (
+                    <em
+                      className="not-italic text-dark-400"
+                      title="En enclos sans croiser : elle en sort féconde et reste en écurie."
+                    >
+                      dont {row.banked.length} à féconder sans croiser
+                    </em>
+                  )}
+                  {mountNames([...row.ids, ...row.banked]).map(([name, count]) =>
                     nameChip(name, count, `load-${row.colorId}-${row.sex}-${name}`)
                   )}
                 </div>

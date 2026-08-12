@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Check,
   Dna,
+  LogOut,
   Egg,
   Fuel,
   Heart,
@@ -56,6 +57,7 @@ import CopyableText from '@/components/ui/CopyableText';
 import { chime, unlock } from '@/lib/dofus/breeding/alarm';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
 import BreedingCloneDialog from '@/components/breeding/BreedingCloneDialog';
+import BreedingEnclosExitDialog from '@/components/breeding/BreedingEnclosExitDialog';
 import {
   cloningsToRecord,
   couplesToRecord,
@@ -149,6 +151,13 @@ type Props = {
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
   /** Enregistre les clonages : deux stériles partent, une fertile entre. */
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  /**
+   * Sort les montures de l'enclos : niveaux relevés, lot passé en fécondes.
+   *
+   * Sans lui, le chargement ne laissait aucune trace en base — et rien ne disait
+   * à la politique que le cycle était payé.
+   */
+  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -628,6 +637,7 @@ const Fill = ({
   enclosTracks = [],
   onStartTrack,
   onToggleTrack,
+  onEnclosExit,
 }: {
   fill: StablePlan;
   nameOf: (colorId: string) => string;
@@ -636,6 +646,8 @@ const Fill = ({
   generations?: Map<string, number>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  /** Sortie d'enclos : niveaux relevés, tout le lot passé en fécondes. */
+  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
   /** Les enclos du plan, leur état, et ce qui les bloque. */
   enclosTracks?: {
     id: string;
@@ -656,7 +668,29 @@ const Fill = ({
    * phase se fait dans le jeu, une monture à la fois, en cherchant un nom.
    */
   const [step, setStep] = useState<'mate' | 'clone' | 'load'>('mate');
-  const [open, setOpen] = useState<'mate' | 'clone' | null>(null);
+  const [open, setOpen] = useState<'mate' | 'clone' | 'exit' | null>(null);
+
+  /**
+   * Les montures qui sont en enclos — celles qu'on en sortira.
+   *
+   * Les parents d'un croisement **qui devaient leur cycle**, plus les
+   * fécondations sans croisement. Une monture déjà féconde n'y est jamais entrée
+   * (voir la liste de chargement), donc elle n'en sort pas non plus.
+   */
+  const loaded = useMemo(() => {
+    const ids = new Set<string>();
+    for (const [male, female] of fill.raw.crossings) {
+      for (const index of [male, female]) {
+        const mount = fill.mounts[index];
+        if (mount && !mount.cycled) ids.add(mount.id);
+      }
+    }
+    for (const index of fill.raw.cycles) {
+      const mount = fill.mounts[index];
+      if (mount) ids.add(mount.id);
+    }
+    return individuals.filter((mount) => ids.has(mount.id) && mount.fertile && !mount.cycled);
+  }, [fill, individuals]);
 
   /**
    * Les couleurs déjà sorties du coffre, pointées à la main.
@@ -892,6 +926,15 @@ const Fill = ({
                 enclos
               </span>
               <span className="text-[11px] text-dark-500">par ordre alphabétique</span>
+              {/* La sortie, qui ferme la boucle : sans elle le chargement ne
+                  laissait aucune trace, et l'éleveur recochait quarante cases
+                  « Féconde » à la main dans Mes stocks — quand il y pensait. */}
+              {onEnclosExit && loaded.length > 0 && (
+                <Button size="sm" variant="secondary" onClick={() => setOpen('exit')}>
+                  <LogOut size={13} />
+                  Les sortir de l’enclos
+                </Button>
+              )}
               {/* Un bouton par enclos, et pas un seul pour le parc : on en remplit
                   un, on le lance, on passe au suivant. Le temps de chercher les
                   montures dans le coffre, le premier a une heure d'avance sur le
@@ -975,6 +1018,16 @@ const Fill = ({
             await onRecordBirths(entries);
             setStep('clone');
           }}
+        />
+      )}
+      {colors && onEnclosExit && (
+        <BreedingEnclosExitDialog
+          isOpen={open === 'exit'}
+          onClose={() => setOpen(null)}
+          mounts={loaded}
+          colors={colors}
+          nameOf={nameOf}
+          onConfirm={onEnclosExit}
         />
       )}
       {colors && (
@@ -1328,6 +1381,7 @@ const BreedingTimeline = ({
   generations,
   onRecordBirths,
   onRecordClonings,
+  onEnclosExit,
 }: Props) => {
   const { plan, clock, now, loading, error, load, pause, resume, restart, clear } = timeline;
 
@@ -1571,6 +1625,7 @@ const BreedingTimeline = ({
           generations={generations}
           onRecordBirths={onRecordBirths}
           onRecordClonings={onRecordClonings}
+          onEnclosExit={onEnclosExit}
           enclosTracks={plan.tracks
             .filter((track) => track.id.startsWith('enclos'))
             .map((track) => ({

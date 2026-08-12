@@ -852,6 +852,74 @@ export const useBreeding = (
     [family, nameForBirth]
   );
 
+  /**
+   * Passe en **fécondes** les montures qui sortent de l'enclos.
+   *
+   * C'est la boucle qui manquait à tout le parcours. Le ruban savait dire quoi
+   * charger, quand ce serait fini, et quoi saisir ensuite — mais rien n'écrivait
+   * jamais le résultat du chargement. Une fournée de quarante places laissait
+   * donc quarante cases à recocher une par une dans « Mes stocks », et tant
+   * qu'elles ne l'étaient pas, la politique voyait des fertiles là où l'éleveur
+   * tenait des fécondes : elle leur réservait des places d'enclos déjà payées et
+   * proposait d'acheter à côté.
+   *
+   * Ne touche que les **fertiles** : une stérile qui traînerait dans la liste ne
+   * doit pas ressusciter en féconde, et la base refuse la combinaison de toute
+   * façon (migration 20260809210000).
+   *
+   * ## Le niveau sort d'ici aussi
+   *
+   * Une monture ne ressort pas de l'enclos comme elle y est entrée : elle a
+   * monté. Et le niveau n'est pas décoratif — c'est lui qui décide du taux de
+   * réussite d'un croisement, donc de ce que la politique propose ensuite. Le
+   * relever ailleurs voudrait dire le relever plus tard, c'est-à-dire jamais :
+   * la seule fois où l'éleveur a les quarante fiches sous les yeux, c'est en les
+   * sortant. D'où une saisie par monture plutôt qu'un simple drapeau.
+   *
+   * Les écritures se groupent par niveau : une fournée en porte deux ou trois
+   * valeurs distinctes, pas quarante, et une requête par monture ferait
+   * quarante allers-retours pour la même chose.
+   */
+  const recordEnclosExit = useCallback(
+    async (entries: { id: string; level: number }[]) => {
+      const known = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+      const kept = entries.filter((entry) => {
+        const mount = known.get(entry.id);
+        return mount !== undefined && mount.fertile;
+      });
+      if (kept.length === 0) return 0;
+
+      const levelOf = new Map(kept.map((entry) => [entry.id, Math.max(1, Math.min(200, entry.level))]));
+
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.map((mount) =>
+          levelOf.has(mount.id)
+            ? { ...mount, cycled: true, level: levelOf.get(mount.id)! }
+            : mount
+        ),
+      }));
+
+      const byLevel = new Map<number, string[]>();
+      for (const [id, level] of levelOf) {
+        byLevel.set(level, [...(byLevel.get(level) ?? []), id]);
+      }
+
+      const supabase = createClient();
+      const stamp = new Date().toISOString();
+      for (const [level, ids] of byLevel) {
+        const { error: saveError } = await supabase
+          .from('user_breeding_individuals')
+          .update({ cycled: true, level, updated_at: stamp })
+          .in('id', ids);
+        if (saveError) console.error('[breeding] sortie d’enclos non enregistrée:', saveError);
+      }
+
+      return levelOf.size;
+    },
+    [stable.individuals]
+  );
+
   /** Corrige une monture suivie : niveau, sexe ou fertilité. */
   const updateIndividual = useCallback(
     async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>) => {
@@ -1231,6 +1299,7 @@ export const useBreeding = (
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    recordEnclosExit,
     removeIndividual,
     recordBirths,
     recordClonings,

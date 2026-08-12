@@ -31,6 +31,16 @@ import type { AddResult } from '@/lib/hooks/useBreeding';
  * Un lot est presque toujours homogène : on recharge un parc entier de fécondes,
  * ou une portée qui vient de naître au niveau 1.
  *
+ * Sauf qu'une écurie relue depuis le jeu ne l'est pas : elle mélange les stériles
+ * déjà dépensées, les fécondes prêtes et les nouveau-nés fertiles, et c'est
+ * exactement ce mélange qui décide de ce qu'on peut lancer demain. La surcharge
+ * par ligne n'est donc pas le cas rare, c'est le cas courant — d'où une lecture
+ * qui prend le niveau et l'état **où qu'ils soient** sur la ligne plutôt qu'à la
+ * fin seulement. Un état écrit devant faisait rejeter la ligne entière, et une
+ * ligne rejetée est une monture qui manque à l'écurie sans que rien d'autre ne le
+ * dise. La colonne `GEN. 4` que la liste du jeu affiche est ignorée au passage :
+ * elle est redondante avec le nom, et son chiffre passait pour un niveau.
+ *
  * ## Pourquoi une prévisualisation, et pas un simple bouton
  *
  * Une ligne mal recopiée ne doit pas passer en silence. Chacune est donc relue
@@ -73,11 +83,90 @@ type Row =
     }
   | { ok: false; line: number; raw: string; problem: string };
 
-const STATUS_WORDS: { words: string[]; status: MountStatus }[] = [
-  { words: ['fertile'], status: 'fertile' },
-  { words: ['feconde', 'féconde'], status: 'feconde' },
-  { words: ['sterile', 'stérile'], status: 'sterile' },
-];
+/**
+ * Les mots qui disent un état, une fois ramenés à leurs lettres nues.
+ *
+ * `plainWord` ôte accents et ponctuation avant de chercher ici, si bien qu'un
+ * seul mot par état suffit : « STÉRILE » recopié de la liste du jeu, « sterile »
+ * tapé sans accent et « Stérile, » collé depuis un tableur tombent tous sur
+ * `sterile`. `fecond` est là parce que le jeu écrit l'adjectif au masculin sur
+ * les mâles, et qu'une monture non reconnue vaut une ligne rejetée.
+ */
+const STATUS_BY_WORD = new Map<string, MountStatus>([
+  ['fertile', 'fertile'],
+  ['feconde', 'feconde'],
+  ['fecond', 'feconde'],
+  ['sterile', 'sterile'],
+]);
+
+/** Un mot réduit à ses lettres latines minuscules — voir `plain` dans `naming`. */
+const plainWord = (token: string): string =>
+  token.normalize('NFD').replace(/[^A-Za-z]/g, '').toLowerCase();
+
+/** Ce qu'une ligne porte en plus du nom, et ce qui cloche s'il y a lieu. */
+type LineExtras = {
+  /** La ligne débarrassée du niveau, de l'état et du bruit de la liste du jeu. */
+  name: string;
+  /** `null` quand la ligne s'en remet au réglage du lot. */
+  level: number | null;
+  status: MountStatus | null;
+  problem: string | null;
+};
+
+/**
+ * Sépare le nom du reste de la ligne, sans exiger d'ordre.
+ *
+ * On lit **mot à mot** plutôt qu'à coups d'expressions ancrées en fin de ligne :
+ * le niveau et l'état sont deux annotations libres, et personne ne se souvient
+ * dans quel ordre les écrire. Ce qui n'est ni un état, ni un niveau, ni la
+ * colonne `GEN. n` du jeu est rendu au nom — donc une ligne mal recopiée échoue
+ * à sa relecture par `parseMountName`, à sa ligne, au lieu de passer avec une
+ * annotation avalée en silence.
+ *
+ * Deux états ou deux niveaux sur la même ligne sont **signalés** plutôt
+ * qu'arbitrés : « 48 61 » est une ligne recopiée de travers, et l'importer choisi
+ * pour elle écrirait une monture que l'éleveur ne retrouvera pas.
+ */
+const readExtras = (raw: string): LineExtras => {
+  const kept: string[] = [];
+  let level: number | null = null;
+  let status: MountStatus | null = null;
+  let problem: string | null = null;
+
+  const tokens = raw.trim().split(/\s+/);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const word = plainWord(token);
+
+    // « GEN. 4 » : la colonne de génération de la liste du jeu. Elle se déduit
+    // déjà du nom, et son chiffre se serait fait prendre pour un niveau.
+    if (word === 'gen') {
+      if (/^\d{1,2}$/.test(tokens[index + 1] ?? '')) index += 1;
+      continue;
+    }
+
+    const known = STATUS_BY_WORD.get(word);
+    if (known) {
+      if (status !== null && status !== known) problem = 'Deux états sur la même ligne.';
+      status = known;
+      continue;
+    }
+
+    if (/^\d{1,3}$/.test(token)) {
+      const value = Number(token);
+      if (value >= 1 && value <= 200) {
+        if (level !== null && level !== value) problem = 'Deux niveaux sur la même ligne.';
+        level = value;
+        continue;
+      }
+    }
+
+    kept.push(token);
+  }
+
+  return { name: kept.join(' '), level, status, problem };
+};
 
 const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const [text, setText] = useState('');
@@ -122,32 +211,15 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
       .map((raw, index) => ({ raw: raw.trim(), line: index + 1 }))
       .filter(({ raw }) => raw.length > 0)
       .map(({ raw, line }): Row => {
-        // Le niveau et l'état peuvent suivre le nom, dans n'importe quel ordre :
-        // on les retire avant de relire ce qui reste comme un nom.
-        let rest = raw;
-        let lineLevel = level;
-        let lineStatus = status;
+        // Le niveau et l'état sont deux annotations libres : on les retire d'où
+        // qu'elles soient avant de relire ce qui reste comme un nom.
+        const extras = readExtras(raw);
+        if (extras.problem) return { ok: false, line, raw, problem: extras.problem };
 
-        for (const { words, status: value } of STATUS_WORDS) {
-          for (const word of words) {
-            const found = new RegExp(`\\s${word}\\b`, 'i');
-            if (found.test(rest)) {
-              lineStatus = value;
-              rest = rest.replace(found, '');
-            }
-          }
-        }
+        const lineLevel = extras.level ?? level;
+        const lineStatus = extras.status ?? status;
 
-        const levelMatch = rest.match(/\s(\d{1,3})\s*$/);
-        if (levelMatch) {
-          const value = Number(levelMatch[1]);
-          if (value >= 1 && value <= 200) {
-            lineLevel = value;
-            rest = rest.slice(0, levelMatch.index);
-          }
-        }
-
-        const parsed = parseMountName(rest);
+        const parsed = parseMountName(extras.name);
         if (!parsed) {
           return {
             ok: false,
@@ -197,6 +269,28 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const valid = rows.filter((row): row is Extract<Row, { ok: true }> => row.ok);
   const broken = rows.filter((row): row is Extract<Row, { ok: false }> => !row.ok);
 
+  /**
+   * Le décompte de ce qui va s'écrire, par sexe et par état.
+   *
+   * C'est le seul contrôle qui se fasse **sans relire ligne à ligne** : le jeu
+   * affiche les mêmes totaux au-dessus de sa propre liste, donc deux chiffres qui
+   * ne tombent pas juste disent qu'une ligne manque ou qu'un état a été recopié
+   * de travers — avant l'écriture, pas après.
+   */
+  const tally = useMemo(() => {
+    const counts = {
+      males: 0,
+      females: 0,
+      status: { fertile: 0, feconde: 0, sterile: 0 } as Record<MountStatus, number>,
+    };
+    for (const row of valid) {
+      if (row.sex === 'M') counts.males += 1;
+      else counts.females += 1;
+      counts.status[row.status] += 1;
+    }
+    return counts;
+  }, [valid]);
+
   const run = async () => {
     setRunning(true);
     setDone(null);
@@ -234,7 +328,9 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
           du jeu et colle-la ici. Le niveau et l&apos;état ne sont pas dans le nom : ils se règlent
           une fois pour tout le lot, et se surchargent ligne par ligne
           {' — '}
-          <code className="text-dark-400">G3 AM M DO-DO 120 féconde</code>.
+          <code className="text-dark-400">G3 AM M DO-DO 120 féconde</code>. Leur place sur la
+          ligne est libre, accents et majuscules indifférents, et la colonne{' '}
+          <code className="text-dark-400">GEN. 4</code> de la liste du jeu est ignorée.
         </p>
 
         <div className="flex flex-wrap items-end gap-4">
@@ -284,6 +380,20 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
             text-dark-100 text-xs font-mono placeholder:text-dark-600 transition-all
             hover:border-dark-500 focus:border-kamas/50"
         />
+
+        {valid.length > 0 && (
+          <p className="text-[11px] text-dark-400">
+            À écrire : <span className="text-info">{tally.males} ♂</span>
+            {' · '}
+            <span className="text-loss-light">{tally.females} ♀</span>
+            {' — '}
+            {(['feconde', 'fertile', 'sterile'] as const)
+              .filter((value) => tally.status[value] > 0)
+              .map((value) => `${tally.status[value]} ${MOUNT_STATUS_LABEL[value].toLowerCase()}s`)
+              .join(', ')}
+            . Ces totaux se comparent à ceux du jeu avant d&apos;écrire quoi que ce soit.
+          </p>
+        )}
 
         {rows.length > 0 && (
           <div className="space-y-1 max-h-72 overflow-y-auto pr-1 custom-scrollbar">

@@ -89,14 +89,27 @@
 //!
 //! | politique | sans cible | gen 10 | pool hérité | départ de zéro |
 //! | --- | --- | --- | --- | --- |
-//! | glouton | 1,9 % | 68,3 | 64,89 M | 11,80 M |
-//! | recherche / myope | 50,5 % | 9,8 | 37,12 M | 10,77 M |
-//! | échelle | **0 %** | 38,0 | 64,57 M | 11,73 M |
-//! | échelle + niveau réglé | **0 %** | 41,7 | **70,80 M** | **14,75 M** |
+//! | glouton | 1,9 % | 68,3 | 62,46 M | 11,80 M |
+//! | recherche / myope | 50,3 % | 9,9 | 36,65 M | 10,77 M |
+//! | échelle | **0 %** | 38,0 | 59,92 M | 11,89 M |
+//! | échelle + niveau réglé | **0 %** | 42,3 | **64,70 M** | **14,77 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
 //! propose **aucun**, et c'est verrouillé par un test.
+//!
+//! ## Un avertissement sur les tables de ce fichier
+//!
+//! Les prix de gen 10 se tirent désormais **en cloche** autour de 600 000 et non
+//! uniformément sur `[300 000, 1 000 000]` — voir `Economy::bell_price`. La
+//! correction coûte 6 M à l'échelle réglée, et pas seulement parce que la moyenne
+//! baisse : `crown` prend le **max de vingt tirages**, et un uniforme le lui
+//! offrait bien plus haut qu'un marché réel. Tout ce qui vit des queues de
+//! distribution était gonflé, l'échelle au premier rang.
+//!
+//! Les tables de `Ordering`, `Gating` et `RUNG_THRESHOLD` datent du modèle
+//! uniforme : leurs **écarts** restent instructifs, leurs **niveaux** ne sont plus
+//! comparables aux chiffres publiés ici.
 //!
 //! Ces chiffres sont ceux de l'échelle **sans son seuil**. Elle en portait un —
 //! dix couples formables avant de lancer un étage impair — et il lui coûtait
@@ -107,9 +120,9 @@
 //! ## Ce qu'il fait encore mal
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
-//! de la gen 2 à la gen 9 ; l'échelle en sort 41,7 gen 10 quand le glouton en
+//! de la gen 2 à la gen 9 ; l'échelle en sort 42,3 gen 10 quand le glouton en
 //! sort 68,3, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
-//! La moisson rattrape une part de l'écart (+18,5 M mesurés) mais ne le comble
+//! La moisson rattrape une part de l'écart (+16,0 M mesurés) mais ne le comble
 //! pas : elle monnaie les hors-plan, elle ne les fait pas monter.
 //!
 //! Il **ne se réoriente pas** non plus. Le plan est arrêté à la première fournée
@@ -807,8 +820,8 @@ pub struct LadderPolicy {
     pub gating: Gating,
     /// Apparier les stériles sans regarder leur sexe.
     ///
-    /// **Mesuré indifférent** : `+0,29 M ± 0,56` sur 200 graines appariées,
-    /// t = 0,51, 105 parties gagnées sur 200. Les deux effets s'annulent — à
+    /// **Mesuré indifférent** : `−0,32 M ± 0,50` sur 200 graines appariées,
+    /// t = −0,64, 91 parties gagnées sur 200. Les deux effets s'annulent — à
     /// sexe égal le clone est certain, mais trier laisse des montures de même
     /// lignée dépareillées, et en espérance `M` mâles et `F` femelles rendent
     /// `M/2` et `F/2` clones dans les deux appariements.
@@ -834,8 +847,8 @@ pub struct LadderPolicy {
     ///
     /// | | avec moisson | sans moisson |
     /// | --- | --- | --- |
-    /// | pool hérité | **+13,59 M** (t = 22,4) | +5,10 M (t = 10,4) |
-    /// | départ de zéro | **−1,47 M** (t = −18,8) | −1,49 M (t = −19,4) |
+    /// | pool hérité | **+11,67 M** (t = 21,5) | +4,72 M (t = 10,1) |
+    /// | départ de zéro | **−1,46 M** (t = −18,8) | −1,47 M (t = −18,6) |
     ///
     /// Avec un parc hérité, la fécondité alimente la production de gen 10 à
     /// 500 000 pièce et vaut bien plus que la liquidation sacrifiée. En partant
@@ -947,8 +960,8 @@ impl LadderPolicy {
     ///
     /// | | écart | t | gagne |
     /// | --- | --- | --- | --- |
-    /// | pool hérité | **+5,84 M ± 0,58** | 9,99 | 160/200 |
-    /// | départ de zéro | **+2,71 M ± 0,12** | 23,65 | 193/200 |
+    /// | pool hérité | **+5,81 M ± 0,54** | 10,71 | 159/200 |
+    /// | départ de zéro | **+2,66 M ± 0,11** | 24,83 | 197/200 |
     ///
     /// Rejoué depuis `Gating::Off` — voir `reglage::ce_que_le_reglage_rapporte`.
     /// Le gain rétrécit d'un point et demi sur le pool hérité : les deux leviers

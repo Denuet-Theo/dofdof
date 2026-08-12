@@ -808,7 +808,7 @@ const Fill = ({
 
   const side = (label: string, colorId: string, ids: string[], key: string) => (
     <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
-      {label} {ids.length === 0 ? <em className="not-italic text-dark-400">à acheter</em> : null}
+      {label} {ids.length === 0 ? <em className="not-italic text-dark-400">à procurer</em> : null}
       {nameOf(colorId)}
       {mountNames(ids).map(([name, count]) => nameChip(name, count, `${key}-${name}`))}
     </span>
@@ -1166,7 +1166,7 @@ const Fill = ({
                   <span className="text-dark-200">{nameOf(row.colorId)}</span>
                   {row.buys > 0 && (
                     <em className="not-italic text-dark-400">
-                      dont {row.buys} à acheter
+                      dont {row.buys} à procurer — achat ou capture
                     </em>
                   )}
                   {mountNames(row.ids).map(([name, count]) =>

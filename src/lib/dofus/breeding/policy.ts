@@ -290,12 +290,24 @@ export type PolicyInput = {
   /** Le solde de l'éleveur. `0` vaut « pas de contrainte », comme ailleurs. */
   kamas: number;
   /**
-   * Autoriser la politique à **acheter** des gen 1 pour compléter la fournée.
+   * Autoriser la politique à se **procurer** des gen 1 — achat à l'hôtel de
+   * vente ou capture au filet — pour compléter la fournée.
    *
-   * Faux par défaut, et c'est l'inverse du modèle : l'écran répond à « que
-   * puis-je faire avec mon stock », pas à « que faudrait-il acheter ». Une
-   * monture achetée arrive fertile, donc elle ne s'accouple pas avant un cycle
-   * d'enclos entier — la proposer en premier geste répond à côté.
+   * Vrai par défaut, et c'est ce que la mesure impose : fermé, une écurie
+   * réelle ne remplissait que **7 places sur 40**. Une gen 1 coûte mille kamas
+   * là où une fournée en coûte cent cinquante mille ; laisser trente-trois
+   * places vides pour ne pas en dépenser trois mille est le mauvais côté de
+   * l'arbitrage.
+   *
+   * Ce que « commencer par mon stock » veut dire est un **ordre**, pas une
+   * interdiction, et c'est le parcours qui le porte : « D'abord, sans enclos »
+   * liste ce que le stock permet tout de suite, la fournée à charger vient
+   * après.
+   *
+   * Le levier reste là pour composer sans rien acquérir — et c'est aussi le
+   * seul régime que le champion n'a **jamais** vu à l'entraînement, ce qui vaut
+   * d'être su avant de s'en servir : sa fonction de valeur a été notée avec
+   * l'achat disponible.
    */
   purchases?: boolean;
   /**
@@ -345,11 +357,18 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       iterations: input.iterations ?? TRAINING_ITERATIONS,
       // Voir l'en-tête : le champion du tapis n'a jamais vu l'extraction.
       sacrifices: false,
-      // L'écran commence par ce que l'écurie permet. Une monture achetée arrive
-      // **fertile** : elle doit un enclos, du carburant et des heures avant de
-      // pouvoir s'accoupler, alors que la question posée est « qu'est-ce que je
-      // peux faire maintenant, avec ce que j'ai ». Voir `SearchConfig.purchases`.
-      purchases: input.purchases ?? false,
+      // Rouvert, et c'est la fournée qui l'a tranché : sans procurement, le parc
+      // tombait à **7 places sur 40**. Une gen 1 à mille kamas est le moyen le
+      // moins cher de ne pas laisser une place vide, et trente-trois places
+      // vides coûtent une fournée entière.
+      //
+      // « Commencer par ce que j'ai » ne veut pas dire « ne jamais se
+      // procurer » : c'est un **ordre**, et c'est le parcours qui le porte —
+      // « D'abord, sans enclos » liste les accouplements que le stock permet
+      // tout de suite, puis vient la fournée à charger, où les gen 1 procurées
+      // occupent les places qui restaient. Voir `SearchConfig.purchases`, qui
+      // garde le levier pour qui veut composer sans rien acquérir.
+      purchases: input.purchases ?? true,
     }),
     {
       mounts,

@@ -13,7 +13,7 @@ import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
  * « Anonyme » pour une gen 1 qu'il fallait d'abord aller acheter, et « prends-en
  * une dans le tas » pour un tas qui n'existait pas.
  */
-export const TO_BUY = 'à acheter';
+export const TO_BUY = 'achat/capture';
 import type { Mate, MatingOutcome } from '@/lib/dofus/breeding/pairing';
 import type { Sex } from '@/lib/dofus/breeding/stable';
 
@@ -86,7 +86,7 @@ const MountCard = ({ mate, sex, names, nameOf, generationOf, iconOf, codeOf }: C
                 key={name}
                 className="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300
                   border border-amber-500/30"
-                title="Cette monture n'est pas dans ton écurie : le plan propose de l'acheter à l'hôtel de vente."
+                title="Cette monture n'est pas dans ton écurie : le plan propose de se la procurer, à l'hôtel de vente ou au filet. Elle arrivera fertile, donc elle passera par l'enclos avant de s'accoupler."
               >
                 {name}
               </span>

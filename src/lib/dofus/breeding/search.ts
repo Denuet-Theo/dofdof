@@ -210,6 +210,19 @@ export type SearchConfig = {
    * n'existe pas.
    */
   purchases?: boolean;
+  /**
+   * Ce qu'un croisement doit satisfaire pour être **proposable**.
+   *
+   * Absent, tout passe — c'est le modèle, et la parité avec le Rust en dépend.
+   *
+   * L'écran, lui, y branche la règle de l'échelle. Et il faut que ce soit ici,
+   * pas après coup : filtrer le plan rendu laissait la recherche dépenser ses
+   * quarante places en croisements qu'on jetait ensuite, si bien qu'une fournée
+   * de 26 propositions en perdait 22 et retombait à 10 places sur 40. La
+   * recherche doit composer **dans** l'espace admissible pour que les places
+   * libérées servent à autre chose.
+   */
+  admissible?: (male: Mate, female: Mate) => boolean;
 };
 
 export const DEFAULT_SEARCH: SearchConfig = {
@@ -518,7 +531,9 @@ const candidatesOf = (
   }
 
   const out: Candidate[] = [];
+  const admissible = searcher.config.admissible;
   for (const [male, female, maleMate, femaleMate] of pairs) {
+    if (admissible && !admissible(maleMate, femaleMate)) continue;
     const delta = deltaOf(searcher, view, maleMate, femaleMate);
     if (delta) out.push({ male, female, delta });
   }

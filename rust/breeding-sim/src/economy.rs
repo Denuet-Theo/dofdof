@@ -222,7 +222,7 @@ impl Default for Economy {
             batch_cost: 150_000,
             starter_price: 1_000,
             amber_per_generation: 20_000,
-            top_value: 500_000,
+            top_value: 600_000,
             mount_level: 67,
             slots_per_enclos: 10,
             sync_enclos: 5,
@@ -237,7 +237,7 @@ impl Default for Economy {
             geneton_value: 0.0,
             amber_range: (20_000, 20_000),
             geneton_range: (0.0, 0.0),
-            top_value_range: (500_000, 500_000),
+            top_value_range: (600_000, 600_000),
             top_values: [0; MAX_COLORS],
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
@@ -294,12 +294,17 @@ impl Economy {
 
         // Un prix par couleur de gen 10, tiré indépendamment : c'est ce qui rend
         // le **choix de la couleur** stratégique et pas seulement celui du rang.
+        //
+        // En **cloche** et non uniformément — relevé de l'éleveur, août 2026. Voir
+        // `bell_price` : un uniforme rendait une couleur à 320 000 aussi probable
+        // qu'une à 600 000, ce qui n'est pas le marché et gonflait tout ce qui vit
+        // des tirages extrêmes.
+        let center = self.top_value;
         for color in 0..catalog.len().min(MAX_COLORS) {
             economy.top_values[color] = if catalog.generation(color as ColorId)
                 >= catalog.top_generation()
             {
-                let draw = draws.at(POOL_COORD, color as u32, purpose::PRICE_COLOR);
-                (low as f64 + draw * (high - low) as f64).round() as i64
+                bell_price(draws, color as u32, center, low, high)
             } else {
                 0
             };
@@ -470,10 +475,67 @@ mod purpose {
     pub const PRICE_GENETON: u32 = 8;
     pub const PRICE_TOP: u32 = 9;
     pub const PRICE_COLOR: u32 = 10;
+    // Deux tirages de plus par couleur : trois uniformes additionnés font une
+    // cloche, et c'est tout ce qu'il faut. Voir `bell_price`.
+    pub const PRICE_COLOR_2: u32 = 11;
+    pub const PRICE_COLOR_3: u32 = 12;
 }
 
 /// La coordonnée réservée à l'amorçage, hors des chargements.
 const POOL_COORD: u32 = u32::MAX;
+
+/// Le prix d'une couleur de gen 10 : une **cloche** centrée sur la norme.
+///
+/// ## Pourquoi pas un uniforme
+///
+/// C'était un uniforme sur `[gen10_min, gen10_max]`, soit `[300 000, 1 000 000]`.
+/// Deux défauts, et le second est celui qui fausse les mesures.
+///
+/// Sa moyenne valait 650 000 quand `economy.toml` annonce 600 000 comme prix
+/// habituel : le simulateur jouait un marché plus généreux que sa propre norme, et
+/// les trois clés se contredisaient.
+///
+/// Surtout, un uniforme rend une couleur à 320 000 **aussi probable** qu'une à
+/// 600 000. Relevé auprès de l'éleveur : les prix se groupent autour de 600 000, et
+/// les bornes sont des excursions rares — une pointe à 2 M se saisit à 1,3 M, un
+/// creux à 200 000 se saisit à 300 000, parce que ce qu'on note est l'espérance de
+/// vente et non le cours du jour. Tout ce qui vit des tirages extrêmes s'en
+/// trouvait gonflé, au premier rang le choix de la couronne : un oracle qui prend
+/// le meilleur de vingt couleurs profitait d'une queue que le marché n'a pas.
+///
+/// ## La forme retenue
+///
+/// Trois uniformes additionnés — Irwin–Hall — donnent une cloche sans dépendance,
+/// sans fonction spéciale, et déterministe par graine comme le reste.
+///
+/// Le recentrage est **asymétrique à dessein** : la norme, 600 000, n'est pas au
+/// milieu de `[300 000, 1 000 000]`. Chaque moitié de la cloche est donc étirée
+/// vers sa propre borne, ce qui fait tomber la **médiane exactement sur la norme**
+/// et le support exactement sur les bornes, sans écrasement de masse aux
+/// extrémités — ce qu'un simple écrêtage aurait produit.
+///
+/// La moyenne, elle, reste un peu au-dessus de la médiane, la moitié haute étant
+/// plus large. C'est le comportement voulu : un marché où les bonnes surprises
+/// portent plus loin que les mauvaises.
+fn bell_price(draws: &Draws, color: u32, center: i64, low: i64, high: i64) -> i64 {
+    if high <= low {
+        return low;
+    }
+    let center = center.clamp(low, high) as f64;
+    let (low, high) = (low as f64, high as f64);
+
+    let bell = (draws.at(POOL_COORD, color, purpose::PRICE_COLOR)
+        + draws.at(POOL_COORD, color, purpose::PRICE_COLOR_2)
+        + draws.at(POOL_COORD, color, purpose::PRICE_COLOR_3))
+        / 3.0;
+
+    let price = if bell < 0.5 {
+        center - (0.5 - bell) * 2.0 * (center - low)
+    } else {
+        center + (bell - 0.5) * 2.0 * (high - center)
+    };
+    price.round() as i64
+}
 
 #[inline]
 fn splitmix64(z: u64) -> u64 {
@@ -1467,6 +1529,68 @@ mod tests {
         }
     }
 
+    /// Les prix de gen 10 forment une **cloche** centrée sur la norme.
+    ///
+    /// Verrouillé parce que rien d'autre ne l'empêche : revenir à un uniforme ne
+    /// casserait aucun test, ne changerait aucune signature, et ne se verrait
+    /// qu'en constatant des mois plus tard que les mesures qui vivent des queues
+    /// de distribution ont dérivé.
+    ///
+    /// Trois propriétés, et la troisième est celle qui distingue vraiment une
+    /// cloche d'un uniforme : la moitié centrale doit contenir bien **plus** que
+    /// la moitié du tirage. Un uniforme en mettrait exactement 50 %.
+    #[test]
+    fn les_prix_de_gen_10_font_une_cloche_autour_de_la_norme() {
+        let catalog = muldo();
+        let base = crate::config::Prices::load_default().expect("economy.toml").economy;
+        let (low, high) = base.top_value_range;
+        let center = base.top_value;
+
+        let tops: Vec<ColorId> = catalog.ids_at_generation(catalog.top_generation()).collect();
+        assert!(tops.len() >= 10, "il faut des couleurs pour parler de forme");
+
+        let mut prices: Vec<i64> = Vec::new();
+        for seed in 0..400u32 {
+            let drawn = base.for_run(&catalog, &Draws::new(seed));
+            for &color in &tops {
+                prices.push(drawn.value_of(&catalog, color));
+            }
+        }
+
+        // 1. Le support tient dans les bornes annoncées.
+        assert!(
+            prices.iter().all(|&p| p >= low && p <= high),
+            "un prix est sorti de [{low}, {high}]"
+        );
+
+        // 2. La médiane tombe sur la norme, à 2 % près. C'est ce que le
+        //    recentrage asymétrique de `bell_price` garantit — et ce qu'un
+        //    uniforme sur ces bornes manquerait de 50 000.
+        prices.sort_unstable();
+        let median = prices[prices.len() / 2];
+        let drift = (median - center).abs() as f64 / center as f64;
+        assert!(
+            drift < 0.02,
+            "médiane {median} loin de la norme {center} ({:.1} %)",
+            drift * 100.0
+        );
+
+        // 3. La forme. Sur la moitié centrale du support, un uniforme mettrait
+        //    50 % de sa masse ; une cloche nettement plus.
+        let quarter = low + (high - low) / 4;
+        let three_quarters = low + 3 * (high - low) / 4;
+        let middle = prices
+            .iter()
+            .filter(|&&p| p >= quarter && p <= three_quarters)
+            .count() as f64
+            / prices.len() as f64;
+        assert!(
+            middle > 0.62,
+            "seulement {:.0} % de la masse au centre : c'est un uniforme, pas une cloche",
+            middle * 100.0
+        );
+    }
+
     #[test]
     fn la_valeur_suit_le_rang_et_la_gen_10_est_a_part() {
         let catalog = muldo();
@@ -1475,7 +1599,7 @@ mod tests {
         assert_eq!(value("dore"), 0, "gen 1 : ne s'extrait pas");
         assert_eq!(value("dore_amande"), 80_000, "gen 4 → 4 × 20 000");
         assert_eq!(value("ambre"), 180_000, "gen 9 → 9 × 20 000");
-        assert_eq!(value("ambre_dore"), 500_000, "gen 10, prix fixe");
+        assert_eq!(value("ambre_dore"), 600_000, "gen 10, prix fixe");
     }
 
     /// L'unité libre coûte le cinquième du bloc à réglages égaux, et dure autant.

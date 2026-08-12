@@ -167,10 +167,21 @@ ambre_max = 30_000
 # La gen 10 se vend au lieu de s'extraire. N'importe laquelle des 50 couleurs,
 # au niveau 0 — c'est ainsi qu'elle naît et qu'on la revend.
 #
-# Elle oscille entre 300 000 et 1 000 000, soit un facteur 3,3 : c'est la plus
-# volatile des trois. Le rapport entre ce prix et celui de l'ambre décide s'il
-# faut monter jusqu'au bout ou encaisser en génération 9.
-gen10 = 500_000
+# `gen10` est la **norme**, et les deux bornes sont des excursions rares : le
+# tirage est une **cloche** centrée sur la norme, pas un uniforme entre les bornes
+# (voir `bell_price`). C'est un relevé de l'éleveur — ce qu'on saisit est
+# l'espérance de vente et non le cours du jour, donc une pointe à 2 M se note
+# 1,3 M et un creux à 200 000 se note 300 000.
+#
+# Le uniforme qui précédait avait deux défauts : sa moyenne valait 650 000 quand
+# cette section annonce 600 000, et il rendait une couleur à 320 000 aussi
+# probable qu'une à 600 000. Tout ce qui vit des queues de distribution s'en
+# trouvait gonflé — au premier rang la couronne de l'échelle, qui prend le max de
+# vingt couleurs.
+#
+# Le rapport entre ce prix et celui de l'ambre décide s'il faut monter jusqu'au
+# bout ou encaisser en génération 9.
+gen10 = 600_000
 gen10_min = 300_000
 gen10_max = 1_000_000
 

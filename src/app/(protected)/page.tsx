@@ -4,7 +4,13 @@ import { useEffect, useState, useCallback, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
-import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
+import {
+  computeCraftCost,
+  computeMargin,
+  recipeHasAllPrices,
+  type UnitCost,
+} from '@/lib/utils/recipes';
+import { fetchCraftIndex } from '@/lib/dofus/craft-index';
 import { fetchRecipesForItems } from '@/lib/dofus/fetch-recipes';
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import KpiCard from '@/components/dashboard/KpiCard';
@@ -74,11 +80,17 @@ const DashboardPage = () => {
         // qui ne se voyait qu'une fois le filtre métier posé.
         const recipesList = await fetchRecipesForItems(itemIds, { jobId });
 
+        // Les recettes des ingrédients : un composant crafté moins cher qu'à
+        // l'achat doit compter à son coût de craft (#123), sinon ce Top 10
+        // classerait sur d'autres chiffres que la page /recipes.
+        const craftIndex = await fetchCraftIndex(recipesList);
+        const costs = new Map<number, UnitCost>();
+
         const computed: TopRecipe[] = recipesList
-          .filter((recipe) => recipeHasAllPrices(recipe, prices))
+          .filter((recipe) => recipeHasAllPrices(recipe, prices, craftIndex, costs))
           .map((recipe) => {
             const resultPrice = prices.get(recipe.resultId)?.price || 0;
-            const craftCost = computeCraftCost(recipe, prices);
+            const craftCost = computeCraftCost(recipe, prices, craftIndex, costs);
             const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
 
             return {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useTransition } from 'react';
+import { useState, useCallback, useEffect, useMemo, useTransition } from 'react';
 import { DofusDBItem, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import GaugeItemCard from '@/components/gauges/GaugeItemCard';
@@ -10,7 +10,8 @@ import EmptyState from '@/components/ui/EmptyState';
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import { Gauge as GaugeIcon, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
 import { parseGaugeInfo, computeValuePerKama, GaugeInfo } from '@/lib/utils/gauges';
-import { computeCraftCost } from '@/lib/utils/recipes';
+import { computeCraftCost, unitCostOf, type UnitCost } from '@/lib/utils/recipes';
+import { useCraftIndex } from '@/lib/hooks/useCraftIndex';
 
 // The 6 gauges fed by "Carburant d'enclos" items in the élevage profession
 const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abreuvoir', 'Mangeoire'];
@@ -45,6 +46,10 @@ const GaugesPage = () => {
   // whichever is cheaper between buying at the sell price and crafting from ingredients.
   const [includeCraft, setIncludeCraft] = useState(false);
   const [recipesByResultId, setRecipesByResultId] = useState<Map<number, DofusDBRecipe>>(new Map());
+  // Les recettes des ingrédients, pour que « craft moins cher » compte le craft
+  // des composants eux-mêmes (#123).
+  const shownRecipes = useMemo(() => Array.from(recipesByResultId.values()), [recipesByResultId]);
+  const { index: craftIndex } = useCraftIndex(shownRecipes);
 
   // Whether the user has asked for anything at all. Derived rather than stored, so the
   // "no query" case needs no state reset — which is what kept it out of the effect body.
@@ -135,14 +140,26 @@ const GaugesPage = () => {
 
   // Sell rentability and craft rentability are always both computed (when known) so the card
   // can show both; `includeCraft` only decides which one feeds the page's sort/best-value pick.
+  //
+  // Un cache par rendu, partagé par toutes les cartes : le même minerai revient
+  // dans beaucoup de recettes et son sous-arbre est le même partout.
+  const costs = new Map<number, UnitCost>();
+
   const computePricing = (item: DofusDBItem, gaugeInfo: GaugeInfo) => {
     const sellPrice = prices.get(item.id)?.price || 0;
     const sellRatio = computeValuePerKama(gaugeInfo.rechargeAmount, sellPrice);
 
     const recipe = recipesByResultId.get(item.id);
+    // Un ingrédient sans prix HDV mais craftable est désormais chiffrable (#123) :
+    // exiger un prix d'achat sur chacun écarterait des recettes que la page
+    // /recipes, elle, sait calculer.
     const allIngredientsPriced =
-      !!recipe && recipe.ingredientIds.every((id) => (prices.get(id)?.price || 0) > 0);
-    const craftCost = recipe && allIngredientsPriced ? computeCraftCost(recipe, prices) : 0;
+      !!recipe &&
+      recipe.ingredientIds.every(
+        (id) => unitCostOf(id, prices, craftIndex, costs).source !== 'none'
+      );
+    const craftCost =
+      recipe && allIngredientsPriced ? computeCraftCost(recipe, prices, craftIndex, costs) : 0;
     const craftRatio = craftCost > 0 ? computeValuePerKama(gaugeInfo.rechargeAmount, craftCost) : 0;
 
     const usedCraft = includeCraft && craftCost > 0 && (sellPrice <= 0 || craftCost < sellPrice);

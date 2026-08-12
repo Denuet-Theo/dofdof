@@ -11,7 +11,13 @@ import RecipeModal from '@/components/recipes/RecipeModal';
 import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import { ChevronDown, ChevronUp, Edit2, Eye } from 'lucide-react';
 import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
-import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
+import {
+  computeCraftCost,
+  computeMargin,
+  recipeHasAllPrices,
+  type RecipeIndex,
+  type UnitCost,
+} from '@/lib/utils/recipes';
 
 interface RecipeCardProps {
   recipe: DofusDBRecipe;
@@ -21,6 +27,9 @@ interface RecipeCardProps {
   onIngredientClick?: (item: PriceTarget) => void;
   expanded?: boolean;
   onToggle?: () => void;
+  /** Les recettes des ingrédients — voir `useCraftIndex`. Absente : achat seul. */
+  index?: RecipeIndex;
+  onOpenSubRecipe?: (item: PriceTarget) => void;
 }
 
 const RecipeCard = ({
@@ -31,16 +40,21 @@ const RecipeCard = ({
   onIngredientClick,
   expanded = false,
   onToggle,
+  index,
+  onOpenSubRecipe,
 }: RecipeCardProps) => {
   // The ingredient grid needs the full width of the row; under `lg` there is none left
   // once the figures are in, so the recipe moves to the popin the other surfaces use.
   const fitsInline = useMediaQuery('(min-width: 1024px)');
   const [showPopin, setShowPopin] = useState(false);
 
-  const craftCost = computeCraftCost(recipe, ingredientPrices);
+  // Partagé entre le coût et le test de complétude : deux parcours du même
+  // arbre pour la même carte, sinon.
+  const costs = new Map<number, UnitCost>();
+  const craftCost = computeCraftCost(recipe, ingredientPrices, index, costs);
   const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
   const isProfitable = margin > 0;
-  const hasAllPrices = recipeHasAllPrices(recipe, ingredientPrices);
+  const hasAllPrices = recipeHasAllPrices(recipe, ingredientPrices, index, costs);
 
   const name = recipe.resultName?.fr || `Item #${recipe.resultId}`;
   const iconUrl =
@@ -56,6 +70,8 @@ const RecipeCard = ({
       resultPrice={resultPrice}
       onEditPrice={(item) => onIngredientClick?.(item)}
       onSell={onSell}
+      index={index}
+      onOpenSubRecipe={onOpenSubRecipe}
     />
   );
 

@@ -18,24 +18,57 @@ interface ModalProps {
  * reaches the top layer. Per-instance ownership would let the inner modal hand
  * scrolling back to a page that is still covered, and make one Escape close the pile.
  *
- * ## Ce que l'accessibilité couvre ici, et ce qu'elle ne couvre pas
+ * ## Ce que l'accessibilité couvre ici
  *
  * Le panneau se déclare (`role="dialog"`, `aria-modal`), porte son nom
- * (`aria-labelledby` sur le titre) et sa croix a un intitulé. C'est ce qui
- * manquait, et ça se corrige sans toucher au comportement.
+ * (`aria-labelledby` sur le titre) et sa croix a un intitulé.
  *
- * En revanche **le focus n'est pas piégé** : au clavier, la tabulation peut
- * encore sortir du panneau vers la page derrière. `aria-modal="true"` promet
- * l'inverse, donc l'écart est connu et assumé plutôt qu'ignoré. Le combler
- * demande de gérer l'ordre de tabulation d'une **pile** de modales — la popin de
- * recette ouvre celle de prix par-dessus elle — et de rendre le focus au bon
- * endroit à la fermeture de chaque étage. C'est un changement de comportement,
- * pas de balisage, et il mérite sa propre mesure.
+ * ## Le focus est piégé, et la pile est ce qui rend ça délicat
+ *
+ * `aria-modal="true"` promet que le reste de la page est hors-jeu. Sans piège de
+ * focus la promesse est fausse : la tabulation sortait du panneau vers une page
+ * qu'une aide technique annonce comme inerte, et on s'y perdait sans rien voir
+ * bouger à l'écran.
+ *
+ * Trois choses, et la troisième est celle que la pile complique :
+ *
+ * 1. **à l'ouverture**, le focus entre dans le panneau — son premier élément
+ *    focalisable, ou le panneau lui-même s'il n'en contient aucun ;
+ * 2. **pendant**, Tab et Shift+Tab bouclent à l'intérieur. Seul le panneau du
+ *    **sommet** de la pile écoute, par le même test de profondeur qu'Escape :
+ *    sans lui, la popin de recette et celle de prix se disputeraient chaque
+ *    tabulation et le piège de l'une renverrait dans l'autre ;
+ * 3. **à la fermeture**, le focus retourne exactement là où il était. Quand
+ *    l'étage fermé est un étage intérieur, « là où il était » est un élément de
+ *    l'étage extérieur, toujours ouvert — c'est ce qui fait que refermer la modale
+ *    de prix rend la main à la ligne d'ingrédient qu'on venait de cliquer, et non
+ *    au haut de la page.
+ *
+ * L'élément mémorisé peut avoir disparu entre-temps — une ligne que la saisie a
+ * fait disparaître, par exemple — d'où la vérification qu'il est encore dans le
+ * document avant de lui rendre le focus.
  */
 let openModals = 0;
 
+/**
+ * Ce qui peut recevoir le focus dans un panneau.
+ *
+ * `:not([disabled])` et `tabindex="-1"` écartés : un bouton désactivé et un
+ * élément retiré du parcours ne doivent pas piéger la tabulation sur eux.
+ */
+const FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
 const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) => {
   const depth = useRef(0);
+  // Le panneau, pour y contenir la tabulation.
+  const panel = useRef<HTMLDivElement>(null);
   // Relie le panneau à son titre. `useId` est stable entre serveur et client,
   // ce qu'un compteur ou un tirage ne serait pas.
   const titleId = useId();
@@ -54,15 +87,89 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
     depth.current = openModals;
     document.body.style.overflow = 'hidden';
 
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && depth.current === openModals) onCloseRef.current();
+    // Où rendre le focus en partant. Lu avant de le déplacer, sinon on
+    // mémoriserait le panneau lui-même.
+    const restoreTo = document.activeElement as HTMLElement | null;
+
+    // Copié dans l'effet : au moment du nettoyage, React a pu remettre le ref à
+    // null, et le comparer là-bas ne filtrerait alors plus notre propre panneau.
+    const own = panel.current;
+
+    // Entrer dans le panneau. Le premier focalisable, sinon le panneau — qui
+    // porte `tabIndex={-1}` pour pouvoir le recevoir sans entrer dans le
+    // parcours de tabulation.
+    const focusables = () =>
+      Array.from(panel.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
+        (element) => element.offsetParent !== null || element === document.activeElement
+      );
+    (focusables()[0] ?? panel.current)?.focus();
+
+    const handleKey = (e: KeyboardEvent) => {
+      // Seul le sommet de la pile écoute : voir la note de tête.
+      if (depth.current !== openModals) return;
+
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      const inside = focusables();
+      if (inside.length === 0) {
+        // Rien à parcourir : on garde le focus sur le panneau plutôt que de
+        // laisser la tabulation partir derrière.
+        e.preventDefault();
+        panel.current?.focus();
+        return;
+      }
+
+      const first = inside[0];
+      const last = inside[inside.length - 1];
+      const active = document.activeElement;
+
+      // Le bouclage, et le cas où le focus a échappé au panneau — un clic dans la
+      // page derrière, par exemple : Tab le ramène dedans au lieu de continuer.
+      if (!panel.current?.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleKey);
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKey);
       openModals -= 1;
       if (openModals === 0) document.body.style.overflow = 'unset';
+
+      // Rendre le focus. Deux cas, et le second n'est pas un cas limite : c'est
+      // celui de la pile.
+      //
+      // L'élément mémorisé peut avoir disparu — une ligne que la saisie a fait
+      // disparaître — mais surtout il peut n'avoir jamais existé. La modale
+      // intérieure s'ouvre en cliquant une **ligne**, qui est un `div` et ne prend
+      // donc pas le focus : `document.activeElement` valait `body` à ce moment-là,
+      // et le lui rendre revient à ne le rendre à personne.
+      //
+      // On se replie alors sur le panneau de l'étage encore ouvert — ce qui est le
+      // comportement attendu de toute façon : refermer la modale de prix doit
+      // ramener dans la recette, pas derrière elle.
+      const usable = restoreTo && restoreTo !== document.body && document.contains(restoreTo);
+      if (usable) {
+        restoreTo.focus();
+        return;
+      }
+      if (openModals > 0) {
+        const below = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+          .filter((element) => element !== own)
+          .pop();
+        below?.focus();
+      }
     };
   }, [isOpen]);
 
@@ -97,6 +204,10 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: ModalProps) =>
 
       {/* Modal */}
       <div
+        ref={panel}
+        // `tabIndex={-1}` : le panneau doit pouvoir recevoir le focus quand il ne
+        // contient rien de focalisable, sans pour autant entrer dans le parcours.
+        tabIndex={-1}
         // `role="dialog"` manquait : sans lui le panneau n'est qu'une pile de
         // `div` pour une aide technique, et rien ne dit que le reste de la page
         // est momentanément hors-jeu. `aria-labelledby` lui donne son nom, et le

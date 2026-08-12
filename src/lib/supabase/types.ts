@@ -247,6 +247,65 @@ export type FarmTarget = {
   top_drops: FarmDrop[];
 };
 
+/**
+ * Une sous-zone classée, telle que `farm_zones` la rend (migration 20260812100000).
+ *
+ * La sous-zone et non la région : c'est la maille où l'on se pose pour enchaîner
+ * des combats. La région reste le filtre.
+ */
+export type FarmZone = {
+  subarea_id: number;
+  subarea_name: string;
+  area_id: number;
+  area_name: string;
+  /** Niveau de la sous-zone tel que le jeu l'annonce. */
+  subarea_level: number;
+  /**
+   * Monstres retenus par les filtres **et** porteurs d'au moins un drop retenu.
+   * C'est le dénominateur de la moyenne, donc il s'affiche avec elle : une
+   * moyenne sur deux monstres ne se lit pas comme une moyenne sur trente.
+   */
+  monster_count: number;
+  /** Ce que rapporte un combat quelconque de la zone. C'est le critère de tri. */
+  avg_kamas_per_fight: number;
+  best_kamas_per_fight: number;
+  best_monster_name: string;
+  /** Fourchette de niveau des monstres retenus. */
+  level_min: number;
+  level_max: number;
+};
+
+/**
+ * Les arguments que `farm_targets` et `farm_zones` partagent, terme pour terme.
+ *
+ * Tous optionnels : les valeurs par défaut vivent dans la signature SQL, la route
+ * n'envoie que ce qui s'écarte du défaut. Deux sources de vérité divergeraient au
+ * premier changement côté base.
+ */
+export type FarmArgs = {
+  p_min_level?: number;
+  p_max_level?: number;
+  p_subarea_ids?: number[];
+  p_area_id?: number;
+  p_exclude_boss?: boolean;
+  p_exclude_mini_boss?: boolean;
+  p_exclude_quest?: boolean;
+  p_exclude_bounty?: boolean;
+  p_exclude_hidden?: boolean;
+  p_min_percent?: number;
+  /** 100 = référence des taux DofusDB. */
+  p_prospecting?: number;
+  p_priced_only?: boolean;
+  p_crafted_only?: boolean;
+  /** Actif par défaut côté SQL. */
+  p_exclude_quest_drops?: boolean;
+  p_unconditional_only?: boolean;
+  /** Sous-ensemble de `ELEMENTS`. */
+  p_elements?: Element[];
+  p_max_resistance?: number;
+  p_limit?: number;
+};
+
 export type DofusSyncStateRow = {
   resource: string;
   last_success_at: string | null;
@@ -756,30 +815,15 @@ export interface Database {
       farm_targets: {
         // Tous optionnels : les valeurs par défaut vivent dans la signature SQL
         // (migration 20260802210000), la route n'envoie que ce qui est demandé.
-        Args: {
-          p_min_level?: number;
-          p_max_level?: number;
-          p_subarea_ids?: number[];
-          p_area_id?: number;
-          p_exclude_boss?: boolean;
-          p_exclude_mini_boss?: boolean;
-          p_exclude_quest?: boolean;
-          p_exclude_bounty?: boolean;
-          p_exclude_hidden?: boolean;
-          p_min_percent?: number;
-          /** 100 = référence des taux DofusDB. */
-          p_prospecting?: number;
-          p_priced_only?: boolean;
-          p_crafted_only?: boolean;
-          /** Actif par défaut côté SQL. */
-          p_exclude_quest_drops?: boolean;
-          p_unconditional_only?: boolean;
-          /** Sous-ensemble de `ELEMENTS`. */
-          p_elements?: Element[];
-          p_max_resistance?: number;
-          p_limit?: number;
-        };
+        Args: FarmArgs;
         Returns: FarmTarget[];
+      };
+      // Même signature, à dessein : `farm_zones` (migration 20260812100000) agrège
+      // exactement la même sélection, par sous-zone au lieu de par monstre. C'est
+      // ce qui permet à `parseFarmArgs` de servir les deux modes sans traduire.
+      farm_zones: {
+        Args: FarmArgs;
+        Returns: FarmZone[];
       };
     };
     Enums: Record<string, never>;

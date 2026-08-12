@@ -85,23 +85,32 @@
 //!
 //! ## Ce qu'il vaut
 //!
-//! **Il bat désormais le glouton** : 69,20 M contre 66,33 M pour son meilleur
-//! objectif, et sans proposer un seul croisement sans cible là où le glouton en
-//! propose 1,9 %. C'est le choix de couronne qui a fait la différence — voir
-//! `Crowning`.
+//! Avec les fenêtres de disponibilité, il rend 63,60 M contre 64,60 M au meilleur
+//! objectif du glouton — et sans proposer un seul croisement sans cible là où le
+//! glouton en propose 1,9 %. Il le dépassait (69,20 contre 66,33) tant qu'on le
+//! mesurait sur une disponibilité continue ; les fenêtres reprennent l'avance,
+//! parce qu'il fait des fournées plus longues et perd donc plus à chaque
+//! dépassement de créneau. C'est exactement ce que le réglage de bande doit
+//! corriger — voir `bin/windows`.
 //!
 //! Deux cents graines, médiane du score, contre les politiques du dépôt :
 //!
 //! | politique | sans cible | gen 10 | pool hérité | départ de zéro |
 //! | --- | --- | --- | --- | --- |
-//! | glouton | 1,9 % | 68,3 | 62,46 M | 11,80 M |
-//! | recherche / myope | 50,3 % | 9,9 | 36,65 M | 10,77 M |
-//! | échelle | **0 %** | 44,9 | 64,33 M | 12,01 M |
-//! | échelle + niveau réglé | **0 %** | 48,8 | **69,20 M** | **14,55 M** |
+//! | glouton | 1,9 % | 64,6 | 60,16 M | 11,80 M |
+//! | recherche / myope | 50,3 % | 9,9 | 36,70 M | 10,77 M |
+//! | échelle | **0 %** | 40,4 | 59,46 M | 11,15 M |
+//! | échelle + niveau réglé | **0 %** | 43,1 | **63,60 M** | **13,01 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
 //! propose **aucun**, et c'est verrouillé par un test.
+//!
+//! Ces chiffres portent désormais les **fenêtres de disponibilité** : on n'agit
+//! que devant le jeu, 72 h par semaine sur 168. Elles coûtent 6 M à l'échelle
+//! réglée. Voir `Economy::availability`, et `bin/windows` pour le balayage — qui
+//! au passage montre que le réglage de bande, jamais mesuré au score, vaut
+//! bien plus que ça.
 //!
 //! ## Un avertissement sur les tables de ce fichier
 //!
@@ -131,7 +140,7 @@
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
 //! de la gen 2 à la gen 9 ; l'échelle en sort 48,8 gen 10 quand le glouton en
-//! sort 68,3, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
+//! sort 64,6, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
 //! La moisson rattrape une part de l'écart (+18,9 M mesurés) mais ne le comble
 //! pas : elle monnaie les hors-plan, elle ne les fait pas monter.
 //!

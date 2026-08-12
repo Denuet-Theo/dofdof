@@ -19,6 +19,41 @@
 # incomplète qu'un chiffre inventé qu'on finit par croire.
 
 # ---------------------------------------------------------------------------
+[disponibilite]
+# ---------------------------------------------------------------------------
+
+# Quand on peut **agir**. Les jauges tournent en continu — une monture monte
+# pendant qu'on dort — mais lancer et récupérer une fournée demande d'être devant
+# le jeu.
+#
+# Sans cette section, l'horizon est un budget d'heures qu'on dépense à volonté,
+# ce qui suppose une disponibilité de vingt-quatre heures sur vingt-quatre. Ce
+# n'est pas un détail : à 7,3 h de fournée, le relevé de l'éleveur donne 25
+# fournées sur 300 h là où le budget continu en promet 42.
+#
+# ## Ce que ça change au problème
+#
+# La durée d'une fournée ne se juge plus « courte ou longue » mais « atterrit-elle
+# dans une fenêtre ». Lancée à 20 h, une fournée de 5 h 30 finit à 1 h 30 et on
+# relance aussitôt ; une de 6 h 30 finit à 2 h 30, une demi-heure après la
+# fermeture, et attend jusqu'à 7 h 30. Trente minutes de dépassement coûtent cinq
+# heures, et c'est une falaise, pas une pente.
+#
+# ## Format
+#
+# Des créneaux `[début, fin]` en heures depuis minuit. Une fin au-delà de 24
+# déborde sur le lendemain : `[20, 26]` est « de 20 h à 2 h ». Quatre créneaux au
+# plus par journée.
+#
+# Deux formes de journée nommées, et `jours` compose la semaine avec elles — une
+# semaine de vacances se dit en mettant sept fois `week_end`.
+
+semaine = [[7.5, 8.5], [13, 14], [20, 26]]
+week_end = [[10, 26]]
+
+jours = ["semaine", "semaine", "semaine", "semaine", "semaine", "week_end", "week_end"]
+
+# ---------------------------------------------------------------------------
 [partie]
 # ---------------------------------------------------------------------------
 

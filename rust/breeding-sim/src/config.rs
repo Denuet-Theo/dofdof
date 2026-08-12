@@ -305,6 +305,52 @@ impl Prices {
             net(get(&["genetons", "prix_unitaire_min"], 0.0)),
             net(get(&["genetons", "prix_unitaire_max"], 0.0)),
         );
+        // Les fenêtres de disponibilité. Deux formes de journée nommées et un motif
+        // de semaine qui les compose : une semaine de vacances se dit en mettant
+        // sept fois la même forme, sans toucher au reste.
+        //
+        // Absentes, `availability` reste à zéro, ce qui vaut disponibilité continue
+        // — le modèle d'avant. C'est voulu : un fichier qui ne parle pas de
+        // disponibilité ne doit pas se retrouver avec une contrainte qu'il n'a pas
+        // demandée.
+        let shape = |name: &str| -> Option<[(f64, f64); crate::economy::MAX_WINDOWS_PER_DAY]> {
+            let rows = root
+                .get("disponibilite")
+                .and_then(|table| table.get(name))
+                .and_then(toml::Value::as_array)?;
+            let mut out = [(0.0, 0.0); crate::economy::MAX_WINDOWS_PER_DAY];
+            for (slot, row) in rows.iter().take(crate::economy::MAX_WINDOWS_PER_DAY).enumerate() {
+                let pair = row.as_array().filter(|pair| pair.len() >= 2)?;
+                let hour = |value: &toml::Value| -> f64 {
+                    value
+                        .as_float()
+                        .or_else(|| value.as_integer().map(|n| n as f64))
+                        .unwrap_or(0.0)
+                };
+                out[slot] = (hour(&pair[0]), hour(&pair[1]));
+            }
+            Some(out)
+        };
+        if let Some(pattern) = root
+            .get("disponibilite")
+            .and_then(|table| table.get("jours"))
+            .and_then(toml::Value::as_array)
+        {
+            for (day, name) in pattern
+                .iter()
+                .take(crate::economy::DAYS_PER_WEEK)
+                .enumerate()
+            {
+                match name.as_str().and_then(shape) {
+                    Some(windows) => economy.availability[day] = windows,
+                    None => missing.push(format!(
+                        "forme de journée « {} » pour le jour {day}",
+                        name.as_str().unwrap_or("?")
+                    )),
+                }
+            }
+        }
+
         economy.top_value_range = (
             get(&["valeurs", "gen10_min"], economy.top_value as f64) as i64,
             get(&["valeurs", "gen10_max"], economy.top_value as f64) as i64,

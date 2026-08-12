@@ -121,6 +121,16 @@ pub fn genetons_for_crossing(male_generation: u8, female_generation: u8, names_t
 /// déjà ce qu'un humain peut suivre.
 pub const MAX_UNITS: usize = 4;
 
+/// Les jours d'une semaine de disponibilité. Voir `Economy::availability`.
+pub const DAYS_PER_WEEK: usize = 7;
+
+/// Combien de créneaux au plus dans une journée.
+///
+/// Trois suffisent au relevé de l'éleveur — avant le travail, la pause de midi, la
+/// soirée — et le quatrième laisse de la place sans faire grossir une structure
+/// qui est `Copy` et recopiée à chaque partie.
+pub const MAX_WINDOWS_PER_DAY: usize = 4;
+
 /// Plafond de couleurs par famille. Le muldo en compte 120.
 pub const MAX_COLORS: usize = 128;
 
@@ -159,6 +169,21 @@ pub struct Economy {
     pub pool_generations: (u8, u8),
     /// Budget en heures. `None` = horizon en nombre de chargements.
     pub horizon_hours: Option<f64>,
+    /// Quand on peut **agir**, heure par heure de la semaine.
+    ///
+    /// Les jauges tournent en continu — une monture monte pendant qu'on dort — mais
+    /// lancer et récupérer une fournée demande d'être devant le jeu. Sans ce
+    /// modèle, l'horizon est un budget d'heures qu'on dépense à volonté, ce qui
+    /// suppose une disponibilité de vingt-quatre heures sur vingt-quatre.
+    ///
+    /// Sept jours, quatre fenêtres au plus par jour, en heures depuis minuit. Une
+    /// borne haute au-delà de 24 déborde sur le lendemain : `(20.0, 26.0)` est
+    /// « de 20 h à 2 h ». Une fenêtre `(0.0, 0.0)` n'existe pas.
+    ///
+    /// **Tout à zéro vaut disponibilité continue**, c'est-à-dire le modèle d'avant :
+    /// les mesures publiées restent donc valides et le nouveau modèle est un choix
+    /// explicite, pas une dérive silencieuse.
+    pub availability: [[(f64, f64); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
     /// Nombre de chargements, quand l'horizon n'est pas un temps.
     pub batches: u32,
     /// Prix forfaitaire d'un chargement du bloc, tant que les prix par jauge
@@ -218,6 +243,7 @@ impl Default for Economy {
             starting_pool: 100,
             pool_generations: (2, 9),
             horizon_hours: None,
+            availability: [[(0.0, 0.0); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
             batches: 100,
             batch_cost: 150_000,
             starter_price: 1_000,
@@ -268,6 +294,75 @@ impl Economy {
                 self.top_value as f64,
             ),
         )
+    }
+
+    /// Des fenêtres de disponibilité ont-elles été posées ?
+    ///
+    /// Tout à zéro veut dire « toujours disponible », et c'est le défaut : sans ça,
+    /// une économie qui oublierait de renseigner ses fenêtres deviendrait une
+    /// économie où l'on ne peut jamais rien faire.
+    pub fn has_windows(&self) -> bool {
+        self.availability
+            .iter()
+            .flatten()
+            .any(|&(from, to)| to > from)
+    }
+
+    /// Le premier instant à partir de `hours` où l'on peut agir.
+    ///
+    /// Rend `hours` tel quel quand aucune fenêtre n'est posée. Sinon avance jusqu'à
+    /// l'ouverture suivante — ce qui est exactement l'attente qu'une fournée finie à
+    /// quatre heures du matin impose : l'enclos est libre, mais personne n'est là
+    /// pour le vider.
+    ///
+    /// ## Pourquoi regarder la veille
+    ///
+    /// Une fenêtre peut déborder — `(20.0, 26.0)` couvre jusqu'à deux heures du
+    /// matin le lendemain. Un instant à minuit trente appartient donc à une fenêtre
+    /// **de la veille**, et ne regarder que le jour courant le manquerait.
+    ///
+    /// Rend `None` au-delà de `limit`, pour qu'un appelant n'ait pas à se protéger
+    /// d'une boucle sans fin quand la semaine ne contient aucune fenêtre atteignable.
+    pub fn actionable(&self, hours: f64, limit: f64) -> Option<f64> {
+        if !self.has_windows() {
+            return Some(hours);
+        }
+        let day = (hours / 24.0).floor() as i64;
+
+        // La veille d'abord, pour ses débordements, puis les jours suivants.
+        let mut probe = day - 1;
+        while (probe as f64) * 24.0 <= limit + 24.0 {
+            let index = probe.rem_euclid(DAYS_PER_WEEK as i64) as usize;
+            let base = (probe as f64) * 24.0;
+
+            // Les fenêtres du jour, triées : l'ordre du tableau n'est pas garanti.
+            let mut slots: Vec<(f64, f64)> = self.availability[index]
+                .iter()
+                .filter(|&&(from, to)| to > from)
+                .map(|&(from, to)| (base + from, base + to))
+                .collect();
+            slots.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+            for (from, to) in slots {
+                if to <= hours {
+                    continue;
+                }
+                let at = from.max(hours);
+                return if at > limit { None } else { Some(at) };
+            }
+            probe += 1;
+        }
+        None
+    }
+
+    /// Les heures où l'on peut agir sur une semaine, pour la lecture et les tests.
+    pub fn weekly_hours(&self) -> f64 {
+        self.availability
+            .iter()
+            .flatten()
+            .filter(|&&(from, to)| to > from)
+            .map(|&(from, to)| to - from)
+            .sum()
     }
 
     /// L'économie d'une partie, prix du jour tirés.
@@ -750,6 +845,10 @@ pub struct RunOutcome {
     /// Chargements refusés. Doit rester à zéro.
     pub rejected_loads: u32,
     pub hours_used: f64,
+    /// Heures passées à attendre une fenêtre, enclos libre et personne devant le
+    /// jeu. Nulles sans fenêtre posée. C'est la mesure de ce que la disponibilité
+    /// coûte, et elle n'existait pas.
+    pub hours_waiting: f64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1210,6 +1309,7 @@ fn run(
         gen10_held: 0,
         rejected_loads: 0,
         hours_used: 0.0,
+        hours_waiting: 0.0,
     };
 
     // Une unité qui ne fait rien plusieurs fois de suite ne fera plus rien : son
@@ -1231,10 +1331,21 @@ fn run(
                     .then(a.cmp(&b))
             });
         let Some(unit) = next else { break };
-        let now = free_at[unit];
+
+        // L'enclos est libre, mais il faut être là pour le vider et le relancer.
+        // Les jauges, elles, ont tourné pendant l'absence : c'est pour ça que
+        // l'attente se prend ici, sur la décision, et non sur la durée du cycle.
+        //
+        // C'est tout le modèle des fenêtres, et il tient en une ligne parce que la
+        // boucle raisonnait déjà en heures murales. Sans fenêtre posée, `actionable`
+        // rend l'instant tel quel et la partie est celle d'avant.
+        let Some(now) = economy.actionable(free_at[unit], budget) else {
+            break;
+        };
         if now >= budget {
             break;
         }
+        outcome.hours_waiting += now - free_at[unit];
         if economy.horizon_hours.is_none()
             && outcome.loads_by_unit.iter().sum::<u32>() >= economy.batches
         {

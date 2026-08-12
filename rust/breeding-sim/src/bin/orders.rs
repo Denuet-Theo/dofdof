@@ -46,7 +46,7 @@
 use breeding_sim::audit::Audit;
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, RunOutcome, Strategy, play};
-use breeding_sim::ladder::{Gating, Ladder, LadderPolicy, Ordering, Route};
+use breeding_sim::ladder::{Gating, Ladder, LadderPolicy, Ordering, Purchasing, Route};
 use breeding_sim::trees::muldo;
 
 const SEEDS: u32 = 200;
@@ -327,6 +327,67 @@ fn sweep(economy: &Economy, ladder: &Ladder, tuned: bool) {
     }
 }
 
+/// Ce que rapporte d'acheter ce qui manque plutôt que de tourner en rond.
+///
+/// ## Pourquoi la question se pose
+///
+/// À 1 000 kamas la gen 1 contre 150 000 le chargement, une place vide coûte plus
+/// cher qu'une paire achetée : l'échelle remplit donc systématiquement le parc
+/// avec des achats, et c'est ce levier qui décide de ce que l'étage 1 fournira
+/// deux fournées plus tard. Or il tournait en rond — un bloc après l'autre — quand
+/// la phase de croisement juste au-dessus choisit au retard relatif. Les deux
+/// moitiés d'une même fournée ne raisonnaient pas pareil.
+///
+/// ## La prédiction, écrite avant la mesure
+///
+/// Gain net en **départ de zéro**, où tout vient des achats et où un mauvais
+/// ratio se paie pendant toute la partie. Effet faible ou nul avec le **pool
+/// hérité**, où cent muldos de la gen 2 à la gen 9 fournissent déjà les basses
+/// générations. Si l'inverse sort, c'est le modèle du problème qui est faux, pas
+/// le réglage.
+fn purchases(economy: &Economy, ladder: &Ladder, label: &str, tuned: bool, seeds: u32) {
+    let catalog = muldo();
+    let run = |mode: Purchasing, seed: u32| {
+        let mut policy = LadderPolicy::with_ladder(ladder.clone());
+        policy.purchasing = mode;
+        if tuned {
+            policy = policy
+                .with_strategies([Strategy::default(); MAX_UNITS])
+                .tuned_for(economy);
+        }
+        play(&catalog, economy, &mut policy, seed)
+    };
+
+    let mut deltas = Vec::new();
+    let mut wins = 0;
+    let mut gen10 = (0.0, 0.0);
+    for seed in 0..seeds {
+        let after = run(Purchasing::MostBehind, seed);
+        let before = run(Purchasing::RoundRobin, seed);
+        let delta = after.score as f64 - before.score as f64;
+        if delta > 0.0 {
+            wins += 1;
+        }
+        deltas.push(delta);
+        gen10.0 += after.gen10_held as f64;
+        gen10.1 += before.gen10_held as f64;
+    }
+
+    let n = deltas.len() as f64;
+    let delta = mean(&deltas);
+    let variance = deltas.iter().map(|d| (d - delta).powi(2)).sum::<f64>() / (n - 1.0);
+    let stderr = (variance / n).sqrt();
+    let t = if stderr > 0.0 { delta / stderr } else { 0.0 };
+    println!(
+        "{label:<34} {:+7.2} M ± {:.2}, t = {:>6.2}, gagne {wins:>4}/{seeds}, gen10 {:.2} → {:.2}",
+        delta / 1e6,
+        stderr / 1e6,
+        t,
+        gen10.1 / n,
+        gen10.0 / n,
+    );
+}
+
 fn main() {
     let prices = match Prices::load_default() {
         Ok(prices) => prices,
@@ -362,6 +423,24 @@ fn main() {
 
     grid(&base, &ladder, true);
     sweep(&base, &ladder, true);
+
+    println!("\n=== achats : « ce qui manque » − « tourniquet », 200 graines ===");
+    purchases(&base, &ladder, "pool hérité, niveau réglé", true, SEEDS);
+    purchases(&base, &ladder, "pool hérité, niveau défaut", false, SEEDS);
+    purchases(&scratch, &ladder, "départ de zéro, niveau réglé", true, SEEDS);
+    purchases(&scratch, &ladder, "départ de zéro, niveau défaut", false, SEEDS);
+
+    // Quatre configurations testées, une seule à t = 2,26 : c'est exactement ce
+    // qu'on attend du hasard à ce nombre de comparaisons. On rejoue la seule
+    // prometteuse sur cinq fois plus de graines — si l'effet est réel, l'erreur
+    // type se resserre et t grandit ; s'il est du bruit, t dérive vers zéro.
+    println!("\n=== les trois qui décident, sur 1 000 graines ===");
+    purchases(&base, &ladder, "pool hérité, niveau réglé", true, 1_000);
+    // Les deux régimes de départ de zéro : à 200 graines l'un était à t = -1,30,
+    // ce qui peut aussi bien être un petit négatif réel que du bruit. Si c'en est
+    // un, le levier dépend du régime et ne peut pas devenir le défaut tel quel.
+    purchases(&scratch, &ladder, "départ de zéro, niveau réglé", true, 1_000);
+    purchases(&scratch, &ladder, "départ de zéro, niveau défaut", false, 1_000);
 
     println!("\n=== croisements sans cible, 25 graines ===");
     for variant in &CANDIDATES {

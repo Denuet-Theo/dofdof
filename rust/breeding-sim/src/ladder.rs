@@ -117,6 +117,11 @@
 //! pour le balayage qui l'a condamné, et `Ordering` pour les cinq ordres de
 //! composition mesurés à cette occasion.
 //!
+//! Ils sont aussi ceux d'une phase d'achat **informée** : les gen 1 qu'on achète
+//! pour remplir le parc se choisissent au même retard relatif que les
+//! croisements, et non plus par tourniquet sur les blocs. Voir `Purchasing` — et
+//! la prédiction que cette mesure a démentie.
+//!
 //! ## Ce qu'il fait encore mal
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
@@ -758,6 +763,58 @@ pub enum Ordering {
     BigToSmallByRank,
 }
 
+/// Comment les gen 1 achetées se choisissent.
+///
+/// Ce n'est pas un détail d'appoint : à 1 000 kamas la monture contre 150 000 le
+/// chargement, une place vide coûte plus cher qu'une paire achetée, donc
+/// l'échelle **remplit systématiquement** le parc avec des achats. C'est ce
+/// levier qui décide de ce que l'étage 1 fournira deux fournées plus tard.
+///
+/// Et jusqu'ici les deux moitiés d'une même fournée ne raisonnaient pas pareil :
+/// `compose` choisissait au retard relatif, l'achat tournait en rond.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Purchasing {
+    /// Un bloc après l'autre, indéfiniment. Ne regarde ni la demande, ni ce que
+    /// l'écurie tient, ni ce que la fournée vient de lancer. Gardé pour la mesure.
+    RoundRobin,
+    /// La paire qui produit la gen 2 dont on est le plus en retard — le même
+    /// critère que `most_behind`, appliqué à ce qu'on achète. **Le défaut.**
+    ///
+    /// ## Ce que ça vaut, et la prédiction que ça démentit
+    ///
+    /// 1 000 graines appariées, écart au tourniquet :
+    ///
+    /// | régime | écart | t | gagne |
+    /// | --- | --- | --- | --- |
+    /// | pool hérité, niveau réglé | **+1,13 M ± 0,30** | 3,80 | 550/1000 |
+    /// | départ de zéro, niveau réglé | −0,00 M ± 0,05 | −0,08 | 503/1000 |
+    /// | départ de zéro, niveau défaut | −0,05 M ± 0,02 | −2,32 | 446/1000 |
+    ///
+    /// La prédiction écrite avant la mesure était l'**inverse** : un gain en
+    /// partant de zéro, où tout vient des achats, et rien avec le pool hérité, où
+    /// les basses générations sont déjà fournies. C'est faux, et l'erreur est
+    /// instructive — en partant de zéro, *tous* les blocs sont également en retard
+    /// à la première fournée, donc le tourniquet tombe juste par accident et il
+    /// n'y a rien à gagner. Avec un pool, l'héritage est **déséquilibré** : c'est
+    /// là que choisir ce qui manque a un sens, et c'est là que le tourniquet se
+    /// trompe.
+    ///
+    /// Le levier reste donc **dépendant du régime**, et il perd 0,05 M sur le
+    /// départ de zéro à niveau non réglé — 0,4 % d'un score de 13 M, contre
+    /// 1,6 % gagnés dans le régime réaliste. C'est ce rapport de vingt contre un
+    /// qui décide, pas l'absence de contre-partie.
+    ///
+    /// ## Ce que la mesure a coûté à établir
+    ///
+    /// À 200 graines, une seule des quatre configurations passait t = 2,26 — soit
+    /// exactement ce que le hasard produit à quatre comparaisons. Il a fallu
+    /// cinq fois plus de graines pour voir t monter à 3,80 plutôt que dériver vers
+    /// zéro. Un `t` juste au-dessus de deux, sur plusieurs configurations
+    /// essayées, ne conclut rien.
+    #[default]
+    MostBehind,
+}
+
 /// Quels étages attendent d'être lançables en nombre avant de partir.
 ///
 /// Le seuil et l'ordre se confondent facilement — les deux décident qui passe
@@ -818,6 +875,8 @@ pub struct LadderPolicy {
     pub ordering: Ordering,
     /// Quels étages ajournent en dessous du seuil. Voir `Gating`.
     pub gating: Gating,
+    /// Comment les gen 1 achetées se choisissent. Voir `Purchasing`.
+    pub purchasing: Purchasing,
     /// Apparier les stériles sans regarder leur sexe.
     ///
     /// **Mesuré indifférent** : `−0,32 M ± 0,50` sur 200 graines appariées,
@@ -890,6 +949,7 @@ impl LadderPolicy {
             threshold: RUNG_THRESHOLD,
             ordering: Ordering::default(),
             gating: Gating::default(),
+            purchasing: Purchasing::default(),
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
@@ -1311,6 +1371,9 @@ impl LadderPolicy {
     /// `by_target`, le retard relatif choisit à l'intérieur d'un étage, et le
     /// seuil est un levier séparé. Ce qui suit ne fait donc que **classer les
     /// étages** et décider si on les vide ou si on les sert à tour de rôle.
+    ///
+    /// Rend ce qu'elle a engagé, par couleur cible : la phase d'achat en a besoin
+    /// pour ne pas racheter ce que la fournée vient déjà de lancer.
     fn compose(
         &self,
         view: &UnitView<'_>,
@@ -1319,7 +1382,7 @@ impl LadderPolicy {
         held: &HashMap<ColorId, f64>,
         crossings: &mut Vec<[usize; 2]>,
         places: &mut usize,
-    ) {
+    ) -> HashMap<ColorId, f64> {
         let catalog = view.catalog;
         let mut made: HashMap<ColorId, f64> = HashMap::new();
 
@@ -1375,7 +1438,7 @@ impl LadderPolicy {
                 let mut launched = false;
                 for (_, here) in &tiers {
                     if *places >= view.capacity {
-                        return;
+                        return made;
                     }
                     let Some((color, position)) =
                         self.most_behind(here, by_target, free, held, &made)
@@ -1388,11 +1451,11 @@ impl LadderPolicy {
                             launched = true;
                         }
                         Launched::Retry => {}
-                        Launched::Full => return,
+                        Launched::Full => return made,
                     }
                 }
                 if !launched {
-                    return;
+                    return made;
                 }
             }
         }
@@ -1410,6 +1473,58 @@ impl LadderPolicy {
                 }
             }
         }
+
+        made
+    }
+
+    /// La paire de gen 1 à acheter : celle qui produit la gen 2 la plus en retard.
+    ///
+    /// Le même critère que `most_behind`, appliqué à ce qu'on achète plutôt qu'à
+    /// ce qu'on possède. La recette d'une gen 2 voulue **est** la paire de teintes
+    /// à acheter : `recipe_of` la donne, et les deux teintes appartiennent par
+    /// construction à un même bloc fermé — c'est ce que `lay_third` garantit.
+    ///
+    /// `bought` compte ce que la phase d'achat a déjà engagé cette fournée. Sans
+    /// lui, la boucle rachèterait indéfiniment la même paire : le retard ne
+    /// bougerait pas d'une itération à l'autre.
+    fn most_needed_purchase(
+        &self,
+        catalog: &Catalog,
+        held: &HashMap<ColorId, f64>,
+        made: &HashMap<ColorId, f64>,
+        bought: &HashMap<ColorId, f64>,
+    ) -> Option<[ColorId; 2]> {
+        let mut choice: Option<(f64, ColorId, [ColorId; 2])> = None;
+
+        for &color in &self.ladder.wanted {
+            // L'étage 1 seul : c'est tout ce qu'une paire de gen 1 peut viser.
+            if catalog.generation(color) != 2 {
+                continue;
+            }
+            let want = self.ladder.demand.get(&color).copied().unwrap_or(0.0);
+            if want <= 0.0 {
+                continue;
+            }
+            let Some(&recipe) = self.ladder.recipe_of.get(&color) else {
+                continue;
+            };
+            // Deux teintes distinctes : une recette qui se recopie ne nomme rien.
+            if recipe[0] == recipe[1] {
+                continue;
+            }
+
+            let stock = held.get(&color).copied().unwrap_or(0.0)
+                + made.get(&color).copied().unwrap_or(0.0)
+                + bought.get(&color).copied().unwrap_or(0.0);
+            let lag = stock / want;
+            // La couleur tranche les égalités, sinon l'ordre dépendrait du
+            // parcours du `HashSet` et deux exécutions différeraient.
+            if choice.is_none_or(|(best, at, _)| lag < best || (lag == best && color < at)) {
+                choice = Some((lag, color, recipe));
+            }
+        }
+
+        choice.map(|(_, _, recipe)| recipe)
     }
 
     /// La couleur qu'un couple vise, s'il est admissible.
@@ -1512,7 +1627,7 @@ impl Policy for LadderPolicy {
         // L'ordre de composition — la dernière inconnue de l'échelle. Voir
         // `Ordering` pour les cinq candidats, et `compose` pour ce qu'ils
         // partagent.
-        self.compose(
+        let made = self.compose(
             view,
             &by_target,
             &mut free,
@@ -1547,23 +1662,56 @@ impl Policy for LadderPolicy {
         // voulue, ce que garantit le choix de deux teintes d'un même bloc.
         // Deux montures neuves : elles doivent toutes deux leur cycle, donc
         // une paire achetée coûte toujours deux places pleines.
+        // Ce que l'achat a déjà engagé cette fournée, par gen 2 visée. Sert au
+        // seul mode `MostBehind`, qui sans ça rachèterait la même paire en boucle.
+        let mut bought: HashMap<ColorId, f64> = HashMap::new();
+
         while places + 2 <= view.capacity
             && budget >= 2 * starter
             && !self.ladder.blocks.is_empty()
         {
-            let block = &self.ladder.blocks[self.next_starter % self.ladder.blocks.len()];
-            self.next_starter += 1;
-            if block.len() < 2 {
-                continue;
-            }
-            let male = block[self.next_starter % block.len()];
-            let female = block[(self.next_starter + 1) % block.len()];
-            if male == female {
-                continue;
-            }
+            let pair = match self.purchasing {
+                Purchasing::MostBehind => {
+                    let Some(recipe) =
+                        self.most_needed_purchase(catalog, &held, &made, &bought)
+                    else {
+                        // Aucune gen 2 ne réclame quoi que ce soit : il n'y a rien
+                        // d'utile à acheter, et le tourniquet en achèterait quand
+                        // même. On s'arrête, les places restantes valent mieux
+                        // vides qu'employées à produire du hors-plan.
+                        break;
+                    };
+                    // La cible, pour tenir le compte du retard.
+                    if let Some(target) = self
+                        .ladder
+                        .recipe_of
+                        .iter()
+                        .find(|(_, r)| **r == recipe)
+                        .map(|(color, _)| *color)
+                    {
+                        *bought.entry(target).or_default() += 1.0;
+                    }
+                    recipe
+                }
+                Purchasing::RoundRobin => {
+                    let block =
+                        &self.ladder.blocks[self.next_starter % self.ladder.blocks.len()];
+                    self.next_starter += 1;
+                    if block.len() < 2 {
+                        continue;
+                    }
+                    let male = block[self.next_starter % block.len()];
+                    let female = block[(self.next_starter + 1) % block.len()];
+                    if male == female {
+                        continue;
+                    }
+                    [male, female]
+                }
+            };
+
             let base = view.stable.len() + purchases.len();
-            purchases.push((male, Sex::Male));
-            purchases.push((female, Sex::Female));
+            purchases.push((pair[0], Sex::Male));
+            purchases.push((pair[1], Sex::Female));
             crossings.push([base, base + 1]);
             places += 2;
             budget -= 2 * starter;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
+  Check,
   Dna,
   Egg,
   Fuel,
@@ -657,6 +658,39 @@ const Fill = ({
   const [step, setStep] = useState<'mate' | 'clone' | 'load'>('mate');
   const [open, setOpen] = useState<'mate' | 'clone' | null>(null);
 
+  /**
+   * Les couleurs déjà sorties du coffre, pointées à la main.
+   *
+   * Douze lignes se sortent une par une, dans une écurie qui trie autrement, et
+   * on s'y perd sans marque — c'est le genre de liste qu'on recommence trois
+   * fois.
+   *
+   * Le pointage ne dure que la visite : il ne décrit pas l'écurie, seulement où
+   * on en est de **ce** passage devant le coffre. L'écrire en base en ferait un
+   * état à réconcilier — sorti ici, pas là, et le jour où deux onglets ne disent
+   * pas la même chose il faudrait trancher pour rien. La clé porte la fournée,
+   * donc un plan qui change repart d'une liste vierge au lieu de traîner les
+   * coches d'avant.
+   */
+  const pullKey = fill.pull
+    .map((pull) => `${pull.colorId}:${pull.males}:${pull.females}`)
+    .join('|');
+  const [pulledAt, setPulledAt] = useState<{ key: string; done: string[] }>({
+    key: pullKey,
+    done: [],
+  });
+  // Comparée plutôt que remise à zéro par un effet : une fournée qui change rend
+  // le pointage caduc à l'instant même, sans un rendu de battement où les coches
+  // de l'ancienne liste s'appliqueraient à la nouvelle.
+  const pulled = pulledAt.key === pullKey ? pulledAt.done : [];
+
+  const setPulled = (done: string[]) => setPulledAt({ key: pullKey, done });
+
+  const togglePulled = (colorId: string) =>
+    setPulled(
+      pulled.includes(colorId) ? pulled.filter((id) => id !== colorId) : [...pulled, colorId]
+    );
+
   const toRecord = useMemo(() => couplesToRecord(fill), [fill]);
   const toClone = useMemo(
     () => (generations ? cloningsToRecord(fill, generations) : []),
@@ -1044,57 +1078,95 @@ const Fill = ({
               >
                 À cloner
               </span>
+              {/* Les montures, et non « une paire ». Un clonage se fait dans le
+                  jeu en désignant deux stériles précises : « gén. 3, 1 paire »
+                  oblige à retrouver soi-même lesquelles, parmi toutes celles de
+                  ce rang, alors que le plan les a déjà choisies. Les noms
+                  suivent l'ordre des paires — deux d'affilée sont les deux
+                  côtés d'un même clonage. */}
               {fill.clonings.map((entry) => (
-                <span key={entry.generation} className="text-dark-200">
-                  gén. {entry.generation}{' '}
+                <span
+                  key={entry.generation}
+                  className="inline-flex flex-wrap items-center gap-1.5 text-dark-200"
+                >
+                  gén. {entry.generation}
                   <span className="text-dark-100 tabular-nums font-semibold">
                     {entry.mountIds.length / 2} paire{entry.mountIds.length > 2 ? 's' : ''}
                   </span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {fill.purchases.length > 0 && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-info/15 text-xs">
-              <span className="text-[11px] text-dark-400">À acheter</span>
-              {fill.purchases.map((entry) => (
-                <span key={entry.colorId} className="text-dark-200">
-                  {nameOf(entry.colorId)}{' '}
-                  <span className="text-dark-100 tabular-nums font-semibold">
-                    {entry.males > 0 && `${entry.males}♂`}
-                    {entry.males > 0 && entry.females > 0 && ' '}
-                    {entry.females > 0 && `${entry.females}♀`}
-                  </span>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Le récapitulatif par couleur, qui se lit devant le coffre : on y va
-              une fois, pas une fois par couple. */}
-          {fill.pull.length > 0 && (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-info/15">
-              <span className="text-[11px] text-dark-400">À sortir de l&apos;écurie</span>
-              {fill.pull.map((pull) => (
-                <span key={pull.colorId} className="text-xs text-dark-300">
-                  {nameOf(pull.colorId)}{' '}
-                  <span className="text-dark-100 tabular-nums font-semibold">
-                    {pull.males > 0 && `${pull.males}♂`}
-                    {pull.males > 0 && pull.females > 0 && ' '}
-                    {pull.females > 0 && `${pull.females}♀`}
-                  </span>
-                  {pull.exhausts && (
-                    <span
-                      className="text-[10px] text-amber-400/70"
-                      title="La fournée vide cette couleur : il n'en restera aucune fertile."
-                    >
-                      {' '}
-                      vidée
-                    </span>
+                  {mountNames(entry.mountIds).map(([name, count]) =>
+                    nameChip(name, count, `k-${entry.generation}-${name}`)
                   )}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Les achats n'ont plus de liste à eux. Chaque monture à acheter est
+              déjà nommée « à acheter » dans la fournée, à la ligne où elle sert,
+              et c'est la seule forme utile : ce qu'on veut savoir devant l'hôtel
+              de vente, c'est pour quel croisement on achète, pas un total qui
+              oblige à revenir en arrière pour retrouver lequel. Le total reste
+              dans `fill.purchases` pour qui en a besoin — voir le budget. */}
+
+          {/* Le récapitulatif par couleur, qui se lit devant le coffre : on y va
+              une fois, pas une fois par couple. Chaque ligne se coche à mesure
+              qu'on la sort — voir `pulled`. */}
+          {fill.pull.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 border-t border-info/15">
+              <span className="text-[11px] text-dark-400">
+                À sortir de l&apos;écurie
+                <span className="text-dark-600 tabular-nums">
+                  {' '}
+                  {pulled.length}/{fill.pull.length}
+                </span>
+              </span>
+              {fill.pull.map((pull) => {
+                const out = pulled.includes(pull.colorId);
+                return (
+                  <button
+                    key={pull.colorId}
+                    type="button"
+                    onClick={() => togglePulled(pull.colorId)}
+                    title={
+                      out
+                        ? 'Sortie du coffre. Clique pour la remettre dans la liste.'
+                        : 'Clique quand tu l’as sortie du coffre.'
+                    }
+                    className={`text-xs cursor-pointer transition-colors ${
+                      out ? 'text-dark-600 line-through' : 'text-dark-300 hover:text-dark-100'
+                    }`}
+                  >
+                    {out && <Check size={11} className="inline -mt-0.5 mr-0.5 text-profit" />}
+                    {nameOf(pull.colorId)}{' '}
+                    <span
+                      className={`tabular-nums font-semibold ${out ? '' : 'text-dark-100'}`}
+                    >
+                      {pull.males > 0 && `${pull.males}♂`}
+                      {pull.males > 0 && pull.females > 0 && ' '}
+                      {pull.females > 0 && `${pull.females}♀`}
+                    </span>
+                    {pull.exhausts && (
+                      <span
+                        className={`text-[10px] ${out ? 'text-dark-600' : 'text-amber-400/70'}`}
+                        title="La fournée vide cette couleur : il n'en restera aucune fertile."
+                      >
+                        {' '}
+                        vidée
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              {pulled.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPulled([])}
+                  className="text-[10px] text-dark-500 hover:text-dark-300 cursor-pointer
+                    transition-colors"
+                >
+                  tout décocher
+                </button>
+              )}
             </div>
           )}
         </>

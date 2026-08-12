@@ -45,6 +45,7 @@ import {
 } from './search';
 import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
+import { aimsAt, ladderOf } from './ladder';
 import type { BreedingColor } from './costs';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
@@ -256,6 +257,19 @@ export type StablePlan = {
   /** Les gen 1 à acheter à l'hôtel de vente. */
   purchases: { colorId: string; males: number; females: number }[];
   pull: PullLine[];
+  /**
+   * Les accouplements que la politique a proposés et que l'échelle a refusés.
+   *
+   * Ils ne sont pas silencieusement effacés : un plan amputé sans rien dire est
+   * exactement ce qui rend un outil impossible à croire. Le compte se rend à
+   * l'écran, séparé par motif — voir `ladder.ts` pour la règle.
+   */
+  refused: {
+    /** Ne nomme aucune couleur : recopie de l'ascendance, zéro géneton. */
+    barren: number;
+    /** Nomme une couleur, mais hors du plan de l'échelle. */
+    offPlan: number;
+  };
   /** Places engagées, sur celles du parc. */
   places: number;
   capacity: number;
@@ -426,7 +440,19 @@ const readPlan = (
   };
 
   const couples = new Map<string, CoupleLine>();
+  const refused = { barren: 0, offPlan: 0 };
   let places = 0;
+
+  /**
+   * La règle de l'échelle, appliquée à ce que la politique entraînée propose.
+   *
+   * Elle n'est pas un filtre d'affichage : un croisement qui ne nomme rien
+   * **stérilise ses deux parents** et ne rend aucun géneton, donc le proposer
+   * coûte deux montures pour rien. La politique entraînée en propose — mesuré à
+   * 50,5 % des accouplements sur deux cents graines, contre 0 % pour l'échelle —
+   * et rien ne les écartait avant d'arriver à l'écran.
+   */
+  const ladder = ladderOf(input.colors);
 
   for (const [maleIndex, femaleIndex] of plan.crossings) {
     const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {
@@ -450,6 +476,22 @@ const readPlan = (
     const [male, maleMate, maleCycled] = side(maleIndex, 'M');
     const [female, femaleMate, femaleCycled] = side(femaleIndex, 'F');
     const aimed = aimedAt(maleMate, femaleMate);
+
+    // « Un croisement est admissible si et seulement si ses couleurs cibles sont
+    // non vides et toutes dans le plan. » Les deux moitiés se comptent à part :
+    // la première est une faute du couple, la seconde un désaccord avec la
+    // route, et l'éleveur ne les corrige pas du même geste.
+    if (maleMate && femaleMate) {
+      if (!aimed) {
+        refused.barren += 1;
+        continue;
+      }
+      if (!aimsAt(maleMate, femaleMate, input.colors, generations, ladder)) {
+        refused.offPlan += 1;
+        continue;
+      }
+    }
+
     const cost = (maleCycled ? 0 : 1) + (femaleCycled ? 0 : 1);
     places += cost;
 
@@ -507,6 +549,7 @@ const readPlan = (
   }
 
   return {
+    refused,
     couples: [...couples.values()].sort((a, b) => a.places - b.places),
     cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
     clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),

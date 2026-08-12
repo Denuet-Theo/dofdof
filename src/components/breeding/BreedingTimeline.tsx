@@ -797,6 +797,31 @@ const Fill = ({
         </span>
       </div>
 
+      {/* Ce que l'échelle a refusé. Rien n'est retiré en silence : un plan amputé
+          sans le dire est ce qui rend un outil impossible à croire, et le motif
+          se corrige de deux gestes différents — un couple sans cible est une
+          erreur d'appariement, un couple hors plan est un désaccord de route. */}
+      {fill.refused.barren + fill.refused.offPlan > 0 && (
+        <p className="text-[11px] text-amber-400/80">
+          {fill.refused.barren > 0 && (
+            <>
+              {fill.refused.barren} accouplement{fill.refused.barren > 1 ? 's' : ''} écarté
+              {fill.refused.barren > 1 ? 's' : ''} — <strong>rien à gagner</strong> : la cible
+              n&apos;est nommée par aucune couleur, donc le croisement recopie l&apos;ascendance
+              et stérilise ses deux parents pour zéro géneton.
+            </>
+          )}
+          {fill.refused.offPlan > 0 && (
+            <>
+              {fill.refused.barren > 0 ? ' ' : ''}
+              {fill.refused.offPlan} écarté{fill.refused.offPlan > 1 ? 's' : ''} comme{' '}
+              <strong>hors plan</strong> : la cible existe, mais elle ne sert aucun barreau de
+              l&apos;échelle.
+            </>
+          )}
+        </p>
+      )}
+
       {/* Le parcours : un bouton qui dit ce qu'il reste à faire et l'ouvre. Les
           listes en dessous restent lisibles — on veut pouvoir tout voir d'un coup
           d'œil — mais c'est ce bouton qui mène le geste, phase après phase. */}

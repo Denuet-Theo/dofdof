@@ -7,6 +7,7 @@ import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import BreedingTimeline from '@/components/breeding/BreedingTimeline';
+import AvailabilityPicker from '@/components/breeding/AvailabilityPicker';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
 import { stablePlan } from '@/lib/dofus/breeding/policy';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
@@ -21,6 +22,7 @@ import { nextBatches } from '@/lib/dofus/breeding/batches';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
+import { useAvailability } from '@/lib/hooks/useAvailability';
 import {
   OBJECTIVES,
   rankFor,
@@ -86,6 +88,10 @@ const BreedingPage = () => {
 
   const project = useBreedingProject(family);
   const timeline = useBreedingTimeline(family);
+  // Les créneaux où l'on peut agir. Le plan ne s'en sert pas encore — il faut
+  // d'abord que l'ordonnanceur sache viser une durée — mais le choix du jour se
+  // pose dès maintenant, parce que c'est le geste du matin.
+  const availability = useAvailability();
 
   // Le plan sélectionné fait foi : c'est la quantité retenue en le choisissant,
   // et le classement doit se relire dans les mêmes termes. Dérivé plutôt que
@@ -521,6 +527,18 @@ const BreedingPage = () => {
           qu'on s'y pose neuf fois sur dix est « est-ce que j'ai quelque chose à
           faire maintenant ». La faire descendre sous les réglages et les stocks
           obligerait à défiler pour lire un compte à rebours. */}
+      {/* Le préréglage du jour, juste avant le planning : c'est ce qui décide de
+          quand on pourra agir, donc ça se lit avant les consignes. */}
+      {availability.restored && (
+        <AvailabilityPicker
+          presets={availability.state.presets}
+          active={availability.active}
+          onChoose={availability.choose}
+          onSave={availability.savePreset}
+          onRemove={availability.removePreset}
+        />
+      )}
+
       {/* La fournée réelle voyage avec le planning : le plan du modèle est joué
           sur une graine, donc il sait quand recharger et pas avec quoi. Sans
           elle, « Charger l'enclos ×10 » est la seule consigne que l'écran donne

@@ -176,7 +176,13 @@ const BreedingCloneDialog = ({
           </div>
         )}
 
-        <div className="flex items-center gap-2 pt-1">
+        {/* Collée en bas, pour la même raison qu'à la saisie des naissances : un
+            bouton qui sort de l'écran fait croire que le geste est fait. Voir
+            `BreedingBirthDialog`, où ça a coûté une soirée de saisie. */}
+        <div
+          className="sticky bottom-0 -mx-1 px-1 py-3 flex items-center gap-2
+            bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"
+        >
           {done > 0 && (
             <Button
               size="sm"

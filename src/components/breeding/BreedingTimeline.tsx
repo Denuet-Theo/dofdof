@@ -62,7 +62,7 @@ import {
 } from '@/lib/dofus/breeding/policy';
 import type { BirthEntry } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
-import type { Individual } from '@/lib/dofus/breeding/stable';
+import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
@@ -678,8 +678,14 @@ const Fill = ({
     };
     for (const [male, female] of fill.raw.crossings) {
       const at = (index: number) => fill.mounts[index];
-      if (at(male)) add(at(male).id);
-      if (at(female)) add(at(female).id);
+      // Une féconde ne passe pas par l'enclos : son cycle est payé, elle
+      // s'accouple telle quelle. La lister ferait dépenser une place pour rien
+      // — et c'est bien ce que le compte dit déjà, puisque `places` ne facture
+      // que les parents qui doivent leur cycle.
+      for (const index of [male, female]) {
+        const mount = at(index);
+        if (mount && !mount.cycled) add(mount.id);
+      }
     }
     for (const index of fill.raw.cycles) if (fill.mounts[index]) add(fill.mounts[index].id);
     return [...names].sort(([a], [b]) => a.localeCompare(b, 'fr'));
@@ -775,6 +781,48 @@ const Fill = ({
   /** Les couples qui ne coûtent aucune place, ou ceux qui en coûtent. */
   const couplesOf = (places: 0 | 1) =>
     fill.couples.filter((line) => (places === 0 ? line.places === 0 : line.places > 0));
+
+  /**
+   * Ce qu'on met réellement en enclos : des **montures**, pas des couples.
+   *
+   * Le chargement ne se fait pas par paires. On ouvre l'enclos, on y glisse dix
+   * montures, et qui s'accouple avec qui se décide après, à la fenêtre
+   * d'accouplement — que `BreedingMatingPanel` reproduit déjà. Afficher ici la
+   * liste des couples obligeait à la retraduire de tête en liste de montures, et
+   * c'est à ce moment-là qu'on charge la mauvaise.
+   *
+   * Surtout, une **féconde n'a rien à y faire** : son cycle est payé, elle
+   * s'accouple telle quelle. Elle apparaissait pourtant dans la liste, du côté
+   * d'un couple dont l'autre parent, lui, devait être chargé — et la charger
+   * dépense une place pour rien. C'est ce que le compte savait déjà : `places`
+   * ne facture que les parents qui doivent leur cycle, si bien que vingt-trois
+   * couples tenaient dans quarante places. La liste, elle, ne le disait pas.
+   *
+   * D'où un décompte par couleur et par sexe : c'est ce qu'on cherche dans
+   * l'écurie du jeu, et les noms suivent pour désigner **lesquelles**.
+   */
+  const loadRows = () => {
+    const rows = new Map<string, { colorId: string; sex: Sex; ids: string[]; buys: number }>();
+    for (const line of fill.couples) {
+      for (const [sex, sideOf] of [
+        ['M', line.male],
+        ['F', line.female],
+      ] as const) {
+        // Le cycle est déjà payé : elle ne passe pas par l'enclos.
+        if (sideOf.cycled) continue;
+        const key = `${sideOf.colorId}|${sex}`;
+        const row = rows.get(key) ?? { colorId: sideOf.colorId, sex, ids: [], buys: 0 };
+        if (sideOf.mountIds.length > 0) row.ids.push(...sideOf.mountIds);
+        else row.buys += line.count;
+        rows.set(key, row);
+      }
+    }
+    return [...rows.values()].sort(
+      (a, b) =>
+        b.ids.length + b.buys - (a.ids.length + a.buys) ||
+        nameOf(a.colorId).localeCompare(nameOf(b.colorId))
+    );
+  };
   const immediate = couplesOf(0).reduce((total, line) => total + line.count, 0);
 
   const nothing =
@@ -999,11 +1047,45 @@ const Fill = ({
                 <span className="text-[11px] font-semibold text-dark-300">
                   Puis la fournée à charger
                 </span>
-                <span className="text-[10px] text-dark-500">
-                  {fill.places}/{fill.capacity} places d’enclos
+                <span className="text-[10px] text-dark-500 tabular-nums">
+                  {loadRows().reduce((total, row) => total + row.ids.length + row.buys, 0)} monture
+                  {loadRows().reduce((total, row) => total + row.ids.length + row.buys, 0) > 1
+                    ? 's'
+                    : ''}{' '}
+                  · {fill.places}/{fill.capacity} places d’enclos
+                </span>
+                <span
+                  className="text-[10px] text-dark-600"
+                  title="Les fécondes n'y sont pas : leur cycle est payé, elles s'accouplent sans repasser par l'enclos. Qui s'accouple avec qui se décide après, à la fenêtre d'accouplement. Si le compte des montures est en deçà des places, la différence est en bas : les fécondations sans croisement, qui occupent une place chacune."
+                >
+                  fécondes exclues
                 </span>
               </div>
-              {couplesOf(1).map((line, index) => couple(line, `load-${index}`))}
+              {loadRows().map((row) => (
+                <div
+                  key={`${row.colorId}-${row.sex}`}
+                  className="flex flex-wrap items-center gap-2 text-xs"
+                >
+                  <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
+                    {row.ids.length + row.buys} ×
+                  </span>
+                  <span
+                    className={row.sex === 'M' ? 'text-info' : 'text-loss-light'}
+                    title={row.sex === 'M' ? 'Mâle' : 'Femelle'}
+                  >
+                    {row.sex === 'M' ? '♂' : '♀'}
+                  </span>
+                  <span className="text-dark-200">{nameOf(row.colorId)}</span>
+                  {row.buys > 0 && (
+                    <em className="not-italic text-dark-400">
+                      dont {row.buys} à acheter
+                    </em>
+                  )}
+                  {mountNames(row.ids).map(([name, count]) =>
+                    nameChip(name, count, `load-${row.colorId}-${row.sex}-${name}`)
+                  )}
+                </div>
+              ))}
             </div>
           )}
 

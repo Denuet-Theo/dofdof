@@ -123,6 +123,7 @@ const BreedingPage = () => {
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    recordEnclosExit,
     removeIndividual,
     recordBirths,
     recordClonings,
@@ -559,6 +560,7 @@ const BreedingPage = () => {
         }
         onRecordBirths={recordBirths}
         onRecordClonings={recordClonings}
+        onEnclosExit={recordEnclosExit}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

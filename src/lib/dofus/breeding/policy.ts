@@ -351,6 +351,7 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
   const generations = new Map(input.colors.map((color) => [color.id, color.generation]));
   const economy = economyView(input.colors, input.market);
   const strategy = strategyOf(champion);
+  const ladder = ladderOf(input.colors);
 
   const plan = planUnit(
     createSearcher({
@@ -369,6 +370,12 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       // occupent les places qui restaient. Voir `SearchConfig.purchases`, qui
       // garde le levier pour qui veut composer sans rien acquérir.
       purchases: input.purchases ?? true,
+      // La règle de l'échelle entre **dans** la recherche et non après elle.
+      // Filtrer le plan rendu laissait la recherche dépenser ses quarante places
+      // en croisements qu'on jetait ensuite : 22 propositions écartées sur 26, et
+      // une fournée retombée à 10 places sur 40. Ici, les places vont d'emblée à
+      // ce qui peut payer.
+      admissible: (male, female) => aimsAt(male, female, input.colors, generations, ladder) !== null,
     }),
     {
       mounts,
@@ -484,6 +491,18 @@ const readPlan = (
    * coûte deux montures pour rien. La politique entraînée en propose — mesuré à
    * 50,5 % des accouplements sur deux cents graines, contre 0 % pour l'échelle —
    * et rien ne les écartait avant d'arriver à l'écran.
+   *
+   * ## Pourquoi ce filet reste, alors que la recherche filtre déjà
+   *
+   * `SearchConfig.admissible` écarte ces croisements **avant** qu'ils coûtent une
+   * place, ce qui est le vrai correctif : filtrer ici seulement laissait la
+   * fournée retomber à dix places sur quarante, les places jetées n'étant
+   * reprises par personne. Ce qui suit ne devrait donc plus rien compter.
+   *
+   * On le garde parce qu'un compte à zéro est une **vérification**, pas un coût :
+   * le jour où les deux règles divergeront — un plan chargé d'ailleurs, un
+   * champion régénéré, un catalogue changé — le bandeau le dira au lieu de
+   * laisser passer.
    */
   const ladder = ladderOf(input.colors);
 

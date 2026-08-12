@@ -266,7 +266,29 @@ const BreedingBirthDialog = ({
   }, [recorded]);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Ce qui est né" size="xl">
+    <Modal
+      isOpen={isOpen}
+      // Fermer sur une saisie non enregistrée demande confirmation. Le brouillon
+      // n'est pas perdu — il attend la réouverture — mais rien ne le disait, et
+      // refermer après avoir cliqué quatorze issues donnait une écurie qui n'avait
+      // rien enregistré.
+      onClose={() => {
+        if (
+          done > 0 &&
+          !window.confirm(
+            `${done} naissance${done > 1 ? 's' : ''} saisie${done > 1 ? 's' : ''} ne ${
+              done > 1 ? 'sont' : 'est'
+            } pas encore enregistrée${done > 1 ? 's' : ''}. Fermer quand même ? Elles seront ` +
+              'toujours là en rouvrant.'
+          )
+        ) {
+          return;
+        }
+        onClose();
+      }}
+      title="Ce qui est né"
+      size="xl"
+    >
       <div className="space-y-5">
         <p className="text-[11px] text-dark-500">
           Un accouplement rend <strong>toujours</strong> un bébé : les pourcentages portent sur
@@ -320,7 +342,15 @@ const BreedingBirthDialog = ({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* La barre reste collée en bas de la fenêtre, et ce n'est pas du confort.
+            La fenêtre défile — quatorze couples font plusieurs écrans — et le
+            bouton était **sous** la pile : on cliquait ses issues, on refermait,
+            et rien n'était écrit. Une saisie qu'on croit faite est pire qu'une
+            saisie qu'on n'a pas commencée, parce qu'on ne la refait pas. */}
+        <div
+          className="sticky bottom-0 -mx-1 px-1 py-3 flex flex-wrap items-center gap-3
+            bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"
+        >
           <Button
             size="sm"
             disabled={saving || done === 0}
@@ -351,6 +381,17 @@ const BreedingBirthDialog = ({
             >
               <RotateCcw size={11} /> tout effacer
             </button>
+          )}
+
+          {/* Tant que ce n'est pas enregistré, le dire — en ambre, dans la barre
+              qu'on a sous les yeux. Le brouillon survit à la fermeture, mais rien
+              ne le disait, et une fournée saisie puis refermée passait pour
+              perdue. */}
+          {done > 0 && (
+            <span className="text-[11px] text-amber-400/90">
+              {done} saisie{done > 1 ? 's' : ''} <strong>pas encore enregistrée</strong>
+              {done > 1 ? 's' : ''}
+            </span>
           )}
 
           {done === total ? (

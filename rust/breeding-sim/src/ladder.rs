@@ -91,8 +91,8 @@
 //! | --- | --- | --- | --- | --- |
 //! | glouton | 1,9 % | 68,3 | 62,46 M | 11,80 M |
 //! | recherche / myope | 50,3 % | 9,9 | 36,65 M | 10,77 M |
-//! | échelle | **0 %** | 38,0 | 59,92 M | 11,89 M |
-//! | échelle + niveau réglé | **0 %** | 42,3 | **64,70 M** | **14,77 M** |
+//! | échelle | **0 %** | 39,0 | 60,48 M | 12,03 M |
+//! | échelle + niveau réglé | **0 %** | 42,0 | **65,38 M** | **14,68 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
@@ -125,9 +125,9 @@
 //! ## Ce qu'il fait encore mal
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
-//! de la gen 2 à la gen 9 ; l'échelle en sort 42,3 gen 10 quand le glouton en
+//! de la gen 2 à la gen 9 ; l'échelle en sort 42,0 gen 10 quand le glouton en
 //! sort 68,3, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
-//! La moisson rattrape une part de l'écart (+16,0 M mesurés) mais ne le comble
+//! La moisson rattrape une part de l'écart (+17,1 M mesurés) mais ne le comble
 //! pas : elle monnaie les hors-plan, elle ne les fait pas monter.
 //!
 //! Il **ne se réoriente pas** non plus. Le plan est arrêté à la première fournée
@@ -786,9 +786,9 @@ pub enum Purchasing {
     ///
     /// | régime | écart | t | gagne |
     /// | --- | --- | --- | --- |
-    /// | pool hérité, niveau réglé | **+1,13 M ± 0,30** | 3,80 | 550/1000 |
-    /// | départ de zéro, niveau réglé | −0,00 M ± 0,05 | −0,08 | 503/1000 |
-    /// | départ de zéro, niveau défaut | −0,05 M ± 0,02 | −2,32 | 446/1000 |
+    /// | pool hérité, niveau réglé | **+1,13 M ± 0,28** | 4,07 | 540/1000 |
+    /// | départ de zéro, niveau réglé | −0,09 M ± 0,04 | −2,01 | 450/1000 |
+    /// | départ de zéro, niveau défaut | −0,05 M ± 0,02 | −2,66 | 448/1000 |
     ///
     /// La prédiction écrite avant la mesure était l'**inverse** : un gain en
     /// partant de zéro, où tout vient des achats, et rien avec le pool hérité, où
@@ -879,8 +879,19 @@ pub struct LadderPolicy {
     pub purchasing: Purchasing,
     /// Apparier les stériles sans regarder leur sexe.
     ///
-    /// **Mesuré indifférent** : `−0,32 M ± 0,50` sur 200 graines appariées,
-    /// t = −0,64, 91 parties gagnées sur 200. Les deux effets s'annulent — à
+    /// **Ce n'est plus indifférent, et le tri gagne** : `−1,74 M ± 0,49` sur
+    /// 200 graines appariées, t = −3,54, 75 parties gagnées sur 200. Regarder le
+    /// sexe vaut donc 1,74 M.
+    ///
+    /// C'est la troisième fois que ce levier tranche autrement, et l'avertissement
+    /// ci-dessous l'avait annoncé : il bouge à chaque changement du modèle de
+    /// places ou du marché. Il a été indifférent (−0,32 M, t = −0,64) sous les prix
+    /// uniformes et le tourniquet d'achat ; la cloche et la phase d'achat informée
+    /// le font ressortir. Le défaut ne change pas — c'était déjà le tri — mais la
+    /// raison de le garder n'est plus « faute de mieux ».
+    ///
+    /// L'arithmétique qui suit explique pourquoi l'effet est fragile plutôt que
+    /// pourquoi il est nul : les deux effets s'annulent **en espérance** — à
     /// sexe égal le clone est certain, mais trier laisse des montures de même
     /// lignée dépareillées, et en espérance `M` mâles et `F` femelles rendent
     /// `M/2` et `F/2` clones dans les deux appariements.
@@ -906,8 +917,8 @@ pub struct LadderPolicy {
     ///
     /// | | avec moisson | sans moisson |
     /// | --- | --- | --- |
-    /// | pool hérité | **+11,67 M** (t = 21,5) | +4,72 M (t = 10,1) |
-    /// | départ de zéro | **−1,46 M** (t = −18,8) | −1,47 M (t = −18,6) |
+    /// | pool hérité | **+12,81 M** (t = 22,3) | +5,61 M (t = 12,8) |
+    /// | départ de zéro | **−1,09 M** (t = −15,5) | −1,10 M (t = −15,9) |
     ///
     /// Avec un parc hérité, la fécondité alimente la production de gen 10 à
     /// 500 000 pièce et vaut bien plus que la liquidation sacrifiée. En partant
@@ -1020,8 +1031,8 @@ impl LadderPolicy {
     ///
     /// | | écart | t | gagne |
     /// | --- | --- | --- | --- |
-    /// | pool hérité | **+5,81 M ± 0,54** | 10,71 | 159/200 |
-    /// | départ de zéro | **+2,66 M ± 0,11** | 24,83 | 197/200 |
+    /// | pool hérité | **+5,12 M ± 0,54** | 9,52 | 146/200 |
+    /// | départ de zéro | **+2,71 M ± 0,11** | 23,76 | 197/200 |
     ///
     /// Rejoué depuis `Gating::Off` — voir `reglage::ce_que_le_reglage_rapporte`.
     /// Le gain rétrécit d'un point et demi sur le pool hérité : les deux leviers

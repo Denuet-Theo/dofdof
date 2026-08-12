@@ -65,14 +65,18 @@ import { readFileSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const out = mkdtempSync(join(tmpdir(), 'dofdof-search-'));
+// Le compilateur est appelé par son point d'entrée et non par  : sous
+// Windows  est un , que  refuse de lancer sans shell
+// depuis Node 20.12, et le script mourait avant d'avoir rien vérifié.
 execFileSync(
-  'npx',
+  process.execPath,
   [
-    'tsc',
+    join(ROOT, 'node_modules/typescript/bin/tsc'),
     join(ROOT, 'src/lib/dofus/breeding/search.ts'),
     join(ROOT, 'src/lib/dofus/breeding/network.ts'),
     // `search.ts` reçoit son générateur en argument plutôt que de l'importer, donc
@@ -91,10 +95,10 @@ execFileSync(
   { stdio: 'inherit' }
 );
 
-const { planUnit, createSearcher, myopic, linearProbe } = await import(join(out, 'search.js'));
-const { censusOf, featuresOf, FEATURES } = await import(join(out, 'census.js'));
-const { seededRandom } = await import(join(out, 'random.js'));
-const { compile, evaluate } = await import(join(out, 'network.js'));
+const { planUnit, createSearcher, myopic, linearProbe } = await import(pathToFileURL(join(out, 'search.js')).href);
+const { censusOf, featuresOf, FEATURES } = await import(pathToFileURL(join(out, 'census.js')).href);
+const { seededRandom } = await import(pathToFileURL(join(out, 'random.js')).href);
+const { compile, evaluate } = await import(pathToFileURL(join(out, 'network.js')).href);
 
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const fixture = read('scripts/fixtures/search-parity.json');

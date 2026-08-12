@@ -194,9 +194,29 @@ export type SearchConfig = {
    * fonction de valeur jugerait alors une écurie qui n'existe pas.
    */
   sacrifices: boolean;
+  /**
+   * Proposer d'**acheter** des gen 1 pour compléter une fournée.
+   *
+   * Fermé dans le navigateur, et pour une raison qui ne se lit pas dans le
+   * modèle : une monture achetée arrive **fertile**, jamais féconde. Elle doit
+   * donc un cycle de jauges complet avant de pouvoir s'accoupler — un enclos, du
+   * carburant, des heures — là où l'éleveur demandait « commence par ce que je
+   * peux faire avec mon stock ». Proposer l'achat en premier geste, c'est
+   * répondre à côté de la question posée.
+   *
+   * On ferme l'action dans la recherche plutôt qu'en filtrant le plan après
+   * coup, exactement comme  : filtrer laisserait le recensement
+   * porter des achats qui n'ont pas lieu, et le réseau jugerait une écurie qui
+   * n'existe pas.
+   */
+  purchases?: boolean;
 };
 
-export const DEFAULT_SEARCH: SearchConfig = { iterations: 1500, sacrifices: true };
+export const DEFAULT_SEARCH: SearchConfig = {
+  iterations: 1500,
+  sacrifices: true,
+  purchases: true,
+};
 
 /* ------------------------------------------------------------- l'inventaire -- */
 
@@ -459,27 +479,41 @@ const candidatesOf = (
   }
 
   const pairs: [Side, Side, Mate, Mate][] = [];
+
+  // Les achats ne sont candidats que si l'appelant les autorise — et quand ils le
+  // sont, ils reprennent **exactement** leur place d'avant dans la liste. L'ordre
+  // des candidats décide des tirages : le déplacer, même sans rien retirer, fait
+  // diverger le portage du Rust sur les 80 plans de .
+  //
+  // Fermés, il ne reste que ce que l'écurie permet — « commence par les
+  // accouplements possibles dans mon stock » — et une fournée vide devient une
+  // réponse recevable, qui vaut mieux qu'un panier de courses.
+  const buying = searcher.config.purchases !== false;
+
   for (const m of males) {
     for (const f of females) {
       pairs.push([{ have: m }, { have: f }, mateOf(fertile[m]), mateOf(fertile[f])]);
     }
+    if (!buying) continue;
     for (const colorId of starters) {
       pairs.push([{ have: m }, { buy: colorId }, mateOf(fertile[m]), bought(colorId, 'F')]);
     }
   }
-  for (const f of females) {
-    for (const colorId of starters) {
-      pairs.push([{ buy: colorId }, { have: f }, bought(colorId, 'M'), mateOf(fertile[f])]);
+  if (buying) {
+    for (const f of females) {
+      for (const colorId of starters) {
+        pairs.push([{ buy: colorId }, { have: f }, bought(colorId, 'M'), mateOf(fertile[f])]);
+      }
     }
-  }
-  for (const maleColor of starters) {
-    for (const femaleColor of starters) {
-      pairs.push([
-        { buy: maleColor },
-        { buy: femaleColor },
-        bought(maleColor, 'M'),
-        bought(femaleColor, 'F'),
-      ]);
+    for (const maleColor of starters) {
+      for (const femaleColor of starters) {
+        pairs.push([
+          { buy: maleColor },
+          { buy: femaleColor },
+          bought(maleColor, 'M'),
+          bought(femaleColor, 'F'),
+        ]);
+      }
     }
   }
 

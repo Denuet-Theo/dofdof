@@ -135,6 +135,12 @@ export const driftSignals = (
       // Sans gain sur la recette, le couple est déjà dans l'arbre : le plan sait
       // le proposer, et le répéter ici ferait deux conseils pour un.
       if (!outlook || outlook.leap <= 0) continue;
+      // Et surtout : une cible que **aucune couleur ne nomme** n'est pas un
+      // raccourci, c'est une recopie. Le tri de cette fonction se fait par
+      // génération visée décroissante, si bien que sans ce test les couples les
+      // plus impossibles remontaient en tête — plus l'ascendance pousse la cible
+      // haut, plus il devient certain que rien ne la nomme.
+      if (outlook.targetColors.length === 0) continue;
 
       const signal: DriftSignal = {
         mount,

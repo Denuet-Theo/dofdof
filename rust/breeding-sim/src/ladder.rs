@@ -520,6 +520,54 @@ impl Ladder {
     /// Dépend de l'économie, donc ne peut pas se décider au chargement de
     /// l'arbre : `LadderPolicy` l'appelle à sa première fournée.
     pub fn crown(&mut self, catalog: &Catalog, economy: &crate::economy::Economy) {
+        self.crown_at(catalog, economy, None);
+    }
+
+    /// Les gen 10 que la couronne peut viser : une gen 9 et une gen 1 achetable.
+    ///
+    /// Publiée pour que la mesure puisse les énumérer — c'est le jeu de choix
+    /// dont `crown` ne retient que le mieux payé, et savoir ce que les autres
+    /// auraient valu est la seule façon de dire si ce choix a de la marge.
+    pub fn crown_candidates(
+        catalog: &Catalog,
+        blocks: &[Vec<ColorId>],
+    ) -> Vec<ColorId> {
+        let top = catalog.top_generation();
+        let ninth = top - 1;
+        let mut found: Vec<ColorId> = Vec::new();
+        for color in catalog.ids_at_generation(top) {
+            let Some([a, b]) = constituents(catalog, color) else {
+                continue;
+            };
+            let (high, low) = if catalog.generation(a) > catalog.generation(b) {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            if catalog.generation(high) != ninth || catalog.generation(low) != 1 {
+                continue;
+            }
+            if !blocks.iter().any(|block| block.contains(&low)) {
+                continue;
+            }
+            found.push(color);
+        }
+        found.sort_unstable();
+        found
+    }
+
+    /// La couronne, avec la possibilité de l'**imposer**.
+    ///
+    /// `choice` sert la mesure : forcer chaque gen 10 candidate à tour de rôle et
+    /// garder la meilleure après coup donne le **plafond** de ce qu'une
+    /// réorientation pourrait rapporter. Inutile de construire le mécanisme si ce
+    /// plafond est nul.
+    pub fn crown_at(
+        &mut self,
+        catalog: &Catalog,
+        economy: &crate::economy::Economy,
+        choice: Option<ColorId>,
+    ) {
         let top = catalog.top_generation();
         let ninth = top - 1;
 
@@ -542,7 +590,14 @@ impl Ladder {
         }
         candidates.sort_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
 
-        let Some(&(_, crown, target, partner)) = candidates.first() else {
+        // Imposée si on le demande, sinon la mieux payée. Une couronne imposée
+        // introuvable est une erreur d'appelant, pas un cas à rattraper en
+        // silence : on ne pose rien plutôt que de retomber sur un autre choix.
+        let picked = match choice {
+            Some(wanted) => candidates.iter().find(|c| c.1 == wanted).copied(),
+            None => candidates.first().copied(),
+        };
+        let Some((_, crown, target, partner)) = picked else {
             return;
         };
         // La gen 1 partenaire doit être achetable, donc rattachée à un bloc.
@@ -940,6 +995,12 @@ pub struct LadderPolicy {
     /// La couronne est posée une fois, à la première fournée : elle dépend des
     /// prix tirés par la partie.
     crowned: bool,
+    /// La couronne imposée, pour la mesure. `None` = la mieux payée du jour.
+    ///
+    /// Sert à chiffrer le **plafond** d'une réorientation : forcer chaque gen 10
+    /// candidate et garder la meilleure après coup donne ce qu'un oracle
+    /// gagnerait, donc ce qu'aucune règle ne peut dépasser.
+    forced_crown: Option<ColorId>,
     /// Les réglages d'unité, quand on en impose. Voir `with_strategies`.
     strategies: Option<[Strategy; MAX_UNITS]>,
     /// `pair_outlook` mémoïsé sur les deux signatures : les mêmes ascendances
@@ -966,6 +1027,7 @@ impl LadderPolicy {
             harvesting: true,
             next_starter: 0,
             crowned: false,
+            forced_crown: None,
             strategies: None,
             admissible: HashMap::new(),
         }
@@ -973,6 +1035,13 @@ impl LadderPolicy {
 
     pub fn ladder(&self) -> &Ladder {
         &self.ladder
+    }
+
+    /// Imposer la gen 10 visée, au lieu de prendre la mieux payée. Voir
+    /// `forced_crown` — c'est un instrument de mesure, pas un réglage de jeu.
+    pub fn with_forced_crown(mut self, crown: ColorId) -> Self {
+        self.forced_crown = Some(crown);
+        self
     }
 
     /// L'ordre de composition, et le seuil qui l'accompagne.
@@ -1597,7 +1666,8 @@ impl Policy for LadderPolicy {
         // La couronne dépend des prix du jour, que seule la partie connaît : on
         // la pose à la première fournée, une fois pour toutes.
         if !self.crowned {
-            self.ladder.crown(catalog, view.economy);
+            self.ladder
+                .crown_at(catalog, view.economy, self.forced_crown);
             self.admissible.clear();
             self.crowned = true;
         }

@@ -31,7 +31,7 @@
 
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, Strategy, play};
-use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
+use breeding_sim::ladder::{Crowning, Ladder, LadderPolicy, Route};
 use breeding_sim::trees::{Catalog, ColorId, muldo};
 
 const SEEDS: u32 = 200;
@@ -72,6 +72,23 @@ fn report(label: &str, economy: &Economy, ladder: &Ladder, tuned: bool) {
 
     println!("\n=== {label} ===");
     println!("{} gen 10 candidates : {:?}", candidates.len(), candidates);
+    // La décomposition de chaque candidate : sa gen 9 cible et sa gen 1 partenaire.
+    // Le travail de l'arbre ne dépend que de la gen 9 ; si les scores diffèrent à
+    // gen 9 égale, c'est le **partenaire** qui décide, donc ce que deviennent les
+    // ratés du dernier croisement.
+    for &color in &candidates {
+        if let Some(recipe) = catalog.color(color).recipes.first() {
+            let [a, b] = *recipe;
+            let (high, low) = if catalog.generation(a) > catalog.generation(b) { (a, b) } else { (b, a) };
+            println!(
+                "    {} = {} (gen {}) x {} (gen 1)",
+                catalog.slug(color),
+                catalog.slug(high),
+                catalog.generation(high),
+                catalog.slug(low)
+            );
+        }
+    }
     if candidates.len() < 2 {
         println!("  moins de deux choix : il n'y a rien à réorienter.");
         return;
@@ -94,24 +111,69 @@ fn report(label: &str, economy: &Economy, ladder: &Ladder, tuned: bool) {
         .map(|seed| run(&catalog, economy, ladder, None, seed, tuned))
         .collect();
 
+    // Le travail que chaque couronne réclame, calculé sur l'arbre et non mesuré :
+    // c'est le candidat au rôle de critère. S'il prédit le classement à prix
+    // plats, `crown` a de quoi arbitrer sans rien deviner.
+    let work: std::collections::HashMap<ColorId, f64> = candidates
+        .iter()
+        .map(|&color| {
+            let mut probe = ladder.clone();
+            probe.crown_at(&catalog, economy, Some(color));
+            (color, probe.work_per_summit())
+        })
+        .collect();
+
+    // Combien de couleurs voulues du plan **contiennent** chaque gen 1 partenaire.
+    // Hypothèse : plus le partenaire sert ailleurs, plus les ratés du dernier
+    // croisement retombent sur quelque chose que le plan réclame.
+    println!("\n  emploi des gen 1 partenaires dans le plan :");
+    let mut partners: Vec<ColorId> = candidates
+        .iter()
+        .filter_map(|&c| {
+            catalog.color(c).recipes.first().map(|&[a, b]| {
+                if catalog.generation(a) > catalog.generation(b) { b } else { a }
+            })
+        })
+        .collect();
+    partners.sort_unstable();
+    partners.dedup();
+    {
+        let mut probe = ladder.clone();
+        probe.crown_at(&catalog, economy, Some(candidates[0]));
+        for &partner in &partners {
+            let uses = probe
+                .recipe_of
+                .values()
+                .filter(|recipe| recipe.contains(&partner))
+                .count();
+            let in_block = probe.blocks.iter().filter(|b| b.contains(&partner)).count();
+            println!(
+                "    {:<12} : {uses} recettes du plan, {in_block} bloc(s)",
+                catalog.slug(partner)
+            );
+        }
+    }
+
     println!(
-        "\n{:<28} {:>11} {:>11}   écart au prix (moyenne)",
-        "couronne", "médiane", "moyenne"
+        "\n{:<28} {:>11} {:>11} {:>8}   écart au prix (moyenne)",
+        "couronne", "médiane", "moyenne", "travail"
     );
-    println!("{}", "-".repeat(78));
+    println!("{}", "-".repeat(88));
     println!(
-        "{:<28} {:>9.2} M {:>9.2} M   témoin",
+        "{:<28} {:>9.2} M {:>9.2} M {:>8}   témoin",
         "prix du jour (défaut)",
         median(&mut baseline.clone()) / 1e6,
-        mean(&baseline) / 1e6
+        mean(&baseline) / 1e6,
+        ""
     );
     for (color, scores) in &per_candidate {
         let delta = mean(scores) - mean(&baseline);
         println!(
-            "{:<28} {:>9.2} M {:>9.2} M   {:+8.2} M",
+            "{:<28} {:>9.2} M {:>9.2} M {:>8.1}   {:+8.2} M",
             format!("imposée : {color:?}"),
             median(&mut scores.clone()) / 1e6,
             mean(scores) / 1e6,
+            work.get(color).copied().unwrap_or(0.0),
             delta / 1e6
         );
     }
@@ -274,4 +336,69 @@ fn main() {
     let mut flat = base;
     flat.top_value_range = (flat.top_value, flat.top_value);
     report("prix aplatis — toutes à 600 000", &flat, &ladder, true);
+
+    // ## Le critère, mis à l'épreuve
+    //
+    // Le relevé ci-dessus dit que le **partenaire** décide, pas le prix.
+    // `Crowning::PartnerThenPrice` prend donc le partenaire le plus employé par le
+    // plan, puis le mieux payé parmi les candidates qui le portent. Reste à savoir
+    // si ce que ça gagne en difficulté d'atteinte dépasse ce que ça abandonne en
+    // prix — les gen 10 vont de 300 000 à 1 000 000, donc forcer le partenaire
+    // coûte parfois cher.
+    println!("\n=== le critère : « partenaire puis prix » − « prix seul » ===");
+    duel("pool hérité, niveau réglé", &base, &ladder, true);
+    duel("pool hérité, niveau défaut", &base, &ladder, false);
+    duel("départ de zéro, niveau réglé", &scratch, &ladder, true);
+}
+
+/// Le critère contre le prix seul, sur graines appariées.
+fn duel(label: &str, economy: &Economy, ladder: &Ladder, tuned: bool) {
+    let catalog = muldo();
+    let run = |mode: Crowning, seed: u32| {
+        let mut policy = LadderPolicy::with_ladder(ladder.clone());
+        policy.crowning = mode;
+        if tuned {
+            policy = policy
+                .with_strategies([Strategy::default(); MAX_UNITS])
+                .tuned_for(economy);
+        }
+        play(&catalog, economy, &mut policy, seed)
+    };
+
+    let seeds = 1_000u32;
+    let mut deltas = Vec::new();
+    let mut wins = 0;
+    // Les égalités comptent : quand le prix tombe déjà sur le bon partenaire, les
+    // deux critères jouent la même partie. Les confondre avec des défaites ferait
+    // lire « gagne la moitié du temps » là où il gagne la plupart des parties où il
+    // change quelque chose.
+    let mut ties = 0;
+    let mut gen10 = (0.0, 0.0);
+    for seed in 0..seeds {
+        let after = run(Crowning::PartnerThenPrice, seed);
+        let before = run(Crowning::PriceOnly, seed);
+        let delta = after.score as f64 - before.score as f64;
+        if delta > 0.0 {
+            wins += 1;
+        } else if delta == 0.0 {
+            ties += 1;
+        }
+        deltas.push(delta);
+        gen10.0 += after.gen10_held as f64;
+        gen10.1 += before.gen10_held as f64;
+    }
+
+    let n = deltas.len() as f64;
+    let delta = mean(&deltas);
+    let variance = deltas.iter().map(|d| (d - delta).powi(2)).sum::<f64>() / (n - 1.0);
+    let stderr = (variance / n).sqrt();
+    println!(
+        "{label:<32} {:+7.2} M ± {:.2}, t = {:>6.2}, gagne {wins:>4}/{} décidées sur {seeds} ({ties} nulles), gen10 {:.2} → {:.2}",
+        delta / 1e6,
+        stderr / 1e6,
+        if stderr > 0.0 { delta / stderr } else { 0.0 },
+        seeds - ties,
+        gen10.1 / n,
+        gen10.0 / n,
+    );
 }

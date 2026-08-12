@@ -85,14 +85,19 @@
 //!
 //! ## Ce qu'il vaut
 //!
+//! **Il bat désormais le glouton** : 69,20 M contre 66,33 M pour son meilleur
+//! objectif, et sans proposer un seul croisement sans cible là où le glouton en
+//! propose 1,9 %. C'est le choix de couronne qui a fait la différence — voir
+//! `Crowning`.
+//!
 //! Deux cents graines, médiane du score, contre les politiques du dépôt :
 //!
 //! | politique | sans cible | gen 10 | pool hérité | départ de zéro |
 //! | --- | --- | --- | --- | --- |
 //! | glouton | 1,9 % | 68,3 | 62,46 M | 11,80 M |
 //! | recherche / myope | 50,3 % | 9,9 | 36,65 M | 10,77 M |
-//! | échelle | **0 %** | 39,0 | 60,48 M | 12,03 M |
-//! | échelle + niveau réglé | **0 %** | 42,0 | **65,38 M** | **14,68 M** |
+//! | échelle | **0 %** | 44,9 | 64,33 M | 12,01 M |
+//! | échelle + niveau réglé | **0 %** | 48,8 | **69,20 M** | **14,55 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
@@ -125,9 +130,9 @@
 //! ## Ce qu'il fait encore mal
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
-//! de la gen 2 à la gen 9 ; l'échelle en sort 42,0 gen 10 quand le glouton en
+//! de la gen 2 à la gen 9 ; l'échelle en sort 48,8 gen 10 quand le glouton en
 //! sort 68,3, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
-//! La moisson rattrape une part de l'écart (+17,1 M mesurés) mais ne le comble
+//! La moisson rattrape une part de l'écart (+18,9 M mesurés) mais ne le comble
 //! pas : elle monnaie les hors-plan, elle ne les fait pas monter.
 //!
 //! Il **ne se réoriente pas** non plus. Le plan est arrêté à la première fournée
@@ -556,6 +561,52 @@ impl Ladder {
         found
     }
 
+    /// La gen 10 à viser quand on choisit le **partenaire** avant le prix.
+    ///
+    /// Le partenaire retenu est la gen 1 que le plan emploie le plus, mesuré sur le
+    /// plan **avant** couronnement — c'est le seul état disponible au moment du
+    /// choix, et il est le même pour toutes les candidates, donc il ne favorise
+    /// aucune. Parmi les candidates qui le portent, on prend la mieux payée.
+    ///
+    /// Voir `Crowning` pour ce que ça vaut et pour ce qui reste inexpliqué.
+    pub fn best_partner_crown(
+        &self,
+        catalog: &Catalog,
+        economy: &crate::economy::Economy,
+    ) -> Option<ColorId> {
+        let candidates = Self::crown_candidates(catalog, &self.blocks);
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // La gen 1 partenaire de chaque candidate.
+        let partner_of = |color: ColorId| -> Option<ColorId> {
+            let [a, b] = constituents(catalog, color)?;
+            Some(if catalog.generation(a) > catalog.generation(b) { b } else { a })
+        };
+
+        // Combien de recettes du plan emploient chaque gen 1. Le maximum décide, et
+        // l'identifiant tranche les égalités pour rester déterministe.
+        let uses = |partner: ColorId| -> usize {
+            self.recipe_of
+                .values()
+                .filter(|recipe| recipe.contains(&partner))
+                .count()
+        };
+
+        let best_partner = candidates
+            .iter()
+            .filter_map(|&color| partner_of(color))
+            .max_by_key(|&partner| (uses(partner), std::cmp::Reverse(partner)))?;
+
+        // Parmi celles qui portent ce partenaire, la mieux payée du jour.
+        candidates
+            .iter()
+            .copied()
+            .filter(|&color| partner_of(color) == Some(best_partner))
+            .max_by_key(|&color| (economy.value_of(catalog, color), std::cmp::Reverse(color)))
+    }
+
     /// La couronne, avec la possibilité de l'**imposer**.
     ///
     /// `choice` sert la mesure : forcer chaque gen 10 candidate à tour de rôle et
@@ -702,6 +753,25 @@ impl Ladder {
         }
     }
 
+    /// Le travail que le plan réclame pour **une** unité de son sommet.
+    ///
+    /// Somme des demandes propagées : chaque unité d'une couleur voulue se produit
+    /// par un croisement, donc `demand` compte déjà les croisements, multiplicités
+    /// comprises. Le taux de réussite n'y figure pas — il est le même partout, donc
+    /// il multiplie tout par la même constante et ne change aucun classement. Les
+    /// gen 1 non plus : elles s'achètent.
+    ///
+    /// ## Ce qu'il n'explique pas
+    ///
+    /// Il ne prend que **trois valeurs**, une par gen 9, alors que les scores des
+    /// vingt couronnes s'étalent sur quinze millions. Le doré (67) et l'ébène (67)
+    /// demandent le même travail et sont aux deux bouts du classement. Gardé parce
+    /// que c'est la mesure qui a permis de l'écarter, et qu'un lecteur tenté par la
+    /// même idée doit trouver la réfutation avant de la refaire. Voir `Crowning`.
+    pub fn work_per_summit(&self) -> f64 {
+        self.demand.values().sum()
+    }
+
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.wanted.is_empty()
@@ -827,6 +897,70 @@ pub enum Ordering {
 ///
 /// Et jusqu'ici les deux moitiés d'une même fournée ne raisonnaient pas pareil :
 /// `compose` choisissait au retard relatif, l'achat tournait en rond.
+/// Comment la couronne se choisit parmi les vingt gen 10 candidates.
+///
+/// Les candidates sont 4 gen 9 × 5 gen 1 partenaires. `crown` ne regardait que le
+/// **prix**, et le relevé de `bin/crown` dit que c'est le partenaire qui décide :
+/// à prix aplatis, le doré gagne dans les **quatre** groupes de gen 9, de dix
+/// millions.
+///
+/// | partenaire | ambre | corail | azur | aigue-marine |
+/// | --- | --- | --- | --- | --- |
+/// | **doré** | **68,9** | **65,7** | **66,1** | **66,4** |
+/// | indigo | 58,8 | 54,7 | 57,1 | 57,0 |
+/// | pourpre | 54,9 | 51,8 | 53,8 | 53,9 |
+/// | orchidée | 54,2 | 51,7 | 53,2 | 53,3 |
+/// | ébène | 53,9 | 52,6 | 53,1 | 53,6 |
+///
+/// ## Un fait sans mécanisme
+///
+/// Deux explications ont été essayées et **réfutées**, ce qui vaut d'être écrit
+/// pour ne pas les réessayer :
+///
+/// - le **travail de l'arbre** (`Ladder::work_per_summit`) ne prend que trois
+///   valeurs, une par gen 9. Doré et ébène en demandent autant — 67 — et sont à
+///   quinze millions d'écart ;
+/// - l'**emploi du partenaire** dans les recettes du plan classe doré 4, ébène 3,
+///   pourpre 3, indigo 2, orchidée 1. Ça explique la victoire du doré et rate le
+///   reste : l'ébène est deuxième en emploi et dernier en score.
+///
+/// Le critère est donc **ajusté sur une observation** et non dérivé d'un mécanisme.
+/// C'est la mesure qui le justifie, rien d'autre. L'explication est probablement
+/// dans ce que deviennent les **ratés** du dernier croisement — une gen 9 × gen 1
+/// échoue une fois sur deux et rend une monture basse portant l'ascendance gen 9 —
+/// mais elle reste à établir.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Crowning {
+    /// La gen 10 la mieux payée du jour, sans regarder son partenaire. Gardé pour
+    /// la mesure.
+    PriceOnly,
+    /// D'abord le partenaire le plus employé par le plan, puis le mieux payé parmi
+    /// les candidates qui le portent. **Le défaut.**
+    ///
+    /// 1 000 graines appariées, écart au prix seul :
+    ///
+    /// | régime | écart | t | décidées | gen 10 |
+    /// | --- | --- | --- | --- | --- |
+    /// | pool hérité, niveau réglé | **+3,12 M ± 0,31** | 10,05 | 505/776 | 42,4 → **48,9** |
+    /// | pool hérité, niveau défaut | **+2,98 M ± 0,28** | 10,67 | 507/776 | 38,2 → 43,9 |
+    /// | départ de zéro, niveau réglé | +0,02 M ± 0,04 | 0,37 | 346/671 | 0,6 → 0,7 |
+    ///
+    /// Les **nulles** comptent : 224 graines sur mille voient le prix tomber déjà
+    /// sur le bon partenaire, et les deux critères y jouent la même partie. Les
+    /// confondre avec des défaites ferait lire « gagne la moitié du temps » là où le
+    /// critère gagne 65 % des parties où il change quelque chose.
+    ///
+    /// Le gain porte surtout sur les **gen 10 tenues** : +6,5 en moyenne. C'est ce
+    /// qu'on attend d'un choix de route plus facile à monter, et c'est ce qui
+    /// distingue ce levier des précédents — il ne grappille pas des kamas, il fait
+    /// arriver plus de montures au sommet.
+    ///
+    /// Neutre en partant de zéro, où rien n'atteint la gen 10 dans l'horizon : le
+    /// choix du sommet n'y décide de rien.
+    #[default]
+    PartnerThenPrice,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Purchasing {
     /// Un bloc après l'autre, indéfiniment. Ne regarde ni la demande, ni ce que
@@ -932,11 +1066,13 @@ pub struct LadderPolicy {
     pub gating: Gating,
     /// Comment les gen 1 achetées se choisissent. Voir `Purchasing`.
     pub purchasing: Purchasing,
+    /// Comment la couronne se choisit. Voir `Crowning`.
+    pub crowning: Crowning,
     /// Apparier les stériles sans regarder leur sexe.
     ///
-    /// **Ce n'est plus indifférent, et le tri gagne** : `−1,74 M ± 0,49` sur
-    /// 200 graines appariées, t = −3,54, 75 parties gagnées sur 200. Regarder le
-    /// sexe vaut donc 1,74 M.
+    /// **Ce n'est plus indifférent, et le tri gagne** : `−2,12 M ± 0,49` sur
+    /// 200 graines appariées, t = −4,31, 75 parties gagnées sur 200. Regarder le
+    /// sexe vaut donc 2,12 M.
     ///
     /// C'est la troisième fois que ce levier tranche autrement, et l'avertissement
     /// ci-dessous l'avait annoncé : il bouge à chaque changement du modèle de
@@ -972,8 +1108,8 @@ pub struct LadderPolicy {
     ///
     /// | | avec moisson | sans moisson |
     /// | --- | --- | --- |
-    /// | pool hérité | **+12,81 M** (t = 22,3) | +5,61 M (t = 12,8) |
-    /// | départ de zéro | **−1,09 M** (t = −15,5) | −1,10 M (t = −15,9) |
+    /// | pool hérité | **+14,73 M** (t = 25,7) | +6,87 M (t = 15,1) |
+    /// | départ de zéro | **−1,18 M** (t = −17,2) | −1,18 M (t = −17,6) |
     ///
     /// Avec un parc hérité, la fécondité alimente la production de gen 10 à
     /// 500 000 pièce et vaut bien plus que la liquidation sacrifiée. En partant
@@ -1022,6 +1158,7 @@ impl LadderPolicy {
             ordering: Ordering::default(),
             gating: Gating::default(),
             purchasing: Purchasing::default(),
+            crowning: Crowning::default(),
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
@@ -1100,8 +1237,8 @@ impl LadderPolicy {
     ///
     /// | | écart | t | gagne |
     /// | --- | --- | --- | --- |
-    /// | pool hérité | **+5,12 M ± 0,54** | 9,52 | 146/200 |
-    /// | départ de zéro | **+2,71 M ± 0,11** | 23,76 | 197/200 |
+    /// | pool hérité | **+5,12 M ± 0,58** | 8,87 | 149/200 |
+    /// | départ de zéro | **+2,72 M ± 0,12** | 22,81 | 195/200 |
     ///
     /// Rejoué depuis `Gating::Off` — voir `reglage::ce_que_le_reglage_rapporte`.
     /// Le gain rétrécit d'un point et demi sur le pool hérité : les deux leviers
@@ -1666,8 +1803,15 @@ impl Policy for LadderPolicy {
         // La couronne dépend des prix du jour, que seule la partie connaît : on
         // la pose à la première fournée, une fois pour toutes.
         if !self.crowned {
-            self.ladder
-                .crown_at(catalog, view.economy, self.forced_crown);
+            let choice = self.forced_crown.or_else(|| match self.crowning {
+                Crowning::PriceOnly => None,
+                // Le partenaire d'abord : voir `Crowning` pour le relevé, et pour
+                // les deux explications que la mesure a écartées.
+                Crowning::PartnerThenPrice => {
+                    self.ladder.best_partner_crown(catalog, view.economy)
+                }
+            });
+            self.ladder.crown_at(catalog, view.economy, choice);
             self.admissible.clear();
             self.crowned = true;
         }

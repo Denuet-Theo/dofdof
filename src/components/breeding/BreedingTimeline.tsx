@@ -28,6 +28,7 @@ import {
   elapsedSeconds,
   formatCountdown,
   elapsedFor,
+  needsLoading,
   blockedOn,
   formatWallClock,
   gaugeChanges,
@@ -725,39 +726,6 @@ const Fill = ({
       pulled.includes(colorId) ? pulled.filter((id) => id !== colorId) : [...pulled, colorId]
     );
 
-  /**
-   * Les couleurs déjà sorties du coffre, pointées à la main.
-   *
-   * Douze lignes se sortent une par une, dans une écurie qui trie autrement, et
-   * on s'y perd sans marque — c'est le genre de liste qu'on recommence trois
-   * fois.
-   *
-   * Le pointage ne dure que la visite : il ne décrit pas l'écurie, seulement où
-   * on en est de **ce** passage devant le coffre. L'écrire en base en ferait un
-   * état à réconcilier — sorti ici, pas là, et le jour où deux onglets ne disent
-   * pas la même chose il faudrait trancher pour rien. La clé porte la fournée,
-   * donc un plan qui change repart d'une liste vierge au lieu de traîner les
-   * coches d'avant.
-   */
-  const pullKey = fill.pull
-    .map((pull) => `${pull.colorId}:${pull.males}:${pull.females}`)
-    .join('|');
-  const [pulledAt, setPulledAt] = useState<{ key: string; done: string[] }>({
-    key: pullKey,
-    done: [],
-  });
-  // Comparée plutôt que remise à zéro par un effet : une fournée qui change rend
-  // le pointage caduc à l'instant même, sans un rendu de battement où les coches
-  // de l'ancienne liste s'appliqueraient à la nouvelle.
-  const pulled = pulledAt.key === pullKey ? pulledAt.done : [];
-
-  const setPulled = (done: string[]) => setPulledAt({ key: pullKey, done });
-
-  const togglePulled = (colorId: string) =>
-    setPulled(
-      pulled.includes(colorId) ? pulled.filter((id) => id !== colorId) : [...pulled, colorId]
-    );
-
   const toRecord = useMemo(() => couplesToRecord(fill), [fill]);
   const toClone = useMemo(
     () => (generations ? cloningsToRecord(fill, generations) : []),
@@ -1016,44 +984,44 @@ const Fill = ({
                   Les sortir de l’enclos
                 </Button>
               )}
-              {/* Un bouton par enclos, et pas un seul pour le parc : on en remplit
-                  un, on le lance, on passe au suivant. Le temps de chercher les
-                  montures dans le coffre, le premier a une heure d'avance sur le
-                  dernier — et c'est cette avance qui décide de l'ordre dans lequel
-                  on ira les récupérer. */}
-              {onStartTrack && enclosTracks.length > 0 && (
-                <span className="w-full flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[11px] text-dark-400">chargé :</span>
-                  {enclosTracks.map(({ id, label, started, paused, blocked }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => (started ? onToggleTrack?.(id) : onStartTrack(id))}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border
-                        transition-all cursor-pointer ${
-                          !started
-                            ? 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50'
-                            : paused
-                              ? 'bg-dark-900/60 text-dark-400 border-dark-600/50 hover:border-kamas/50'
-                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:border-emerald-400/60'
-                        }`}
-                      title={
-                        !started
-                          ? `Lancer le compteur de ${label} — il vient d’être chargé.`
-                          : paused
-                            ? `${label} est arrêté. Le relancer.`
-                            : blocked
-                              ? `${label} attend ${GAUGE_LABELS[blocked]}, qui ne tourne pas sans toi — l’arrêter avant de partir.`
-                              : `${label} tourne. Il n’attend qu’une stat, il ira au bout tout seul.`
-                      }
-                    >
-                      {label}
-                      {started && (paused ? ' ⏸' : blocked ? ' ⚠' : ' ✓')}
-                    </button>
-                  ))}
-                </span>
-              )}
             </>
+          )}
+          {/* Un bouton par enclos, et pas un seul pour le parc : on en remplit
+              un, on le lance, on passe au suivant. Le temps de chercher les
+              montures dans le coffre, le premier a une heure d'avance sur le
+              dernier — et c'est cette avance qui décide de l'ordre dans lequel
+              on ira les récupérer. */}
+          {onStartTrack && enclosTracks.length > 0 && (
+            <span className="w-full flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-dark-400">chargé :</span>
+              {enclosTracks.map(({ id, label, started, paused, blocked }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => (started ? onToggleTrack?.(id) : onStartTrack(id))}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold border
+                    transition-all cursor-pointer ${
+                      !started
+                        ? 'bg-dark-800/80 text-dark-300 border-dark-600/50 hover:border-kamas/50'
+                        : paused
+                          ? 'bg-dark-900/60 text-dark-400 border-dark-600/50 hover:border-kamas/50'
+                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:border-emerald-400/60'
+                    }`}
+                  title={
+                    !started
+                      ? `Lancer le compteur de ${label} — il vient d’être chargé.`
+                      : paused
+                        ? `${label} est arrêté. Le relancer.`
+                        : blocked
+                          ? `${label} attend ${GAUGE_LABELS[blocked]}, qui ne tourne pas sans toi — l’arrêter avant de partir.`
+                          : `${label} tourne. Il n’attend qu’une stat, il ira au bout tout seul.`
+                  }
+                >
+                  {label}
+                  {started && (paused ? ' ⏸' : blocked ? ' ⚠' : ' ✓')}
+                </button>
+              ))}
+            </span>
           )}
           {step !== 'load' && (
             <button
@@ -1633,13 +1601,38 @@ const BreedingTimeline = ({
    * Prendre l'horloge du plan ferait sortir du cadre les enclos lancés plus tôt,
    * qui sont pourtant ceux qu'on va récupérer en premier.
    */
-  const leading = Math.max(elapsed, ...plan.tracks.map((track) => elapsedOf(track.id)));
+  /**
+   * Les enclos du plan, et ceux que l'éleveur a déclarés chargés.
+   *
+   * Tant qu'aucun ne l'est, la fournée **n'a pas commencé** : le plan est affiché,
+   * rien n'est en jeu. Le ruban le disait pourtant en marche, parce que son
+   * horloge partait à l'affichage.
+   */
+  const loadable = plan.tracks.filter((track) => needsLoading(track.id));
+  const loadedTracks = loadable.filter((track) => clock.tracks?.[track.id] !== undefined);
+  const running = loadable.length === 0 || loadedTracks.length > 0;
+
+  /**
+   * L'avance de la piste la plus avancée : c'est elle qui cadre le ruban.
+   *
+   * Sur un plan à enclos, elle se lit sur les enclos **chargés** et non sur
+   * l'horloge du plan — sans quoi un parc à moitié rempli ferait courir le cadre
+   * sur des enclos vides.
+   */
+  const leading = running
+    ? Math.max(
+        loadable.length === 0 ? elapsed : 0,
+        ...plan.tracks.map((track) => elapsedOf(track.id))
+      )
+    : 0;
   const horizon = planHorizon(plan);
   const upcoming = agenda(plan, elapsedOf);
   const next = nextAction(plan, elapsedOf);
   const nextDate = next ? wallClockAt(clock, next.at, now) : null;
   const NextIcon = next ? KIND_ICON[next.kind] : CalendarClock;
-  const exhausted = elapsed >= horizon;
+  // Épuisée se lit sur la piste la plus avancée, pas sur l'horloge du plan : une
+  // fournée jamais chargée n'est pas finie, elle n'a pas commencé.
+  const exhausted = running && leading >= horizon;
 
   return (
     <div className="glass rounded-2xl px-5 py-4 space-y-4">
@@ -1649,8 +1642,22 @@ const BreedingTimeline = ({
         {plan.label && <span className="text-xs text-dark-500 truncate">{plan.label}</span>}
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[11px] text-dark-500 tabular-nums">
-            {paused ? 'en pause' : `démarrée il y a ${formatCountdown(elapsed)}`}
+          {/* « Démarrée il y a 3 h » sur une fournée que personne n'a chargée
+              était le mensonge le plus coûteux du ruban : tout ce qui suit —
+              agenda, rappel, heure de récupération — en découlait. */}
+          <span
+            className={`text-[11px] tabular-nums ${running ? 'text-dark-500' : 'text-amber-400/80'}`}
+            title={
+              running
+                ? undefined
+                : 'Le compte à rebours part quand tu déclares un enclos chargé, pas quand le plan s’affiche.'
+            }
+          >
+            {!running
+              ? 'pas encore chargée'
+              : paused
+                ? 'en pause'
+                : `démarrée il y a ${formatCountdown(leading)}`}
           </span>
           {/* Le rappel sonore. L'activation **est** le geste que le navigateur
               exige avant tout son : on réveille le contexte audio là, pas au

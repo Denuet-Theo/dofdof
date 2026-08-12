@@ -238,9 +238,26 @@ export const isPaused = (clock: TimelineClock) => clock.pausedAt !== null;
  * décompter les pauses piste par piste demanderait de savoir laquelle tournait
  * quand — une complication pour une distinction qui n'existe pas.
  */
+/**
+ * Les pistes qui ne comptent qu'une fois **réellement chargées**.
+ *
+ * Un enclos ne se met pas à tourner parce qu'un plan s'affiche : il tourne quand
+ * l'éleveur y a mis des montures, ce qu'il est le seul à savoir et qu'il déclare
+ * par `startTrack`. Les autres pistes — l'écurie, l'hôtel de vente — n'ont rien à
+ * charger et suivent l'horloge du plan.
+ */
+export const needsLoading = (trackId: string): boolean => trackId.startsWith('enclos');
+
 export const elapsedFor = (clock: TimelineClock, trackId: string, now: number): number => {
   const own = clock.tracks?.[trackId];
-  if (!own) return elapsedSeconds(clock, now);
+  // Un enclos sans horloge propre n'a pas été chargé : il ne décompte pas.
+  //
+  // Il suivait celle du plan, si bien que le compte à rebours démarrait à
+  // l'**affichage** de la fournée — l'app annonçait « prêt dans 6 h » pour un
+  // enclos vide, et l'heure de récupération était fausse de tout le temps passé
+  // à chercher les montures dans le coffre. Personne ne charge quarante places à
+  // la seconde où le plan apparaît.
+  if (!own) return needsLoading(trackId) ? 0 : elapsedSeconds(clock, now);
   const stopped = own.pausedAt ?? now;
   return Math.max(0, (stopped - own.startedAt) / 1000 - own.pausedSeconds);
 };

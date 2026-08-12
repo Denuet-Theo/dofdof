@@ -201,6 +201,21 @@ pub struct Economy {
     /// **Zéro par défaut**, donc toutes les mesures publiées restent valides et
     /// facturer la stérilité est un choix explicite.
     pub barren_crossing_malus: i64,
+    /// Ce qu'une fournée **réussie** rapporte, tous produits confondus.
+    ///
+    /// Le seul terme du réglage du rythme qui ne se déduise pas de l'économie :
+    /// les fournées et le carburant se calculent, ce qu'une fournée rend dépend de
+    /// la politique. Exposé plutôt que deviné, parce qu'il décide du choix de
+    /// bande et qu'un chiffre caché y serait indiscutable.
+    ///
+    /// Calibré sur le balayage de `bin/windows` : entre la bande 0 au niveau 50 et
+    /// la bande 2 au niveau 36, 59,6 fournées de plus valent 30,2 M de score plus
+    /// 41,9 M de carburant, soit 1,21 M la fournée à 40,8 % de réussite — donc
+    /// environ trois millions par réussite.
+    ///
+    /// À rejouer quand les prix bougent : c'est un rapport entre un score et un
+    /// carburant, et les deux sont dans `economy.toml`.
+    pub value_per_success: i64,
     /// Prix forfaitaire d'un chargement du bloc, tant que les prix par jauge
     /// manquent.
     pub batch_cost: i64,
@@ -261,6 +276,7 @@ impl Default for Economy {
             availability: [[(0.0, 0.0); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
             batches: 100,
             barren_crossing_malus: 0,
+            value_per_success: 3_000_000,
             batch_cost: 150_000,
             starter_price: 1_000,
             amber_per_generation: 20_000,
@@ -369,6 +385,41 @@ impl Economy {
             probe += 1;
         }
         None
+    }
+
+    /// Combien de fournées de `hours` tiennent dans `horizon`.
+    ///
+    /// Sans fenêtre, c'est la division. Avec, il faut dérouler le temps : une
+    /// fournée qui finit hors créneau attend, et cette attente décale toutes les
+    /// suivantes. C'est ce qui fait qu'une durée un peu plus longue peut coûter
+    /// bien plus qu'un peu — trente minutes de dépassement valent cinq heures.
+    ///
+    /// Le déroulé est le même que celui de `play`, en plus court : on ne suit qu'un
+    /// enclos, ce qui suffit à comparer deux rythmes.
+    pub fn loads_within(&self, horizon: f64, hours: f64) -> i64 {
+        if hours <= 0.0 {
+            return 0;
+        }
+        if !self.has_windows() {
+            return (horizon / hours).floor() as i64;
+        }
+        let mut at = 0.0f64;
+        let mut count = 0i64;
+        // Borne dure : une fournée par heure au plus, donc l'horizon borne la
+        // boucle même si `actionable` renvoyait toujours le même instant.
+        let ceiling = horizon.ceil() as i64 + 1;
+        while count < ceiling {
+            let Some(start) = self.actionable(at, horizon) else {
+                break;
+            };
+            let end = start + hours;
+            if end > horizon {
+                break;
+            }
+            count += 1;
+            at = end;
+        }
+        count
     }
 
     /// Les heures où l'on peut agir sur une semaine, pour la lecture et les tests.

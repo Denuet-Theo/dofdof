@@ -103,6 +103,12 @@
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
 //! propose **aucun**, et c'est verrouillé par un test.
 //!
+//! Ces chiffres portent désormais les **fenêtres de disponibilité** : on n'agit
+//! que devant le jeu, 72 h par semaine sur 168. Elles coûtent 6 M à l'échelle
+//! réglée. Voir `Economy::availability`, et `bin/windows` pour le balayage — qui
+//! au passage montre que le réglage de bande, jamais mesuré au score, vaut
+//! bien plus que ça.
+//!
 //! ## Un avertissement sur les tables de ce fichier
 //!
 //! Les prix de gen 10 se tirent désormais **en cloche** autour de 600 000 et non

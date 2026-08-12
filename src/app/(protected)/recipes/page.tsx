@@ -7,15 +7,22 @@ import RecipeCard from '@/components/recipes/RecipeCard';
 import { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
 import SellModal from '@/components/recipes/SellModal';
 import PriceModal from '@/components/recipes/PriceModal';
+import RecipeModal from '@/components/recipes/RecipeModal';
 import SearchBar from '@/components/items/SearchBar';
 import Skeleton from '@/components/ui/Skeleton';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import { useItemPrices } from '@/lib/hooks/useItemPrices';
 import { fetchRecipesForItems } from '@/lib/dofus/fetch-recipes';
-import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChefHat, Filter, ArrowDownAZ, RefreshCw, ArrowUp, ArrowDown, Hammer } from 'lucide-react';
 import { JOBS } from '@/lib/constants/jobs';
-import { computeCraftCost, computeMargin, recipeHasAllPrices } from '@/lib/utils/recipes';
+import {
+  computeCraftCost,
+  computeMargin,
+  recipeHasAllPrices,
+  type UnitCost,
+} from '@/lib/utils/recipes';
+import { useCraftIndex } from '@/lib/hooks/useCraftIndex';
 
 /** Cartes révélées à chaque « Voir plus ». */
 const VISIBLE_STEP = 30;
@@ -40,6 +47,9 @@ const RecipesContent = () => {
   const [total, setTotal] = useState(0);
   const [visible, setVisible] = useState(VISIBLE_STEP);
   const { prices, applyPriceSaved } = useItemPrices();
+  // Les recettes des ingrédients : c'est ce qui permet de compter un composant
+  // au moins cher de l'achat et de sa fabrication (#123).
+  const { index: craftIndex, indexing } = useCraftIndex(recipes);
   const [loading, startLoading] = useTransition();
   const [loadingMore, startLoadingMore] = useTransition();
   const [jobId, setJobId] = useState<string>('');
@@ -54,6 +64,16 @@ const RecipesContent = () => {
 
   const [editPriceItem, setEditPriceItem] = useState<PriceTarget | null>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
+
+  /**
+   * L'ingrédient dont on regarde la recette (#123).
+   *
+   * Une seule popin, repointée à chaque descente : ouvrir la recette d'un
+   * composant d'un composant remplace la vue au lieu d'empiler des modales, ce
+   * qui donne une profondeur libre sans jamais laisser deux fenêtres l'une sur
+   * l'autre.
+   */
+  const [subRecipeItem, setSubRecipeItem] = useState<PriceTarget | null>(null);
 
   /**
    * Une page de résultats pour les filtres courants.
@@ -150,14 +170,22 @@ const RecipesContent = () => {
     setVisible(VISIBLE_STEP);
   }, []);
 
+  // Un cache pour toute la passe de tri : les mêmes ingrédients reviennent dans
+  // des dizaines de recettes, et l'arbre est identique pour toutes. Recréé à
+  // chaque rendu, donc jamais périmé quand un prix change.
+  const costs = new Map<number, UnitCost>();
+
+  function craftCostOf(recipe: DofusDBRecipe): number {
+    return computeCraftCost(recipe, prices, craftIndex, costs);
+  }
+
   function getMargin(recipe: DofusDBRecipe): number {
     const resultPrice = prices.get(recipe.resultId)?.price || 0;
-    const craftCost = computeCraftCost(recipe, prices);
-    return computeMargin(resultPrice, craftCost).margin;
+    return computeMargin(resultPrice, craftCostOf(recipe)).margin;
   }
 
   function hasAllPrices(recipe: DofusDBRecipe): boolean {
-    return recipeHasAllPrices(recipe, prices);
+    return recipeHasAllPrices(recipe, prices, craftIndex, costs);
   }
 
   // Sort recipes by profitability
@@ -181,8 +209,8 @@ const RecipesContent = () => {
       } else {
         const marginA = getMargin(a);
         const marginB = getMargin(b);
-        const costA = computeCraftCost(a, prices);
-        const costB = computeCraftCost(b, prices);
+        const costA = craftCostOf(a);
+        const costB = craftCostOf(b);
         const marginPercentA = costA > 0 ? (marginA / costA) * 100 : 0;
         const marginPercentB = costB > 0 ? (marginB / costB) * 100 : 0;
         cmp = marginPercentA - marginPercentB;
@@ -350,6 +378,17 @@ const RecipesContent = () => {
         </div>
       ) : sortedRecipes.length > 0 ? (
         <div className="space-y-3">
+          {/* Tant que les recettes des ingrédients ne sont pas là, les coûts
+              affichés sont ceux de l'achat seul et le classement va bouger sous
+              les yeux. Le dire vaut mieux qu'un glissement silencieux. */}
+          {indexing ? (
+            <p className="text-[11px] text-dark-500 flex items-center gap-1.5">
+              <Hammer size={11} className="text-craft" />
+              Chargement des recettes de composants — les coûts affichés ne comptent
+              encore que les prix d&apos;achat.
+            </p>
+          ) : null}
+
           <div className="space-y-3 stagger-children">
             {sortedRecipes.slice(0, visible).map((recipe) => (
               <RecipeCard
@@ -363,6 +402,8 @@ const RecipesContent = () => {
                 onToggle={() =>
                   setExpandedId(expandedId === recipe.id ? null : recipe.id)
                 }
+                index={craftIndex}
+                onOpenSubRecipe={setSubRecipeItem}
               />
             ))}
           </div>
@@ -400,6 +441,18 @@ const RecipesContent = () => {
         onSold={loadRecipes}
       />
       
+      {/* La recette d'un ingrédient. `RecipeModal` la charge depuis l'id, donc
+          rien à précharger : on ne descend que là où on clique. */}
+      <RecipeModal
+        isOpen={subRecipeItem !== null}
+        onClose={() => setSubRecipeItem(null)}
+        prices={prices}
+        itemId={subRecipeItem?.id}
+        onPriceSaved={applyPriceSaved}
+        index={craftIndex}
+        onOpenSubRecipe={setSubRecipeItem}
+      />
+
       <PriceModal
         isOpen={showPriceModal}
         onClose={() => {

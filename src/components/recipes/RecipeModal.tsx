@@ -10,6 +10,7 @@ import RecipeDetails, { PriceTarget, SellTarget } from '@/components/recipes/Rec
 import PriceModal from '@/components/recipes/PriceModal';
 import SellModal from '@/components/recipes/SellModal';
 import { DofusDBRecipe, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import type { RecipeIndex } from '@/lib/utils/recipes';
 import { Edit2 } from 'lucide-react';
 
 interface RecipeModalProps {
@@ -28,6 +29,13 @@ interface RecipeModalProps {
   onSell?: (item: SellTarget) => void;
   onPriceSaved?: (itemId: number, price: number, updatedAt: string) => void;
   onSold?: () => void;
+  /** Les recettes des ingrédients — voir `useCraftIndex`. Absente : achat seul. */
+  index?: RecipeIndex;
+  /**
+   * Ouvrir la recette d'un ingrédient. L'hôte peut repointer cette même popin,
+   * ce qui donne une descente de profondeur libre sans en empiler plusieurs.
+   */
+  onOpenSubRecipe?: (item: PriceTarget) => void;
 }
 
 /**
@@ -46,6 +54,8 @@ const RecipeModal = ({
   onSell,
   onPriceSaved,
   onSold,
+  index,
+  onOpenSubRecipe,
 }: RecipeModalProps) => {
   // Keyed by the item it was fetched for, which is what lets `loading` below be derived
   // rather than held in a second state the effect would have to keep in step.
@@ -137,6 +147,8 @@ const RecipeModal = ({
               onEditPrice={handleEditPrice}
               onSell={handleSell}
               showSummary
+              index={index}
+              onOpenSubRecipe={onOpenSubRecipe}
             />
           </>
         ) : (

@@ -19,6 +19,7 @@ import {
   PriceSuggestionBucket,
 } from '@/lib/supabase/types';
 import { findNewlyProfitable, ProfitableRecipe } from '@/lib/utils/recipes';
+import { fetchCraftIndex } from '@/lib/dofus/craft-index';
 import { mergePrice } from '@/lib/hooks/useItemPrices';
 import {
   usePriceSuggestions,
@@ -146,7 +147,12 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
           if (!res.ok) throw new Error('Failed to fetch impacted recipes');
           const data: DofusDBResponse<DofusDBRecipe> = await res.json();
 
-          const newly = findNewlyProfitable(data.data ?? [], before, after);
+          // Les recettes des ingrédients : sans elles, une recette débloquée par
+          // le craft d'un composant resterait annoncée « prix manquants » ici
+          // alors que /recipes la calcule (#123).
+          const impacted = data.data ?? [];
+          const craftIndex = await fetchCraftIndex(impacted);
+          const newly = findNewlyProfitable(impacted, before, after, craftIndex);
           if (newly.length === 0) return;
 
           setUnlocked((prev) => {

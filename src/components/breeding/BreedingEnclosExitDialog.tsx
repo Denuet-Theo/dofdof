@@ -189,7 +189,12 @@ const BreedingEnclosExitDialog = ({
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Collée en bas : quarante lignes de niveaux passent l'écran, et un
+            bouton hors champ fait croire que la sortie est enregistrée. */}
+        <div
+          className="sticky bottom-0 -mx-1 px-1 py-3 flex flex-wrap items-center gap-3
+            bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"
+        >
           <Button
             size="sm"
             disabled={running || mounts.length === 0}

@@ -91,19 +91,25 @@
 //! | --- | --- | --- | --- | --- |
 //! | glouton | 1,9 % | 68,3 | 64,89 M | 11,80 M |
 //! | recherche / myope | 50,5 % | 9,8 | 37,12 M | 10,77 M |
-//! | échelle | **0 %** | 34,5 | 60,12 M | 11,09 M |
-//! | échelle + niveau réglé | **0 %** | 39,4 | **67,51 M** | **13,29 M** |
+//! | échelle | **0 %** | 38,0 | 64,57 M | 11,73 M |
+//! | échelle + niveau réglé | **0 %** | 41,7 | **70,80 M** | **14,75 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
 //! propose **aucun**, et c'est verrouillé par un test.
 //!
+//! Ces chiffres sont ceux de l'échelle **sans son seuil**. Elle en portait un —
+//! dix couples formables avant de lancer un étage impair — et il lui coûtait
+//! 3,3 M sur le pool hérité, 1,5 M en partant de zéro. Voir `RUNG_THRESHOLD`
+//! pour le balayage qui l'a condamné, et `Ordering` pour les cinq ordres de
+//! composition mesurés à cette occasion.
+//!
 //! ## Ce qu'il fait encore mal
 //!
 //! Il **sous-emploie le pool de départ**. La partie donne cent muldos répartis
-//! de la gen 2 à la gen 9 ; l'échelle en sort 39,4 gen 10 quand le glouton en
+//! de la gen 2 à la gen 9 ; l'échelle en sort 41,7 gen 10 quand le glouton en
 //! sort 68,3, parce qu'elle fabrique depuis la gen 1 ce qu'elle a déjà en main.
-//! La moisson rattrape une part de l'écart (+14 M mesurés) mais ne le comble
+//! La moisson rattrape une part de l'écart (+18,5 M mesurés) mais ne le comble
 //! pas : elle monnaie les hors-plan, elle ne les fait pas monter.
 //!
 //! Il **ne se réoriente pas** non plus. Le plan est arrêté à la première fournée
@@ -634,9 +640,150 @@ impl Ladder {
 ///
 /// En deçà, les ingrédients restent en réserve : ils ne perdent rien à
 /// attendre, et une fournée qui ne lance que deux croisements paie le même
-/// forfait qu'une qui en lance dix. Le chiffre vient du dicté, pas d'une
-/// mesure — c'est le premier réglage à faire varier.
+/// forfait qu'une qui en lance dix.
+///
+/// ## Le raisonnement est faux, et il coûte cher
+///
+/// Le chiffre venait du dicté. Balayé — `cargo run -p breeding-sim --bin
+/// orders` — il est monotone décroissant, sur 200 graines appariées contre
+/// « aucun seuil », pool hérité et niveau réglé :
+///
+/// | seuil | médiane | écart | t |
+/// | --- | --- | --- | --- |
+/// | **0** | **70,80 M** | témoin | |
+/// | 2 | 69,51 M | −0,25 M | −0,43 |
+/// | 6 | 68,76 M | −0,71 M | −0,98 |
+/// | 10 | 67,51 M | −2,74 M | −3,82 |
+/// | 20 | 58,71 M | −10,92 M | −13,22 |
+/// | 30 | 53,24 M | −16,49 M | −21,47 |
+///
+/// Aucun cran ne bat zéro, et à partir de 8 l'écart sort du bruit. La prémisse
+/// omettait le coût de l'attente : le forfait est bien le même, mais **l'horizon
+/// est en heures**, donc une fournée ajournée n'est pas reportée, elle est
+/// perdue. Ce qu'un seuil économise en frais fixes, il le paie en tours.
+///
+/// C'est pourquoi `Gating::Off` est désormais le défaut. La constante reste —
+/// elle est ce qui rend la table ci-dessus rejouable, et elle n'a d'effet que si
+/// on redemande explicitement `OddOnly` ou `Everywhere`.
 pub const RUNG_THRESHOLD: usize = 10;
+
+/// Dans quel ordre les croisements entrent dans la fournée.
+///
+/// C'est la dernière inconnue de l'échelle, et elle n'est pas cosmétique : les
+/// places d'enclos sont le facteur rare, donc **le premier servi mange le
+/// budget du dernier**. Cinq ordres se défendent, et rien dans l'arbre ne dit
+/// lequel gagne — d'où le levier, et la mesure.
+///
+/// Ce que l'ordre ne touche pas : la règle d'admissibilité, le choix du retard
+/// relatif à l'intérieur d'un étage, la moisson, les achats, le clonage. Un
+/// seul bouton, sinon la comparaison ne dit rien.
+///
+/// ## Ce que la mesure en dit
+///
+/// `cargo run --release -p breeding-sim --bin orders`, 200 graines appariées,
+/// écart à l'ancien défaut (`TopDown` + `Gating::OddOnly`), niveau réglé :
+///
+/// | ordre | pool hérité | départ de zéro |
+/// | --- | --- | --- |
+/// | `TopDown` + `Off` — **le défaut** | **+2,74 M** (t = 3,8) | **+1,30 M** (t = 11,9) |
+/// | `RoundRobin` + `Off` | −2,69 M (t = −3,9) | +0,79 M (t = 7,7) |
+/// | `BigToSmall` + `Off` | −4,22 M (t = −5,5) | −1,04 M (t = −16,6) |
+/// | `BigToSmallByRank` + `Off` | −6,90 M (t = −8,4) | −0,64 M (t = −9,6) |
+/// | `BottomUp` + `Everywhere` | −23,08 M (t = −31,0) | −1,96 M (t = −29,3) |
+///
+/// Seul `TopDown` + `Off` gagne dans les deux régimes — d'où le défaut. Deux
+/// enseignements, et le second n'était pas attendu.
+///
+/// **La direction pèse dix fois le seuil.** Monter du bas perd 23 M, et ce n'est
+/// pas son seuil qui le condamne : `BottomUp` + `Off` rend encore 47,03 M contre
+/// 70,80 M à `TopDown` + `Off`. La raison est le pool — cent muldos de la gen 2 à
+/// la gen 9 fournissent déjà les basses générations, donc les places dépensées à
+/// les refabriquer sont des places volées à la seule chose qui manque.
+///
+/// **Servir d'abord ce qui est abondant est un piège.** `BigToSmall` semble
+/// appliquer la logique du seuil sans l'attendre ; en pratique l'abondance est
+/// une propriété des étages *bas* — ils ont plus de sujets — donc classer par
+/// nombre de couples est une façon détournée de monter du bas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Ordering {
+    /// La plus haute génération d'abord, **vidée** jusqu'à la dernière place,
+    /// puis celle du dessous.
+    ///
+    /// L'argument : une étape haute dont les ingrédients sont en main se fait
+    /// maintenant, parce que ces ingrédients-là ont coûté dix fournées à
+    /// produire et qu'une place dépensée en gen 2 est remplaçable. Ce qui reste
+    /// prépare l'étage du dessous.
+    #[default]
+    TopDown,
+    /// La plus basse d'abord, vidée, puis celle du dessus.
+    ///
+    /// L'argument inverse : l'échelle **sous-emploie sa base**, et un étage haut
+    /// servi en premier consomme les places qui auraient fabriqué ses propres
+    /// ingrédients pour la fournée suivante. Nourrir le bas, c'est nourrir le
+    /// haut avec un tour de retard.
+    BottomUp,
+    /// Descendante, mais **un seul croisement par étage et par tour**, et on
+    /// recommence tant qu'il reste des places.
+    ///
+    /// Ce n'est pas un autre ordre, c'est un autre **partage** : le haut ne peut
+    /// plus rafler toutes les places avant que le bas soit servi une fois.
+    RoundRobin,
+    /// Par nombre de couples formables décroissant, **couleur par couleur**.
+    ///
+    /// L'argument : le seuil dit qu'une fournée qui ne lance que deux
+    /// croisements paie le même forfait qu'une qui en lance dix. Servir d'abord
+    /// ce qui est abondant, c'est appliquer cette logique sans attendre un
+    /// seuil — et laisser les couleurs rares à la fournée où elles seront
+    /// nombreuses.
+    BigToSmall,
+    /// Idem, mais l'unité classée est la **génération** et non la couleur : on
+    /// somme les couples de l'étage avant de trancher.
+    ///
+    /// La distinction compte parce qu'un étage à deux couleurs moyennement
+    /// fournies passe devant une couleur seule très fournie, ce que
+    /// `BigToSmall` fait l'inverse.
+    BigToSmallByRank,
+}
+
+/// Quels étages attendent d'être lançables en nombre avant de partir.
+///
+/// Le seuil et l'ordre se confondent facilement — les deux décident qui passe
+/// en premier — mais ils ne font pas la même chose : l'ordre **classe**, le
+/// seuil **ajourne**. Séparés pour qu'on puisse dire lequel des deux porte
+/// l'écart, et la réponse est nette : `Off` gagne pour **les cinq** ordres.
+/// Médianes, pool hérité, niveau réglé :
+///
+/// | ordre | `OddOnly` | `Everywhere` | `Off` |
+/// | --- | --- | --- | --- |
+/// | `TopDown` | 67,51 M | 60,91 M | **70,80 M** |
+/// | `RoundRobin` | 61,74 M | 53,49 M | **63,73 M** |
+/// | `BigToSmall` | 56,01 M | 46,69 M | **64,22 M** |
+/// | `BigToSmallByRank` | 54,24 M | 49,49 M | **60,35 M** |
+/// | `BottomUp` | 45,24 M | 43,28 M | **47,03 M** |
+///
+/// Voir `RUNG_THRESHOLD` pour le balayage cran par cran et pourquoi la prémisse
+/// du seuil était fausse.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Gating {
+    /// Les générations impaires seulement — les couleurs **simples**, celles qui
+    /// font les barreaux. C'était la règle, jusqu'à ce qu'on la mesure.
+    OddOnly,
+    /// Tous les étages, composées comprises.
+    Everywhere,
+    /// Aucune retenue : ce qui est formable part. **Le défaut**, parce qu'il
+    /// gagne partout.
+    #[default]
+    Off,
+}
+
+/// Ce qu'un couple engagé a donné. `Retry` ne devrait pas se produire — la
+/// position est choisie sur des groupes non vides — mais le garder évite de
+/// faire dépendre la correction d'un raisonnement.
+enum Launched {
+    Yes,
+    Retry,
+    Full,
+}
 
 /// Ce qu'une fournée accumule pendant qu'on la compose.
 ///
@@ -653,10 +800,15 @@ struct Building {
 pub struct LadderPolicy {
     ladder: Ladder,
     pub threshold: usize,
+    /// L'ordre dans lequel les croisements entrent dans la fournée. Voir
+    /// `Ordering` pour les cinq candidats et ce qui les sépare.
+    pub ordering: Ordering,
+    /// Quels étages ajournent en dessous du seuil. Voir `Gating`.
+    pub gating: Gating,
     /// Apparier les stériles sans regarder leur sexe.
     ///
-    /// **Mesuré indifférent** : `-0,27 M ± 0,57` sur 200 graines appariées,
-    /// t = -0,46, 100 parties gagnées sur 200. Les deux effets s'annulent — à
+    /// **Mesuré indifférent** : `+0,29 M ± 0,56` sur 200 graines appariées,
+    /// t = 0,51, 105 parties gagnées sur 200. Les deux effets s'annulent — à
     /// sexe égal le clone est certain, mais trier laisse des montures de même
     /// lignée dépareillées, et en espérance `M` mâles et `F` femelles rendent
     /// `M/2` et `F/2` clones dans les deux appariements.
@@ -682,8 +834,8 @@ pub struct LadderPolicy {
     ///
     /// | | avec moisson | sans moisson |
     /// | --- | --- | --- |
-    /// | pool hérité | **+14,06 M** (t = 22,6) | +6,86 M (t = 13,8) |
-    /// | départ de zéro | **−1,62 M** (t = −26,6) | −1,63 M (t = −26,8) |
+    /// | pool hérité | **+13,59 M** (t = 22,4) | +5,10 M (t = 10,4) |
+    /// | départ de zéro | **−1,47 M** (t = −18,8) | −1,49 M (t = −19,4) |
     ///
     /// Avec un parc hérité, la fécondité alimente la production de gen 10 à
     /// 500 000 pièce et vaut bien plus que la liquidation sacrifiée. En partant
@@ -723,6 +875,8 @@ impl LadderPolicy {
         Self {
             ladder,
             threshold: RUNG_THRESHOLD,
+            ordering: Ordering::default(),
+            gating: Gating::default(),
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
@@ -735,6 +889,25 @@ impl LadderPolicy {
 
     pub fn ladder(&self) -> &Ladder {
         &self.ladder
+    }
+
+    /// L'ordre de composition, et le seuil qui l'accompagne.
+    ///
+    /// Les deux ensemble parce qu'ils ne se lisent qu'ensemble : « bas vers le
+    /// haut » sans dire où le seuil s'applique ne décrit pas une politique. Les
+    /// cinq candidats du relevé se nomment ainsi :
+    ///
+    /// | | ordre | seuil |
+    /// | --- | --- | --- |
+    /// | dépôt | `TopDown` | `OddOnly` |
+    /// | bas vers le haut | `BottomUp` | `Everywhere` |
+    /// | haut vers le bas | `TopDown` | `Off` |
+    /// | haut vers le bas, un par un | `RoundRobin` | `Off` |
+    /// | du plus fourni au moins fourni | `BigToSmall` | `Off` |
+    pub fn with_ordering(mut self, ordering: Ordering, gating: Gating) -> Self {
+        self.ordering = ordering;
+        self.gating = gating;
+        self
     }
 
     /// Les réglages d'unité — bandes de jauge, niveau, seuil d'Optimakina.
@@ -774,8 +947,13 @@ impl LadderPolicy {
     ///
     /// | | écart | t | gagne |
     /// | --- | --- | --- | --- |
-    /// | pool hérité | **+7,07 M ± 0,67** | 10,6 | 153/200 |
-    /// | départ de zéro | **+2,17 M ± 0,07** | 29,7 | 198/200 |
+    /// | pool hérité | **+5,84 M ± 0,58** | 9,99 | 160/200 |
+    /// | départ de zéro | **+2,71 M ± 0,12** | 23,65 | 193/200 |
+    ///
+    /// Rejoué depuis `Gating::Off` — voir `reglage::ce_que_le_reglage_rapporte`.
+    /// Le gain rétrécit d'un point et demi sur le pool hérité : les deux leviers
+    /// achètent en partie la même chose, des tours de jeu, donc le second à
+    /// mesurer trouve moins à prendre. Ils ne s'annulent pas pour autant.
     pub fn tuned_for(mut self, economy: &crate::economy::Economy) -> Self {
         let Some(strategies) = self.strategies.as_mut() else {
             return self;
@@ -1022,6 +1200,205 @@ impl LadderPolicy {
         best
     }
 
+    /// Cet étage attend-il d'être lançable en nombre ?
+    fn gated(&self, rank: u8) -> bool {
+        match self.gating {
+            Gating::OddOnly => rank % 2 == 1,
+            Gating::Everywhere => true,
+            Gating::Off => false,
+        }
+    }
+
+    /// Combien de couples l'étage propose, tous candidats confondus.
+    ///
+    /// Le compte porte sur les couples **énumérés**, pas sur ceux encore
+    /// lançables : une monture apparaît dans plusieurs couples et n'en honorera
+    /// qu'un. C'est ce que le seuil du dépôt mesure, et le resserrer changerait
+    /// le seuil sans le dire — donc une autre expérience que celle-ci.
+    fn formable(by_target: &HashMap<ColorId, Vec<(usize, usize)>>, here: &[ColorId]) -> usize {
+        here.iter()
+            .map(|c| by_target.get(c).map_or(0, |pairs| pairs.len()))
+            .sum()
+    }
+
+    /// La couleur de l'étage dont on est le plus en retard, et le premier couple
+    /// qu'elle a encore sous la main.
+    ///
+    /// Le retard est **relatif** à la demande propagée : `stock / demande`. C'est
+    /// lui qui donne le « deux fois plus de Roux-Amande » sans qu'on l'écrive, et
+    /// il est le même pour les cinq ordres — seul l'ordre dans lequel on
+    /// l'interroge change.
+    fn most_behind(
+        &self,
+        here: &[ColorId],
+        by_target: &HashMap<ColorId, Vec<(usize, usize)>>,
+        free: &[Vec<usize>],
+        held: &HashMap<ColorId, f64>,
+        made: &HashMap<ColorId, f64>,
+    ) -> Option<(ColorId, usize)> {
+        let mut choice: Option<(f64, ColorId, usize)> = None;
+        for &color in here {
+            let want = self.ladder.demand.get(&color).copied().unwrap_or(0.0);
+            if want <= 0.0 {
+                continue;
+            }
+            let Some(pairs) = by_target.get(&color) else {
+                continue;
+            };
+            let position = pairs.iter().position(|&(male, female)| {
+                male != female && !free[male].is_empty() && !free[female].is_empty()
+            });
+            let Some(position) = position else { continue };
+
+            let stock =
+                held.get(&color).copied().unwrap_or(0.0) + made.get(&color).copied().unwrap_or(0.0);
+            let lag = stock / want;
+            if choice.is_none_or(|(best, _, _)| lag < best) {
+                choice = Some((lag, color, position));
+            }
+        }
+        choice.map(|(_, color, position)| (color, position))
+    }
+
+    /// Engager un couple, si la place le permet.
+    ///
+    /// Les places se comptent **après** le tirage : leur coût dépend de ce que
+    /// ces deux montures-là doivent encore de cycle, pas du nombre de
+    /// croisements.
+    fn launch(
+        &self,
+        view: &UnitView<'_>,
+        pair: (usize, usize),
+        free: &mut [Vec<usize>],
+        crossings: &mut Vec<[usize; 2]>,
+        places: &mut usize,
+    ) -> Launched {
+        let (male, female) = pair;
+        let Some(male_index) = free[male].pop() else {
+            return Launched::Retry;
+        };
+        let Some(female_index) = free[female].pop() else {
+            free[male].push(male_index);
+            return Launched::Retry;
+        };
+        let cost = places_for(view.stable, [male_index, female_index]);
+        if *places + cost > view.capacity {
+            free[male].push(male_index);
+            free[female].push(female_index);
+            return Launched::Full;
+        }
+        *places += cost;
+        crossings.push([male_index, female_index]);
+        Launched::Yes
+    }
+
+    /// Composer la fournée : quels croisements, et dans quel ordre.
+    ///
+    /// Les cinq ordres partagent tout le reste — l'admissibilité a déjà filtré
+    /// `by_target`, le retard relatif choisit à l'intérieur d'un étage, et le
+    /// seuil est un levier séparé. Ce qui suit ne fait donc que **classer les
+    /// étages** et décider si on les vide ou si on les sert à tour de rôle.
+    fn compose(
+        &self,
+        view: &UnitView<'_>,
+        by_target: &HashMap<ColorId, Vec<(usize, usize)>>,
+        free: &mut [Vec<usize>],
+        held: &HashMap<ColorId, f64>,
+        crossings: &mut Vec<[usize; 2]>,
+        places: &mut usize,
+    ) {
+        let catalog = view.catalog;
+        let mut made: HashMap<ColorId, f64> = HashMap::new();
+
+        // Les étages : une génération, et les couleurs voulues qu'elle porte.
+        // `BigToSmall` est le seul à ne pas grouper — son unité est la couleur —
+        // et il se coule dans la même boucle en rendant des étages singletons.
+        let mut tiers: Vec<(u8, Vec<ColorId>)> = if self.ordering == Ordering::BigToSmall {
+            let mut colors: Vec<ColorId> = self.ladder.wanted.iter().copied().collect();
+            // Le plus fourni d'abord. L'identifiant tranche les égalités, sinon
+            // l'ordre dépendrait du parcours du `HashSet` et la mesure ne serait
+            // pas reproductible.
+            colors.sort_unstable_by_key(|&color| {
+                std::cmp::Reverse((by_target.get(&color).map_or(0, |p| p.len()), color))
+            });
+            colors
+                .into_iter()
+                .map(|color| (catalog.generation(color), vec![color]))
+                .collect()
+        } else {
+            let mut grouped: HashMap<u8, Vec<ColorId>> = HashMap::new();
+            for &color in &self.ladder.wanted {
+                grouped.entry(catalog.generation(color)).or_default().push(color);
+            }
+            let mut tiers: Vec<(u8, Vec<ColorId>)> = grouped.into_iter().collect();
+            for (_, here) in &mut tiers {
+                here.sort_unstable();
+            }
+            match self.ordering {
+                // La plus haute d'abord.
+                Ordering::TopDown | Ordering::RoundRobin => {
+                    tiers.sort_unstable_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+                }
+                Ordering::BottomUp => tiers.sort_unstable_by_key(|(rank, _)| *rank),
+                // À nombre de couples égal, la plus haute génération.
+                Ordering::BigToSmallByRank => tiers.sort_by_key(|(rank, here)| {
+                    std::cmp::Reverse((Self::formable(by_target, here), *rank))
+                }),
+                Ordering::BigToSmall => unreachable!("traité au-dessus"),
+            }
+            tiers
+        };
+        // Les étages ajournés sortent une fois pour toutes : `by_target` ne
+        // bouge pas pendant la fournée, donc le verdict du seuil non plus.
+        tiers.retain(|(rank, here)| {
+            !(self.gated(*rank) && Self::formable(by_target, here) < self.threshold)
+        });
+
+        if self.ordering == Ordering::RoundRobin {
+            // Un croisement par étage et par tour, tant qu'un tour complet en
+            // place au moins un. Sans le drapeau, un étage dont les couples sont
+            // épuisés ferait tourner la boucle indéfiniment.
+            loop {
+                let mut launched = false;
+                for (_, here) in &tiers {
+                    if *places >= view.capacity {
+                        return;
+                    }
+                    let Some((color, position)) =
+                        self.most_behind(here, by_target, free, held, &made)
+                    else {
+                        continue;
+                    };
+                    match self.launch(view, by_target[&color][position], free, crossings, places) {
+                        Launched::Yes => {
+                            *made.entry(color).or_default() += 1.0;
+                            launched = true;
+                        }
+                        Launched::Retry => {}
+                        Launched::Full => return,
+                    }
+                }
+                if !launched {
+                    return;
+                }
+            }
+        }
+
+        for (_, here) in &tiers {
+            while *places < view.capacity {
+                let Some((color, position)) = self.most_behind(here, by_target, free, held, &made)
+                else {
+                    break;
+                };
+                match self.launch(view, by_target[&color][position], free, crossings, places) {
+                    Launched::Yes => *made.entry(color).or_default() += 1.0,
+                    Launched::Retry => continue,
+                    Launched::Full => break,
+                }
+            }
+        }
+    }
+
     /// La couleur qu'un couple vise, s'il est admissible.
     ///
     /// `None` dès qu'il ne nomme rien — recopie, deux fécondités pour rien — ou
@@ -1114,97 +1491,22 @@ impl Policy for LadderPolicy {
             }
         }
 
-        // Les couleurs voulues, la plus haute d'abord : une étape haute dont les
-        // ingrédients sont en main se fait maintenant, ce qui reste de places
-        // prépare l'étage du dessous. L'inverse asphyxie la montée.
-        let mut ranks: Vec<u8> = self
-            .ladder
-            .wanted
-            .iter()
-            .map(|&c| catalog.generation(c))
-            .collect();
-        ranks.sort_unstable_by(|a, b| b.cmp(a));
-        ranks.dedup();
-
         let mut crossings: Vec<[usize; 2]> = Vec::new();
         // Places d'enclos consommées. Ce n'est plus le nombre de croisements :
         // un couple dont les deux parents ont déjà cyclé ne coûte rien.
         let mut places = 0usize;
-        let mut made: HashMap<ColorId, f64> = HashMap::new();
 
-        for rank in ranks {
-            let mut here: Vec<ColorId> = self
-                .ladder
-                .wanted
-                .iter()
-                .copied()
-                .filter(|&c| catalog.generation(c) == rank)
-                .collect();
-            here.sort_unstable();
-
-            // Une couleur simple attend d'être lançable en nombre ; une composée
-            // se fait au fil de l'eau. C'est la règle du seuil, généralisée.
-            let gated = rank % 2 == 1;
-            if gated {
-                let formable: usize = here
-                    .iter()
-                    .map(|c| by_target.get(c).map_or(0, |pairs| pairs.len()))
-                    .sum();
-                if formable < self.threshold {
-                    continue;
-                }
-            }
-
-            // On fabrique en priorité ce dont on est le plus en retard, au
-            // regard de la demande propagée : c'est ce qui tient le ratio.
-            while places < view.capacity {
-                let mut choice: Option<(f64, ColorId, usize)> = None;
-                for &color in &here {
-                    let want = self.ladder.demand.get(&color).copied().unwrap_or(0.0);
-                    if want <= 0.0 {
-                        continue;
-                    }
-                    let Some(pairs) = by_target.get(&color) else {
-                        continue;
-                    };
-                    let position = pairs.iter().position(|&(male, female)| {
-                        male != female && !free[male].is_empty() && !free[female].is_empty()
-                    });
-                    let Some(position) = position else { continue };
-
-                    let stock = held.get(&color).copied().unwrap_or(0.0)
-                        + made.get(&color).copied().unwrap_or(0.0);
-                    let lag = stock / want;
-                    if choice.is_none_or(|(best, _, _)| lag < best) {
-                        choice = Some((lag, color, position));
-                    }
-                }
-
-                let Some((_, color, position)) = choice else {
-                    break;
-                };
-                let (male, female) = by_target[&color][position];
-                let Some(male_index) = free[male].pop() else {
-                    continue;
-                };
-                let Some(female_index) = free[female].pop() else {
-                    free[male].push(male_index);
-                    continue;
-                };
-
-                // Les places se comptent après le tirage du couple : leur coût
-                // dépend de ce que **ces deux montures-là** doivent encore.
-                let cost = places_for(view.stable, [male_index, female_index]);
-                if places + cost > view.capacity {
-                    free[male].push(male_index);
-                    free[female].push(female_index);
-                    break;
-                }
-                places += cost;
-                crossings.push([male_index, female_index]);
-                *made.entry(color).or_default() += 1.0;
-            }
-        }
+        // L'ordre de composition — la dernière inconnue de l'échelle. Voir
+        // `Ordering` pour les cinq candidats, et `compose` pour ce qu'ils
+        // partagent.
+        self.compose(
+            view,
+            &by_target,
+            &mut free,
+            &held,
+            &mut crossings,
+            &mut places,
+        );
 
         let mut purchases: Vec<(ColorId, Sex)> = Vec::new();
         let starter = view.economy.starter_price;

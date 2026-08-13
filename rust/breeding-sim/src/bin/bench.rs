@@ -146,7 +146,7 @@ fn main() {
             // Le niveau des montures se paie en points de jauge, donc en heures,
             // donc en fournées. `tuned_for` prend le dernier cran gratuit — voir
             // sa doc pour le balayage qui montre l'effondrement au-delà.
-            let ladder = Ladder::of(&muldo(), Route::Shared);
+            let ladder = Ladder::of(&muldo(), Route::default());
             measure("echelle / niveau réglé", &economy, move || {
                 Box::new(
                     LadderPolicy::with_ladder(ladder.clone())

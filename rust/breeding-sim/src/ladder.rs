@@ -169,32 +169,80 @@ use crate::trees::{Catalog, ColorId};
 /// une gen 4 ou qui n'en partagent aucune, et les deux atteignent la cible à
 /// 50,10 %. Ce qui les sépare est ce que rendent les ratés.
 ///
-/// ## Ce que la mesure en dit
+/// ## Ce que la mesure en dit — et elle a changé de camp deux fois
 ///
-/// Sur 200 graines appariées, **rien** : `+0,65 M ± 0,55`, t = 1,19, le cas 2
-/// l'emporte 108 fois sur 200. Le choix est indifférent.
+/// Le relevé est **daté par la hauteur de l'échelle**, et c'est l'enseignement à
+/// garder : *un barreau se juge sur l'échelle entière*, jamais sur le sommet
+/// provisoire.
 ///
-/// Il ne l'était pas quand l'échelle s'arrêtait à la gen 5 — le cas 2 gagnait
-/// alors `+0,45 M ± 0,035`, t = 12,87, 166 fois sur 200. C'est un avertissement
-/// à garder : **un barreau se juge sur l'échelle entière**, pas sur le sommet
-/// provisoire. Une différence de dispersion des ratés qui compte quand elle est
-/// le dernier mot se dilue dès qu'il reste trois étages à monter.
+/// | l'échelle monte jusqu'à | ce que 200 graines appariées disaient |
+/// | --- | --- |
+/// | gen 5 | `Disjoint` gagne `+0,45 M ± 0,035`, t = 12,87, 166 fois sur 200 |
+/// | gen 7 (`TOP_RUNG`) | **rien** : `+0,65 M ± 0,55`, t = 1,19, 108 fois sur 200 |
+/// | gen 9 (aujourd'hui) | `Disjoint` gagne **+7,15 M** de médiane |
+///
+/// La dernière ligne est `cargo run --release -p breeding-sim --bin bench`,
+/// 200 graines identiques pour toutes les politiques, pool hérité :
+///
+/// | échelle | p10 | médiane | p90 | gen 10 tenues |
+/// | --- | --- | --- | --- | --- |
+/// | cas 1 (`Shared`) | 43,44 M | 52,72 M | 63,66 M | 32,3 |
+/// | cas 2 (`Disjoint`) | **48,97 M** | **59,87 M** | **71,33 M** | **40,4** |
+///
+/// Le plafond retiré (#157), l'échelle monte deux étages de plus et la différence
+/// entre les routes cesse de se diluer : elle se **cumule**. Le portage
+/// TypeScript le dit par un autre chemin — la demande propagée pour une unité de
+/// sommet passe de 204 à 252 croisements chez le muldo (+24 %), et
+/// `simulatePolicy` sur le Corail-Pourpre paie 1 369 croisements en `Disjoint`
+/// contre 2 794 en `Shared`, dix graines sans recouvrement.
+///
+/// Le mécanisme est lisible : le pivot du cas 1 est `roux_amande`, une gen 4 faite
+/// de **deux gen 3**, quand le cas 2 prend des gen 4 faites d'une gen 3 et d'une
+/// gen 1 — qui s'achète à mille kamas. Le critère de `lay_rung` compte le travail
+/// *local* d'un jeu de gen 4 et donne raison au cas 1 (14 contre 16) ; la demande
+/// propagée compte le travail *réel* et le condamne, la gen 4 pivot étant
+/// réclamée seize fois.
 ///
 /// À la gen 7 la question ne se pose même pas : Prune et Émeraude ne partagent
 /// **aucune** gen 6, donc `Shared` n'y a aucun candidat et se rabat sur
 /// `Disjoint`. Les deux routes ne diffèrent que par leur gen 4.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// ## Pourquoi un `Default`, alors que les appels nommaient la route
+///
+/// Ils la nommaient tous `Shared` ici, et le portage
+/// (`src/lib/dofus/breeding/ladder.ts`) prenait `disjoint` faute d'avoir écrit le
+/// sien : les deux échelles posaient un plan différent pour le même arbre, sans
+/// qu'une ligne ne dise laquelle avait raison. Le défaut est maintenant écrit
+/// **une fois, des deux côtés**, et les sites d'appel le lisent au lieu de le
+/// redire — sauf `bin/bench` et `bin/barren`, qui comparent les deux et doivent
+/// donc les nommer.
+///
+/// ## Ce que ce changement périme
+///
+/// Les tables de `Ordering`, `Gating`, `Purchasing`, `Crowning` et
+/// `RUNG_THRESHOLD` ont toutes été relevées sous `Shared`. Elles n'ont **pas** été
+/// rejouées sous `Disjoint` : leurs écarts restent instructifs, leurs niveaux ne
+/// sont plus ceux du défaut.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Route {
     /// **Cas 1** — une gen 4 pivot sert aux deux gen 5, donc on en fabrique
     /// deux fois plus. Trois couleurs de gen 4 au lieu de quatre, et surtout des
     /// ascendances qui se recoupent : la masse d'échec se concentre sur les
     /// couleurs communes et **une seule** recombinaison sort du plan (3,50 %).
+    ///
+    /// Gardé pour la mesure : c'est le témoin de `bin/bench`, et le plan qu'il
+    /// pose est plus **petit** que celui du cas 2 — 25 couleurs contre 30 chez le
+    /// muldo. Compter les couleurs est le raisonnement qui trompe ici.
     Shared,
     /// **Cas 2** — quatre gen 4 disjointes, une par côté et par cible. Les
     /// ascendances ne se recoupent pas, donc la masse d'échec s'éparpille sur
     /// quatre couleurs et **quatre** recombinaisons apparaissent, dont trois
     /// hors plan (9,81 %). En contrepartie deux d'entre elles retombent sur une
     /// gen 4 voulue, ce que le cas 1 ne fait pas.
+    ///
+    /// **Le défaut**, des deux côtés du portage, et c'est la mesure qui l'impose
+    /// depuis que l'échelle monte jusqu'à la gen 9.
+    #[default]
     Disjoint,
 }
 
@@ -2313,13 +2361,28 @@ mod tests {
         }
     }
 
+    /// Les deux routes visent le même sommet, quel que soit le sommet.
+    ///
+    /// Le test attendait deux couleurs — « Ivoire et Turquoise », le sommet du
+    /// temps où `TOP_RUNG` arrêtait la montée à la gen 5. Le plafond retiré, le
+    /// muldo monte jusqu'à la gen 9, qui en compte **quatre** : l'assertion est
+    /// rouge sur `main` depuis, sans que personne ne l'ait vu.
+    ///
+    /// On la réécrit sur le rang plutôt que sur un nombre, pour qu'elle survive
+    /// au prochain déplacement du sommet : ce qui compte est que les deux routes
+    /// s'arrêtent au **même** rang, pas qu'elles s'arrêtent à la gen 5.
     #[test]
     fn les_deux_routes_visent_les_memes_sommets() {
         let catalog = muldo();
         let shared = Ladder::of(&catalog, Route::Shared);
         let disjoint = Ladder::of(&catalog, Route::Disjoint);
-        assert_eq!(shared.summit, disjoint.summit, "Ivoire et Turquoise");
-        assert_eq!(shared.summit.len(), 2);
+        assert_eq!(shared.summit, disjoint.summit, "le même sommet");
+        assert!(!shared.summit.is_empty(), "un sommet, au moins");
+        let rung = catalog.generation(shared.summit[0]);
+        assert!(rung % 2 == 1, "le sommet est un rang impair, pas une composée");
+        for &color in &shared.summit {
+            assert_eq!(catalog.generation(color), rung, "un seul rang au sommet");
+        }
     }
 
     #[test]

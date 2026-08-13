@@ -120,13 +120,13 @@ fn table(label: &str, economy: &Economy, path: &str) {
         Box::new(Searching::new(Myopic))
     });
     audit("echelle", economy, || {
-        Box::new(LadderPolicy::new(&catalog, Route::Shared))
+        Box::new(LadderPolicy::new(&catalog, Route::default()))
     });
     // Le réglage du niveau ne demande rien au champion : il se déduit de
     // l'agenda par dichotomie sur le nombre de fournées que l'horizon permet.
     audit("echelle + niveau réglé", economy, || {
         Box::new(
-            LadderPolicy::new(&catalog, Route::Shared)
+            LadderPolicy::new(&catalog, Route::default())
                 .with_strategies([Strategy::default(); breeding_sim::economy::MAX_UNITS])
                 .tuned_for(economy),
         )
@@ -138,11 +138,11 @@ fn table(label: &str, economy: &Economy, path: &str) {
     };
     let strategies = genome.strategies;
     audit("echelle + agenda", economy, || {
-        Box::new(LadderPolicy::new(&catalog, Route::Shared).with_strategies(strategies))
+        Box::new(LadderPolicy::new(&catalog, Route::default()).with_strategies(strategies))
     });
     audit("echelle + agenda réglé", economy, || {
         Box::new(
-            LadderPolicy::new(&catalog, Route::Shared)
+            LadderPolicy::new(&catalog, Route::default())
                 .with_strategies(strategies)
                 .tuned_for(economy),
         )

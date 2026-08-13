@@ -128,7 +128,7 @@ fn main() {
             })
         },
         {
-            let ladder = Ladder::of(&muldo(), Route::Shared);
+            let ladder = Ladder::of(&muldo(), Route::default());
             run("echelle / niveau réglé", &economy, move || {
                 Box::new(
                     LadderPolicy::with_ladder(ladder.clone())

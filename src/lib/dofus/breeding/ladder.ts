@@ -49,6 +49,61 @@ import type { BreedingColor } from './costs';
  */
 export type Route = 'shared' | 'disjoint';
 
+/**
+ * La route qu'on prend quand l'appelant n'en nomme pas.
+ *
+ * Elle n'était écrite nulle part : `disjoint` ici par un défaut de paramètre sans
+ * commentaire, `Shared` dans la source Rust où `Route` n'avait pas de `Default` et
+ * où **tous** les sites d'appel le passaient à la main. Les deux échelles
+ * décrivaient donc un plan différent pour le même arbre, sans qu'une ligne ne dise
+ * laquelle avait raison.
+ *
+ * ## Ce qu'on a mesuré, et ce qui a surpris
+ *
+ * Le plan d'abord, les deux routes posées sur les trois familles. `shared` est
+ * plus **petit**, vise le même sommet et achète les mêmes blocs :
+ *
+ * | famille | couleurs `disjoint` | couleurs `shared` | qui diffèrent | blocs | sommet |
+ * | --- | --- | --- | --- | --- | --- |
+ * | dragodinde | 18 | 18 | 0 | mêmes | mêmes |
+ * | muldo | 30 | 25 | 7 | mêmes | mêmes |
+ * | volkorne | 16 | 15 | 3 | mêmes | mêmes |
+ *
+ * Compter les couleurs suggérait donc d'aligner le portage sur le Rust. Le
+ * **travail propagé** dit l'inverse — somme des demandes pour une unité de
+ * sommet, c'est-à-dire le nombre de croisements que le plan réclame :
+ *
+ * | famille | `disjoint` | `shared` |
+ * | --- | --- | --- |
+ * | dragodinde | 222 | 222 |
+ * | muldo | **204** | 252 (+24 %) |
+ * | volkorne | **24** | 30 (+25 %) |
+ *
+ * Et joué, l'écart est plus large encore. `simulatePolicy` sur le Corail-Pourpre
+ * du muldo, dix graines × vingt parties, seule la route changeant :
+ *
+ * | route | croisements (médiane) | coût (médiane) | aboutit à budget serré |
+ * | --- | --- | --- | --- |
+ * | `disjoint` | **1 369** | **16,7 M** | **36,5 %** |
+ * | `shared` | 2 794 | 34,9 M | 2,0 % |
+ *
+ * Les dix graines ne se recouvrent pas (1 248–1 580 contre 2 653–2 927), pour un
+ * bruit inter-graines de 15 %. Le Rust dit la même chose depuis que le plafond est
+ * tombé : `bin/bench`, 200 graines, l'échelle rend 59,87 M en `Disjoint` contre
+ * 52,72 M en `Shared`. C'est donc le Rust qu'on aligne, pas l'inverse.
+ *
+ * ## Pourquoi la route qui compte moins de couleurs coûte plus cher
+ *
+ * Le pivot partagé du muldo est `roux_amande`, une gen 4 faite de **deux gen 3**.
+ * `disjoint` prend à la place `roux_dore` et `dore_amande`, chacune une gen 3 et
+ * une gen 1 — qui s'achète à mille kamas. Le critère de `layRung` compte le
+ * travail **local** d'un jeu de gen 4, et il donne raison à `shared` (14 contre
+ * 16) ; la demande propagée compte le travail **réel** et le condamne, parce que
+ * la gen 4 pivot est réclamée seize fois. La gen 2 passe de 80 à 112, la gen 3 de
+ * 40 à 56.
+ */
+const DEFAULT_ROUTE: Route = 'disjoint';
+
 /** Le plan déduit de l'arbre : ce qu'on s'autorise à produire, et comment. */
 export type Ladder = {
   /** Toute couleur qu'on accepte de produire. Ce qui naît en dehors est hors plan. */
@@ -394,7 +449,7 @@ const ladderCache = new WeakMap<BreedingColor[], Map<Route, Ladder>>();
  * gen 2 et de gen 4 est un produit cartésien, négligeable une fois mais pas à
  * chaque rendu.
  */
-export const ladderOf = (colors: BreedingColor[], route: Route = 'disjoint'): Ladder => {
+export const ladderOf = (colors: BreedingColor[], route: Route = DEFAULT_ROUTE): Ladder => {
   let byRoute = ladderCache.get(colors);
   if (!byRoute) {
     byRoute = new Map();

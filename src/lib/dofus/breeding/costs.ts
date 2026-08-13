@@ -34,6 +34,7 @@
  */
 
 import { lineageValue } from './lineage';
+import { ladderOf } from './ladder';
 
 export type BreedingRecipe = [string, string];
 
@@ -798,6 +799,30 @@ export const computeBreedingCosts = (
   const byId = new Map(colors.map((color) => [color.id, color]));
 
   /**
+   * Le plan de l'échelle, qui décide **quelle recette** chaque couleur emploie.
+   *
+   * Le choix était local : la moins chère, couleur par couleur, sans jamais
+   * regarder les autres. Un choix local ne peut pas tenir une propriété globale,
+   * et il y en a une — `layThird` la démontre. Le jeu de gen 2 retenu doit être
+   * une **union disjointe de cliques** : un raté de `A × B` rend une gen 1
+   * portant `[A, B]`, et la réemployer face à un C fait rencontrer B et C, qui
+   * nomment `B-C`. Dans une clique `B-C` est voulue et rien n'est perdu ; sinon
+   * la cible se dédouble et 27 % de la masse utile s'en va.
+   *
+   * Relevé en énumérant les jeux qu'un choix indépendant peut atteindre : sur le
+   * muldo, **6 sur 18** sont fermés, et le jeu retenu ne l'était sur aucun des
+   * huit tirages de prix de `check-recipes.mjs`. Le plan chiffrait donc une route
+   * dont un raté sur quatre part hors cible, et l'écran l'annonçait au prix de la
+   * route saine.
+   *
+   * L'échelle, elle, choisit les recettes ensemble et sous la contrainte de
+   * fermeture. C'est le même plan que la politique applique déjà comme règle
+   * d'admissibilité (`policy.ts`) : les deux moitiés de l'écran parlaient de deux
+   * arbres différents, et c'est ce qui est réparé ici.
+   */
+  const ladder = ladderOf(colors);
+
+  /**
    * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
    *
    * Les poids ne sont plus posés par symétrie : ils sont **mesurés**, sur sept
@@ -852,84 +877,110 @@ export const computeBreedingCosts = (
 
     const optimakinaPrice = positive(optimakinaPrices?.get(color.generation));
 
-    for (const recipe of color.recipes) {
-      const [first, second] = recipe.map((parent) => estimates.get(parent));
+    /**
+     * Les recettes qu'on s'autorise à chiffrer, l'échelle d'abord.
+     *
+     * Deux passes et non une seule liste : la recette de l'échelle peut être
+     * **inchiffrable** — un de ses parents sans prix connu — et une couleur sans
+     * recette chiffrée sort du plan. Retomber sur l'arbre entier vaut mieux que
+     * de la faire disparaître, et le cas se dit ici plutôt que de se deviner sur
+     * un écran vide.
+     *
+     * Hors du plan de l'échelle, rien ne change : une couleur que l'échelle ne
+     * nomme pas garde le choix par le prix. C'est le cas de l'éleveur qui vise à
+     * côté de la montée, et le plan doit continuer de lui répondre.
+     */
+    const planned = ladder.recipeOf.get(color.id);
+    const onLadder = planned
+      ? color.recipes.filter(
+          (recipe) =>
+            (recipe[0] === planned[0] && recipe[1] === planned[1]) ||
+            (recipe[0] === planned[1] && recipe[1] === planned[0])
+        )
+      : [];
+    const passes = onLadder.length > 0 ? [onLadder, color.recipes] : [color.recipes];
 
-      // Un parent sans coût connu rend la recette inchiffrable. On ne la
-      // remplace pas par une valeur par défaut : un coût inventé se propagerait
-      // en silence jusqu'au classement, et « je ne sais pas » y ressemblerait à
-      // « c'est gratuit ». Comparaison à `null` explicite : un coût nul est une
-      // valeur légitime, que le raccourci `!cost` confondrait avec l'absence.
-      if (first?.cost == null || second?.cost == null) continue;
+    for (const candidates of passes) {
+      if (breedRecipe !== null) break;
+      for (const recipe of candidates) {
+        const [first, second] = recipe.map((parent) => estimates.get(parent));
 
-      const genetons = genetonsForCrossing(color.generation, [
-        byId.get(recipe[0])!.generation,
-        byId.get(recipe[1])!.generation,
-      ]);
+        // Un parent sans coût connu rend la recette inchiffrable. On ne la
+        // remplace pas par une valeur par défaut : un coût inventé se propagerait
+        // en silence jusqu'au classement, et « je ne sais pas » y ressemblerait à
+        // « c'est gratuit ». Comparaison à `null` explicite : un coût nul est une
+        // valeur légitime, que le raccourci `!cost` confondrait avec l'absence.
+        if (first?.cost == null || second?.cost == null) continue;
 
-      // Le niveau des parents se choisit **par recette** : il dépend du prix des
-      // parents, qui n'est pas le même d'une recette à l'autre. Un niveau unique
-      // pour tout l'arbre surpaierait les croisements bon marché.
-      // Le clonage rend la moitié de ce qu'on consomme. La montée, elle, est à
-      // refaire : le niveau est une jauge, et le clone repart à zéro — c'est
-      // pourquoi seul le prix des parents est divisé, pas le coût de montée.
-      //
-      // Les coûts sont bornés à zéro avant d'être réinjectés. Un croisement dont
-      // les génétons dépassent la dépense affiche un coût négatif, ce qui est
-      // exact et intéressant à voir — mais le propager casserait tout : diviser
-      // un négatif par le taux de réussite rend un **mauvais** taux préférable,
-      // et l'optimiseur choisirait alors des parents niveau 1. Une monture ne
-      // peut pas coûter moins que rien à se procurer ; ce qu'elle rapporte en
-      // plus se lit sur sa propre marge, pas sur le prix de ses enfants.
-      const parentsCost =
-        (Math.max(first.cost, 0) + Math.max(second.cost, 0)) * (recycleSteriles ? 0.5 : 1);
-      // Un accouplement demande **deux** parents à fécondité pleine et les rend
-      // tous deux à zéro : il faut donc deux cycles, un par parent, quelle que
-      // soit leur provenance. Le facturer à l'usage plutôt qu'à la naissance
-      // n'est pas un choix de présentation — imputer un cycle à chaque bébé
-      // laisserait les montures achetées, capturées et clonées ne jamais payer
-      // le leur. `planDuration` et `planGaugeNeeds` comptent déjà `2 ×
-      // tentatives` montures à préparer ; le coût attendu suit enfin.
-      const fuelCost = fuelCostPerCycle * 2;
+        const genetons = genetonsForCrossing(color.generation, [
+          byId.get(recipe[0])!.generation,
+          byId.get(recipe[1])!.generation,
+        ]);
 
-      // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
-      // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
-      const failureValue = creditOffTarget
-        ? lineageValueOf(recipe[0]) + lineageValueOf(recipe[1])
-        : 0;
+        // Le niveau des parents se choisit **par recette** : il dépend du prix des
+        // parents, qui n'est pas le même d'une recette à l'autre. Un niveau unique
+        // pour tout l'arbre surpaierait les croisements bon marché.
+        // Le clonage rend la moitié de ce qu'on consomme. La montée, elle, est à
+        // refaire : le niveau est une jauge, et le clone repart à zéro — c'est
+        // pourquoi seul le prix des parents est divisé, pas le coût de montée.
+        //
+        // Les coûts sont bornés à zéro avant d'être réinjectés. Un croisement dont
+        // les génétons dépassent la dépense affiche un coût négatif, ce qui est
+        // exact et intéressant à voir — mais le propager casserait tout : diviser
+        // un négatif par le taux de réussite rend un **mauvais** taux préférable,
+        // et l'optimiseur choisirait alors des parents niveau 1. Une monture ne
+        // peut pas coûter moins que rien à se procurer ; ce qu'elle rapporte en
+        // plus se lit sur sa propre marge, pas sur le prix de ses enfants.
+        const parentsCost =
+          (Math.max(first.cost, 0) + Math.max(second.cost, 0)) * (recycleSteriles ? 0.5 : 1);
+        // Un accouplement demande **deux** parents à fécondité pleine et les rend
+        // tous deux à zéro : il faut donc deux cycles, un par parent, quelle que
+        // soit leur provenance. Le facturer à l'usage plutôt qu'à la naissance
+        // n'est pas un choix de présentation — imputer un cycle à chaque bébé
+        // laisserait les montures achetées, capturées et clonées ne jamais payer
+        // le leur. `planDuration` et `planGaugeNeeds` comptent déjà `2 ×
+        // tentatives` montures à préparer ; le coût attendu suit enfin.
+        const fuelCost = fuelCostPerCycle * 2;
 
-      const parents =
-        parentLevel === 'auto'
-          ? optimalParentLevel(
-              parentsCost,
-              fuelCost,
-              mangeoireCostPerMountPoint,
-              optimakinaPrice,
-              failureValue,
-              parentLevelFloor
-            )
-          : fixedParentLevel(
-              parentLevel,
-              parentsCost,
-              fuelCost,
-              mangeoireCostPerMountPoint,
-              optimakinaPrice,
-              failureValue
-            );
+        // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
+        // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
+        const failureValue = creditOffTarget
+          ? lineageValueOf(recipe[0]) + lineageValueOf(recipe[1])
+          : 0;
 
-      // Les génétons ne tombent qu'à la naissance : ils se déduisent une fois,
-      // après la division par le taux de réussite qui, elle, frappe chaque
-      // tentative — y compris celles qui échouent sans rien produire.
-      const cost = parents.expectedCost - genetons * genetonValue;
-      if (breedCost !== null && cost >= breedCost) continue;
+        const parents =
+          parentLevel === 'auto'
+            ? optimalParentLevel(
+                parentsCost,
+                fuelCost,
+                mangeoireCostPerMountPoint,
+                optimakinaPrice,
+                failureValue,
+                parentLevelFloor
+              )
+            : fixedParentLevel(
+                parentLevel,
+                parentsCost,
+                fuelCost,
+                mangeoireCostPerMountPoint,
+                optimakinaPrice,
+                failureValue
+              );
 
-      breedCost = cost;
-      breedRecipe = recipe;
-      breedGenetons = genetons;
-      breedParents = parents;
-      // Le chemin ne vaut que par son maillon le plus faible : une recette sûre
-      // dont un parent vient d'un croisement non recoupé ne l'est pas.
-      breedVerified = color.source === 'game' && first.verified && second.verified;
+        // Les génétons ne tombent qu'à la naissance : ils se déduisent une fois,
+        // après la division par le taux de réussite qui, elle, frappe chaque
+        // tentative — y compris celles qui échouent sans rien produire.
+        const cost = parents.expectedCost - genetons * genetonValue;
+        if (breedCost !== null && cost >= breedCost) continue;
+
+        breedCost = cost;
+        breedRecipe = recipe;
+        breedGenetons = genetons;
+        breedParents = parents;
+        // Le chemin ne vaut que par son maillon le plus faible : une recette sûre
+        // dont un parent vient d'un croisement non recoupé ne l'est pas.
+        breedVerified = color.source === 'game' && first.verified && second.verified;
+      }
     }
 
     // Capturer ne concerne que les couleurs sauvages : au-delà de la première

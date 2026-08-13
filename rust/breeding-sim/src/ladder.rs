@@ -236,18 +236,33 @@ type SecondTier = (
 type FourthTier = (usize, usize, Vec<ColorId>, Vec<[ColorId; 2]>);
 
 impl Ladder {
-    /// Le plus haut barreau que l'échelle sait poser aujourd'hui.
-    pub const TOP_RUNG: u8 = 7;
-
     pub fn of(catalog: &Catalog, route: Route) -> Self {
         let mut ladder = Self::default();
         if !ladder.lay_third(catalog) {
             return Self::default();
         }
         // On monte de deux en deux : les couleurs simples sont aux générations
-        // impaires, et c'est elles qui font les barreaux.
+        // impaires, et c'est elles qui font les barreaux. On part de 5 parce que
+        // `lay_third` vient de poser le 3 — et avec lui les gen 2 qui le
+        // composent. Les générations paires ne sont jamais des barreaux : elles
+        // entrent comme ingrédients de celui du dessus.
+        //
+        // Le plafond `TOP_RUNG = 7` a été retiré, ici comme dans le portage
+        // (`src/lib/dofus/breeding/ladder.ts`). Sa seule justification était
+        // « le plus haut barreau que l'échelle sait poser aujourd'hui » — un
+        // état des lieux, pas une démonstration. Relevé avant de l'ôter : à 9
+        // les invariants tiennent sur les trois familles, et le plan passe de 18
+        // à 30 couleurs chez le muldo, de 13 à 18 chez la dragodinde. La montée
+        // s'arrête maintenant là où l'arbre s'arrête, ce que `lay_rung` sait
+        // déjà dire.
+        let highest = catalog
+            .colors()
+            .iter()
+            .map(|color| color.generation)
+            .max()
+            .unwrap_or(0);
         let mut rung = 5;
-        while rung <= Self::TOP_RUNG {
+        while rung <= highest {
             // La route demandée peut n'avoir aucun candidat — chez le muldo,
             // Prune et Émeraude ne partagent **aucune** gen 6, donc le cas 1
             // n'existe pas à cet étage. On se rabat plutôt que de s'arrêter :

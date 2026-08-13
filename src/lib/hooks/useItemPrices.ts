@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 import { ItemPrice } from '@/lib/supabase/types';
 
 export interface SaveItemPriceInput {
@@ -71,32 +72,16 @@ export const mergePrice = (
 };
 
 /**
- * PostgREST plafonne toute réponse à `max_rows` (1000, cf. supabase/config.toml)
- * sans le signaler. Un `select('*')` nu rendait donc une carte silencieusement
- * tronquée au-delà de 1000 prix : les items coupés passaient partout pour « jamais
- * tarifés », et leurs recettes pour « prix manquants ». D'où la pagination.
+ * Toute la table, page par page : `item_prices` a dépassé le millier de lignes,
+ * et PostgREST tronque en silence au-delà. Voir `fetchAllRows`, qui porte le
+ * détail — et que l'élevage lit désormais par le même chemin.
  */
-const PRICES_PAGE_SIZE = 1000;
-
-/** L'ordre importe peu, mais il doit être stable : sans `order`, deux pages peuvent
- *  se recouvrir ou se manquer. */
 const fetchAllPrices = async (): Promise<ItemPrice[]> => {
   const supabase = createClient();
-  const all: ItemPrice[] = [];
 
-  for (let from = 0; ; from += PRICES_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from('item_prices')
-      .select('*')
-      .order('item_id', { ascending: true })
-      .range(from, from + PRICES_PAGE_SIZE - 1);
-
-    if (error) throw error;
-
-    const page = data ?? [];
-    all.push(...page);
-    if (page.length < PRICES_PAGE_SIZE) return all;
-  }
+  return fetchAllRows<ItemPrice>((from, to) =>
+    supabase.from('item_prices').select('*').order('item_id', { ascending: true }).range(from, to)
+  );
 };
 
 /**

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 import { saveItemPrice } from '@/lib/hooks/useItemPrices';
 import type {
   BreedingColorPrice,
@@ -223,7 +224,7 @@ export const useBreeding = (
         const [
           colorRows,
           settingRows,
-          itemRows,
+          priceRows,
           mountRows,
           individualRows,
           stockRows,
@@ -231,10 +232,34 @@ export const useBreeding = (
         ] = await Promise.all([
             supabase.from('breeding_color_prices').select('*').eq('family', family),
             supabase.from('user_breeding_settings').select('*').maybeSingle(),
-            supabase.from('item_prices').select('*'),
+            // Les trois tables sans borne connue passent par `fetchAllRows` : le
+            // catalogue tarifé dépasse les 1000 lignes depuis longtemps, et rien
+            // ne majore le stock ni le nombre de montures suivies une à une.
+            // Un `select` nu les tronquerait en silence — l'élevage lisait alors
+            // « prix manquants » sur des recettes tarifées la semaine d'avant.
+            fetchAllRows<ItemPrice>((from, to) =>
+              supabase
+                .from('item_prices')
+                .select('*')
+                .order('item_id', { ascending: true })
+                .range(from, to)
+            ),
             supabase.from('user_breeding_mounts').select('*').eq('family', family),
-            supabase.from('user_breeding_individuals').select('*').eq('family', family),
-            supabase.from('user_item_stock').select('*'),
+            fetchAllRows<UserBreedingIndividual>((from, to) =>
+              supabase
+                .from('user_breeding_individuals')
+                .select('*')
+                .eq('family', family)
+                .order('id', { ascending: true })
+                .range(from, to)
+            ),
+            fetchAllRows<UserItemStock>((from, to) =>
+              supabase
+                .from('user_item_stock')
+                .select('*')
+                .order('item_id', { ascending: true })
+                .range(from, to)
+            ),
             // Les 120 carburants d'enclos tiennent en une page du miroir local :
             // c'est ce qui chiffre le cycle de fécondité et la montée en niveau.
             fetch(`/api/dofusdb/items?typeId=${FUEL_TYPE_ID}&limit=200`).then((response) =>
@@ -254,9 +279,7 @@ export const useBreeding = (
         }
         setPrices(nextPrices);
 
-        setItemPrices(
-          new Map(((itemRows.data ?? []) as ItemPrice[]).map((row) => [row.item_id, row]))
-        );
+        setItemPrices(new Map(priceRows.map((row) => [row.item_id, row])));
         setFuelItems((fuelResponse as DofusDBResponse<DofusDBItem>).data ?? []);
 
         setStable({
@@ -275,7 +298,7 @@ export const useBreeding = (
                 },
               ])
           ),
-          individuals: ((individualRows.data ?? []) as UserBreedingIndividual[]).map((row) => ({
+          individuals: individualRows.map((row) => ({
             id: row.id,
             colorId: row.color_id,
             name: row.name ?? null,
@@ -297,7 +320,7 @@ export const useBreeding = (
         });
         setItemStock(
           new Map(
-            ((stockRows.data ?? []) as UserItemStock[])
+            stockRows
               .filter((row) => row.quantity > 0)
               .map((row) => [row.item_id, row.quantity])
           )

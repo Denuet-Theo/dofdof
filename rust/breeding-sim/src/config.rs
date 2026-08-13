@@ -360,6 +360,15 @@ impl Prices {
             get(&["valeurs", "ambre_max"], economy.amber_per_generation as f64) as i64,
         );
 
+        // Ce qu'on facture à un croisement qui ne pouvait pas monter. Absent, il
+        // reste à zéro : le compte est tenu de toute façon, seul le prix est un
+        // choix, et les mesures publiées ne doivent pas bouger sous les pieds de
+        // qui n'a rien demandé.
+        economy.barren_crossing_malus = get(
+            &["valeurs", "malus_croisement_sterile"],
+            economy.barren_crossing_malus as f64,
+        ) as i64;
+
         economy.slots_per_enclos = slots_per_enclos;
         economy.sync_enclos = get(&["fournee", "enclos_synchronises"], 5.0) as usize;
         economy.free_enclos = get(&["fournee", "enclos_libres"], 0.0) as usize;

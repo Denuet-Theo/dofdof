@@ -186,6 +186,21 @@ pub struct Economy {
     pub availability: [[(f64, f64); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
     /// Nombre de chargements, quand l'horizon n'est pas un temps.
     pub batches: u32,
+    /// Ce que coûte un croisement qui n'avait **aucune chance de monter**, retiré
+    /// du score final. Voir `RunOutcome::barren_crossings`.
+    ///
+    /// ## Pourquoi un terme de score et non une dépense
+    ///
+    /// Une dépense en kamas changerait la solvabilité, donc le déroulé de la
+    /// partie : on ne saurait plus si un écart vient du prix posé ou du jeu
+    /// différent qu'il a provoqué. Retiré du score, le malus **re-classe** les
+    /// politiques sur des parties identiques — et comme la fitness de la recherche
+    /// *est* le score, il devient aussi ce que la recherche évite si on réentraîne
+    /// avec.
+    ///
+    /// **Zéro par défaut**, donc toutes les mesures publiées restent valides et
+    /// facturer la stérilité est un choix explicite.
+    pub barren_crossing_malus: i64,
     /// Prix forfaitaire d'un chargement du bloc, tant que les prix par jauge
     /// manquent.
     pub batch_cost: i64,
@@ -245,6 +260,7 @@ impl Default for Economy {
             horizon_hours: None,
             availability: [[(0.0, 0.0); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
             batches: 100,
+            barren_crossing_malus: 0,
             batch_cost: 150_000,
             starter_price: 1_000,
             amber_per_generation: 20_000,
@@ -812,6 +828,17 @@ pub struct RunOutcome {
     pub balance_before_liquidation: i64,
     pub liquidation: i64,
     pub crossings: usize,
+    /// Croisements qui n'avaient **aucune chance de monter**.
+    ///
+    /// Un couple dont la cible n'est nommée par personne est en régime
+    /// « recopie » : toute la masse de réussite retombe sur l'ascendance, donc le
+    /// poulain naît au mieux à la génération que les parents portaient déjà.
+    /// L'occupation de l'enclos, le carburant et la fécondité sont payés pour un
+    /// tirage qui ne peut pas faire avancer l'écurie.
+    ///
+    /// Compté toujours, facturé seulement si `Economy::barren_crossing_malus`
+    /// n'est pas nul : le compte est une observation, le prix est un choix.
+    pub barren_crossings: usize,
     pub purchases: usize,
     pub clonings: usize,
     pub sacrifices: usize,
@@ -867,6 +894,9 @@ pub enum Rejected {
 struct Applied {
     genetons: i64,
     crossings: usize,
+    /// Croisements qui **ne pouvaient pas** monter, ceux dont `pair_outlook`
+    /// rend une cible que personne ne nomme. Voir `RunOutcome::barren_crossings`.
+    barren: usize,
     purchases: usize,
     clonings: usize,
     sacrifices: usize,
@@ -1115,6 +1145,7 @@ fn apply(
     // --- croisements -------------------------------------------------------
     let mut best_generation = 0;
     let mut genetons: i64 = 0;
+    let mut barren = 0usize;
     let mut births: Vec<Mount> = Vec::with_capacity(plan.crossings.len());
     for (slot, &[male, female]) in plan.crossings.iter().enumerate() {
         check(male)?;
@@ -1139,6 +1170,13 @@ fn apply(
         };
 
         let names_target = !outlook.target_colors.is_empty();
+        // Une cible que personne ne nomme : toute la masse de réussite retombe sur
+        // l'ascendance, donc le poulain **ne peut pas** dépasser la génération que
+        // le couple portait déjà. Le croisement est stérile au sens qui compte —
+        // pas qu'il ne donne rien, mais qu'il ne peut rien donner de nouveau.
+        if !names_target {
+            barren += 1;
+        }
 
         // La fécondité se consomme, et définitivement.
         stable.mounts[male].fertile = false;
@@ -1211,6 +1249,7 @@ fn apply(
     Ok(Applied {
         genetons,
         crossings: plan.crossings.len(),
+        barren,
         purchases: plan.purchases.len(),
         clonings: plan.clonings.len(),
         sacrifices: plan.sacrifices.len(),
@@ -1297,6 +1336,7 @@ fn run(
         balance_before_liquidation: 0,
         liquidation: 0,
         crossings: 0,
+        barren_crossings: 0,
         purchases: 0,
         clonings: 0,
         cycles: 0,
@@ -1379,6 +1419,7 @@ fn run(
         ) {
             Ok(applied) => {
                 outcome.crossings += applied.crossings;
+                outcome.barren_crossings += applied.barren;
                 outcome.purchases += applied.purchases;
                 outcome.clonings += applied.clonings;
                 outcome.cycles += applied.cycles;
@@ -1463,7 +1504,12 @@ fn run(
         .filter(|m| catalog.generation(m.color) >= catalog.top_generation())
         .count();
     outcome.best_generation = outcome.best_generation.max(stable.top_generation(catalog));
-    outcome.score = kamas + outcome.liquidation;
+    // Le malus est retiré ici, une fois, sur le total : c'est un terme de score et
+    // non une dépense, donc il n'a jamais pu influer sur la solvabilité ni sur ce
+    // que la politique pouvait se permettre en cours de partie. Deux malus
+    // différents rejouent exactement la même partie.
+    outcome.score = kamas + outcome.liquidation
+        - economy.barren_crossing_malus * outcome.barren_crossings as i64;
     outcome
 }
 

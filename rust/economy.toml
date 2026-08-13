@@ -220,6 +220,24 @@ gen10 = 600_000
 gen10_min = 300_000
 gen10_max = 1_000_000
 
+# Ce que coûte un croisement qui n'avait **aucune chance de monter**.
+#
+# Un couple dont la cible n'est nommée par personne est en régime « recopie » :
+# toute la masse de réussite retombe sur l'ascendance, donc le poulain naît au
+# mieux à la génération que les parents portaient déjà. La place d'enclos, le
+# carburant et la fécondité sont payés pour un tirage qui ne peut pas faire
+# avancer l'écurie.
+#
+# **Retiré du score, pas dépensé en kamas.** Une dépense changerait la solvabilité
+# et donc le déroulé de la partie ; on ne saurait plus si un écart vient du prix
+# posé ou du jeu différent qu'il a provoqué. Retiré du score, le malus re-classe
+# les politiques sur des parties identiques — et comme la fitness de la recherche
+# *est* le score, il devient ce que la recherche évite si on réentraîne avec.
+#
+# Zéro par défaut : le compte est tenu de toute façon (`barren_crossings`), seul
+# le prix est un choix. `bin/barren` mesure ce qu'un prix non nul re-classe.
+malus_croisement_sterile = 0
+
 # ---------------------------------------------------------------------------
 [genetons]
 # ---------------------------------------------------------------------------

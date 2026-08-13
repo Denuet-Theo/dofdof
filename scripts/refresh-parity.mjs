@@ -1,5 +1,5 @@
 /**
- * Réinstaller un champion et refaire les quatre références de parité.
+ * Réinstaller un champion et refaire les six références de parité.
  *
  * ```sh
  * node scripts/refresh-parity.mjs                 # rust/champion.json
@@ -7,12 +7,12 @@
  * node scripts/refresh-parity.mjs --check         # ne réécrit rien, vérifie
  * ```
  *
- * ## Pourquoi une commande et pas quatre
+ * ## Pourquoi une commande et pas six
  *
  * Changer de champion demande cinq gestes : copier l'artefact dans `src/`, refaire
  * les deux références qui en dépendent — le réseau et la recherche — refaire les
  * deux qui n'en dépendent pas mais que `FEATURES` peut invalider, et rejouer les
- * cinq gardes. Les faire à la main, c'est en oublier un ; et l'oubli qui compte
+ * six gardes. Les faire à la main, c'est en oublier un ; et l'oubli qui compte
  * ne se voit pas.
  *
  * Le pire est celui-ci : régénérer les références **sans** copier l'artefact. Les
@@ -96,8 +96,8 @@ if (checkOnly) {
 /* ------------------------------------------------------------ les fixtures */
 
 if (!checkOnly) {
-  // Les quatre dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
-  // les demander séparément relançait quatre fois la même vérification de crate.
+  // Les six dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
+  // les demander séparément relançait six fois la même vérification de crate.
   say('--- compilation des dumpers ---');
   run(
     'cargo',
@@ -117,6 +117,8 @@ if (!checkOnly) {
       'dump-search',
       '--bin',
       'dump-schedule',
+      '--bin',
+      'dump-ladder',
     ],
     RUST
   );
@@ -133,6 +135,10 @@ if (!checkOnly) {
     // Celle-ci ne dépend d'aucun champion — c'est de l'ordonnancement pur — mais
     // elle dépend de `schedule.rs`, et la refaire coûte deux secondes.
     ['dump-schedule', [target('schedule-parity.json')]],
+    // Celle-ci non plus : le plan de l'échelle se déduit de `trees.json` et de
+    // `ladder.rs`, donc c'est l'un des deux qui bouge quand elle change. La
+    // refaire par réflexe évite d'avoir à se demander lequel.
+    ['dump-ladder', [target('ladder-parity.json')]],
   ];
   say('\n--- références ---');
   for (const [binary, args] of dumps) {
@@ -144,7 +150,7 @@ if (!checkOnly) {
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search', 'schedule']) {
+for (const guard of ['network', 'census', 'delta', 'search', 'schedule', 'ladder-parity']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {
@@ -159,4 +165,4 @@ if (failed > 0) {
   );
   process.exit(1);
 }
-say('\nles cinq gardes passent — le portage rejoue ce champion-ci');
+say('\nles six gardes passent — le portage rejoue ce champion-ci');

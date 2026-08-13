@@ -88,18 +88,33 @@ const BreedingEnclosExitDialog = ({
       levels: { ...levels, [id]: Math.max(1, Math.min(200, value || 1)) },
     });
 
-  /** Une monture de vrac n'a pas de niveau à elle : elle ne se saisit pas. */
-  const tracked = mounts.filter((mount) => parseCountedMountId(mount.id) === null);
-
   /** Le même niveau pour tout le lot — le cas courant, en un geste. */
   const setAll = (value: number) =>
     setDraft({
       key: signature,
       done: null,
-      levels: Object.fromEntries(tracked.map((mount) => [mount.id, value])),
+      levels: Object.fromEntries(mounts.map((mount) => [mount.id, value])),
     });
 
-  const climbed = tracked.filter((mount) => levelOf(mount) !== mount.level).length;
+  const climbed = mounts.filter((mount) => levelOf(mount) !== mount.level).length;
+
+  /**
+   * Les montures dont le niveau n'est **pas** connu, et que la sortie ne doit pas
+   * enregistrer sans qu'on l'ait saisi.
+   *
+   * Une monture comptée — vrac ou procurée — vaut `BULK_MATE_LEVEL`, soit 1. Sa
+   * ligne s'affiche donc préremplie à 1, et le bouton partirait sur ce 1 au
+   * premier clic : quarante montures inscrites niveau 1, des taux de réussite
+   * effondrés, et une fournée suivante calculée là-dessus. C'est le mode d'échec
+   * le plus probable de cet écran, parce qu'il ne ressemble pas à une erreur — il
+   * ressemble à un clic.
+   *
+   * Les suivies, elles, portent un niveau réel : il fait un point de départ
+   * honnête, et rien ne les bloque.
+   */
+  const missing = mounts.filter(
+    (mount) => parseCountedMountId(mount.id) !== null && levels[mount.id] === undefined
+  );
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
@@ -111,7 +126,7 @@ const BreedingEnclosExitDialog = ({
           taux de réussite des croisements à venir.
         </p>
 
-        {tracked.length > 1 && (
+        {mounts.length > 1 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-dark-400">Même niveau pour tout le lot</span>
             <input
@@ -163,33 +178,29 @@ const BreedingEnclosExitDialog = ({
                 >
                   {mount.name ?? ANONYMOUS_NAME}
                 </code>
-                {/* Le vrac se compte, il ne se nomme pas : il n'a aucune ligne
-                    où ranger un niveau, et tout le stock d'une couleur partage
-                    le même. Demander une saisie ici ferait croire qu'elle est
-                    retenue. La fécondité, elle, est bien enregistrée. */}
-                {parseCountedMountId(mount.id) ? (
-                  <span className="ml-auto text-[10px] text-dark-600">niveau non suivi</span>
-                ) : (
-                  <>
-                    <label className="ml-auto flex items-center gap-1 text-[10px] text-dark-500">
-                      niv
-                      <input
-                        type="number"
-                        min={1}
-                        max={200}
-                        value={String(levelOf(mount))}
-                        onChange={(event) => setLevel(mount.id, Number(event.target.value))}
-                        className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
-                          border-dark-600/50 text-dark-100 text-[11px] text-right transition-all
-                          hover:border-dark-500 focus:border-kamas/50"
-                      />
-                    </label>
-                    {levelOf(mount) !== mount.level && (
-                      <span className="text-[10px] text-dark-600 tabular-nums">
-                        était {mount.level}
-                      </span>
-                    )}
-                  </>
+                {/* Toute monture qui sort d'ici prend son niveau, vrac et
+                    procurées comprises. Sans lui elles vaudraient
+                    `BULK_MATE_LEVEL`, soit 1 — et c'est le niveau qui décide du
+                    taux de réussite des croisements suivants, donc les prêter à 1
+                    reviendrait à saboter tout ce qu'on vient de sortir. La sortie
+                    les inscrit une par une pour cette raison. */}
+                <label className="ml-auto flex items-center gap-1 text-[10px] text-dark-500">
+                  niv
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={String(levelOf(mount))}
+                    onChange={(event) => setLevel(mount.id, Number(event.target.value))}
+                    className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                      border-dark-600/50 text-dark-100 text-[11px] text-right transition-all
+                      hover:border-dark-500 focus:border-kamas/50"
+                  />
+                </label>
+                {levelOf(mount) !== mount.level && (
+                  <span className="text-[10px] text-dark-600 tabular-nums">
+                    était {mount.level}
+                  </span>
                 )}
               </div>
             );
@@ -211,7 +222,7 @@ const BreedingEnclosExitDialog = ({
         >
           <Button
             size="sm"
-            disabled={running || mounts.length === 0}
+            disabled={running || mounts.length === 0 || missing.length > 0}
             onClick={async () => {
               setRunning(true);
               const written = await onConfirm(
@@ -227,7 +238,14 @@ const BreedingEnclosExitDialog = ({
               ? 'Enregistrement…'
               : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''}`}
           </Button>
-          {climbed > 0 && (
+          {missing.length > 0 && (
+            <span className="text-[11px] text-loss-light">
+              {missing.length} monture{missing.length > 1 ? 's' : ''} sans niveau — pose le niveau
+              du lot ci-dessus, sinon {missing.length > 1 ? 'elles entreraient' : 'elle entrerait'} à
+              l&apos;écurie au niveau 1 et les croisements suivants seraient calculés dessus
+            </span>
+          )}
+          {missing.length === 0 && climbed > 0 && (
             <span className="text-[11px] text-dark-500">
               {climbed} niveau{climbed > 1 ? 'x' : ''} corrigé{climbed > 1 ? 's' : ''}
             </span>

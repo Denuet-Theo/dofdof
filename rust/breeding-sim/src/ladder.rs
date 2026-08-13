@@ -300,9 +300,14 @@ impl Ladder {
         // « le plus haut barreau que l'échelle sait poser aujourd'hui » — un
         // état des lieux, pas une démonstration. Relevé avant de l'ôter : à 9
         // les invariants tiennent sur les trois familles, et le plan passe de 18
-        // à 30 couleurs chez le muldo, de 13 à 18 chez la dragodinde. La montée
-        // s'arrête maintenant là où l'arbre s'arrête, ce que `lay_rung` sait
-        // déjà dire.
+        // à 30 couleurs chez le muldo, de 13 à 18 chez la dragodinde.
+        //
+        // La montée s'arrête maintenant sur `lay_rung`, qui rend `false` quand un
+        // rang n'a **aucune** cible ou aucun jeu candidat. Le corps de ce
+        // commit-là disait qu'elle s'arrêtait « là où l'arbre s'arrête » et que le
+        // volkorne restait en gen 5 faute de jeu candidat au rang 9 : c'était
+        // inexact. Il butait sur un **second** seuil écrit à la main dans
+        // `lay_rung` et n'atteignait jamais le rang 9. Voir là-bas.
         let highest = catalog
             .colors()
             .iter()
@@ -477,9 +482,31 @@ impl Ladder {
     ///
     /// Rend `false` quand la route demandée n'a aucun candidat — voir l'appelant,
     /// qui se rabat alors sur l'autre.
+    ///
+    /// ## Le seuil « au moins deux cibles » a été retiré
+    ///
+    /// Il n'avait aucun commentaire, et il était incompatible avec `lay_third`,
+    /// qui se contente d'une seule cible. Ce qu'il croyait dire est vrai mais se
+    /// dit déjà ailleurs : à une seule cible, un seul couple d'ingrédients est
+    /// retenu, donc `Shared` — qui réclame un pivot partagé — n'a aucun candidat
+    /// et `Disjoint` est trivialement satisfait. Cette moitié-là est portée par la
+    /// contrainte de route et par le repli de l'appelant sur l'autre route.
+    ///
+    /// Ce que le seuil ajoutait, en revanche, était faux : il **arrêtait la
+    /// montée** là où la route était seulement indéterminée. Le volkorne n'a
+    /// qu'une gen 7, Doré, dont les huit recettes emploient toutes deux gen 6
+    /// distinctes ; le seuil refusait son rang 7, et le rang 9 n'était donc jamais
+    /// tenté — ce qu'on a écrit à tort comme une propriété de l'arbre. Mesuré en
+    /// le retirant, sur le portage qui sert de banc aux trois familles : le plan
+    /// du volkorne passe de 16 à 28 couleurs, sommet gen 5 → gen 9, travail par
+    /// sommet 24 → 228, et son plan **couronné** se referme, ce qu'il ne faisait
+    /// pas. La dragodinde et le muldo ne bougent pas : leurs rangs impairs ont
+    /// tous deux cibles.
     fn lay_rung(&mut self, catalog: &Catalog, generation: u8, route: Route) -> bool {
         let targets: Vec<ColorId> = catalog.ids_at_generation(generation).collect();
-        if targets.len() < 2 {
+        // Aucune cible : le rang n'existe pas, la montée s'arrête. Une seule
+        // suffit — voir ci-dessus pour ce que le seuil précédent coûtait.
+        if targets.is_empty() {
             return false;
         }
 

@@ -51,7 +51,7 @@ execFileSync(
   { stdio: 'inherit' }
 );
 
-const { ladderOf, aimsAt, namesSomething } = await import(
+const { ladderOf, crownAt, aimsAt, namesSomething } = await import(
   pathToFileURL(join(out, 'ladder.js')).href
 );
 
@@ -152,10 +152,78 @@ for (const family of trees.families) {
     .map((block) => block.map((colorId) => byId.get(colorId)?.name ?? colorId).join('+'))
     .join(' | ');
 
+  // **Le plan couronné**, qui est celui que l'écran applique.
+  //
+  // `ladderOf` s'arrête au dernier barreau impair et garde toutes ses couleurs ;
+  // `crownedLadderOf` tranche une gen 10 et taille ce que plus rien ne réclame.
+  // C'est le second qui alimente `aimsAt` dans `policy.ts`, donc c'est lui qu'il
+  // faut refermer — et rien ne le vérifiait : le volkorne a posé pendant tout un
+  // correctif un plan couronné dont la gen 8 réclamait une gen 7 absente, sans
+  // qu'aucune garde ne rougisse.
+  //
+  // La couronne dépend des prix de gen 10, donc on ne conclut pas sur un tirage :
+  // on couronne sur chaque candidate à tour de rôle, ce qui couvre aussi les
+  // routes que le prix ne choisit jamais.
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+  const tops = colors.filter((color) => color.generation === top).map((color) => color.id);
+  let crownedRuns = 0;
+  for (const forced of tops) {
+    // `crownedLadderOf` choisit d'abord le partenaire, donc un prix ne suffit
+    // pas à imposer une couronne : on passe par `crownAt`, qui l'accepte.
+    const crowned = {
+      wanted: new Set(ladder.wanted),
+      recipeOf: new Map(ladder.recipeOf),
+      demand: new Map(ladder.demand),
+      blocks: ladder.blocks.map((block) => [...block]),
+      summit: [...ladder.summit],
+    };
+    crownAt(crowned, colors, () => 0, forced);
+    // Une gen 10 qui n'est pas gen 9 × gen 1 achetable n'est pas couronnable.
+    if (crowned.summit.length !== 1 || crowned.summit[0] !== forced) continue;
+    crownedRuns += 1;
+
+    for (const colorId of crowned.wanted) {
+      const recipe = crowned.recipeOf.get(colorId);
+      if (!recipe) {
+        fail(`${family.id} : ${colorId} au plan couronné sans recette (${forced}).`);
+        continue;
+      }
+      for (const ingredient of recipe) {
+        if (!crowned.wanted.has(ingredient) && generations.get(ingredient) !== 1) {
+          fail(
+            `${family.id} : le plan couronné sur ${forced} demande ${ingredient} ` +
+              `pour ${colorId}, ni au plan ni achetable.`
+          );
+        }
+      }
+      // Ce qui reste au plan doit être réclamé. C'est la taille par la demande,
+      // et c'est elle qui distingue le plan du Rust de celui d'avant le portage.
+      if ((crowned.demand.get(colorId) ?? 0) <= 0) {
+        fail(`${family.id} : ${colorId} reste au plan couronné sans demande (${forced}).`);
+      }
+    }
+    // Et la règle d'admissibilité doit tenir sur ce plan-là aussi.
+    for (const male of firsts) {
+      for (const female of firsts) {
+        const mate = (color, sex) => ({ id: null, colorId: color.id, sex, level: 1, parents: null });
+        const pair = [mate(male, 'M'), mate(female, 'F')];
+        if (namesSomething(pair[0], pair[1], colors, generations)) continue;
+        if (aimsAt(pair[0], pair[1], colors, generations, crowned) !== null) {
+          fail(
+            `${family.id} : ${male.id} × ${female.id} ne nomme rien et le plan ` +
+              `couronné sur ${forced} l'accepte.`
+          );
+        }
+      }
+    }
+  }
+  if (crownedRuns === 0) fail(`${family.id} : aucune couronne posable.`);
+
   console.log(
     `${family.id.padEnd(11)} · ${ladder.wanted.size} couleurs au plan · ` +
       `blocs ${blocks} · ` +
-      `paires gen 1 : ${barren} sans cible refusées, ${accepted} admises`
+      `paires gen 1 : ${barren} sans cible refusées, ${accepted} admises · ` +
+      `${crownedRuns} couronne${crownedRuns > 1 ? 's' : ''} refermée${crownedRuns > 1 ? 's' : ''}`
   );
 }
 

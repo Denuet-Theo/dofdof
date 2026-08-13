@@ -50,16 +50,11 @@ import type { BreedingColor } from './costs';
  * | --- | --- | --- | --- |
  * | dragodinde | 18 | 17 | une gen 9 sur deux, et la gen 8 qu'elle seule servait |
  * | muldo | 30 | 19 ou 22 | 3 gen 9 sur 4, et les gen 6/7/8 qu'elles seules servaient |
+ * | volkorne | 28 | 23 | 3 gen 9 sur 4, et leurs gen 8 |
  *
  * Et en croisements admissibles, sur toutes les paires de couleurs du catalogue :
- * 36 → 34 chez la dragodinde, 154 → 94/102/114 chez le muldo. Aucun accouplement
- * sans cible n'est jamais admis, avant comme après.
- *
- * Le volkorne est à part et le restera jusqu'au correctif suivant : sa montée
- * s'arrête à la gen 5, donc la couronne y **pose** une route neuve au lieu d'en
- * tailler une, et le plan qui en sort n'est pas refermé — sa gen 8 réclame une
- * gen 7 absente. Ce n'est pas la couronne qui est en cause mais un second seuil
- * écrit à la main dans `layRung`.
+ * 36 → 34 chez la dragodinde, 154 → 94/102/114 chez le muldo, 138 → 122 chez le
+ * volkorne. Aucun accouplement sans cible n'est jamais admis, avant comme après.
  */
 
 /**
@@ -89,7 +84,7 @@ export type Route = 'shared' | 'disjoint';
  * | --- | --- | --- | --- | --- | --- |
  * | dragodinde | 18 | 18 | 0 | mêmes | mêmes |
  * | muldo | 30 | 25 | 7 | mêmes | mêmes |
- * | volkorne | 16 | 15 | 3 | mêmes | mêmes |
+ * | volkorne | 28 | 27 | 7 | mêmes | mêmes |
  *
  * Compter les couleurs suggérait donc d'aligner le portage sur le Rust. Le
  * **travail propagé** dit l'inverse — somme des demandes pour une unité de
@@ -99,7 +94,7 @@ export type Route = 'shared' | 'disjoint';
  * | --- | --- | --- |
  * | dragodinde | 222 | 222 |
  * | muldo | **204** | 252 (+24 %) |
- * | volkorne | **24** | 30 (+25 %) |
+ * | volkorne | **228** | 276 (+21 %) |
  *
  * Et joué, l'écart est plus large encore. `simulatePolicy` sur le Corail-Pourpre
  * du muldo, dix graines × vingt parties, seule la route changeant :
@@ -150,14 +145,19 @@ export type Ladder = {
  * à 18 chez la dragodinde. La règle tenait donc déjà plus haut que le plafond ne
  * la laissait aller.
  *
- * La montée s'arrête maintenant d'elle-même, là où l'arbre s'arrête : `layRung`
- * rend `false` quand un rang n'a pas deux cibles ou aucun jeu de recettes
- * candidat, et les deux routes sont essayées avant d'abandonner. C'est la bonne
- * borne — celle de la famille — au lieu d'un nombre écrit à la main qui vaut
- * pour toutes.
+ * La montée s'arrête maintenant sur `layRung`, qui rend `false` quand un rang n'a
+ * **aucune** cible ou aucun jeu de recettes candidat, les deux routes essayées
+ * avant d'abandonner. C'est la bonne borne — celle de la famille — au lieu d'un
+ * nombre écrit à la main qui vaut pour toutes.
  *
- * Le volkorne ne monte pas plus haut pour autant : aucun jeu candidat au rang 9.
- * Ce n'est pas un échec, c'est l'arbre qui le dit.
+ * ## Une phrase à corriger
+ *
+ * Le corps du commit qui a retiré le plafond disait que le volkorne s'arrêtait au
+ * rang 5 parce que « l'arbre le dit », faute de jeu candidat au rang 9. C'est
+ * inexact et la mesure le montre : le volkorne n'a **jamais atteint** le rang 9.
+ * Il butait sur un second seuil écrit à la main dans `layRung` — « au moins deux
+ * cibles » — et son rang 7 n'a qu'une couleur, Doré. Ce seuil retiré, le plan
+ * passe de 16 à 28 couleurs et monte jusqu'à la gen 9. Voir `layRung`.
  */
 
 /**
@@ -362,6 +362,32 @@ const layThird = (ladder: Ladder, colors: BreedingColor[], index: Index): boolea
  *
  * Rend `false` quand la route demandée n'a aucun candidat — l'appelant se rabat
  * alors sur l'autre plutôt que d'interrompre la montée.
+ *
+ * ## Le seuil « au moins deux cibles » a été retiré
+ *
+ * Il n'avait aucun commentaire, et il était incompatible avec `layThird`, qui se
+ * contente d'une seule cible. Ce qu'il croyait dire est vrai mais se dit déjà
+ * ailleurs : à une seule cible, un seul couple d'ingrédients est retenu, donc
+ * `shared` — qui réclame un pivot partagé — n'a aucun candidat, et `disjoint` est
+ * trivialement satisfait. Cette moitié-là est déjà portée par la contrainte de
+ * route et par le repli de l'appelant sur l'autre route.
+ *
+ * Ce que le seuil ajoutait, en revanche, était faux : il **arrêtait la montée** là
+ * où la route était seulement indéterminée. Le volkorne n'a qu'une gen 7, Doré,
+ * dont les huit recettes emploient toutes deux gen 6 distinctes ; le seuil
+ * refusait le rang 7 et le rang 9 n'était jamais tenté. Mesuré en le retirant :
+ *
+ * | famille | plan avant | plan après | sommet | travail par sommet |
+ * | --- | --- | --- | --- | --- |
+ * | dragodinde | 18 | 18 | inchangé | 222 |
+ * | muldo | 30 | 30 | inchangé | 204 |
+ * | volkorne | 16 | **28** | gen 5 → **gen 9** | 24 → 228 |
+ *
+ * La dragodinde et le muldo ne bougent pas : leurs rangs impairs ont tous deux
+ * cibles. Le volkorne, lui, gagne deux étages — et son plan couronné se referme,
+ * ce qu'il ne faisait pas tant que la montée s'arrêtait en gen 5. C'est
+ * `check-ladder` qui le vérifie désormais, sur chacune des seize couronnes
+ * posables.
  */
 const layRung = (
   ladder: Ladder,
@@ -373,7 +399,9 @@ const layRung = (
   const byId = new Map(colors.map((color) => [color.id, color]));
   const generationOf = (colorId: string) => byId.get(colorId)?.generation ?? 0;
   const targets = colors.filter((color) => color.generation === generation);
-  if (targets.length < 2) return false;
+  // Aucune cible : le rang n'existe pas, la montée s'arrête. Une seule suffit —
+  // voir la doc ci-dessus pour ce que le seuil précédent coûtait au volkorne.
+  if (targets.length === 0) return false;
 
   // Ce que chaque gen 1 sert déjà, pour départager à coût égal.
   const usage = new Map<string, number>();

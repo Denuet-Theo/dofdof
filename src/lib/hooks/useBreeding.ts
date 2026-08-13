@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/pagination';
-import { saveItemPrice } from '@/lib/hooks/useItemPrices';
+import { priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
 import type {
   BreedingColorPrice,
   DofusDBItem,
@@ -66,6 +66,19 @@ import { parseCountedMountId } from '@/lib/dofus/breeding/search';
  * silence qui coûte une soirée.
  */
 export type AddResult = { ok: true; mount: Individual } | { ok: false; message: string };
+
+/**
+ * Ce qu'un enregistrement de prix de carburant a donné.
+ *
+ * Même leçon qu'`AddResult`, sur la saisie la plus dense de l'écran : cent vingt
+ * champs, un enregistrement par frappe, et jusqu'ici pas un mot quand la base
+ * refusait. Le nom de l'item voyage avec le message parce que la bannière est
+ * unique pour toute la liste — sans lui, elle dirait qu'un prix est perdu sans
+ * dire lequel.
+ */
+export type FuelPriceResult =
+  | { ok: true }
+  | { ok: false; itemName: string; message: string };
 
 /**
  * Ce qu'un accouplement a donné : ses deux parents, et le bébé qui en est né.
@@ -1392,8 +1405,13 @@ export const useBreeding = (
    * la frappe poussive.
    */
   const saveFuelPrice = useCallback(
-    async (itemId: number, itemName: string, price: number) => {
+    async (itemId: number, itemName: string, price: number): Promise<FuelPriceResult> => {
       const updated_at = new Date().toISOString();
+      // Ce que la base porte avant la saisie : c'est là qu'on revient si elle
+      // refuse. Sans ça, l'état local partait devant et **y restait**, si bien
+      // qu'un prix jamais enregistré continuait de nourrir le coût du cycle
+      // jusqu'au rechargement suivant.
+      const previous = itemPrices.get(itemId);
       setItemPrices((current) => {
         const next = new Map(current);
         if (price > 0) {
@@ -1412,14 +1430,22 @@ export const useBreeding = (
         return next;
       });
 
-      if (price <= 0) return;
+      if (price <= 0) return { ok: true as const };
       try {
         await saveItemPrice({ itemId, itemName, price });
+        return { ok: true as const };
       } catch (saveError) {
         console.error('[breeding] prix de carburant non enregistré:', saveError);
+        setItemPrices((current) => {
+          const next = new Map(current);
+          if (previous) next.set(itemId, previous);
+          else next.delete(itemId);
+          return next;
+        });
+        return { ok: false as const, itemName, message: priceSaveMessage(saveError) };
       }
     },
-    []
+    [itemPrices]
   );
 
   /** Idem pour un carburant en réserve. */

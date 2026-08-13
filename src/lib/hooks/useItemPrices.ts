@@ -13,8 +13,32 @@ export interface SaveItemPriceInput {
 }
 
 /**
+ * Le texte à montrer quand un prix n'est pas passé.
+ *
+ * Le message de PostgREST **et son code**, pas un « échec » à nous : une session
+ * expirée (PGRST301), une policy qui refuse (42501) et une contrainte violée
+ * (23xxx) demandent trois gestes différents, et seule la base sait lequel. La
+ * console ne suffit pas : personne ne l'ouvre en tarifant cent vingt carburants.
+ */
+export const priceSaveMessage = (error: unknown): string => {
+  if (error && typeof error === 'object') {
+    const { message, code } = error as { message?: unknown; code?: unknown };
+    if (typeof message === 'string' && message) {
+      return typeof code === 'string' && code ? `${message} (${code})` : message;
+    }
+  }
+  return 'La base n’a rien renvoyé.';
+};
+
+/**
  * Writes a price to the shared `item_prices` table and returns the timestamp it was
  * stamped with, so callers can merge it into local state. Throws on failure.
+ *
+ * Le `.select()` n'est pas là pour lire : il est là pour **vérifier**. Une
+ * absence d'erreur ne prouve pas qu'une ligne a été écrite — c'est précisément
+ * ce qui a laissé six carburants sans prix pendant une semaine, ressaisis trois
+ * fois sans que rien ne le dise. On redemande donc la ligne, et son absence
+ * devient un échec comme un autre.
  */
 export const saveItemPrice = async ({
   itemId,
@@ -29,20 +53,28 @@ export const saveItemPrice = async ({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { error } = await supabase.from('item_prices').upsert(
-    {
-      item_id: itemId,
-      item_name: itemName,
-      icon_url: iconUrl ?? null,
-      price,
-      updated_at,
-      updated_by: user?.id,
-    },
-    { onConflict: 'item_id' }
-  );
+  const { data, error } = await supabase
+    .from('item_prices')
+    .upsert(
+      {
+        item_id: itemId,
+        item_name: itemName,
+        icon_url: iconUrl ?? null,
+        price,
+        updated_at,
+        updated_by: user?.id,
+      },
+      { onConflict: 'item_id' }
+    )
+    .select('updated_at')
+    .single();
 
   if (error) throw error;
-  return updated_at;
+  if (!data) throw new Error('La base n’a rien renvoyé.');
+
+  // L'estampille relue, et non celle qu'on vient de fabriquer : c'est celle que
+  // porte la ligne, donc celle que « MAJ : il y a 2 min » dira vrai.
+  return data.updated_at ?? updated_at;
 };
 
 /**

@@ -1,5 +1,6 @@
-// Résolution partagée de SUPABASE_DB_URL, utilisée par run-migrations.mjs et
-// sync-dofusdb.mjs pour qu'ils échouent de la même façon et logguent la même chose.
+// Résolution partagée de SUPABASE_DB_URL, utilisée par run-migrations.mjs,
+// sync-dofusdb.mjs et export-user-data.mjs pour qu'ils échouent de la même façon
+// et logguent la même chose.
 //
 // SUPABASE_DB_URL est une chaîne de connexion Postgres *directe* avec les droits
 // DDL. Les variables NEXT_PUBLIC_SUPABASE_* que l'app utilise sont une clé anon
@@ -45,3 +46,20 @@ export function requireDbUrl(tag, onRenderMsg) {
   console.warn(`[${tag}] SUPABASE_DB_URL is not set — skipping.`);
   process.exit(0);
 }
+
+/**
+ * Config node-postgres pour une connexion directe à Supabase.
+ *
+ * Supabase n'accepte que des connexions TLS, et node-postgres ne l'active pas de
+ * lui-même — contrairement à la CLI Supabase qu'utilise run-migrations.mjs, qui
+ * s'en charge seule. Le certificat est signé par une AC absente du magasin par
+ * défaut de Node, d'où `rejectUnauthorized: false` : le transport est chiffré,
+ * la chaîne n'est pas validée. Une chaîne de connexion qui précise déjà
+ * `sslmode` est laissée telle quelle.
+ *
+ * @param {string} connectionString
+ */
+export const clientConfig = (connectionString) => ({
+  connectionString,
+  ...(/[?&]sslmode=/i.test(connectionString) ? {} : { ssl: { rejectUnauthorized: false } }),
+});

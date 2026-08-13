@@ -210,6 +210,41 @@ into `recipe.quantities` **by array index**, so dropping one silently shifts eve
 quantity and corrupts the craft cost. Instead each row carries `super_type_id`, and exclusion
 is an opt-in filter at query time. (There is no cosmetic item type in this dataset at all.)
 
+### Extraire les données utilisateur
+
+```bash
+SUPABASE_DB_URL=<uri> npm run db:export       # écrit ./data-export/
+SUPABASE_DB_URL=<uri> npm run db:export:dry   # compte les lignes, n'écrit rien
+```
+
+Sur les 18 tables, **7 ne sont pas extraites** : le miroir `dofus_*` est régénérable par
+`npm run db:sync`, et c'est le gros du volume. Le recopier produirait un catalogue figé là
+où une resynchronisation en donne un à jour. Les 11 autres sont saisies par l'utilisateur —
+ventes, stocks, prix relevés, projets d'élevage, montures, généalogies — et ne se
+reconstruisent pas. `auth.users` est extraite en plus, réduite à l'identité et au hachage
+bcrypt du mot de passe : le reprendre tel quel évite de faire réinitialiser les mots de passe.
+
+Chaque table donne un fichier NDJSON, plus un `manifest.json` qui porte l'ordre d'import
+(toute clé étrangère pointe vers une table déjà écrite), les types de chaque colonne, et la
+convention de sérialisation. Deux points comptent à la relecture : **les `bigint` et les
+`numeric` sortent en chaînes décimales**, parce qu'un prix en kamas dépasse
+`Number.MAX_SAFE_INTEGER` et qu'un taux relu en flottant ne revient pas juste ; et
+`user_breeding_individuals` se référence elle-même via `parent_a_id`/`parent_b_id`, donc
+l'import doit différer le contrôle des clés étrangères — aucun ordre de lignes ne résout la
+généalogie.
+
+L'export tourne dans une transaction en lecture seule, et recompte les lignes écrites contre
+le `count(*)` pris à l'ouverture : un écart échoue au lieu de livrer une extraction tronquée.
+Il **refuse aussi de tourner** si la base porte une table classée ni « à extraire » ni
+« régénérable ». Le schéma a bougé 32 fois ; sans ce contrôle, une table ajoutée plus tard
+serait sautée en silence et le trou ne se découvrirait qu'après la coupure de l'ancienne base.
+Une table *absente* de la base ne fait qu'avertir : c'est le cas normal d'une migration pas
+encore appliquée, ou d'une table retirée depuis (`breeding_project_stock`, remplacée par
+`user_breeding_mounts`).
+
+`data-export/` est ignoré par git : il contient des hachages de mots de passe. À supprimer
+une fois la reprise vérifiée.
+
 ## Élevage
 
 L'écran `/breeding` classe les 306 couleurs de monture (66 dragodindes, 120 muldos,

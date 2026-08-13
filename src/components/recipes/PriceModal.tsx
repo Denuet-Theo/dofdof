@@ -5,7 +5,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
 import ItemPreview from '@/components/items/ItemPreview';
-import { saveItemPrice } from '@/lib/hooks/useItemPrices';
+import { priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
 import { Save } from 'lucide-react';
 
 interface PriceModalProps {
@@ -64,9 +64,11 @@ const PriceForm = ({
       onPriceSaved?.(item.id, numPrice, updatedAt);
       onClose();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Erreur lors de la sauvegarde du prix'
-      );
+      console.error('Error saving price:', err);
+      // `priceSaveMessage` et non `err.message` : PostgREST renvoie un objet nu,
+      // qui n'est pas une `Error` — la modale retombait donc sur son texte
+      // générique là où la base disait précisément ce qui n'allait pas.
+      setError(priceSaveMessage(err));
     } finally {
       setLoading(false);
     }

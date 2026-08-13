@@ -26,7 +26,7 @@ import {
 } from '@/lib/dofus/breeding/naming';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { DofusDBItem } from '@/lib/supabase/types';
-import type { AddResult, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
+import type { AddResult, DEFAULT_SETTINGS, FuelPriceResult } from '@/lib/hooks/useBreeding';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -71,7 +71,7 @@ type Props = {
   itemStock: Map<number, number>;
   /** Prix unitaire des carburants, pour les afficher et les comparer au point. */
   itemPrices: Map<number, number>;
-  onSaveFuelPrice: (itemId: number, itemName: string, price: number) => Promise<void>;
+  onSaveFuelPrice: (itemId: number, itemName: string, price: number) => Promise<FuelPriceResult>;
   ownedGaugePoints: Map<string, number>;
   settings: Settings;
   onSaveBulk: (colorId: string, males: number, females: number) => Promise<void>;
@@ -199,6 +199,7 @@ const BreedingStocks = ({
   const [importing, setImporting] = useState(false);
   const [mountQuery, setMountQuery] = useState('');
   const [fuelQuery, setFuelQuery] = useState('');
+  const [fuelError, setFuelError] = useState('');
   /** Les deux axes sur lesquels on cherche un carburant : sa jauge et son rang. */
   const [gaugeFilter, setGaugeFilter] = useState<string | null>(null);
   const [rankFilter, setRankFilter] = useState<FuelRank | null>(null);
@@ -766,6 +767,20 @@ const BreedingStocks = ({
               </div>
             </div>
 
+            {/* Une bannière pour toute la liste, et non un message par ligne :
+                la ligne fait une trentaine de pixels de haut et le champ
+                s'enregistre à chaque frappe. Le nom de l'item est donc dans le
+                message, pas dans sa position. */}
+            {fuelError && (
+              <p
+                role="alert"
+                className="mb-2 px-3 py-2 rounded-xl bg-loss/10 border border-loss/30
+                  text-[11px] leading-snug text-loss-light"
+              >
+                {fuelError}
+              </p>
+            )}
+
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
               {fuelsByGauge.map(([gauge, fuels]) => (
                 <div key={gauge}>
@@ -826,7 +841,14 @@ const BreedingStocks = ({
                             <span className="text-[10px] text-dark-500">prix</span>
                             {countInput(
                               price,
-                              (next) => onSaveFuelPrice(item.id, name, next),
+                              async (next) => {
+                                const result = await onSaveFuelPrice(item.id, name, next);
+                                setFuelError(
+                                  result.ok
+                                    ? ''
+                                    : `${result.itemName} non enregistré — ${result.message}`
+                                );
+                              },
                               99_999_999,
                               `Prix d'achat d'une unité de ${name}`
                             )}

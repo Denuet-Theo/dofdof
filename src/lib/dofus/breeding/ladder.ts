@@ -63,8 +63,25 @@ export type Ladder = {
   summit: string[];
 };
 
-/** Le plus haut barreau que l'échelle sait poser aujourd'hui. */
-export const TOP_RUNG = 7;
+/**
+ * Le plafond a été retiré.
+ *
+ * Il valait 7, avec pour toute justification « le plus haut barreau que
+ * l'échelle sait poser aujourd'hui » — un état des lieux, pas une
+ * démonstration. Mesuré avant de le retirer : à 9, `check-ladder` reste vert sur
+ * les trois familles, et le plan passe de 18 à 30 couleurs chez le muldo, de 13
+ * à 18 chez la dragodinde. La règle tenait donc déjà plus haut que le plafond ne
+ * la laissait aller.
+ *
+ * La montée s'arrête maintenant d'elle-même, là où l'arbre s'arrête : `layRung`
+ * rend `false` quand un rang n'a pas deux cibles ou aucun jeu de recettes
+ * candidat, et les deux routes sont essayées avant d'abandonner. C'est la bonne
+ * borne — celle de la famille — au lieu d'un nombre écrit à la main qui vaut
+ * pour toutes.
+ *
+ * Le volkorne ne monte pas plus haut pour autant : aucun jeu candidat au rang 9.
+ * Ce n'est pas un échec, c'est l'arbre qui le dit.
+ */
 
 /**
  * L'ordre du catalogue, qui départage les jeux de couleurs à égalité.
@@ -396,7 +413,8 @@ export const ladderOf = (colors: BreedingColor[], route: Route = 'disjoint'): La
 
   // On monte de deux en deux : les couleurs simples sont aux générations
   // impaires, et ce sont elles qui font les barreaux.
-  for (let rung = 5; rung <= TOP_RUNG; rung += 2) {
+  const highest = colors.reduce((top, color) => Math.max(top, color.generation), 0);
+  for (let rung = 5; rung <= highest; rung += 2) {
     if (layRung(ladder, colors, index, rung, route)) continue;
     // La route demandée peut n'avoir aucun candidat — chez le muldo, Prune et
     // Émeraude ne partagent aucune gen 6. On se rabat plutôt que de s'arrêter :

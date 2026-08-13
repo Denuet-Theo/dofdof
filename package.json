@@ -21,7 +21,8 @@
     "parity": "node scripts/refresh-parity.mjs",
     "parity:check": "node scripts/refresh-parity.mjs --check",
     "policy:report": "node scripts/policy-report.mjs",
-    "check:ladder": "node scripts/check-ladder.mjs"
+    "check:ladder": "node scripts/check-ladder.mjs",
+    "check:recipes": "node scripts/check-recipes.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

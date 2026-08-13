@@ -7,7 +7,7 @@ import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME, colorCoder } from '@/lib/dofus/breeding/naming';
-import { parseBulkMountId } from '@/lib/dofus/breeding/search';
+import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 
 /**
@@ -89,7 +89,7 @@ const BreedingEnclosExitDialog = ({
     });
 
   /** Une monture de vrac n'a pas de niveau à elle : elle ne se saisit pas. */
-  const tracked = mounts.filter((mount) => parseBulkMountId(mount.id) === null);
+  const tracked = mounts.filter((mount) => parseCountedMountId(mount.id) === null);
 
   /** Le même niveau pour tout le lot — le cas courant, en un geste. */
   const setAll = (value: number) =>
@@ -167,7 +167,7 @@ const BreedingEnclosExitDialog = ({
                     où ranger un niveau, et tout le stock d'une couleur partage
                     le même. Demander une saisie ici ferait croire qu'elle est
                     retenue. La fécondité, elle, est bien enregistrée. */}
-                {parseBulkMountId(mount.id) ? (
+                {parseCountedMountId(mount.id) ? (
                   <span className="ml-auto text-[10px] text-dark-600">niveau non suivi</span>
                 ) : (
                   <>

@@ -55,7 +55,7 @@ import {
 import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
 // Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
 // c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
-import { parseBulkMountId } from '@/lib/dofus/breeding/search';
+import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -930,16 +930,34 @@ export const useBreeding = (
       /** Les suivies : un niveau et un drapeau, ligne par ligne. */
       const levelOf = new Map<number, string[]>();
       const levelById = new Map<string, number>();
-      /** Le vrac : des quantités à créditer, par couleur et par sexe. */
-      const bulkExits = new Map<string, { males: number; females: number }>();
+      /**
+       * Les comptées : des quantités, par couleur et par sexe.
+       *
+       * `acquired*` est le sous-ensemble que le plan est allé **chercher** — achat
+       * ou capture. Celles-là n'existent nulle part encore : la sortie d'enclos
+       * est le premier moment où l'app peut les apprendre, donc elle les ajoute au
+       * stock en même temps qu'elle les déclare fécondes. Les autres y sont déjà,
+       * et seul leur compteur de fécondité bouge.
+       */
+      const bulkExits = new Map<
+        string,
+        { males: number; females: number; acquiredMales: number; acquiredFemales: number }
+      >();
 
       for (const entry of entries) {
-        const bulk = parseBulkMountId(entry.id);
-        if (bulk) {
-          const current = bulkExits.get(bulk.colorId) ?? { males: 0, females: 0 };
-          if (bulk.sex === 'M') current.males += 1;
-          else current.females += 1;
-          bulkExits.set(bulk.colorId, current);
+        const counted = parseCountedMountId(entry.id);
+        if (counted) {
+          const current =
+            bulkExits.get(counted.colorId) ??
+            { males: 0, females: 0, acquiredMales: 0, acquiredFemales: 0 };
+          if (counted.sex === 'M') {
+            current.males += 1;
+            if (counted.acquired) current.acquiredMales += 1;
+          } else {
+            current.females += 1;
+            if (counted.acquired) current.acquiredFemales += 1;
+          }
+          bulkExits.set(counted.colorId, current);
           continue;
         }
 
@@ -959,13 +977,18 @@ export const useBreeding = (
       // une partition, et la base refuse un compteur négatif.
       const nextBulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
       for (const [colorId, out] of bulkExits) {
-        const current = nextBulk.get(colorId);
-        if (!current) continue;
+        // Une couleur entièrement procurée n'a pas encore de ligne de stock : elle
+        // s'ouvre ici. D'où un défaut à zéro plutôt qu'un `continue`, qui perdait
+        // l'achat en silence.
+        const current = nextBulk.get(colorId) ?? { males: 0, females: 0 };
         const banked = cycledOf(current);
+        const males = current.males + out.acquiredMales;
+        const females = current.females + out.acquiredFemales;
         nextBulk.set(colorId, {
-          ...current,
-          cycledMales: Math.min(current.males, banked.males + out.males),
-          cycledFemales: Math.min(current.females, banked.females + out.females),
+          males,
+          females,
+          cycledMales: Math.min(males, banked.males + out.males),
+          cycledFemales: Math.min(females, banked.females + out.females),
         });
       }
 

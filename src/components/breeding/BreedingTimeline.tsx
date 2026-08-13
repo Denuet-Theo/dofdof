@@ -679,18 +679,39 @@ const Fill = ({
    * (voir la liste de chargement), donc elle n'en sort pas non plus.
    */
   const loaded = useMemo(() => {
-    const ids = new Set<string>();
+    /**
+     * Les montures se lisent dans la liste à plat du plan, et non en refiltrant
+     * les individus suivis.
+     *
+     * `flatten` met le vrac **et** les individus dans cette liste, et les indices
+     * du plan portent sur elle. Repasser par `individuals` perdait donc tout le
+     * vrac : une gen 1 achetée ou capturée n'a pas d'uuid, son identifiant est
+     * fabriqué, et aucun individu suivi ne lui correspond. Elle disparaissait de
+     * la liste de sortie sans un mot — chargée dans l'enclos, cycle payé, jamais
+     * enregistrée comme féconde. La politique la revoyait fertile, lui
+     * réservait une place déjà payée, et proposait d'acheter à côté : exactement
+     * ce que la migration `breeding_bulk_feconde` était venue empêcher.
+     *
+     * L'enregistrement suivi reste préféré quand il existe, pour que la ligne
+     * affiche le niveau et le nom à jour plutôt que l'instantané du plan.
+     */
+    const tracked = new Map(individuals.map((mount) => [mount.id, mount]));
+    const picked = new Map<string, Individual>();
+
+    const consider = (index: number) => {
+      const planned = fill.mounts[index];
+      if (!planned) return;
+      const mount = tracked.get(planned.id) ?? planned;
+      if (mount.fertile && !mount.cycled) picked.set(mount.id, mount);
+    };
+
     for (const [male, female] of fill.raw.crossings) {
-      for (const index of [male, female]) {
-        const mount = fill.mounts[index];
-        if (mount && !mount.cycled) ids.add(mount.id);
-      }
+      consider(male);
+      consider(female);
     }
-    for (const index of fill.raw.cycles) {
-      const mount = fill.mounts[index];
-      if (mount) ids.add(mount.id);
-    }
-    return individuals.filter((mount) => ids.has(mount.id) && mount.fertile && !mount.cycled);
+    for (const index of fill.raw.cycles) consider(index);
+
+    return [...picked.values()];
   }, [fill, individuals]);
 
   /**

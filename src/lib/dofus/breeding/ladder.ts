@@ -18,7 +18,9 @@ import type { BreedingColor } from './costs';
  * La politique en échelle — `rust/breeding-sim/src/ladder.rs`, dont ceci est le
  * portage de la partie qui décide — n'en propose aucun, et c'est mesuré : 0 %
  * d'accouplements sans cible contre 50,5 % pour la recherche myope, sur deux
- * cents graines.
+ * cents graines. Ce 0 % est celui du Rust **couronné** ; il n'était pas
+ * transposable ici tant que la couronne manquait, et il l'est depuis qu'elle est
+ * portée — voir `crownAt` et `crownedLadderOf`.
  *
  * ## La règle, et elle seule
  *
@@ -33,11 +35,31 @@ import type { BreedingColor } from './costs';
  *
  * ## Ce qui n'est pas porté
  *
- * La politique complète — l'ordonnancement des fournées, la moisson, le clonage,
- * la couronne qui choisit la gen 10 la mieux payée. Ici on ne porte que le
- * **plan** et l'**admissibilité**, parce que c'est ce qui répond à la question
- * posée à l'écran : « celui-ci, faut-il le proposer ? ». Le reste continue de
- * venir du champion entraîné.
+ * La politique complète — l'ordonnancement des fournées, la moisson, le clonage.
+ * Ici on porte le **plan**, la **couronne** et l'**admissibilité**, parce que
+ * c'est ce qui répond à la question posée à l'écran : « celui-ci, faut-il le
+ * proposer ? ». Le reste continue de venir du champion entraîné.
+ *
+ * La couronne a longtemps manqué, et son absence n'était pas neutre : sans elle
+ * `summit` gardait **toutes** les couleurs du dernier rang impair, `wanted` était
+ * strictement plus large que celui du Rust, et `aimsAt` admettait donc des
+ * croisements que la politique mesurée refuse. Mesuré au portage, sur 200 tirages
+ * de prix de gen 10 en cloche autour de 600 000 :
+ *
+ * | famille | avant | après | ce qui sort |
+ * | --- | --- | --- | --- |
+ * | dragodinde | 18 | 17 | une gen 9 sur deux, et la gen 8 qu'elle seule servait |
+ * | muldo | 30 | 19 ou 22 | 3 gen 9 sur 4, et les gen 6/7/8 qu'elles seules servaient |
+ *
+ * Et en croisements admissibles, sur toutes les paires de couleurs du catalogue :
+ * 36 → 34 chez la dragodinde, 154 → 94/102/114 chez le muldo. Aucun accouplement
+ * sans cible n'est jamais admis, avant comme après.
+ *
+ * Le volkorne est à part et le restera jusqu'au correctif suivant : sa montée
+ * s'arrête à la gen 5, donc la couronne y **pose** une route neuve au lieu d'en
+ * tailler une, et le plan qui en sort n'est pas refermé — sa gen 8 réclame une
+ * gen 7 absente. Ce n'est pas la couronne qui est en cause mais un second seuil
+ * écrit à la main dans `layRung`.
  */
 
 /**
@@ -151,14 +173,34 @@ type Index = Map<string, number>;
 const byCatalogOrder = (index: Index) => (a: string, b: string) =>
   (index.get(a) ?? 0) - (index.get(b) ?? 0);
 
-/** Compare deux listes déjà triées, longueur d'abord — l'ordre du Rust. */
-const shorterThenSmaller = (left: string[], right: string[], index: Index): boolean => {
-  if (left.length !== right.length) return left.length < right.length;
-  for (let position = 0; position < left.length; position += 1) {
+/**
+ * Compare deux listes déjà triées, élément par élément — l'ordre de `Vec<ColorId>`.
+ *
+ * C'est l'ordre lexicographique de Rust : la longueur ne tranche que si l'une est
+ * un **préfixe** de l'autre.
+ */
+const smaller = (left: string[], right: string[], index: Index): boolean => {
+  const shared = Math.min(left.length, right.length);
+  for (let position = 0; position < shared; position += 1) {
     const delta = (index.get(left[position]) ?? 0) - (index.get(right[position]) ?? 0);
     if (delta !== 0) return delta < 0;
   }
-  return false;
+  return left.length < right.length;
+};
+
+/**
+ * Le même, mais **longueur d'abord**.
+ *
+ * Les deux existent parce que le Rust ne compare pas pareil aux deux endroits, et
+ * la différence a bien failli passer inaperçue : `lay_third` compare
+ * `(order.len(), &order)`, donc la longueur d'abord, alors que `lay_rung` compare
+ * `&distinct` seul, donc lexicographiquement. Un seul comparateur ici rendait le
+ * bon plan sur les trois familles — les jeux à égalité de travail y ont toujours
+ * la même taille — mais c'était une coïncidence de ces arbres-là, pas la règle.
+ */
+const shorterThenSmaller = (left: string[], right: string[], index: Index): boolean => {
+  if (left.length !== right.length) return left.length < right.length;
+  return smaller(left, right, index);
 };
 
 /**
@@ -388,7 +430,9 @@ const layRung = (
       work < best.work ||
       (work === best.work &&
         (strain < best.strain ||
-          (strain === best.strain && shorterThenSmaller(distinct, best.ingredients, index))));
+          // Lexicographique et non longueur d'abord : c'est `&distinct` seul que
+          // le Rust compare ici. Voir `smaller`.
+          (strain === best.strain && smaller(distinct, best.ingredients, index))));
     if (better) best = { work, strain, ingredients: distinct, picked };
   }
 
@@ -419,11 +463,20 @@ const layRung = (
  */
 const spreadDemand = (ladder: Ladder, colors: BreedingColor[]) => {
   const generationOf = new Map(colors.map((color) => [color.id, color.generation]));
+  const index: Index = new Map(colors.map((color, position) => [color.id, position]));
+  // Recalculée de zéro : la couronne déplace le sommet, donc les demandes d'avant
+  // sont périmées et les cumuler les doublerait.
   ladder.demand.clear();
   for (const colorId of ladder.summit) ladder.demand.set(colorId, 1);
 
+  // À génération égale, l'ordre du catalogue et non l'alphabet — c'est
+  // `Reverse((generation, c))` côté Rust. L'ordre intra-génération ne peut rien
+  // changer, les ingrédients d'une recette étant toujours d'une génération
+  // strictement inférieure ; on l'aligne quand même, parce qu'un seul endroit du
+  // module qui compare des identifiants textuels est un endroit de trop.
   const order = [...ladder.wanted].sort(
-    (a, b) => (generationOf.get(b) ?? 0) - (generationOf.get(a) ?? 0) || b.localeCompare(a)
+    (a, b) =>
+      (generationOf.get(b) ?? 0) - (generationOf.get(a) ?? 0) || byCatalogOrder(index)(b, a)
   );
 
   for (const colorId of order) {
@@ -481,6 +534,281 @@ export const ladderOf = (colors: BreedingColor[], route: Route = DEFAULT_ROUTE):
   spreadDemand(ladder, colors);
   byRoute.set(route, ladder);
   return ladder;
+};
+
+/* --------------------------------------------------------- la couronne -- */
+
+/**
+ * Une copie indépendante du plan.
+ *
+ * `ladderOf` mémoïse par catalogue et par route, parce que le plan ne dépend que
+ * de l'arbre. La couronne, elle, dépend des **prix du jour** : couronner
+ * l'exemplaire mémoïsé le figerait sur le marché du premier rendu et le rendrait
+ * faux pour tous les suivants. On copie avant de tailler.
+ */
+const copyOf = (ladder: Ladder): Ladder => ({
+  wanted: new Set(ladder.wanted),
+  recipeOf: new Map(ladder.recipeOf),
+  demand: new Map(ladder.demand),
+  blocks: ladder.blocks.map((block) => [...block]),
+  summit: [...ladder.summit],
+});
+
+/**
+ * Pose une cible unique : sa recette la moins coûteuse, et les composées
+ * qu'elle réclame. Même critère de travail accumulé que `layRung`.
+ *
+ * Un barreau ordinaire produit **les deux** couleurs de son étage ; la couronne
+ * n'en veut qu'une, donc elle ne peut pas passer par `layRung`.
+ */
+const laySingle = (
+  ladder: Ladder,
+  colors: BreedingColor[],
+  index: Index,
+  target: string
+): boolean => {
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const generationOf = (colorId: string) => byId.get(colorId)?.generation ?? 0;
+
+  const work = (colorId: string): number => {
+    const recipe = constituents(byId.get(colorId));
+    if (!recipe) return Number.MAX_SAFE_INTEGER;
+    return generationOf(recipe[0]) + generationOf(recipe[1]);
+  };
+
+  const recipes = [...(byId.get(target)?.recipes ?? [])].sort(
+    (a, b) => byCatalogOrder(index)(a[0], b[0]) || byCatalogOrder(index)(a[1], b[1])
+  );
+
+  let chosen: readonly [string, string] | null = null;
+  let bestWork = Number.MAX_SAFE_INTEGER;
+  let bestPair: string[] = [];
+  for (const recipe of recipes) {
+    const pair = [...recipe].sort(byCatalogOrder(index));
+    const cost = Math.min(work(recipe[0]) + work(recipe[1]), Number.MAX_SAFE_INTEGER);
+    const better =
+      chosen === null ||
+      cost < bestWork ||
+      (cost === bestWork && smaller(pair, bestPair, index));
+    if (better) {
+      chosen = recipe;
+      bestWork = cost;
+      bestPair = pair;
+    }
+  }
+  if (!chosen) return false;
+
+  for (const ingredient of chosen) {
+    const inner = constituents(byId.get(ingredient));
+    if (!inner) return false;
+    ladder.wanted.add(ingredient);
+    ladder.recipeOf.set(ingredient, inner);
+  }
+  ladder.wanted.add(target);
+  ladder.recipeOf.set(target, chosen);
+  return true;
+};
+
+/**
+ * Les gen 10 que la couronne peut viser : une gen 9 et une gen 1 **achetable**.
+ *
+ * Une gen 1 s'achète à mille kamas, là où le second ingrédient d'une gen 10
+ * pourrait être une autre gen 9 — c'est-à-dire toute une échelle à remonter. Et
+ * elle doit être rattachée à un bloc, sans quoi la produire ferait sortir du jeu
+ * de gen 1 fermé que `layThird` a démontré.
+ */
+export const crownCandidates = (colors: BreedingColor[], blocks: string[][]): string[] => {
+  const index: Index = new Map(colors.map((color, position) => [color.id, position]));
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const generationOf = (colorId: string) => byId.get(colorId)?.generation ?? 0;
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+  const inBlocks = new Set(blocks.flat());
+
+  const found: string[] = [];
+  for (const color of colors) {
+    if (color.generation !== top) continue;
+    const recipe = constituents(color);
+    if (!recipe) continue;
+    const [high, low] =
+      generationOf(recipe[0]) > generationOf(recipe[1])
+        ? [recipe[0], recipe[1]]
+        : [recipe[1], recipe[0]];
+    if (generationOf(high) !== top - 1 || generationOf(low) !== 1) continue;
+    if (!inBlocks.has(low)) continue;
+    found.push(color.id);
+  }
+  return found.sort(byCatalogOrder(index));
+};
+
+/**
+ * La gen 10 à viser quand on choisit le **partenaire** avant le prix.
+ *
+ * Le partenaire retenu est la gen 1 que le plan emploie le plus, mesuré sur le
+ * plan **avant** couronnement — le seul état disponible au moment du choix, et le
+ * même pour toutes les candidates, donc il n'en favorise aucune. Parmi les
+ * candidates qui le portent, on prend la mieux payée.
+ *
+ * C'est le critère par défaut du Rust (`Crowning::PartnerThenPrice`), et il vaut
+ * `+3,12 M ± 0,31` sur mille graines appariées contre le prix seul. Il a aussi
+ * l'avantage de tenir quand l'éleveur n'a saisi aucun prix de gen 10 : le
+ * partenaire ne dépend pas du marché, et seul le départage final en dépend.
+ */
+export const bestPartnerCrown = (
+  ladder: Ladder,
+  colors: BreedingColor[],
+  valueOf: (colorId: string) => number
+): string | null => {
+  const index: Index = new Map(colors.map((color, position) => [color.id, position]));
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const generationOf = (colorId: string) => byId.get(colorId)?.generation ?? 0;
+  const rank = (colorId: string) => index.get(colorId) ?? 0;
+
+  const candidates = crownCandidates(colors, ladder.blocks);
+  if (candidates.length === 0) return null;
+
+  /** La gen 1 partenaire d'une candidate : celle des deux qui n'est pas la gen 9. */
+  const partnerOf = (colorId: string): string | null => {
+    const recipe = constituents(byId.get(colorId));
+    if (!recipe) return null;
+    return generationOf(recipe[0]) > generationOf(recipe[1]) ? recipe[1] : recipe[0];
+  };
+
+  // Combien de recettes du plan emploient chaque gen 1. Le maximum décide, et
+  // l'ordre du catalogue tranche les égalités pour rester déterministe.
+  const uses = (partner: string) =>
+    [...ladder.recipeOf.values()].filter(
+      (recipe) => recipe[0] === partner || recipe[1] === partner
+    ).length;
+
+  let partner: string | null = null;
+  for (const colorId of candidates) {
+    const other = partnerOf(colorId);
+    if (!other) continue;
+    if (
+      partner === null ||
+      uses(other) > uses(partner) ||
+      (uses(other) === uses(partner) && rank(other) < rank(partner))
+    ) {
+      partner = other;
+    }
+  }
+  if (partner === null) return null;
+
+  let best: string | null = null;
+  for (const colorId of candidates) {
+    if (partnerOf(colorId) !== partner) continue;
+    if (
+      best === null ||
+      valueOf(colorId) > valueOf(best) ||
+      (valueOf(colorId) === valueOf(best) && rank(colorId) < rank(best))
+    ) {
+      best = colorId;
+    }
+  }
+  return best;
+};
+
+/**
+ * La couronne : choisir **une** gen 9, la gen 10 qu'elle ouvre, et tailler le
+ * reste.
+ *
+ * Les barreaux du dessous produisent toutes les couleurs de leur étage, parce que
+ * la montée a besoin des deux. Le dernier ne suit pas cette règle : les quatre
+ * gen 9 du muldo ouvrent chacune des gen 10, on n'en a besoin que d'une, et le
+ * jeu a prévu que le choix compte — chaque gen 10 porte son propre prix.
+ *
+ * `choice` sert la mesure : forcer chaque candidate à tour de rôle et garder la
+ * meilleure après coup donne le **plafond** d'une réorientation. Sans elle, la
+ * mieux payée du jour.
+ *
+ * Ne fait rien si aucune candidate n'existe, si son partenaire n'est dans aucun
+ * bloc, ou si la gen 9 visée ne se pose pas : un plan à moitié couronné serait
+ * pire que le plan complet, et le Rust s'arrête au même endroit.
+ */
+export const crownAt = (
+  ladder: Ladder,
+  colors: BreedingColor[],
+  valueOf: (colorId: string) => number,
+  choice?: string
+): void => {
+  const index: Index = new Map(colors.map((color, position) => [color.id, position]));
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const generationOf = (colorId: string) => byId.get(colorId)?.generation ?? 0;
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+
+  const candidates: { value: number; crown: string; target: string; partner: string }[] = [];
+  for (const color of colors) {
+    if (color.generation !== top) continue;
+    const recipe = constituents(color);
+    if (!recipe) continue;
+    const [high, low] =
+      generationOf(recipe[0]) > generationOf(recipe[1])
+        ? [recipe[0], recipe[1]]
+        : [recipe[1], recipe[0]];
+    if (generationOf(high) !== top - 1 || generationOf(low) !== 1) continue;
+    candidates.push({ value: valueOf(color.id), crown: color.id, target: high, partner: low });
+  }
+  candidates.sort((a, b) => b.value - a.value || byCatalogOrder(index)(a.crown, b.crown));
+
+  // Imposée si on le demande, sinon la mieux payée. Une couronne imposée
+  // introuvable est une erreur d'appelant, pas un cas à rattraper en silence : on
+  // ne pose rien plutôt que de retomber sur un autre choix.
+  const picked =
+    choice === undefined
+      ? candidates[0]
+      : candidates.find((candidate) => candidate.crown === choice);
+  if (!picked) return;
+  // La gen 1 partenaire doit être achetable, donc rattachée à un bloc.
+  if (!ladder.blocks.some((block) => block.includes(picked.partner))) return;
+  if (!laySingle(ladder, colors, index, picked.target)) return;
+
+  ladder.wanted.add(picked.crown);
+  ladder.recipeOf.set(picked.crown, [picked.target, picked.partner]);
+  ladder.summit = [picked.crown];
+  spreadDemand(ladder, colors);
+
+  // ## Tailler ce que la couronne ne réclame pas
+  //
+  // Les barreaux du dessous produisent **les deux** couleurs de leur étage, parce
+  // qu'on ne savait pas encore laquelle servirait. La couronne tranche : Corail
+  // ne se fait que par des gen 8 dérivées de Prune, donc Émeraude et ses gen 6
+  // tombent à une demande de zéro.
+  //
+  // Les laisser dans le plan ne serait pas neutre : elles resteraient
+  // **admissibles**, donc un croisement pourrait les viser au lieu de servir la
+  // route. Un plan doit être exactement ce dont on a besoin — et sans cette
+  // taille, `aimsAt` admet ici ce que la politique mesurée refuse là-bas.
+  const dead = [...ladder.wanted].filter(
+    (colorId) => (ladder.demand.get(colorId) ?? 0) <= 0
+  );
+  for (const colorId of dead) {
+    ladder.wanted.delete(colorId);
+    ladder.recipeOf.delete(colorId);
+    ladder.demand.delete(colorId);
+  }
+};
+
+/**
+ * Le plan **couronné** : celui que la politique mesurée applique réellement.
+ *
+ * `ladderOf` s'arrête au dernier barreau impair et garde toutes ses couleurs ;
+ * c'est le plan d'avant le choix du sommet, pas celui qu'on suit. La couronne le
+ * ramène à une seule route, et c'est ce plan-là que `aimsAt` doit lire.
+ *
+ * Non mémoïsé, contrairement à `ladderOf` : il dépend des prix saisis, qui
+ * changent d'un rendu à l'autre. Le coût est celui de `crownAt` seul — le produit
+ * cartésien des recettes, lui, reste mémoïsé.
+ */
+export const crownedLadderOf = (
+  colors: BreedingColor[],
+  valueOf: (colorId: string) => number,
+  route: Route = DEFAULT_ROUTE
+): Ladder => {
+  const plan = copyOf(ladderOf(colors, route));
+  // Le partenaire d'abord, puis le prix : le défaut du Rust. Voir
+  // `bestPartnerCrown` pour ce que ça vaut.
+  crownAt(plan, colors, valueOf, bestPartnerCrown(plan, colors, valueOf) ?? undefined);
+  return plan;
 };
 
 /**

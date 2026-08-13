@@ -12,6 +12,7 @@
     "db:sync:dry": "node scripts/sync-dofusdb.mjs --dry-run",
     "db:export": "node scripts/export-user-data.mjs",
     "db:export:dry": "node scripts/export-user-data.mjs --dry-run",
+    "db:export:check": "node scripts/check-export.mjs",
     "lint": "eslint",
     "db:link": "supabase link",
     "db:migration:new": "supabase migration new",

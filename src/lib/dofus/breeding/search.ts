@@ -349,6 +349,34 @@ export const createSearcher = (config: SearchConfig = DEFAULT_SEARCH): Searcher 
  * L'ordre est le contrat : les indices que le plan rend s'y rapportent, vrac
  * d'abord puis individus.
  */
+/**
+ * L'identité d'une monture de vrac.
+ *
+ * Le vrac n'a pas d'identité en base — il se compte, il ne se nomme pas. Mais un
+ * plan rend des **indices** dans la liste à plat, et l'écran doit pouvoir
+ * remonter de l'indice à la monture pour dire ce qu'on en fait. D'où un
+ * identifiant fabriqué, qui porte de quoi retrouver la ligne de stock : sa
+ * couleur et son sexe.
+ *
+ * Il est reconnaissable, et c'est le point : `#` ne peut pas apparaître dans un
+ * uuid, donc `parseBulkMountId` sépare sans ambiguïté une monture de vrac d'une
+ * monture suivie. Une sortie d'enclos s'écrit dans deux tables différentes selon
+ * le cas, et l'avoir deviné au petit bonheur est précisément ce qui a fait
+ * disparaître le vrac de la liste de sortie.
+ */
+export const bulkMountId = (colorId: string, sex: Sex, index: number) =>
+  `${colorId}#${sex}${index}`;
+
+/** L'inverse de `bulkMountId`. `null` pour une monture suivie (un uuid). */
+export const parseBulkMountId = (id: string): { colorId: string; sex: Sex } | null => {
+  const cut = id.lastIndexOf('#');
+  if (cut <= 0) return null;
+  const sex = id[cut + 1];
+  if (sex !== 'M' && sex !== 'F') return null;
+  if (!/^\d+$/.test(id.slice(cut + 2))) return null;
+  return { colorId: id.slice(0, cut), sex };
+};
+
 export const flatten = (stable: Stable): Individual[] => {
   const out: Individual[] = [];
   for (const [colorId, counts] of stable.bulk) {
@@ -359,7 +387,7 @@ export const flatten = (stable: Stable): Individual[] => {
     const push = (sex: Sex, count: number, banked: number) => {
       for (let index = 0; index < count; index += 1) {
         out.push({
-          id: `${colorId}#${sex}${index}`,
+          id: bulkMountId(colorId, sex, index),
           colorId,
           name: null,
           sex,

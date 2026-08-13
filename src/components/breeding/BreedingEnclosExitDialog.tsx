@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME, colorCoder } from '@/lib/dofus/breeding/naming';
+import { parseBulkMountId } from '@/lib/dofus/breeding/search';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 
 /**
@@ -87,15 +88,18 @@ const BreedingEnclosExitDialog = ({
       levels: { ...levels, [id]: Math.max(1, Math.min(200, value || 1)) },
     });
 
+  /** Une monture de vrac n'a pas de niveau à elle : elle ne se saisit pas. */
+  const tracked = mounts.filter((mount) => parseBulkMountId(mount.id) === null);
+
   /** Le même niveau pour tout le lot — le cas courant, en un geste. */
   const setAll = (value: number) =>
     setDraft({
       key: signature,
       done: null,
-      levels: Object.fromEntries(mounts.map((mount) => [mount.id, value])),
+      levels: Object.fromEntries(tracked.map((mount) => [mount.id, value])),
     });
 
-  const climbed = mounts.filter((mount) => levelOf(mount) !== mount.level).length;
+  const climbed = tracked.filter((mount) => levelOf(mount) !== mount.level).length;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
@@ -107,7 +111,7 @@ const BreedingEnclosExitDialog = ({
           taux de réussite des croisements à venir.
         </p>
 
-        {mounts.length > 1 && (
+        {tracked.length > 1 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-dark-400">Même niveau pour tout le lot</span>
             <input
@@ -159,23 +163,33 @@ const BreedingEnclosExitDialog = ({
                 >
                   {mount.name ?? ANONYMOUS_NAME}
                 </code>
-                <label className="ml-auto flex items-center gap-1 text-[10px] text-dark-500">
-                  niv
-                  <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    value={String(levelOf(mount))}
-                    onChange={(event) => setLevel(mount.id, Number(event.target.value))}
-                    className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
-                      border-dark-600/50 text-dark-100 text-[11px] text-right transition-all
-                      hover:border-dark-500 focus:border-kamas/50"
-                  />
-                </label>
-                {levelOf(mount) !== mount.level && (
-                  <span className="text-[10px] text-dark-600 tabular-nums">
-                    était {mount.level}
-                  </span>
+                {/* Le vrac se compte, il ne se nomme pas : il n'a aucune ligne
+                    où ranger un niveau, et tout le stock d'une couleur partage
+                    le même. Demander une saisie ici ferait croire qu'elle est
+                    retenue. La fécondité, elle, est bien enregistrée. */}
+                {parseBulkMountId(mount.id) ? (
+                  <span className="ml-auto text-[10px] text-dark-600">niveau non suivi</span>
+                ) : (
+                  <>
+                    <label className="ml-auto flex items-center gap-1 text-[10px] text-dark-500">
+                      niv
+                      <input
+                        type="number"
+                        min={1}
+                        max={200}
+                        value={String(levelOf(mount))}
+                        onChange={(event) => setLevel(mount.id, Number(event.target.value))}
+                        className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                          border-dark-600/50 text-dark-100 text-[11px] text-right transition-all
+                          hover:border-dark-500 focus:border-kamas/50"
+                      />
+                    </label>
+                    {levelOf(mount) !== mount.level && (
+                      <span className="text-[10px] text-dark-600 tabular-nums">
+                        était {mount.level}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             );

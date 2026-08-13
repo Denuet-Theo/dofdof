@@ -53,6 +53,9 @@ import {
   type Stable,
 } from '@/lib/dofus/breeding/stable';
 import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
+// Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
+// c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
+import { parseBulkMountId } from '@/lib/dofus/breeding/search';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -902,35 +905,83 @@ export const useBreeding = (
    * Les écritures se groupent par niveau : une fournée en porte deux ou trois
    * valeurs distinctes, pas quarante, et une requête par monture ferait
    * quarante allers-retours pour la même chose.
+   *
+   * ## Deux tables, parce qu'il y a deux sortes de montures
+   *
+   * Une gen 1 vit en **vrac** : elle se compte, elle n'a pas de ligne à elle. Sa
+   * fécondité s'écrit donc sur des compteurs, `cycled_males` / `cycled_females`
+   * (migration `breeding_bulk_feconde`), et non sur un booléen par monture.
+   *
+   * Ne traiter que les individus suivis revenait à perdre tout le vrac en
+   * silence : chargé dans l'enclos, cycle payé, jamais enregistré. La politique
+   * le revoyait fertile, lui réservait une place déjà payée et proposait
+   * d'acheter à côté — le trou même que cette migration avait creusé le
+   * rangement pour boucher.
+   *
+   * Le niveau saisi ne concerne que les suivies. Le vrac n'a pas de niveau à
+   * porter : il vaut `BULK_MATE_LEVEL` pour tout le monde, et lui en inventer un
+   * demanderait de le promouvoir en individu suivi — un autre geste, qui n'a pas
+   * sa place dans une sortie d'enclos.
    */
   const recordEnclosExit = useCallback(
     async (entries: { id: string; level: number }[]) => {
       const known = new Map(stable.individuals.map((mount) => [mount.id, mount]));
-      const kept = entries.filter((entry) => {
-        const mount = known.get(entry.id);
-        return mount !== undefined && mount.fertile;
-      });
-      if (kept.length === 0) return 0;
 
-      const levelOf = new Map(kept.map((entry) => [entry.id, Math.max(1, Math.min(200, entry.level))]));
+      /** Les suivies : un niveau et un drapeau, ligne par ligne. */
+      const levelOf = new Map<number, string[]>();
+      const levelById = new Map<string, number>();
+      /** Le vrac : des quantités à créditer, par couleur et par sexe. */
+      const bulkExits = new Map<string, { males: number; females: number }>();
+
+      for (const entry of entries) {
+        const bulk = parseBulkMountId(entry.id);
+        if (bulk) {
+          const current = bulkExits.get(bulk.colorId) ?? { males: 0, females: 0 };
+          if (bulk.sex === 'M') current.males += 1;
+          else current.females += 1;
+          bulkExits.set(bulk.colorId, current);
+          continue;
+        }
+
+        // Une stérile qui traînerait dans la liste ne doit pas ressusciter en
+        // féconde, et la base refuse la combinaison de toute façon.
+        const mount = known.get(entry.id);
+        if (!mount || !mount.fertile) continue;
+        const level = Math.max(1, Math.min(200, entry.level));
+        levelById.set(entry.id, level);
+        levelOf.set(level, [...(levelOf.get(level) ?? []), entry.id]);
+      }
+
+      if (levelById.size === 0 && bulkExits.size === 0) return 0;
+
+      // Le vrac se recalcule depuis l'état courant, et le crédit se borne au
+      // stock : `cycled_*` est un sous-ensemble de `males` / `females`, jamais
+      // une partition, et la base refuse un compteur négatif.
+      const nextBulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
+      for (const [colorId, out] of bulkExits) {
+        const current = nextBulk.get(colorId);
+        if (!current) continue;
+        const banked = cycledOf(current);
+        nextBulk.set(colorId, {
+          ...current,
+          cycledMales: Math.min(current.males, banked.males + out.males),
+          cycledFemales: Math.min(current.females, banked.females + out.females),
+        });
+      }
 
       setStable((current) => ({
         ...current,
+        bulk: bulkExits.size > 0 ? nextBulk : current.bulk,
         individuals: current.individuals.map((mount) =>
-          levelOf.has(mount.id)
-            ? { ...mount, cycled: true, level: levelOf.get(mount.id)! }
+          levelById.has(mount.id)
+            ? { ...mount, cycled: true, level: levelById.get(mount.id)! }
             : mount
         ),
       }));
 
-      const byLevel = new Map<number, string[]>();
-      for (const [id, level] of levelOf) {
-        byLevel.set(level, [...(byLevel.get(level) ?? []), id]);
-      }
-
       const supabase = createClient();
       const stamp = new Date().toISOString();
-      for (const [level, ids] of byLevel) {
+      for (const [level, ids] of levelOf) {
         const { error: saveError } = await supabase
           .from('user_breeding_individuals')
           .update({ cycled: true, level, updated_at: stamp })
@@ -938,9 +989,31 @@ export const useBreeding = (
         if (saveError) console.error('[breeding] sortie d’enclos non enregistrée:', saveError);
       }
 
-      return levelOf.size;
+      if (bulkExits.size > 0) {
+        const { error: bulkError } = await supabase.from('user_breeding_mounts').upsert(
+          [...bulkExits.keys()].map((colorId) => ({
+            family,
+            color_id: colorId,
+            males: nextBulk.get(colorId)?.males ?? 0,
+            females: nextBulk.get(colorId)?.females ?? 0,
+            cycled_males: nextBulk.get(colorId)?.cycledMales ?? 0,
+            cycled_females: nextBulk.get(colorId)?.cycledFemales ?? 0,
+            updated_at: stamp,
+          })),
+          { onConflict: 'user_id,family,color_id' }
+        );
+        if (bulkError) console.error('[breeding] vrac sorti d’enclos non enregistré:', bulkError);
+      }
+
+      // Le compte rendu à l'écran couvre les deux, sinon la sortie annoncerait
+      // moins de montures que la liste n'en portait.
+      const bulkCount = [...bulkExits.values()].reduce(
+        (total, out) => total + out.males + out.females,
+        0
+      );
+      return levelById.size + bulkCount;
     },
-    [stable.individuals]
+    [family, stable.bulk, stable.individuals]
   );
 
   /** Corrige une monture suivie : niveau, sexe ou fertilité. */

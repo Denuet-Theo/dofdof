@@ -405,7 +405,7 @@ fn main() {
     let mut scratch = base;
     scratch.pool_generations = (1, 1);
 
-    let ladder = Ladder::of(&muldo(), Route::Shared);
+    let ladder = Ladder::of(&muldo(), Route::default());
 
     println!(
         "{SEEDS} graines appariées, économie {}, horizon {} h, {} places de parc.",

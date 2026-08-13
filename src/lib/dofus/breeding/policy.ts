@@ -45,7 +45,7 @@ import {
 } from './search';
 import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
-import { aimsAt, ladderOf } from './ladder';
+import { aimsAt, crownedLadderOf } from './ladder';
 import type { BreedingColor } from './costs';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
@@ -351,7 +351,29 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
   const generations = new Map(input.colors.map((color) => [color.id, color.generation]));
   const economy = economyView(input.colors, input.market);
   const strategy = strategyOf(champion);
-  const ladder = ladderOf(input.colors);
+
+  /**
+   * Le plan **couronné**, et pas le plan brut.
+   *
+   * `ladderOf` s'arrête au dernier barreau impair en gardant **toutes** ses
+   * couleurs, parce qu'à ce moment-là on ne sait pas encore laquelle servira. La
+   * politique mesurée, elle, tranche à sa première fournée : une seule gen 10,
+   * donc une seule gen 9, et tout ce que plus rien ne réclame sort du plan.
+   *
+   * Sans ce couronnement, `aimsAt` admettait ici des croisements que le Rust
+   * refuse là-bas — 154 paires de couleurs admissibles au lieu de 114 chez le
+   * muldo — et le « 0 % d'accouplements sans cible » publié en tête de
+   * `ladder.ts` était celui d'un plan que le navigateur n'appliquait pas.
+   *
+   * `economy.valueOf` est l'équivalent de `Economy::value_of` : pour une gen 10,
+   * le plus haut entre son prix HDV et son extraction en ambre. Les deux ne sont
+   * pas à la même échelle, ce qui est sans effet — la couronne ne compare les
+   * gen 10 qu'**entre elles**, jamais à un seuil, donc seul leur classement
+   * compte. Une famille dont l'éleveur n'a saisi aucun prix les rend toutes
+   * égales : le critère se rabat alors sur le partenaire, qui ne dépend pas du
+   * marché.
+   */
+  const ladder = crownedLadderOf(input.colors, economy.valueOf);
 
   const plan = planUnit(
     createSearcher({
@@ -503,8 +525,12 @@ const readPlan = (
    * le jour où les deux règles divergeront — un plan chargé d'ailleurs, un
    * champion régénéré, un catalogue changé — le bandeau le dira au lieu de
    * laisser passer.
+   *
+   * Le plan lu ici est le **couronné**, comme celui que la recherche a employé :
+   * comparer le filet d'affichage à un plan plus large que celui du filtre ferait
+   * compter zéro refus par construction, ce qui ne vérifierait rien.
    */
-  const ladder = ladderOf(input.colors);
+  const ladder = crownedLadderOf(input.colors, economy.valueOf);
 
   for (const [maleIndex, femaleIndex] of plan.crossings) {
     const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {

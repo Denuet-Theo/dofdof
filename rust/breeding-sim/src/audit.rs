@@ -141,7 +141,7 @@ mod tests {
         let catalog = muldo();
         let economy = Prices::load_default().expect("economy.toml").economy;
         for seed in 0..25 {
-            let mut audit = Audit::new(LadderPolicy::new(&catalog, Route::Shared));
+            let mut audit = Audit::new(LadderPolicy::new(&catalog, Route::default()));
             play(&catalog, &economy, &mut audit, seed);
             assert!(
                 audit.tally.crossings > 0,

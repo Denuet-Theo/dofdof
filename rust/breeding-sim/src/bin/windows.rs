@@ -102,7 +102,7 @@ fn sweep(label: &str, economy: &Economy, ladder: &Ladder, band: usize) {
 fn main() {
     let prices = Prices::load_default().expect("economy.toml");
     let economy = prices.economy;
-    let ladder = Ladder::of(&muldo(), Route::Shared);
+    let ladder = Ladder::of(&muldo(), Route::default());
 
     if !economy.has_windows() {
         println!("Aucune fenêtre dans economy.toml : il n'y a rien à mesurer ici.");

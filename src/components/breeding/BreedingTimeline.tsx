@@ -66,6 +66,10 @@ import {
 } from '@/lib/dofus/breeding/policy';
 import type { BirthEntry } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+// Les montures que le plan se procure n'ont pas d'identité : la liste de sortie
+// leur en fabrique une, dans l'espace de noms que `search.ts` définit.
+import { acquiredMountId } from '@/lib/dofus/breeding/search';
+import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
@@ -700,9 +704,36 @@ const Fill = ({
 
     const consider = (index: number) => {
       const planned = fill.mounts[index];
-      if (!planned) return;
-      const mount = tracked.get(planned.id) ?? planned;
-      if (mount.fertile && !mount.cycled) picked.set(mount.id, mount);
+      if (planned) {
+        const mount = tracked.get(planned.id) ?? planned;
+        if (mount.fertile && !mount.cycled) picked.set(mount.id, mount);
+        return;
+      }
+
+      /**
+       * Au-delà de `mounts.length`, l'indice désigne un **achat** — c'est le
+       * contrat de `readPlan`, et l'oublier laissait la fournée sortir amputée de
+       * tout ce que le plan se procure : 17 montures sur 40 dans une fournée qui
+       * en achetait 23.
+       *
+       * Rien n'enregistre un achat avant cet écran. La monture est donc bâtie
+       * ici, telle qu'une gen 1 acquise : fertile, pas encore féconde, sans
+       * ascendance — et son identifiant dit qu'elle reste à créer au stock.
+       */
+      const bought = fill.raw.purchases[index - fill.mounts.length];
+      if (!bought) return;
+      const [colorId, sex] = bought;
+      const id = acquiredMountId(colorId, sex, index - fill.mounts.length);
+      picked.set(id, {
+        id,
+        colorId,
+        name: null,
+        sex,
+        level: BULK_MATE_LEVEL,
+        fertile: true,
+        cycled: false,
+        parents: null,
+      });
     };
 
     for (const [male, female] of fill.raw.crossings) {

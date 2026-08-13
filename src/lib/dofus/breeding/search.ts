@@ -359,7 +359,7 @@ export const createSearcher = (config: SearchConfig = DEFAULT_SEARCH): Searcher 
  * couleur et son sexe.
  *
  * Il est reconnaissable, et c'est le point : `#` ne peut pas apparaître dans un
- * uuid, donc `parseBulkMountId` sépare sans ambiguïté une monture de vrac d'une
+ * uuid, donc `parseCountedMountId` sépare sans ambiguïté une monture de vrac d'une
  * monture suivie. Une sortie d'enclos s'écrit dans deux tables différentes selon
  * le cas, et l'avoir deviné au petit bonheur est précisément ce qui a fait
  * disparaître le vrac de la liste de sortie.
@@ -367,14 +367,38 @@ export const createSearcher = (config: SearchConfig = DEFAULT_SEARCH): Searcher 
 export const bulkMountId = (colorId: string, sex: Sex, index: number) =>
   `${colorId}#${sex}${index}`;
 
-/** L'inverse de `bulkMountId`. `null` pour une monture suivie (un uuid). */
-export const parseBulkMountId = (id: string): { colorId: string; sex: Sex } | null => {
-  const cut = id.lastIndexOf('#');
+/**
+ * Une monture que le plan se **procure** : achetée à l'hôtel de vente ou capturée.
+ *
+ * Elle n'existe nulle part encore — ni ligne suivie, ni stock. Les indices d'un
+ * `UnitPlan` au-delà de `mounts.length` la désignent (voir `readPlan`), et rien ne
+ * l'enregistre avant que l'éleveur ne la déclare. La sortie d'enclos est donc le
+ * premier moment où l'app peut apprendre qu'elle existe : il faut l'y **créer**,
+ * et non seulement créditer un compteur. D'où un espace de noms distinct du vrac
+ * en stock — `+` plutôt que `#`, deux caractères qu'un identifiant de couleur ne
+ * porte jamais.
+ */
+export const acquiredMountId = (colorId: string, sex: Sex, index: number) =>
+  `${colorId}+${sex}${index}`;
+
+/**
+ * Lit un identifiant de monture **comptée** — vrac en stock ou à procurer.
+ *
+ * `null` pour une monture suivie (un uuid). `acquired` dit laquelle des deux :
+ * une monture à procurer doit être ajoutée au stock en sortant de l'enclos, une
+ * monture déjà en stock seulement passée féconde. Un seul lecteur pour les deux,
+ * parce que tout ce qui les distingue de l'écurie suivie leur est commun : pas de
+ * ligne à soi, pas de niveau propre, une quantité par couleur et par sexe.
+ */
+export const parseCountedMountId = (
+  id: string
+): { colorId: string; sex: Sex; acquired: boolean } | null => {
+  const cut = Math.max(id.lastIndexOf('#'), id.lastIndexOf('+'));
   if (cut <= 0) return null;
   const sex = id[cut + 1];
   if (sex !== 'M' && sex !== 'F') return null;
   if (!/^\d+$/.test(id.slice(cut + 2))) return null;
-  return { colorId: id.slice(0, cut), sex };
+  return { colorId: id.slice(0, cut), sex, acquired: id[cut] === '+' };
 };
 
 export const flatten = (stable: Stable): Individual[] => {

@@ -55,7 +55,7 @@ import {
 import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
 // Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
 // c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
-import { parseBulkMountId } from '@/lib/dofus/breeding/search';
+import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -906,22 +906,26 @@ export const useBreeding = (
    * valeurs distinctes, pas quarante, et une requête par monture ferait
    * quarante allers-retours pour la même chose.
    *
-   * ## Deux tables, parce qu'il y a deux sortes de montures
+   * ## Sortir de l'enclos, c'est entrer à l'écurie suivie
    *
-   * Une gen 1 vit en **vrac** : elle se compte, elle n'a pas de ligne à elle. Sa
-   * fécondité s'écrit donc sur des compteurs, `cycled_males` / `cycled_females`
-   * (migration `breeding_bulk_feconde`), et non sur un booléen par monture.
+   * Trois sortes de montures entrent dans un enclos : des suivies, du vrac en
+   * stock, et ce que le plan est allé **procurer** — acheté ou capturé, et que
+   * rien n'enregistre avant cet écran.
    *
-   * Ne traiter que les individus suivis revenait à perdre tout le vrac en
-   * silence : chargé dans l'enclos, cycle payé, jamais enregistré. La politique
-   * le revoyait fertile, lui réservait une place déjà payée et proposait
-   * d'acheter à côté — le trou même que cette migration avait creusé le
-   * rangement pour boucher.
+   * Toutes en sortent **suivies**, avec leur niveau. Tant qu'une monture n'est
+   * qu'un compteur, elle vaut `BULK_MATE_LEVEL`, soit 1 : or le niveau décide du
+   * taux de réussite d'un croisement, donc la laisser au compteur après un cycle
+   * d'enclos saboterait tous ses accouplements suivants — et c'est le seul moment
+   * où l'éleveur a les quarante fiches sous les yeux.
    *
-   * Le niveau saisi ne concerne que les suivies. Le vrac n'a pas de niveau à
-   * porter : il vaut `BULK_MATE_LEVEL` pour tout le monde, et lui en inventer un
-   * demanderait de le promouvoir en individu suivi — un autre geste, qui n'a pas
-   * sa place dans une sortie d'enclos.
+   * Ce qui quitte le vrac est décompté du stock : on ne le compte plus par
+   * couleur, on le connaît une par une. Une procurée n'était nulle part, il n'y a
+   * donc rien à en retirer — seulement une ligne à ouvrir.
+   *
+   * Aucune n'a d'ascendance, et c'est un état que l'écurie suivie accepte déjà
+   * (l'ajout manuel propose « les deux couleurs de l'ascendance, **ou rien** »).
+   * Leur lecture généalogique est donc inchangée : ce qu'elles gagnent, c'est
+   * leur niveau.
    */
   const recordEnclosExit = useCallback(
     async (entries: { id: string; level: number }[]) => {
@@ -930,16 +934,46 @@ export const useBreeding = (
       /** Les suivies : un niveau et un drapeau, ligne par ligne. */
       const levelOf = new Map<number, string[]>();
       const levelById = new Map<string, number>();
-      /** Le vrac : des quantités à créditer, par couleur et par sexe. */
+      /**
+       * Les comptées : des quantités, par couleur et par sexe.
+       *
+       * Le vrac qui sort d'un enclos **quitte le compteur** : il devient une
+       * monture suivie. Ce qu'on ne compte plus par couleur, on le connaît une par
+       * une — ce qui est tout l'objet de cette sortie.
+       */
       const bulkExits = new Map<string, { males: number; females: number }>();
 
+      /**
+       * Les montures à inscrire à l'écurie suivie.
+       *
+       * Une monture comptée — vrac en stock ou procurée — vaut `BULK_MATE_LEVEL`,
+       * soit 1, tant qu'elle n'a pas de ligne à elle. Or c'est le **niveau** qui
+       * décide du taux de réussite d'un croisement : la laisser au compteur après
+       * un cycle d'enclos reviendrait à saboter tous ses accouplements suivants,
+       * alors qu'on tient justement sa fiche sous les yeux.
+       *
+       * Sans ascendance : ni le vrac ni un achat n'en ont, et c'est un état que
+       * l'écurie suivie accepte déjà — l'ajout manuel le propose (« les deux
+       * couleurs de l'ascendance, ou rien »). Elles gardent donc exactement la
+       * même lecture généalogique qu'au compteur, et gagnent leur niveau.
+       */
+      const promoted: { colorId: string; sex: Sex; level: number }[] = [];
+
       for (const entry of entries) {
-        const bulk = parseBulkMountId(entry.id);
-        if (bulk) {
-          const current = bulkExits.get(bulk.colorId) ?? { males: 0, females: 0 };
-          if (bulk.sex === 'M') current.males += 1;
-          else current.females += 1;
-          bulkExits.set(bulk.colorId, current);
+        const counted = parseCountedMountId(entry.id);
+        if (counted) {
+          promoted.push({
+            colorId: counted.colorId,
+            sex: counted.sex,
+            level: Math.max(1, Math.min(200, entry.level)),
+          });
+          // Une monture procurée n'était pas au compteur : rien à en retirer.
+          if (!counted.acquired) {
+            const current = bulkExits.get(counted.colorId) ?? { males: 0, females: 0 };
+            if (counted.sex === 'M') current.males += 1;
+            else current.females += 1;
+            bulkExits.set(counted.colorId, current);
+          }
           continue;
         }
 
@@ -952,35 +986,84 @@ export const useBreeding = (
         levelOf.set(level, [...(levelOf.get(level) ?? []), entry.id]);
       }
 
-      if (levelById.size === 0 && bulkExits.size === 0) return 0;
+      if (levelById.size === 0 && promoted.length === 0) return 0;
 
-      // Le vrac se recalcule depuis l'état courant, et le crédit se borne au
-      // stock : `cycled_*` est un sous-ensemble de `males` / `females`, jamais
-      // une partition, et la base refuse un compteur négatif.
+      // Ce qui quitte le compteur en sort pour de bon. `cycledOf` borne déjà les
+      // fécondes au stock, mais le plancher se reprend ici : la base refuse un
+      // compteur négatif, et une fournée peut vider une couleur entièrement.
       const nextBulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
       for (const [colorId, out] of bulkExits) {
         const current = nextBulk.get(colorId);
         if (!current) continue;
         const banked = cycledOf(current);
+        const males = Math.max(0, current.males - out.males);
+        const females = Math.max(0, current.females - out.females);
         nextBulk.set(colorId, {
-          ...current,
-          cycledMales: Math.min(current.males, banked.males + out.males),
-          cycledFemales: Math.min(current.females, banked.females + out.females),
+          males,
+          females,
+          // Les sortantes n'étaient pas fécondes — la liste de sortie les exclut —
+          // donc le compte de fécondes ne baisse pas, il se reborne seulement.
+          cycledMales: Math.min(males, banked.males),
+          cycledFemales: Math.min(females, banked.females),
         });
+      }
+
+      const supabase = createClient();
+      const stamp = new Date().toISOString();
+
+      // Les promues d'abord : leurs identifiants viennent de la base, et l'état
+      // local doit porter les mêmes pour qu'un accouplement puisse les désigner.
+      let inserted: Individual[] = [];
+      if (promoted.length > 0) {
+        const { data, error: promoteError } = await supabase
+          .from('user_breeding_individuals')
+          .insert(
+            promoted.map((mount) => ({
+              family,
+              color_id: mount.colorId,
+              sex: mount.sex,
+              level: mount.level,
+              // Elle sort de l'enclos : son cycle est payé.
+              fertile: true,
+              cycled: true,
+              // Pas d'ascendance, et pas de nom : l'éleveur n'en a dicté aucun en
+              // jeu, et en inventer un ici désignerait une monture introuvable.
+              name: null,
+              parent_a_color: null,
+              parent_b_color: null,
+            }))
+          )
+          .select();
+
+        if (promoteError) {
+          console.error('[breeding] montures non inscrites à l’écurie:', promoteError);
+        }
+
+        inserted = (data ?? []).map((row) => ({
+          id: row.id,
+          colorId: row.color_id,
+          name: row.name ?? null,
+          sex: row.sex,
+          level: row.level,
+          fertile: row.fertile,
+          cycled: row.cycled ?? false,
+          parents: null,
+        }));
       }
 
       setStable((current) => ({
         ...current,
         bulk: bulkExits.size > 0 ? nextBulk : current.bulk,
-        individuals: current.individuals.map((mount) =>
-          levelById.has(mount.id)
-            ? { ...mount, cycled: true, level: levelById.get(mount.id)! }
-            : mount
-        ),
+        individuals: [
+          ...current.individuals.map((mount) =>
+            levelById.has(mount.id)
+              ? { ...mount, cycled: true, level: levelById.get(mount.id)! }
+              : mount
+          ),
+          ...inserted,
+        ],
       }));
 
-      const supabase = createClient();
-      const stamp = new Date().toISOString();
       for (const [level, ids] of levelOf) {
         const { error: saveError } = await supabase
           .from('user_breeding_individuals')
@@ -1007,11 +1090,7 @@ export const useBreeding = (
 
       // Le compte rendu à l'écran couvre les deux, sinon la sortie annoncerait
       // moins de montures que la liste n'en portait.
-      const bulkCount = [...bulkExits.values()].reduce(
-        (total, out) => total + out.males + out.females,
-        0
-      );
-      return levelById.size + bulkCount;
+      return levelById.size + promoted.length;
     },
     [family, stable.bulk, stable.individuals]
   );

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
@@ -46,13 +47,18 @@ const InventoryPage = () => {
       const supabase = createClient();
 
       try {
-        const { data, error } = await supabase
-          .from('user_sales')
-          .select('*')
-          .order('created_at', { ascending: false });
+        // Les annonces les plus anciennes sont encore en vente : les couper
+        // effacerait de l'inventaire des lots réellement posés en HDV.
+        const data = await fetchAllRows<UserSale>((from, to) =>
+          supabase
+            .from('user_sales')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to)
+        );
 
-        if (error) throw error;
-        setSales(data || []);
+        setSales(data);
       } catch (err) {
         console.error('Error loading inventory:', err);
       }

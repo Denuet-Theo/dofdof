@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/pagination';
 import { UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import {
@@ -43,12 +44,19 @@ const DashboardPage = () => {
       const supabase = createClient();
 
       try {
-        const { data } = await supabase
-          .from('user_sales')
-          .select('*')
-          .order('created_at', { ascending: false });
+        // Toutes les ventes, pas la première page : les totaux du tableau de
+        // bord se somment sur l'historique entier, et une troncature les
+        // sous-estimerait sans rien afficher d'anormal.
+        const data = await fetchAllRows<UserSale>((from, to) =>
+          supabase
+            .from('user_sales')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to)
+        );
 
-        setSales(data ?? []);
+        setSales(data);
       } catch (err) {
         console.error('Error loading dashboard data:', err);
         setSales([]);

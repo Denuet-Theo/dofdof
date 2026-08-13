@@ -210,6 +210,80 @@ into `recipe.quantities` **by array index**, so dropping one silently shifts eve
 quantity and corrupts the craft cost. Instead each row carries `super_type_id`, and exclusion
 is an opt-in filter at query time. (There is no cosmetic item type in this dataset at all.)
 
+### Extraire les données utilisateur
+
+```bash
+SUPABASE_DB_URL=<uri> npm run db:export       # écrit ./data-export/
+SUPABASE_DB_URL=<uri> npm run db:export:dry   # compte les lignes, n'écrit rien
+```
+
+Sur les 18 tables, **7 ne sont pas extraites** : le miroir `dofus_*` est régénérable par
+`npm run db:sync`, et c'est le gros du volume. Le recopier produirait un catalogue figé là
+où une resynchronisation en donne un à jour. Les 11 autres sont saisies par l'utilisateur —
+ventes, stocks, prix relevés, projets d'élevage, montures, généalogies — et ne se
+reconstruisent pas. `auth.users` est extraite en plus, réduite à l'identité et au hachage
+bcrypt du mot de passe : le reprendre tel quel évite de faire réinitialiser les mots de passe.
+
+Chaque table donne un fichier NDJSON, plus un `manifest.json` qui porte l'ordre d'import
+(toute clé étrangère pointe vers une table déjà écrite), les types de chaque colonne, et la
+convention de sérialisation. Deux points comptent à la relecture : **les `bigint` et les
+`numeric` sortent en chaînes décimales**, parce qu'un prix en kamas dépasse
+`Number.MAX_SAFE_INTEGER` et qu'un taux relu en flottant ne revient pas juste ; et
+`user_breeding_individuals` se référence elle-même via `parent_a_id`/`parent_b_id`, donc
+l'import doit différer le contrôle des clés étrangères — aucun ordre de lignes ne résout la
+généalogie.
+
+L'export tourne dans une transaction en lecture seule, et recompte les lignes écrites contre
+le `count(*)` pris à l'ouverture : un écart échoue au lieu de livrer une extraction tronquée.
+Il **refuse aussi de tourner** si la base porte une table classée ni « à extraire » ni
+« régénérable ». Le schéma a bougé 32 fois ; sans ce contrôle, une table ajoutée plus tard
+serait sautée en silence et le trou ne se découvrirait qu'après la coupure de l'ancienne base.
+Une table *absente* de la base ne fait qu'avertir : c'est le cas normal d'une migration pas
+encore appliquée, ou d'une table retirée depuis (`breeding_project_stock`, remplacée par
+`user_breeding_mounts`).
+
+`data-export/` est ignoré par git : il contient des hachages de mots de passe. À supprimer
+une fois la reprise vérifiée.
+
+### Récupérer les données sans la chaîne de connexion
+
+`GET /api/admin/export` sert le même contenu que le script, en un seul flux NDJSON, **depuis
+le service déployé**. Utile quand `SUPABASE_DB_URL` n'est pas accessible : le service la porte
+déjà dans son environnement, alors qu'une clé anon ne pourrait ni lire `auth.users` ni
+contourner les RLS.
+
+Connecté à l'app, ouvrir l'URL dans le navigateur : la réponse est un attachement, le fichier
+se télécharge. La session est déjà dans les cookies, il n'y a rien à passer à la main.
+
+| | |
+| --- | --- |
+| `?catalog=1` | réintègre le miroir `dofus_*`, exclu par défaut |
+| `?passwords=0` | omet les hachages bcrypt, inclus par défaut |
+
+**C'est une porte de sortie de données, et elle se referme.** Trois verrous : une session
+valide (revérifiée dans la route, pas seulement dans le proxy), une adresse inscrite dans
+`ALLOWED_EMAILS` — sans quoi n'importe quel compte de l'app emporterait les données de tous
+les autres, hachages compris — et aucune mise en cache. Vide, la liste fait répondre 503 :
+c'est l'état dans lequel ce fichier doit revenir s'il survit à la reprise. Une adresse e-mail
+n'étant pas un secret, elle se pose en clair dans le code plutôt qu'en variable
+d'environnement — un jeton, lui, resterait dans l'historique git après le retrait de la route.
+
+À supprimer une fois la reprise vérifiée : `src/app/api/admin/export/route.ts`, rien d'autre
+à défaire.
+
+Le flux se relit avec :
+
+```bash
+npm run db:export:check -- dofdof-export.ndjson
+```
+
+Ce contrôle n'est pas décoratif. Le statut HTTP 200 part **avant** que la première table ne
+soit lue, donc une coupure en cours de transfert laisse un fichier dont chaque ligne est du
+JSON valide — d'apparence saine. Le vérificateur exige la ligne finale `{"kind":"end"}`,
+recompte chaque table contre la borne que le flux annonce, et refuse un `bigint` sérialisé en
+nombre JSON plutôt qu'en chaîne. Sur un export de sauvetage, ces trois défauts ne se
+rattrapent pas : la base n'est plus là pour recommencer.
+
 ## Élevage
 
 L'écran `/breeding` classe les 306 couleurs de monture (66 dragodindes, 120 muldos,

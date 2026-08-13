@@ -36,6 +36,11 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# L'extraction des données utilisateur produite par `npm run db:export` : des
+# ventes, des stocks, des prix relevés — et les hachages bcrypt des mots de passe
+# dans auth.users.ndjson. Une sauvegarde, pas une source. Elle ne se versionne pas.
+/data-export/
+
 # vercel
 .vercel
 

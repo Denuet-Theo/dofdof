@@ -17,7 +17,7 @@
 
 import pg from 'pg';
 import { pathToFileURL } from 'node:url';
-import { describeTarget, isRender, requireDbUrl } from './lib/db-url.mjs';
+import { clientConfig, describeTarget, isRender, requireDbUrl } from './lib/db-url.mjs';
 
 const API = 'https://api.dofusdb.fr';
 // DofusDB plafonne $limit à 50 quoi qu'on demande.
@@ -47,19 +47,6 @@ const maxAgeHours = Number(process.env.DOFUSDB_SYNC_MAX_AGE_HOURS ?? 168);
 // DOFUSDB_SYNC_ON_BOOT=0 dans le dashboard Render débloque sans revert de code.
 // N'affecte que --if-stale : un `npm run db:sync` explicite tourne toujours.
 const syncOnBoot = process.env.DOFUSDB_SYNC_ON_BOOT !== '0';
-
-/**
- * Supabase n'accepte que des connexions TLS, et node-postgres ne l'active pas de
- * lui-même — contrairement à la CLI Supabase qu'utilise run-migrations.mjs, qui
- * s'en charge seule. Le certificat est signé par une AC absente du magasin par
- * défaut de Node, d'où `rejectUnauthorized: false` : le transport est chiffré,
- * la chaîne n'est pas validée. Une chaîne de connexion qui précise déjà
- * `sslmode` est laissée telle quelle.
- */
-const clientConfig = (connectionString) => ({
-  connectionString,
-  ...(/[?&]sslmode=/i.test(connectionString) ? {} : { ssl: { rejectUnauthorized: false } }),
-});
 
 const log = (msg) => console.log(`[sync] ${msg}`);
 const warn = (msg) => console.warn(`[sync] ${msg}`);

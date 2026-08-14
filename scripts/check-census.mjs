@@ -26,35 +26,16 @@
  * déployer le champion qui les a produites. Voir `refresh-parity.mjs`.
  */
 
-import { readFileSync, mkdtempSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+import { ROOT, compile, load } from './lib/tsc.mjs';
+
 const TOLERANCE = 1e-9;
 
-const out = mkdtempSync(join(tmpdir(), 'dofdof-census-'));
-execFileSync(
-  'npx',
-  [
-    'tsc',
-    join(ROOT, 'src/lib/dofus/breeding/census.ts'),
-    '--outDir', out,
-    '--module', 'commonjs',
-    '--target', 'es2020',
-    '--moduleResolution', 'node',
-    '--esModuleInterop',
-    '--skipLibCheck',
-    '--resolveJsonModule',
-    '--noCheck',
-  ],
-  { stdio: 'inherit' }
-);
+const out = compile('census', ['src/lib/dofus/breeding/census.ts'], { json: true });
 
-const { censusOf, featuresOf, FEATURES } = await import(
-  join(out, 'census.js')
-);
+const { censusOf, featuresOf, FEATURES } = await load(out, 'census.js');
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const fixture = read('scripts/fixtures/census-parity.json');
 const trees = read('src/lib/dofus/breeding/trees.json');

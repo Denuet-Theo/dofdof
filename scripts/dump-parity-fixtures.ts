@@ -17,12 +17,19 @@
  *
  * Uniformément sur les 120 couleurs du muldo, la moitié des cases tomberait en
  * génération 10 — les six cases d'une paire porteraient presque toujours un 10,
- * la cible viserait la génération 11, et `pairOutlook` répondrait `null` sur
- * l'écrasante majorité des cas. On ne mesurerait plus rien.
+ * et toutes les cibles seraient **plafonnées**. La fenêtre est pleine dans ce
+ * régime-là, mais c'est toujours la même, et le reste de la loi ne serait plus
+ * mesuré.
  *
  * On tire donc d'abord un **plafond** de génération, puis les couleurs en
  * dessous. Les cibles se répartissent alors sur tout le catalogue, et les cas
- * intéressants — recopie, raccourci, cible multiple — sortent en nombre.
+ * intéressants — recopie, raccourci, plafond, cible multiple — sortent en
+ * nombre.
+ *
+ * Ce biais avait une seconde raison, qui est tombée : `pairOutlook` refusait de
+ * répondre au-dessus du plafond, et le lot n'aurait mesuré qu'une file de
+ * `null`. Le jeu ne refuse pas, il plafonne (issue #185), donc chaque cas porte
+ * désormais une fenêtre — y compris au sommet, où elle est la plus riche.
  *
  * ## Ce qui n'est pas comparé
  *
@@ -104,11 +111,25 @@ const toMate = (mate: SerialisedMate): Mate => ({
 });
 
 /**
- * Des cas construits à la main, en tête de fixture.
+ * Des cas nommés, en tête de fixture.
  *
- * Le tirage aléatoire couvre large mais ne garantit rien de précis. Ces
- * cinq-là sont les relevés en jeu qui ont fondé les règles ; s'ils passent
- * inaperçus dans le lot, une régression sur eux passerait inaperçue aussi.
+ * Le tirage aléatoire couvre large mais ne garantit rien de précis. Ceux-là sont
+ * les **relevés en jeu** qui ont fondé les règles ; s'ils passent inaperçus dans
+ * le lot, une régression sur eux passerait inaperçue aussi.
+ *
+ * ## Deux cas construits en moins, trois relevés en plus
+ *
+ * La liste portait deux cas que personne n'avait jamais ouverts en jeu :
+ * « raccourci non plafonné » et « au-dessus du plafond ». Ils figeaient une
+ * inférence — que la cible pouvait dépasser le sommet, et qu'un tel couple était
+ * refusé — et cette inférence était fausse. Le relevé du 14/08 (issue #185) la
+ * corrige, et il coûte 4,89 et 50,10 points d'écart à ces deux-là précisément :
+ * ce sont les seuls que la nouvelle loi déplace.
+ *
+ * Le raccourci reste, parce qu'il porte autre chose — huit générations d'un coup
+ * — mais il est réécrit sur une ascendance gen 9 qui ne touche pas le plafond, ce
+ * qui est ce qu'il voulait montrer. Les trois fenêtres du sommet le remplacent
+ * là où il empiétait, et elles, elles ont été relevées.
  */
 const named: { why: string; male: SerialisedMate; female: SerialisedMate }[] = [
   {
@@ -117,7 +138,7 @@ const named: { why: string; male: SerialisedMate; female: SerialisedMate }[] = [
     female: { color: 'ebene_orchidee', level: 61, parents: ['amande', 'dore'] },
   },
   {
-    why: 'raccourci non plafonné : une gen 1 d’ascendance gen 9 vise la gen 10',
+    why: 'raccourci #59 : une gen 1 d’ascendance gen 9 vise la gen 10, huit rangs d’un coup',
     male: { color: 'dore', level: 67, parents: ['ambre', 'dore'] },
     female: { color: 'dore', level: 67, parents: null },
   },
@@ -131,10 +152,24 @@ const named: { why: string; male: SerialisedMate; female: SerialisedMate }[] = [
     male: { color: 'dore', level: 100, parents: ['dore', 'dore'] },
     female: { color: 'amande', level: 100, parents: ['amande', 'amande'] },
   },
+  // Les trois fenêtres du 14/08 (issue #185), même mère, trois pères. Ce sont
+  // elles qui ont mesuré le plafond : la cible y vaut 10 au lieu de 11, la
+  // couleur de la mère passe du bloc « Autres » au bloc « Génération cible », et
+  // l'échec se renormalise sur ce qui reste. Reproduites à 0,005 point.
   {
-    why: 'au-dessus du plafond : une ascendance gen 10 des deux côtés ne vise rien',
-    male: { color: 'dore', level: 67, parents: ['ambre_dore', 'dore'] },
-    female: { color: 'dore', level: 67, parents: ['ambre_dore', 'dore'] },
+    why: 'sommet #185, fenêtre 1 : gen 10 [Azur, Pourpre] × Ébène gen 1 capturé — cible plafonnée à 10',
+    male: { color: 'ebene', level: 44, parents: null },
+    female: { color: 'azur_turquoise', level: 46, parents: ['azur', 'pourpre'] },
+  },
+  {
+    why: 'sommet #185, fenêtre 2 : le père porte une ascendance, trois couleurs cibles',
+    male: { color: 'dore', level: 44, parents: ['dore', 'pourpre'] },
+    female: { color: 'azur_turquoise', level: 46, parents: ['azur', 'pourpre'] },
+  },
+  {
+    why: 'sommet #185, fenêtre 3 : père composé gen 4, celle qui fixe les poids de la gen 9',
+    male: { color: 'dore_amande', level: 61, parents: ['dore', 'amande'] },
+    female: { color: 'azur_turquoise', level: 46, parents: ['azur', 'pourpre'] },
   },
 ];
 
@@ -150,31 +185,36 @@ type ParityCase = {
   why?: string;
   male: SerialisedMate;
   female: SerialisedMate;
+  /**
+   * Plus jamais `null` : le jeu ne refuse aucun accouplement. Le champ garde sa
+   * forme d'objet, et gagne `anc` — la génération que le couple porte, qui
+   * valait `gen - 1` partout jusqu'à ce que le plafond les décolle.
+   */
   outlook: {
     gen: number;
+    anc: number;
     leap: number;
     rate: number;
     targets: [string, number][];
-  } | null;
+  };
   outcomes: [string, number, string][];
 };
 
 const cases: ParityCase[] = [];
 let recopies = 0;
 let shortcuts = 0;
-let aboveCap = 0;
+let capped = 0;
 let multiTarget = 0;
 
 const record = (male: SerialisedMate, female: SerialisedMate, why: string | null) => {
   const outlook = pairOutlook(toMate(male), toMate(female), colors, generations);
   const outcomes = matingOutcomes(toMate(male), toMate(female), colors, generations);
+  if (!outlook) throw new Error(`couple sans fenêtre : ${male.color} × ${female.color}`);
 
-  if (!outlook) aboveCap += 1;
-  else {
-    if (outlook.targetColors.length === 0) recopies += 1;
-    if (outlook.targetColors.length > 1) multiTarget += 1;
-    if (outlook.leap > 0) shortcuts += 1;
-  }
+  if (outlook.targetColors.length === 0) recopies += 1;
+  if (outlook.targetColors.length > 1) multiTarget += 1;
+  if (outlook.leap > 0) shortcuts += 1;
+  if (outlook.targetGeneration <= outlook.ancestryGeneration) capped += 1;
 
   // Les listes sont encodées en tuples plutôt qu'en objets nommés : à 5 000 cas
   // la répétition des clés pesait plus lourd que les données, et une fixture
@@ -185,16 +225,15 @@ const record = (male: SerialisedMate, female: SerialisedMate, why: string | null
     ...(why ? { why } : {}),
     male,
     female,
-    outlook: outlook
-      ? {
-          gen: outlook.targetGeneration,
-          leap: outlook.leap,
-          rate: outlook.successRate,
-          targets: outlook.targetColors.map(
-            (target): [string, number] => [target.colorId, target.weight]
-          ),
-        }
-      : null,
+    outlook: {
+      gen: outlook.targetGeneration,
+      anc: outlook.ancestryGeneration,
+      leap: outlook.leap,
+      rate: outlook.successRate,
+      targets: outlook.targetColors.map(
+        (target): [string, number] => [target.colorId, target.weight]
+      ),
+    },
     outcomes: outcomes.map(
       (outcome): [string, number, string] => [
         outcome.colorId,
@@ -207,10 +246,10 @@ const record = (male: SerialisedMate, female: SerialisedMate, why: string | null
 
 for (const entry of named) record(entry.male, entry.female, entry.why);
 while (cases.length < CASE_COUNT) {
-  // Le plafond monte jusqu'au sommet une fois sur dix, pour que le refus de
-  // viser une génération 11 soit couvert par le tirage et pas seulement par le
-  // cas nommé. Le reste du temps il s'arrête en dessous, sans quoi la moitié du
-  // lot ne mesurerait plus qu'un `null`.
+  // Le plafond monte jusqu'au sommet une fois sur dix, pour que la cible
+  // plafonnée soit couverte par le tirage et pas seulement par les trois cas
+  // nommés. Le reste du temps il s'arrête en dessous, sans quoi la moitié du lot
+  // ne mesurerait plus que ce même régime.
   const ceiling =
     random() < 0.1 ? topGeneration : 1 + Math.floor(random() * (topGeneration - 1));
   record(makeMate(ceiling), makeMate(ceiling), null);
@@ -232,5 +271,5 @@ writeFileSync(
 
 console.log(`${cases.length} cas écrits dans ${output}`);
 console.log(
-  `couverture : ${recopies} recopies, ${shortcuts} raccourcis, ${multiTarget} cibles multiples, ${aboveCap} au-dessus du plafond`
+  `couverture : ${recopies} recopies, ${shortcuts} raccourcis, ${multiTarget} cibles multiples, ${capped} cibles plafonnées`
 );

@@ -71,7 +71,7 @@ impl Policy for PolicyBox {
 
 fn audit(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy>) {
     let catalog = muldo();
-    let (mut crossings, mut barren, mut impossible) = (0usize, 0usize, 0usize);
+    let (mut crossings, mut barren, mut capped) = (0usize, 0usize, 0usize);
     let mut scores = Vec::new();
     let mut gen10 = 0.0;
     let (mut head, mut ster, mut ster_value) = (0.0, 0.0, 0.0);
@@ -81,7 +81,7 @@ fn audit(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy
         let outcome = play(&catalog, economy, &mut audited, seed);
         crossings += audited.tally.crossings;
         barren += audited.tally.barren;
-        impossible += audited.tally.impossible;
+        capped += audited.tally.capped;
         gen10 += outcome.gen10_held as f64;
         head += audited.tally.headcount as f64;
         ster += audited.tally.steriles as f64;
@@ -94,7 +94,7 @@ fn audit(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy
     println!(
         "{:<22} {:>8.1} % {:>8.1} {:>8.0} {:>8.0} {:>7.0} % {:>10.2} M {:>11.2} M",
         name,
-        (barren + impossible) as f64 / crossings.max(1) as f64 * 100.0,
+        (barren + capped) as f64 / crossings.max(1) as f64 * 100.0,
         gen10 / n,
         head / n,
         ster / n,

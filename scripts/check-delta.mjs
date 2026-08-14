@@ -27,33 +27,16 @@
  * déployer le champion qui les a produites. Voir `refresh-parity.mjs`.
  */
 
-import { readFileSync, mkdtempSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+import { ROOT, compile, load } from './lib/tsc.mjs';
+
 const TOLERANCE = 1e-9;
 
-const out = mkdtempSync(join(tmpdir(), 'dofdof-delta-'));
-execFileSync(
-  'npx',
-  [
-    'tsc',
-    join(ROOT, 'src/lib/dofus/breeding/census.ts'),
-    '--outDir', out,
-    '--module', 'commonjs',
-    '--target', 'es2020',
-    '--moduleResolution', 'node',
-    '--esModuleInterop',
-    '--skipLibCheck',
-    '--resolveJsonModule',
-    '--noCheck',
-  ],
-  { stdio: 'inherit' }
-);
+const out = compile('delta', ['src/lib/dofus/breeding/census.ts'], { json: true });
 
-const { pairDelta } = await import(join(out, 'census.js'));
+const { pairDelta } = await load(out, 'census.js');
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const fixture = read('scripts/fixtures/delta-parity.json');
 const trees = read('src/lib/dofus/breeding/trees.json');
@@ -103,13 +86,15 @@ for (const [at, testCase] of fixture.cases.entries()) {
   }
 
   const theirs = testCase.delta;
-  // Un booléen ne se compare pas à une tolérance : il est juste ou il ne l'est
-  // pas, et c'est lui qui distingue « monte d'un rang » de « recopie ».
-  if (delta.namesTarget !== theirs.namesTarget) {
-    console.error(
-      `cas ${at} : namesTarget ${delta.namesTarget} contre ${theirs.namesTarget}`
-    );
-    process.exit(1);
+  // Deux booléens, et ils ne se comparent pas à une tolérance : ils sont justes
+  // ou ils ne le sont pas. `namesTarget` dit qu'une couleur nomme le rang visé,
+  // `climbs` qu'on y gagne une génération — et ils divergent au plafond, où la
+  // fenêtre est pleine sans que rien ne monte.
+  for (const key of ['namesTarget', 'climbs']) {
+    if (delta[key] !== theirs[key]) {
+      console.error(`cas ${at} : ${key} ${delta[key]} contre ${theirs[key]}`);
+      process.exit(1);
+    }
   }
   for (const key of [
     'maleGeneration', 'femaleGeneration', 'maleCarried', 'femaleCarried',

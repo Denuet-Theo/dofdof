@@ -33,35 +33,20 @@
  * gen 10 à 30 au lieu de 1 et le réseau lirait un marché qu'il n'a jamais vu.
  */
 
-import { readFileSync, mkdtempSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+import { ROOT, compile, load } from './lib/tsc.mjs';
 
-const out = mkdtempSync(join(tmpdir(), 'dofdof-policy-'));
-execFileSync(
-  'npx',
-  [
-    'tsc',
-    join(ROOT, 'src/lib/dofus/breeding/policy.ts'),
-    join(ROOT, 'src/lib/dofus/breeding/random.ts'),
-    '--outDir', out,
-    '--module', 'commonjs',
-    '--target', 'es2020',
-    '--moduleResolution', 'node',
-    '--esModuleInterop',
-    '--skipLibCheck',
-    '--resolveJsonModule',
-    '--noCheck',
-  ],
-  { stdio: 'inherit' }
+const out = compile(
+  'policy',
+  ['src/lib/dofus/breeding/policy.ts', 'src/lib/dofus/breeding/random.ts'],
+  { json: true }
 );
 
-const { stablePlan, economyView } = await import(join(out, 'policy.js'));
-const { createSearcher, flatten, planUnit, myopic } = await import(join(out, 'search.js'));
-const { seededRandom } = await import(join(out, 'random.js'));
+const { stablePlan, economyView } = await load(out, 'policy.js');
+const { createSearcher, flatten, planUnit, myopic } = await load(out, 'search.js');
+const { seededRandom } = await load(out, 'random.js');
 
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const champion = read('src/lib/dofus/breeding/champion.json');

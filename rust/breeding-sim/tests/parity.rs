@@ -115,7 +115,7 @@ fn le_portage_rejoue_le_typescript_au_milliardieme() {
     let mut failures: Vec<String> = Vec::new();
     let mut compared_outcomes = 0usize;
     let mut recopies = 0usize;
-    let mut above_cap = 0usize;
+    let mut capped = 0usize;
     let mut shortcuts = 0usize;
 
     for (index, case) in cases.iter().enumerate() {
@@ -139,72 +139,78 @@ fn le_portage_rejoue_le_typescript_au_milliardieme() {
         let actual = pair_outlook(&catalog, &male, &female);
         let expected = &case["outlook"];
 
-        match (expected, &actual) {
-            (Value::Null, Some(outlook)) => fail(format!(
-                "le TS ne vise rien (cible au-dessus du plafond), le Rust vise la gen {}",
-                outlook.target_generation
-            )),
-            (Value::Null, None) => above_cap += 1,
-            (_, None) => fail(format!(
-                "le TS vise la gen {}, le Rust ne vise rien",
-                expected["gen"]
-            )),
-            (_, Some(outlook)) => {
-                let want_gen = expected["gen"].as_u64().expect("`gen`") as u8;
-                let want_leap = expected["leap"].as_i64().expect("`leap`") as i16;
-                let want_rate = expected["rate"].as_f64().expect("`rate`");
+        // `outlook` n'est plus jamais nul : le jeu ne refuse aucun accouplement,
+        // il plafonne la cible au sommet de la famille (issue #185). La fixture
+        // porte donc un objet à tous les cas, et la comparaison n'a plus de
+        // branche pour l'absence.
+        {
+            let want_gen = expected["gen"].as_u64().expect("`gen`") as u8;
+            let want_anc = expected["anc"].as_u64().expect("`anc`") as u8;
+            let want_leap = expected["leap"].as_i64().expect("`leap`") as i16;
+            let want_rate = expected["rate"].as_f64().expect("`rate`");
+            let outlook = &actual;
 
-                if outlook.target_generation != want_gen {
-                    fail(format!(
-                        "génération visée : TS {want_gen}, Rust {}",
-                        outlook.target_generation
-                    ));
-                }
-                if outlook.leap != want_leap {
-                    fail(format!("saut : TS {want_leap}, Rust {}", outlook.leap));
-                }
-                if !close(outlook.success_rate, want_rate) {
-                    fail(format!(
-                        "taux : TS {want_rate}, Rust {}",
-                        outlook.success_rate
-                    ));
-                }
+            if outlook.target_generation != want_gen {
+                fail(format!(
+                    "génération visée : TS {want_gen}, Rust {}",
+                    outlook.target_generation
+                ));
+            }
+            // L'ascendance portée : elle valait `gen - 1` partout jusqu'à ce que
+            // le plafond les décolle, et c'est elle qui décide des génétons.
+            if outlook.ancestry_generation != want_anc {
+                fail(format!(
+                    "ascendance portée : TS {want_anc}, Rust {}",
+                    outlook.ancestry_generation
+                ));
+            }
+            if outlook.leap != want_leap {
+                fail(format!("saut : TS {want_leap}, Rust {}", outlook.leap));
+            }
+            if !close(outlook.success_rate, want_rate) {
+                fail(format!(
+                    "taux : TS {want_rate}, Rust {}",
+                    outlook.success_rate
+                ));
+            }
 
-                let want_targets = expected["targets"].as_array().expect("`targets`");
-                if want_targets.is_empty() {
-                    recopies += 1;
-                }
-                if want_leap > 0 {
-                    shortcuts += 1;
-                }
+            let want_targets = expected["targets"].as_array().expect("`targets`");
+            if want_targets.is_empty() {
+                recopies += 1;
+            }
+            if want_leap > 0 {
+                shortcuts += 1;
+            }
+            if want_gen <= want_anc {
+                capped += 1;
+            }
 
-                if want_targets.len() != outlook.target_colors.len() {
-                    fail(format!(
-                        "nombre de couleurs cibles : TS {}, Rust {} ({:?})",
-                        want_targets.len(),
-                        outlook.target_colors.len(),
-                        outlook
-                            .target_colors
-                            .iter()
-                            .map(|t| catalog.slug(t.color))
-                            .collect::<Vec<_>>()
-                    ));
-                } else {
-                    // L'ordre compte autant que les valeurs : c'est lui qui
-                    // décide de la couleur annoncée en tête, et donc de ce que
-                    // la politique croit produire.
-                    for (rank, want) in want_targets.iter().enumerate() {
-                        let want_slug = want[0].as_str().expect("couleur cible");
-                        let want_weight = want[1].as_f64().expect("poids cible");
-                        let got = outlook.target_colors[rank];
-                        if catalog.slug(got.color) != want_slug || !close(got.weight, want_weight) {
-                            fail(format!(
-                                "cible n°{rank} : TS {want_slug}@{want_weight}, Rust {}@{}",
-                                catalog.slug(got.color),
-                                got.weight
-                            ));
-                            break;
-                        }
+            if want_targets.len() != outlook.target_colors.len() {
+                fail(format!(
+                    "nombre de couleurs cibles : TS {}, Rust {} ({:?})",
+                    want_targets.len(),
+                    outlook.target_colors.len(),
+                    outlook
+                        .target_colors
+                        .iter()
+                        .map(|t| catalog.slug(t.color))
+                        .collect::<Vec<_>>()
+                ));
+            } else {
+                // L'ordre compte autant que les valeurs : c'est lui qui décide
+                // de la couleur annoncée en tête, et donc de ce que la politique
+                // croit produire.
+                for (rank, want) in want_targets.iter().enumerate() {
+                    let want_slug = want[0].as_str().expect("couleur cible");
+                    let want_weight = want[1].as_f64().expect("poids cible");
+                    let got = outlook.target_colors[rank];
+                    if catalog.slug(got.color) != want_slug || !close(got.weight, want_weight) {
+                        fail(format!(
+                            "cible n°{rank} : TS {want_slug}@{want_weight}, Rust {}@{}",
+                            catalog.slug(got.color),
+                            got.weight
+                        ));
+                        break;
                     }
                 }
             }
@@ -272,11 +278,11 @@ fn le_portage_rejoue_le_typescript_au_milliardieme() {
     );
     assert!(recopies > 100, "recopies sous-représentées: {recopies}");
     assert!(shortcuts > 100, "raccourcis sous-représentés: {shortcuts}");
-    assert!(above_cap > 10, "plafond sous-représenté: {above_cap}");
+    assert!(capped > 10, "cibles plafonnées sous-représentées: {capped}");
 
     println!(
         "parité : {} cas, {compared_outcomes} issues comparées \
-         ({recopies} recopies, {shortcuts} raccourcis, {above_cap} au-dessus du plafond)",
+         ({recopies} recopies, {shortcuts} raccourcis, {capped} cibles plafonnées)",
         cases.len()
     );
 }

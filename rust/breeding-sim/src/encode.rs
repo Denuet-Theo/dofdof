@@ -335,7 +335,7 @@ pub struct PairDelta {
     /// La génération visée, et ce que coûte l'Optimakina qui va avec — zéro si
     /// la stratégie n'en achète pas à ce rang.
     pub target_generation: u8,
-    /// Une couleur **nomme** ce rang, donc le croisement peut y monter.
+    /// Une couleur **nomme** ce rang.
     ///
     /// Faux pour deux Ébène : la paire vise la génération 2, mais aucune recette
     /// ne s'écrit `[ebene, ebene]`, et toute la masse retombe sur la recopie. Le
@@ -343,6 +343,15 @@ pub struct PairDelta {
     /// l'information, si bien qu'un affichage lisant `target_generation` seul
     /// annonçait « gen 2 » là où il ne sortira qu'un Ébène de plus.
     pub names_target: bool,
+    /// Le croisement gagne-t-il une génération ?
+    ///
+    /// Ce champ disait « donc le croisement peut y monter » à la suite du
+    /// précédent, et cette inférence-là est tombée : au **plafond**, une paire
+    /// nomme des couleurs de la génération visée sans que celle-ci dépasse ce
+    /// que le couple porte déjà. Les deux se confondaient tant que ces couples
+    /// étaient refusés ; ils se séparent depuis, et c'est celui-ci que les
+    /// génétons et l'admissibilité veulent.
+    pub climbs: bool,
     pub optimakina_cost: i64,
     /// Ce que le croisement rapporte en génétons, **en espérance** : ils ne
     /// tombent qu'en cas de succès. C'est le lien sans lequel la recherche ne
@@ -362,9 +371,10 @@ impl PairDelta {
         level: u16,
         optimakina_from: u8,
     ) -> Option<Self> {
+        // La cible sort déjà plafonnée : la borner une seconde fois ici n'avait
+        // plus d'effet, et laissait croire qu'elle pouvait dépasser le sommet.
         let target_generation = pair_target_generation(catalog, male, female);
-        let with_optimakina =
-            target_generation >= optimakina_from && target_generation <= catalog.top_generation();
+        let with_optimakina = target_generation >= optimakina_from;
         let optimakina_cost = if with_optimakina {
             economy.optimakina[usize::from(target_generation).min(10)]
         } else {
@@ -378,15 +388,19 @@ impl PairDelta {
         }
 
         // La masse de réussite vaut `rate` quand une couleur nomme la cible, et
-        // zéro sinon — c'est exactement la condition des génétons.
+        // zéro sinon. Les génétons demandent une condition de plus — que la
+        // cible dépasse l'ascendance — et les deux ne coïncident qu'en dessous
+        // du plafond.
         let names_target = outcomes
             .iter()
             .any(|outcome| outcome.kind == crate::pairing::OutcomeKind::Target);
+        let climbs = names_target
+            && target_generation > crate::pairing::pair_ancestry_generation(catalog, male, female);
         let geneton_kamas = rate
             * crate::economy::genetons_for_crossing(
                 catalog.generation(male.color),
                 catalog.generation(female.color),
-                names_target,
+                climbs,
             ) as f64
             * economy.geneton_value;
 
@@ -419,6 +433,7 @@ impl PairDelta {
             expected_value,
             target_generation,
             names_target,
+            climbs,
             optimakina_cost,
             geneton_kamas,
         })

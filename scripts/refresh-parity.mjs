@@ -32,8 +32,14 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'nod
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(new URL('..', import.meta.url).pathname);
+// `fileURLToPath` et non `.pathname` : sous Windows ce dernier rend
+// `/C:/Users/...`, que `resolve` prend pour un chemin absolu à rattacher au
+// disque courant et transforme en `C:\C:\Users\...`. La commande échouait donc
+// sur « rust\champion.json est absent » alors que le fichier était là, et le
+// message envoyait réentraîner un champion pour rien.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const RUST = join(ROOT, 'rust');
 const FIXTURES = join(ROOT, 'scripts/fixtures');
 const EMBEDDED = join(ROOT, 'src/lib/dofus/breeding/champion.json');

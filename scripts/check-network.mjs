@@ -34,34 +34,19 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// `compileTs` sous un autre nom : `network.ts` exporte lui aussi un `compile`,
+// celui qui déplie un génome en réseau, et c'est celui-là qu'on veut ici.
+import { ROOT, compile as compileTs, load } from './lib/tsc.mjs';
+
 const TOLERANCE = 1e-9;
 
 // Le module est en TypeScript et n'importe rien : on le compile seul, sans monter
 // le bundle, exactement comme `check-plan.mjs` le fait pour `timeline.ts`.
-const out = mkdtempSync(join(tmpdir(), 'dofdof-net-'));
-execFileSync(
-  'npx',
-  [
-    'tsc',
-    join(ROOT, 'src/lib/dofus/breeding/network.ts'),
-    '--outDir', out,
-    '--module', 'commonjs',
-    '--target', 'es2020',
-    '--moduleResolution', 'node',
-    '--esModuleInterop',
-    '--skipLibCheck',
-    '--noCheck',
-  ],
-  { stdio: 'inherit' }
-);
+const out = compileTs('net', ['src/lib/dofus/breeding/network.ts']);
 
-const { compile, evaluate, isConnected } = await import(join(out, 'network.js'));
+const { compile, evaluate, isConnected } = await load(out, 'network.js');
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
 const champion = read('src/lib/dofus/breeding/champion.json');
 const fixture = read('scripts/fixtures/network-parity.json');

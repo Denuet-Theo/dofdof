@@ -33,33 +33,17 @@
  * ```
  */
 
-import { readFileSync, mkdtempSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+import { ROOT, compile, load } from './lib/tsc.mjs';
+
 /** Une seconde sur des fournées de plusieurs heures : c'est du bruit de flottant. */
 const TOLERANCE_SECONDS = 1e-3;
 
-const out = mkdtempSync(join(tmpdir(), 'dofdof-schedule-'));
-execFileSync(
-  'npx',
-  [
-    'tsc',
-    join(ROOT, 'src/lib/dofus/breeding/schedule.ts'),
-    '--outDir', out,
-    '--module', 'commonjs',
-    '--target', 'es2020',
-    '--moduleResolution', 'node',
-    '--esModuleInterop',
-    '--skipLibCheck',
-    '--noCheck',
-  ],
-  { stdio: 'inherit' }
-);
+const out = compile('schedule', ['src/lib/dofus/breeding/schedule.ts']);
 
-const { schedule, slots, mountXpForLevel } = await import(join(out, 'schedule.js'));
+const { schedule, slots, mountXpForLevel } = await load(out, 'schedule.js');
 const fixture = JSON.parse(
   readFileSync(join(ROOT, 'scripts/fixtures/schedule-parity.json'), 'utf8')
 );

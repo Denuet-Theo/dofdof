@@ -189,21 +189,6 @@ const smaller = (left: string[], right: string[], index: Index): boolean => {
 };
 
 /**
- * Le même, mais **longueur d'abord**.
- *
- * Les deux existent parce que le Rust ne compare pas pareil aux deux endroits, et
- * la différence a bien failli passer inaperçue : `lay_third` compare
- * `(order.len(), &order)`, donc la longueur d'abord, alors que `lay_rung` compare
- * `&distinct` seul, donc lexicographiquement. Un seul comparateur ici rendait le
- * bon plan sur les trois familles — les jeux à égalité de travail y ont toujours
- * la même taille — mais c'était une coïncidence de ces arbres-là, pas la règle.
- */
-const shorterThenSmaller = (left: string[], right: string[], index: Index): boolean => {
-  if (left.length !== right.length) return left.length < right.length;
-  return smaller(left, right, index);
-};
-
-/**
  * La composition d'une couleur : ses deux teintes, telles que l'arbre les nomme.
  *
  * Une composée n'a qu'une composition — c'est ce qui la définit — même quand
@@ -232,124 +217,15 @@ const emptyLadder = (): Ladder => ({
 });
 
 /**
- * La gen 3 : un jeu de gen 2 minimal **et fermé** couvrant toutes les gen 3.
+ * Le premier barreau, celui dont les ingrédients s'**achètent**.
  *
- * Le choix n'est pas libre. En lisant chaque gen 2 comme une **arête** entre ses
- * deux gen 1, le jeu retenu doit être une union disjointe de cliques : un raté de
- * `A × B` rend une gen 1 portant `[A, B]`, et la réemployer face à un C fait
- * rencontrer B et C, qui nomment `B-C`. Dans une clique `B-C` est voulue et rien
- * n'est perdu ; sinon la cible se dédouble et 27 % de la masse utile s'en va.
- *
- * Sur les 18 jeux possibles du muldo, 6 sont fermés — tous de la forme
- * *triangle + arête isolée*.
+ * C'est la seule chose qui distingue le rang 3 des autres, et c'est ce qui rend
+ * sa contrainte de fermeture nécessaire — voir `layRung`.
  */
-const layThird = (ladder: Ladder, colors: BreedingColor[], index: Index): boolean => {
-  const byId = new Map(colors.map((color) => [color.id, color]));
-  const third = colors.filter((color) => color.generation === 3);
-  if (third.length === 0) return false;
-
-  const choices = third.map((color) =>
-    [...color.recipes].sort(
-      (a, b) => byCatalogOrder(index)(a[0], b[0]) || byCatalogOrder(index)(a[1], b[1])
-    )
-  );
-  if (choices.some((recipes) => recipes.length === 0)) return false;
-
-  let best: {
-    seconds: string[];
-    recipes: Map<string, readonly [string, string]>;
-    blocks: string[][];
-  } | null = null;
-
-  const total = choices.reduce((product, recipes) => product * recipes.length, 1);
-
-  for (let attempt = 0; attempt < total; attempt += 1) {
-    const picked = pick(choices, attempt);
-    const recipes = new Map<string, readonly [string, string]>();
-    const seconds = new Set<string>();
-    picked.forEach((recipe, position) => {
-      seconds.add(recipe[0]);
-      seconds.add(recipe[1]);
-      recipes.set(third[position].id, recipe);
-    });
-
-    // Chaque gen 2 voulue est une arête entre ses deux gen 1.
-    const edges = new Set<string>();
-    const vertices = new Set<string>();
-    let sound = true;
-    for (const colorId of seconds) {
-      const pair = constituents(byId.get(colorId));
-      if (!pair || pair[0] === pair[1]) {
-        sound = false;
-        break;
-      }
-      const [a, b] = [...pair].sort();
-      edges.add(`${a}|${b}`);
-      vertices.add(pair[0]);
-      vertices.add(pair[1]);
-    }
-    if (!sound) continue;
-
-    const joined = (a: string, b: string) => {
-      const [first, second] = [a, b].sort();
-      return edges.has(`${first}|${second}`);
-    };
-    const neighbours = (vertex: string) =>
-      [...vertices].filter((other) => other !== vertex && joined(vertex, other));
-
-    // Fermeture : deux arêtes partageant un sommet exigent la troisième.
-    const closed = [...vertices].every((vertex) => {
-      const near = neighbours(vertex);
-      return near.every((x) => near.every((y) => x === y || joined(x, y)));
-    });
-    if (!closed) continue;
-
-    // Les blocs sont les composantes connexes, qui sont donc les cliques.
-    const blocks: string[][] = [];
-    const seen = new Set<string>();
-    for (const start of [...vertices].sort(byCatalogOrder(index))) {
-      if (seen.has(start)) continue;
-      seen.add(start);
-      const block = [start];
-      const queue = [start];
-      while (queue.length > 0) {
-        const vertex = queue.pop()!;
-        for (const next of neighbours(vertex)) {
-          if (seen.has(next)) continue;
-          seen.add(next);
-          block.push(next);
-          queue.push(next);
-        }
-      }
-      blocks.push(block.sort(byCatalogOrder(index)));
-    }
-
-    const order = [...seconds].sort(byCatalogOrder(index));
-    if (best === null || shorterThenSmaller(order, best.seconds, index)) {
-      best = { seconds: order, recipes, blocks };
-    }
-  }
-
-  if (!best) return false;
-
-  for (const colorId of best.seconds) {
-    const recipe = constituents(byId.get(colorId));
-    if (!recipe) continue;
-    ladder.wanted.add(colorId);
-    ladder.recipeOf.set(colorId, recipe);
-  }
-  for (const [colorId, recipe] of best.recipes) {
-    ladder.wanted.add(colorId);
-    ladder.recipeOf.set(colorId, recipe);
-    ladder.summit.push(colorId);
-  }
-  ladder.blocks = best.blocks;
-  ladder.summit.sort(byCatalogOrder(index));
-  return true;
-};
+const BUYABLE_RUNG = 3;
 
 /**
- * Un barreau impair : choisir une recette par cible, selon la route.
+ * Un barreau : choisir une recette par cible, et les ingrédients qui s'ensuivent.
  *
  * Deux critères, dans cet ordre :
  *
@@ -363,14 +239,51 @@ const layThird = (ladder: Ladder, colors: BreedingColor[], index: Index): boolea
  * Rend `false` quand la route demandée n'a aucun candidat — l'appelant se rabat
  * alors sur l'autre plutôt que d'interrompre la montée.
  *
+ * ## Le rang 3 passe par ici aussi, et son critère n'a jamais divergé
+ *
+ * Il avait son propre poseur, qui départageait sur la **taille** du jeu là où
+ * celui-ci départage sur le travail accumulé. La divergence n'était écrite nulle
+ * part, ce qui laissait croire à un arbitrage tacite. Il n'y en a pas : au
+ * rang 3 les deux critères sont **le même**, et pour trois raisons qui tiennent
+ * par construction plutôt que par chance —
+ *
+ * - `toll` d'une gen 2 vaut toujours **2** : une gen 2 est faite de deux gen 1,
+ *   et une gen 1 a la génération 1. Vérifié sur les trois catalogues, sans une
+ *   exception. Donc le travail d'un jeu vaut `2 × sa taille`, et le minimiser
+ *   **est** minimiser sa taille.
+ * - `strain` y vaut **0** pour tout le monde : il se lit sur `ladder.wanted`, que
+ *   ce rang est le premier à remplir. Rien n'est encore sollicité.
+ * - À taille égale, `shorterThenSmaller` se réduit à `smaller`, qui est ce
+ *   comparateur-ci.
+ *
+ * Le départage retombe donc sur l'ordre du catalogue, exactement comme avant.
+ * Et il départage réellement : le muldo a **six** jeux de gen 2 fermés, tous de
+ * taille 4. Ils réclament les mêmes cinq gen 1 — Doré, Ébène, Indigo, Orchidée,
+ * Pourpre — donc le choix ne change ni ce qu'on achète ni ce qu'on paie. La
+ * dragodinde n'a qu'un candidat, le volkorne n'en a qu'un jeu distinct.
+ *
+ * ## Ce qui est réellement propre au rang 3 : la fermeture
+ *
+ * Ses ingrédients sont les gen 2, composées de gen 1 — les seules couleurs qu'on
+ * achète, donc les seules qu'on réemploie par dizaines. En lisant chaque gen 2
+ * comme une **arête** entre ses deux gen 1, le jeu retenu doit être une union
+ * disjointe de cliques : un raté de `A × B` rend une gen 1 portant `[A, B]`, et
+ * la réemployer face à un C fait rencontrer B et C, qui nomment `B-C`. Dans une
+ * clique `B-C` est voulue et rien n'est perdu ; sinon la cible se dédouble et
+ * 27 % de la masse utile s'en va.
+ *
+ * Un raté au rang 5 ou 7 ne rend pas une couleur achetable qu'on réemploie par
+ * dizaines : il rend une composée qu'on a produite. La fermeture n'a donc de sens
+ * qu'à cet étage, et elle y remplace la contrainte de route — les deux répondent
+ * à la même question, « ces ingrédients se recoupent-ils comme il faut ».
+ *
  * ## Le seuil « au moins deux cibles » a été retiré
  *
- * Il n'avait aucun commentaire, et il était incompatible avec `layThird`, qui se
+ * Il n'avait aucun commentaire, et il était incompatible avec le rang 3, qui se
  * contente d'une seule cible. Ce qu'il croyait dire est vrai mais se dit déjà
  * ailleurs : à une seule cible, un seul couple d'ingrédients est retenu, donc
  * `shared` — qui réclame un pivot partagé — n'a aucun candidat, et `disjoint` est
- * trivialement satisfait. Cette moitié-là est déjà portée par la contrainte de
- * route et par le repli de l'appelant sur l'autre route.
+ * trivialement satisfait.
  *
  * Ce que le seuil ajoutait, en revanche, était faux : il **arrêtait la montée** là
  * où la route était seulement indéterminée. Le volkorne n'a qu'une gen 7, Doré,
@@ -403,7 +316,11 @@ const layRung = (
   // voir la doc ci-dessus pour ce que le seuil précédent coûtait au volkorne.
   if (targets.length === 0) return false;
 
-  // Ce que chaque gen 1 sert déjà, pour départager à coût égal.
+  /** Les ingrédients de ce rang s'achètent-ils ? Alors la fermeture s'applique. */
+  const closes = generation === BUYABLE_RUNG;
+
+  // Ce que chaque gen 1 sert déjà, pour départager à coût égal. Vide au premier
+  // barreau, qui est celui qui la remplit.
   const usage = new Map<string, number>();
   for (const colorId of ladder.wanted) {
     const recipe = constituents(byId.get(colorId));
@@ -425,6 +342,60 @@ const layRung = (
     ];
   };
 
+  /**
+   * Les cliques d'un jeu d'ingrédients, ou `null` s'il n'est pas fermé.
+   *
+   * Chaque ingrédient est une arête entre ses deux constituants ; les blocs sont
+   * les composantes connexes, qui sont donc les cliques.
+   */
+  const cliquesOf = (ingredients: string[]): string[][] | null => {
+    const edges = new Set<string>();
+    const vertices = new Set<string>();
+    for (const colorId of ingredients) {
+      const pair = constituents(byId.get(colorId));
+      // Une composée de deux teintes identiques n'est pas une arête.
+      if (!pair || pair[0] === pair[1]) return null;
+      const [a, b] = [...pair].sort();
+      edges.add(`${a}|${b}`);
+      vertices.add(pair[0]);
+      vertices.add(pair[1]);
+    }
+
+    const joined = (a: string, b: string) => {
+      const [first, second] = [a, b].sort();
+      return edges.has(`${first}|${second}`);
+    };
+    const neighbours = (vertex: string) =>
+      [...vertices].filter((other) => other !== vertex && joined(vertex, other));
+
+    // Fermeture : deux arêtes partageant un sommet exigent la troisième.
+    const closed = [...vertices].every((vertex) => {
+      const near = neighbours(vertex);
+      return near.every((x) => near.every((y) => x === y || joined(x, y)));
+    });
+    if (!closed) return null;
+
+    const blocks: string[][] = [];
+    const seen = new Set<string>();
+    for (const start of [...vertices].sort(byCatalogOrder(index))) {
+      if (seen.has(start)) continue;
+      seen.add(start);
+      const block = [start];
+      const queue = [start];
+      while (queue.length > 0) {
+        const vertex = queue.pop()!;
+        for (const next of neighbours(vertex)) {
+          if (seen.has(next)) continue;
+          seen.add(next);
+          block.push(next);
+          queue.push(next);
+        }
+      }
+      blocks.push(block.sort(byCatalogOrder(index)));
+    }
+    return blocks;
+  };
+
   const options = targets.map((color) =>
     [...color.recipes].sort(
       (a, b) => byCatalogOrder(index)(a[0], b[0]) || byCatalogOrder(index)(a[1], b[1])
@@ -437,6 +408,7 @@ const layRung = (
     strain: number;
     ingredients: string[];
     picked: readonly (readonly [string, string])[];
+    blocks: string[][] | null;
   } | null = null;
 
   const total = options.reduce((product, recipes) => product * recipes.length, 1);
@@ -445,10 +417,16 @@ const layRung = (
     const picked = pick(options, attempt);
     const ingredients = picked.flatMap((recipe) => [...recipe]).sort(byCatalogOrder(index));
     const distinct = [...new Set(ingredients)];
-    const shared = ingredients.length - distinct.length;
 
-    // Cas 1 : au moins un pivot partagé. Cas 2 : aucun.
-    if (route === 'shared' ? shared < 1 : shared !== 0) continue;
+    let blocks: string[][] | null = null;
+    if (closes) {
+      blocks = cliquesOf(distinct);
+      if (blocks === null) continue;
+    } else {
+      const shared = ingredients.length - distinct.length;
+      // Cas 1 : au moins un pivot partagé. Cas 2 : aucun.
+      if (route === 'shared' ? shared < 1 : shared !== 0) continue;
+    }
 
     const work = distinct.reduce((sum, colorId) => sum + toll(colorId)[0], 0);
     const strain = distinct.reduce((sum, colorId) => sum + toll(colorId)[1], 0);
@@ -461,7 +439,7 @@ const layRung = (
           // Lexicographique et non longueur d'abord : c'est `&distinct` seul que
           // le Rust compare ici. Voir `smaller`.
           (strain === best.strain && smaller(distinct, best.ingredients, index))));
-    if (better) best = { work, strain, ingredients: distinct, picked };
+    if (better) best = { work, strain, ingredients: distinct, picked, blocks };
   }
 
   if (!best) return false;
@@ -480,6 +458,7 @@ const layRung = (
     ladder.summit.push(colorId);
   });
   ladder.summit.sort(byCatalogOrder(index));
+  if (best.blocks !== null) ladder.blocks = best.blocks;
   return true;
 };
 
@@ -542,7 +521,9 @@ export const ladderOf = (colors: BreedingColor[], route: Route = DEFAULT_ROUTE):
   const index: Index = new Map(colors.map((color, position) => [color.id, position]));
   const ladder = emptyLadder();
 
-  if (!layThird(ladder, colors, index)) {
+  // Le premier barreau porte la fermeture ; la route ne le concerne pas, mais
+  // elle voyage avec pour que le poseur reste unique.
+  if (!layRung(ladder, colors, index, BUYABLE_RUNG, route)) {
     byRoute.set(route, ladder);
     return ladder;
   }
@@ -643,7 +624,7 @@ const laySingle = (
  * Une gen 1 s'achète à mille kamas, là où le second ingrédient d'une gen 10
  * pourrait être une autre gen 9 — c'est-à-dire toute une échelle à remonter. Et
  * elle doit être rattachée à un bloc, sans quoi la produire ferait sortir du jeu
- * de gen 1 fermé que `layThird` a démontré.
+ * de gen 1 fermé que le premier barreau a démontré.
  */
 export const crownCandidates = (colors: BreedingColor[], blocks: string[][]): string[] => {
   const index: Index = new Map(colors.map((color, position) => [color.id, position]));

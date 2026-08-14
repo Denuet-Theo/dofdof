@@ -1180,11 +1180,26 @@ const Fill = ({
               ))}
             </span>
           )}
+          {/* La navigation va dans les deux sens. Elle n'allait que vers l'avant,
+              si bien qu'une étape dépassée ne se rouvrait plus : après une sortie
+              d'enclos l'écran restait sur « charger », vide, et il fallait
+              recharger la page pour revenir aux accouplements. Voir #167. */}
+          {step !== 'mate' && (
+            <button
+              type="button"
+              onClick={() => setStep(step === 'load' ? 'clone' : 'mate')}
+              className="ml-auto text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer"
+            >
+              ← revenir
+            </button>
+          )}
           {step !== 'load' && (
             <button
               type="button"
               onClick={() => setStep(step === 'mate' ? 'clone' : 'load')}
-              className="ml-auto text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer"
+              className={`text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer ${
+                step === 'mate' ? 'ml-auto' : ''
+              }`}
             >
               passer →
             </button>
@@ -1253,7 +1268,16 @@ const Fill = ({
           mounts={loaded}
           colors={colors}
           nameOf={nameOf}
-          onConfirm={onEnclosExit}
+          onConfirm={async (entries) => {
+            const written = await onEnclosExit(entries);
+            // Une fournée qui sort de l'enclos en ressort **féconde** : c'est
+            // exactement le moment où de nouveaux accouplements deviennent
+            // possibles. Rester sur « charger » — l'étape qui vient de se vider —
+            // était le second verrou de #167 : plus rien n'y était actionnable, et
+            // la seule façon d'en sortir était de recharger la page.
+            if (written > 0) setStep('mate');
+            return written;
+          }}
         />
       )}
       {colors && (

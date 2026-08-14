@@ -197,6 +197,27 @@ fn main() {
         score / 1e6
     );
 
+    // Et ce que le levier choisit, unité par unité. La bande retenue n'est pas un
+    // détail d'affichage : seule la **bande 3** demande un réappro manuel en cours
+    // de tâche — son carburant plafonne à 100 000 et le palier de 4 pt/s tombe à
+    // 90 000, donc dix mille points de marge pour une stat qui en consomme vingt
+    // mille. Les bandes 0 à 2 tiennent une tâche entière sur un seul remplissage.
+    // Le débit constant que le moteur suppose n'est donc exact que jusqu'à la
+    // bande 2, et savoir laquelle est retenue dit si l'approximation mord.
+    let tuned_both = {
+        let mut policy = LadderPolicy::with_ladder(ladder.clone())
+            .with_strategies([Strategy::default(); MAX_UNITS]);
+        policy.tuning = Tuning::BandAndLevel;
+        policy.tuned_for(&economy)
+    };
+    let bands: Vec<String> = (0..economy.unit_count().min(MAX_UNITS))
+        .map(|unit| {
+            let s = tuned_both.strategy(unit);
+            format!("unité {unit} : bande {} niveau {}", s.bands[0], s.level)
+        })
+        .collect();
+    println!("`Tuning::BandAndLevel` choisit — {}", bands.join(" · "));
+
     // ## Le levier, sur les deux régimes
     //
     // Le balayage dit qu'une autre bande vaut trente millions. Reste à savoir ce

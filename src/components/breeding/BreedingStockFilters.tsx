@@ -179,7 +179,7 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
               exactement ces montures-là et le jeu, lui, les classe. */}
           {noLevel > 0 && (
             <p className="text-[10px] text-dark-600 mt-1.5 leading-snug">
-              {noLevel} monture{noLevel > 1 ? 's' : ''} de vrac sans niveau enregistré —
+              {noLevel}&nbsp;monture{noLevel > 1 ? 's' : ''} de vrac sans niveau enregistré —
               écartée{noLevel > 1 ? 's' : ''} dès que la plage bouge.
             </p>
           )}
@@ -232,8 +232,9 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
           {/* L'autre trou du vrac, dit là où il fausse le compte. */}
           {bulkCount > 0 && (
             <p className="text-[10px] text-dark-600 mt-1.5 leading-snug">
-              Les {bulkCount} montures de vrac sont toutes fertiles ou fécondes : une gen 1
-              stérilisée n&apos;a nulle part où être dite. Attends ce compte en deçà du jeu.
+              Les {bulkCount}&nbsp;montures de vrac sont toutes fertiles ou fécondes : une
+              gen&nbsp;1 stérilisée n&apos;a nulle part où être dite. Attends ce compte en deçà
+              du jeu.
             </p>
           )}
         </div>

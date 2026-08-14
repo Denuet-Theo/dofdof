@@ -1,4 +1,4 @@
-import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
+import { toNumber, DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 
 export const HDV_TAX_RATE = 0.02;
 export const PRICE_EDIT_TAX_RATE = 0.01;
@@ -81,7 +81,7 @@ const unitCostIn = (
   const cached = cache.get(itemId);
   if (cached !== undefined) return { value: cached, tainted: false };
 
-  const buy = prices.get(itemId)?.price || 0;
+  const buy = toNumber(prices.get(itemId)?.price);
   const recipe = index.get(itemId);
 
   // Pas de recette, ou on ne peut pas descendre : l'achat est le seul chiffre.
@@ -183,7 +183,7 @@ export const recipeHasAllPrices = (
   index: RecipeIndex = new Map(),
   cache: Map<number, UnitCost> = new Map()
 ) => {
-  const resultPrice = prices.get(recipe.resultId)?.price || 0;
+  const resultPrice = toNumber(prices.get(recipe.resultId)?.price);
   if (resultPrice <= 0) return false;
   return recipe.ingredientIds.every(
     (id) => unitCostOf(id, prices, index, cache).source !== 'none'
@@ -207,7 +207,7 @@ const profitabilityOf = (
 ): ProfitableRecipe | null => {
   if (!recipeHasAllPrices(recipe, prices, index, cache)) return null;
 
-  const sellPrice = prices.get(recipe.resultId)?.price || 0;
+  const sellPrice = toNumber(prices.get(recipe.resultId)?.price);
   const craftCost = computeCraftCost(recipe, prices, index, cache);
   const { margin, marginPercent } = computeMargin(sellPrice, craftCost);
 

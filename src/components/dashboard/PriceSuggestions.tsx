@@ -11,13 +11,12 @@ import Skeleton from '@/components/ui/Skeleton';
 import PriceModal from '@/components/recipes/PriceModal';
 import { PriceTarget } from '@/components/recipes/RecipeDetails';
 import UnlockedRecipes from '@/components/dashboard/UnlockedRecipes';
-import {
+import { toNumber,
   DofusDBRecipe,
   DofusDBResponse,
   ItemPrice,
   PriceSuggestion,
-  PriceSuggestionBucket,
-} from '@/lib/supabase/types';
+  PriceSuggestionBucket, } from '@/lib/supabase/types';
 import { findNewlyProfitable, ProfitableRecipe } from '@/lib/utils/recipes';
 import { fetchCraftIndex } from '@/lib/dofus/craft-index';
 import { mergePrice } from '@/lib/hooks/useItemPrices';
@@ -254,7 +253,7 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
                   const done = filled.has(row.item_id);
                   // Pas de ligne en base, ou un prix à 0 : l'app ne sait pas les
                   // distinguer et les traite tous deux comme jamais renseignés.
-                  const never = (row.current_price ?? 0) <= 0;
+                  const never = toNumber(row.current_price) <= 0;
 
                   return (
                     <ItemCard
@@ -267,7 +266,7 @@ const PriceSuggestions = ({ prices, onPriceSaved }: PriceSuggestionsProps) => {
                           id: row.item_id,
                           name: row.item_name,
                           iconUrl: row.img,
-                          price: row.current_price ?? 0,
+                          price: toNumber(row.current_price),
                           superTypeId: row.super_type_id,
                         })
                       }

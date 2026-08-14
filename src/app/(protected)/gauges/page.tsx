@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useTransition } from 'react';
-import { DofusDBItem, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
+import { toNumber, DofusDBItem, DofusDBRecipe, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import GaugeItemCard from '@/components/gauges/GaugeItemCard';
 import Skeleton from '@/components/ui/Skeleton';
@@ -146,7 +146,7 @@ const GaugesPage = () => {
   const costs = new Map<number, UnitCost>();
 
   const computePricing = (item: DofusDBItem, gaugeInfo: GaugeInfo) => {
-    const sellPrice = prices.get(item.id)?.price || 0;
+    const sellPrice = toNumber(prices.get(item.id)?.price);
     const sellRatio = computeValuePerKama(gaugeInfo.rechargeAmount, sellPrice);
 
     const recipe = recipesByResultId.get(item.id);
@@ -351,7 +351,9 @@ const GaugesPage = () => {
               key={item.id}
               item={item}
               gaugeInfo={gaugeInfo}
-              currentPrice={prices.get(item.id)?.price}
+              currentPrice={
+                prices.has(item.id) ? toNumber(prices.get(item.id)?.price) : undefined
+              }
               updatedAt={prices.get(item.id)?.updated_at}
               effectivePrice={price}
               usedCraft={usedCraft}

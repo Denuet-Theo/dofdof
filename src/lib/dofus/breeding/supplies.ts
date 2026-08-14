@@ -1,3 +1,4 @@
+import { toNumber } from '@/lib/supabase/types';
 import type { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
 import {
@@ -82,7 +83,7 @@ export const fuelsByGauge = (
     const info = parseGaugeInfo(item);
     if (!info || info.rechargeAmount <= 0) continue;
 
-    const price = prices.get(item.id)?.price ?? 0;
+    const price = toNumber(prices.get(item.id)?.price);
     if (price <= 0) continue;
 
     const fuel: Fuel = {
@@ -427,7 +428,9 @@ export const computeSupplyCosts = (
       : null,
     capture: bestCaptureNet(netItems, {
       netCosts: new Map(
-        netItems.map((net) => [net.id, prices.get(net.id)?.price ?? -1] as const)
+        // -1 = pas de ligne de prix, et il faut le distinguer d'un prix **nul** :
+        // le repli de `toNumber` ne vaut que pour l'absence, pas pour un zéro saisi.
+        netItems.map((net) => [net.id, toNumber(prices.get(net.id)?.price, -1)] as const)
       ),
       recoveryRate: netRecoveryRate,
       minutesPerFight,

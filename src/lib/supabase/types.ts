@@ -1,11 +1,55 @@
 // These must stay `type` aliases, not `interface` — using an interface here as a Database
 // `Row` type breaks TypeScript's inference in @supabase/postgrest-js's insert/upsert
 // generics, collapsing the accepted value type to `never[]`.
+
+/**
+ * Une valeur de colonne `bigint` ou `numeric`, **telle qu'elle arrive vraiment**.
+ *
+ * PostgREST sérialise les deux en chaînes décimales, et il a raison : un `bigint`
+ * dépasse `Number.MAX_SAFE_INTEGER`, donc le rendre en nombre JSON perdrait des
+ * unités sur un prix en kamas. Le client reçoit donc `"3000000"`, pas `3000000`.
+ *
+ * Ces champs étaient déclarés `number`. Le type mentait, et le mensonge ne se
+ * voyait nulle part : la valeur ne traverse aucune frontière que `tsc` inspecte,
+ * donc rien ne confrontait jamais la déclaration à ce qui arrivait.
+ *
+ * Ce que ça a coûté (#174) : `census.kamas` partait de `kamas_available` et
+ * `census.ts` le faisait avancer avec `+=`. Sur une chaîne, `+=` **concatène**.
+ * Le solde devenait du texte, la fonction de valeur en rendait à son tour, et la
+ * recherche comparait ses candidats **lexicographiquement**. Sur une écurie
+ * réelle : 1 accouplement et 2 places sur 50, au lieu de 23 et 50 — et ça
+ * ressemblait à une écurie pauvre, pas à une panne.
+ *
+ * D'où ce type. Il ne corrige rien tout seul : il rend le mensonge **visible**,
+ * en forçant une conversion explicite là où la valeur entre dans un calcul.
+ * `toNumber` est là pour ça, et il vaut mieux qu'un `Number()` nu parce qu'il
+ * traite `null` et `NaN` comme le repli qu'on lui donne.
+ *
+ * Ne s'applique qu'aux **lectures**. Écrire un `number` reste juste : Postgres
+ * accepte un nombre JSON pour un `bigint`, et ce qu'on écrit depuis l'app tient
+ * de toute façon dans un entier sûr.
+ */
+export type Numeric = string | number;
+
+/**
+ * Un `Numeric` ramené à un nombre utilisable.
+ *
+ * `null` et les valeurs illisibles rendent `fallback` plutôt que `NaN` : un
+ * `NaN` se propage en silence à travers toute une chaîne de calcul et ne se
+ * signale qu'à l'affichage, plusieurs écrans plus loin.
+ */
+export const toNumber = (value: Numeric | null | undefined, fallback = 0): number => {
+  if (value === null || value === undefined) return fallback;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 export type ItemPrice = {
   item_id: number;
   item_name: string;
   icon_url: string | null;
-  price: number;
+  /** `bigint` : arrive en chaîne. Voir `Numeric`. */
+  price: Numeric;
   updated_at: string;
   updated_by: string | null;
 };
@@ -17,9 +61,10 @@ export type UserSale = {
   item_name: string;
   icon_url: string | null;
   quantity: number;
-  unit_price: number;
-  craft_cost: number;
-  tax_paid: number;
+  /** Les trois sont des `bigint` : elles arrivent en chaînes. Voir `Numeric`. */
+  unit_price: Numeric;
+  craft_cost: Numeric;
+  tax_paid: Numeric;
   lot_size: 1 | 10 | 100 | 1000;
   lot_count: number;
   status: 'active' | 'sold';
@@ -49,7 +94,7 @@ export type PriceSuggestion = {
   super_type_id: number;
   has_recipe: boolean;
   /** `null` quand aucune ligne `item_prices` n'existe — l'item n'a jamais été rempli. */
-  current_price: number | null;
+  current_price: Numeric | null;
   updated_at: string | null;
   recipe_count: number | null;
   craft_cost: number | null;
@@ -191,13 +236,14 @@ export type DofusDropRow = {
   /** Expression de critères DofusDB, brute. Fait partie de la clé primaire. */
   criterions: string;
   has_criterions: boolean;
-  percent_grade_1: number;
-  percent_grade_2: number;
-  percent_grade_3: number;
-  percent_grade_4: number;
-  percent_grade_5: number;
+  /** Les cinq grades sont des `numeric` : ils arrivent en chaînes. Voir `Numeric`. */
+  percent_grade_1: Numeric;
+  percent_grade_2: Numeric;
+  percent_grade_3: Numeric;
+  percent_grade_4: Numeric;
+  percent_grade_5: Numeric;
   /** Colonne générée : le plus grand des cinq grades. Jamais écrite par le client. */
-  percent_max: number;
+  percent_max: Numeric;
   max_count: number;
   synced_at: string;
 };
@@ -243,7 +289,8 @@ export type FarmTarget = {
   resistances: Record<Element, [number, number]>;
   drop_count: number;
   /** Espérance de gain pour un combat, à la prospection demandée. */
-  kamas_per_fight: number;
+  /** `numeric` rendu par la fonction : arrive en chaîne. Voir `Numeric`. */
+  kamas_per_fight: Numeric;
   top_drops: FarmDrop[];
 };
 
@@ -267,8 +314,9 @@ export type FarmZone = {
    */
   monster_count: number;
   /** Ce que rapporte un combat quelconque de la zone. C'est le critère de tri. */
-  avg_kamas_per_fight: number;
-  best_kamas_per_fight: number;
+  /** `numeric` rendus par la fonction : ils arrivent en chaînes. Voir `Numeric`. */
+  avg_kamas_per_fight: Numeric;
+  best_kamas_per_fight: Numeric;
   best_monster_name: string;
   /** Fourchette de niveau des monstres retenus. */
   level_min: number;
@@ -321,7 +369,8 @@ export type BreedingColorPrice = {
   color_id: string;
   /** 0 = poulain à la naissance, 200 = monture montée au maximum. */
   mount_level: 0 | 200;
-  price: number;
+  /** `bigint` : arrive en chaîne. Voir `Numeric`. */
+  price: Numeric;
   updated_at: string;
   updated_by: string | null;
 };
@@ -331,15 +380,17 @@ export type UserBreedingSettings = {
   user_id: string;
   breeder_level: number;
   enclos_count: number;
-  kamas_per_hour: number;
+  /** `bigint` : arrive en chaîne. Voir `Numeric`. */
+  kamas_per_hour: Numeric;
   /**
    * Kamas engageables. Distinct de `kamas_per_hour`, qui dit ce que vaut une
    * heure : celui-ci **contraint** le plan au lieu d'arbitrer. À 0, pas de
    * contrainte — un budget nul voudrait dire « je ne peux rien faire ».
    */
-  kamas_available: number;
+  kamas_available: Numeric;
   minutes_per_fight: number;
-  net_recovery_rate: number;
+  /** `numeric` : arrive en chaîne. Voir `Numeric`. */
+  net_recovery_rate: Numeric;
   recycle_steriles: boolean;
   never_sell_mounts: boolean;
   /**
@@ -399,8 +450,8 @@ export type BreedingTimeline = {
   started_at: string;
   /** Instant de la pause en cours, ou null si la timeline tourne. */
   paused_at: string | null;
-  /** Cumul des pauses **terminées**, en secondes. */
-  paused_seconds: number;
+  /** Cumul des pauses **terminées**, en secondes. `bigint` : arrive en chaîne. */
+  paused_seconds: Numeric;
   /**
    * L'horloge propre de chaque piste, indexée par identifiant.
    *

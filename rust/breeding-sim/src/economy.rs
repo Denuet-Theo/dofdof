@@ -1110,6 +1110,21 @@ pub fn apply_plan(
     })
 }
 
+/// Descend la stratégie d'un cran de bande, ou dit qu'il n'y en a plus.
+///
+/// Un cran plus bas, c'est moins cher au point et plus lent : c'est exactement
+/// l'arbitrage que `tuned_for` tranche une fois pour toutes, et qu'un tour sans
+/// argent doit pouvoir retrancher pour lui seul.
+fn lower_band(strategy: &mut Strategy) -> bool {
+    if strategy.bands.iter().all(|&band| band == 0) {
+        return false;
+    }
+    for band in strategy.bands.iter_mut() {
+        *band = band.saturating_sub(1);
+    }
+    true
+}
+
 /// Applique un chargement, ou dit pourquoi il est refusé.
 ///
 /// L'ordre est celui qui rend un chargement auto-finançable : on **crédite les
@@ -1558,9 +1573,35 @@ fn run(
 
         // 3. on applique. Les bébés attendront la fin du cycle.
         let coord = load_coord(unit, loads[unit.min(MAX_UNITS - 1)]);
-        match apply(
-            catalog, economy, &mut stable, &mut kamas, &plan, strategy, unit, &draws, coord,
-        ) {
+
+        // ## Le repli sur la bande la plus chère finançable
+        //
+        // Un chargement refusé était un tour **entièrement** perdu : l'enclos
+        // restait vide, l'horloge avançait de l'overhead, et rien n'était tenté.
+        // Or le relevé dit que ces refus sont à **99,7 % du carburant** — le plan
+        // lui-même tient, c'est le rythme commandé qui dépasse la bourse de ce
+        // tour-là. À la médiane : 1 385 928 demandés contre 665 505 en caisse, et
+        // les achats ne pèsent que 2 000.
+        //
+        // La bande est un choix **par chargement**, pas un réglage global. Quand
+        // elle n'est pas finançable maintenant, on charge le même monde un cran
+        // moins vite plutôt que pas du tout. Le cran retenu voyage ensuite dans
+        // `strategy` : la durée du cycle est celle qu'on a réellement payée.
+        //
+        // Ne rattrape que `Unaffordable`. Un plan mal formé ne devient pas bon
+        // parce qu'il coûte moins cher, et l'attraper ici masquerait un défaut de
+        // politique.
+        let mut strategy = strategy;
+        let attempt = loop {
+            let tried = apply(
+                catalog, economy, &mut stable, &mut kamas, &plan, strategy, unit, &draws, coord,
+            );
+            match tried {
+                Err(Rejected::Unaffordable { .. }) if lower_band(&mut strategy) => continue,
+                settled => break settled,
+            }
+        };
+        match attempt {
             Ok(applied) => {
                 outcome.crossings += applied.crossings;
                 outcome.barren_crossings += applied.barren;

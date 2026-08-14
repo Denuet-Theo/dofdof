@@ -1,69 +1,22 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
-import ColorRow from '@/components/breeding/ColorRow';
+import { Egg, Info } from 'lucide-react';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
-import BreedingBatches from '@/components/breeding/BreedingBatches';
-import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import BreedingTimeline from '@/components/breeding/BreedingTimeline';
 import AvailabilityPicker from '@/components/breeding/AvailabilityPicker';
-import { buildLoadout } from '@/lib/dofus/breeding/loadout';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
+import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
-import PriceEntry from '@/components/breeding/PriceEntry';
-import Button from '@/components/ui/Button';
-import EmptyState from '@/components/ui/EmptyState';
-import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
-import { nextBatches } from '@/lib/dofus/breeding/batches';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
 import { useAvailability } from '@/lib/hooks/useAvailability';
-import {
-  OBJECTIVES,
-  rankFor,
-  recommendedFor,
-  type Candidate,
-  type ObjectiveId,
-} from '@/lib/dofus/breeding/objectives';
 import { formatHours } from '@/lib/utils/date';
 import { toNumber } from '@/lib/supabase/types';
-
-/**
- * Les panneaux qui descendent de l'heuristique sont-ils affichés.
- *
- * Trois d'un coup, et c'est bien un seul interrupteur parce que c'est une seule
- * source : « Couleur visée », « La fournée à charger » et « Prochaines
- * fournées » lisent tous le plan que `breedingPlan` construit sur l'arbre des
- * recettes, pour une couleur que le **classement** désigne.
- *
- * Masquer le classement seul n'a donc rien réglé : il a retiré la vue sur
- * l'heuristique en laissant les trois panneaux lui obéir. L'écran annonçait
- * « les étapes du plan Azur-Doré » — une couleur que personne n'avait choisie,
- * puisque le seul endroit où la choisir venait de disparaître.
- *
- * Le modèle, lui, répond à la même question deux panneaux plus haut, avec un
- * plan joué et daté. Entre les deux, ce n'est plus un doublon d'affichage :
- * c'est une contradiction, et c'est la version devinée qui parlait le plus fort.
- *
- * Une constante et non une suppression, parce que ces panneaux portent encore
- * des choses qui n'ont **pas** d'équivalent côté modèle :
- *
- * - la **saisie des naissances** (`BreedingBirthDialog`), seul chemin qui tienne
- *   l'écurie à jour ;
- * - les **clonages à faire** et les **signaux hors recette** (`driftSignals`),
- *   qui ne sortent d'aucun plan et se lisent sur l'écurie seule ;
- * - la saisie des prix de couleurs, la quantité visée, le choix de la couleur.
- *
- * Les reloger est une décision de mise en page à part entière — voir l'issue. En
- * attendant tout le calcul reste branché : seules les vues sont coupées, et les
- * remettre est ce booléen.
- */
-const SHOW_HEURISTIC_PANELS = false;
 
 const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'muldo', label: 'Muldos' },
@@ -73,9 +26,6 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
 
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
-  const [pricedOnly, setPricedOnly] = useState(false);
-  const [entryMode, setEntryMode] = useState(false);
-  const [goalsOpen, setGoalsOpen] = useState(true);
   /**
    * Combien d'exemplaires viser, tant qu'aucun plan n'est sélectionné.
    *
@@ -117,8 +67,6 @@ const BreedingPage = () => {
     stockBySex,
     itemStock,
     ownedGaugePoints,
-    loading,
-    error,
     savePrice,
     saveSettings,
     saveBulkStock,
@@ -143,17 +91,25 @@ const BreedingPage = () => {
     return (colorId: string) => names.get(colorId) ?? colorId;
   }, [rows]);
 
-  /**
-   * La génération d'une couleur, qui décide de la façon dont l'écurie la porte :
-   * comptée en vrac jusqu'à la gen 2, suivie monture par monture au-delà.
-   */
-  const generationOf = useMemo(() => {
-    const generations = new Map(rows.map((row) => [row.colorId, row.generation]));
-    return (colorId: string) => generations.get(colorId) ?? 1;
-  }, [rows]);
-
   /** La couleur du plan suivi, qui réduit la liste à elle seule. */
   const selectedColorId = project.current?.target_color_id ?? null;
+
+  /**
+   * Les gen 10 qu'on peut réellement poursuivre.
+   *
+   * Pas toutes : `crownAt` exige une recette qui marie une gen 9 à une gen 1
+   * **rattachée à un bloc**, donc achetable. Une cible qui ne remplit pas ces
+   * conditions serait ignorée en silence, et proposer un choix sans effet est
+   * pire que ne pas le proposer.
+   */
+  const crownable = useMemo(() => {
+    const colors = tree?.colors ?? [];
+    if (colors.length === 0) return [];
+    const plan = ladderOf(colors);
+    return colors
+      .filter((color) => isCrownable(plan, colors, color.id))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [tree]);
 
   /**
    * Le programme des fournées du plan suivi, places libres comprises.
@@ -198,90 +154,12 @@ const BreedingPage = () => {
     });
   }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
-  /**
-   * Ce que le plan cherche — et pourquoi on ne le demande plus.
-   *
-   * Le choix entre « rentabilité », « gen 10 à l'équilibre » et « gen 10 au
-   * moins cher » n'a de sens que face à **plusieurs générateurs** de plans,
-   * qu'on arbitre alors les uns contre les autres. Il n'y en a qu'un, et les
-   * autres optimisations sont encore à écrire : proposer un arbitrage entre une
-   * seule option, c'est faire croire à un levier qui n'en est pas un, et faire
-   * porter au lecteur la charge de comprendre trois critères pour n'en exercer
-   * aucun.
-   *
-   * Le sélecteur est donc retiré, pas la machinerie : `objectives.ts` et le
-   * partage de financement de `ColorRow` restent entiers, et rebrancher le choix
-   * sera un changement d'écran quand il y aura de quoi choisir.
-   */
-  const objective: ObjectiveId = 'profit';
-
-  /** Les lignes réduites à ce dont un objectif a besoin pour les départager. */
-  const candidates = useMemo<(Candidate & { row: BreedingRow })[]>(
-    () =>
-      rows.map((row) => ({
-        row,
-        colorId: row.colorId,
-        generation: row.generation,
-        planMargin: row.planMargin,
-        marginPerHour: row.marginPerHour,
-        enclosHours: row.planned?.duration?.enclosHours ?? null,
-        wallClockHours: row.planned?.duration?.wallClockHours ?? null,
-        crossings: row.planned?.plan.crossings ?? null,
-        totalCost: row.planned?.plan.totalCost ?? null,
-        bestMargin: row.estimate.bestMargin,
-        breedable: row.planned !== null,
-      })),
-    [rows]
-  );
-
-  /**
-   * La couleur que l'objectif désigne, **parmi celles qu'on peut financer**.
-   *
-   * Un plan hors budget n'est pas une recommandation, c'est une frustration :
-   * l'écarter vaut mieux que de le proposer en sachant qu'il bloquera.
-   */
-  const recommendation = useMemo(
-    () =>
-      recommendedFor(
-        candidates,
-        objective,
-        // Le budget trie, il n'élimine pas : si rien n'est finançable, on désigne
-        // quand même la meilleure route et l'écran dit ce qu'il y manque.
-        (candidate) =>
-          !candidate.row.planned?.funding || candidate.row.planned.funding.affordable
-      ),
-    [candidates, objective]
-  );
-
-  const recommended = recommendation?.item.row ?? null;
-
   /* La répartition du parc qui tient l'équilibre — le curseur de financement et
      les parts par couleur — vivait ici. Elle n'existait que sous l'objectif
      « gen 10 à l'équilibre », qui ne peut plus être sélectionné : la garder
      aurait laissé à l'écran une consigne qu'aucun réglage ne pouvait plus
      atteindre. `fundingSplit`, `combinedRate` et `minimumFunderPercent` restent
      dans `objectives.ts`, et `ColorRow` sait toujours afficher une part. */
-
-  /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
-  const shortfall =
-    recommendation && !recommendation.affordable
-      ? (recommendation.item.row.planned?.funding?.shortfall ?? null)
-      : null;
-
-  const sorted = useMemo(() => {
-    // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
-    // n'a plus rien à départager. Garder les autres couleurs à l'écran invite à
-    // comparer une décision déjà prise, et noie la seule ligne qu'on vient
-    // consulter. Ni le tri ni `pricedOnly` ne s'y appliquent — la ligne suivie
-    // doit rester visible même sous un filtre qui la masquerait.
-    if (selectedColorId) return rows.filter((row) => row.colorId === selectedColorId);
-
-    // L'objectif décide seul de l'ordre. Les deux objectifs « gen 10 » ne
-    // gardent que la génération maximale ; « rentabilité » n'écarte rien, et
-    // c'est donc là qu'on va chercher une couleur précise à la main.
-    const ranked = rankFor(candidates, objective).map((entry) => entry.item.row);
-    return pricedOnly ? ranked.filter((row) => row.estimate.priceLevel0 !== null) : ranked;
-  }, [candidates, objective, pricedOnly, selectedColorId, rows]);
 
   /**
    * Les occasions que l'arbre ne peut pas exprimer.
@@ -304,52 +182,7 @@ const BreedingPage = () => {
     });
   }, [tree, stable]);
 
-  /** Les montures signalées, que ni la fournée ni les suivantes ne doivent charger. */
-  const reserved = useMemo(() => drift.map((signal) => signal.mount.id), [drift]);
 
-  /**
-   * Les deux prochaines fournées du plan suivi, montures nommées.
-   *
-   * Ne se calcule que pour le plan suivi : c'est une consigne d'action, pas une
-   * comparaison, et l'établir pour les 120 couleurs n'aurait ni sens ni intérêt.
-   */
-  const batches = useMemo(() => {
-    const target = rows.find((row) => row.colorId === selectedColorId);
-    if (!target?.planned) return [];
-
-    return nextBatches(target.planned.plan, stable, {
-      capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
-      count: 2,
-      recycleSteriles: settings.recycle_steriles,
-      generationOf,
-      reserved,
-    });
-  }, [
-    rows,
-    selectedColorId,
-    stable,
-    settings.enclos_count,
-    settings.recycle_steriles,
-    generationOf,
-    reserved,
-  ]);
-
-  /**
-   * La couleur dont on charge le plan : celle qu'on suit, ou à défaut la mieux
-   * classée **qui s'élève**.
-   *
-   * Le repli n'est pas une commodité : la fournée doit se lire **avant** d'avoir
-   * choisi, sans quoi l'écran ne dit rien à qui découvre son écurie. Il ne peut
-   * pas s'arrêter à la recommandation, qui sous l'objectif « rentabilité » est
-   * souvent une couleur qu'il vaut mieux **acheter** — donc sans plan, donc sans
-   * rien à charger. On descend alors le classement jusqu'à la première qui en a
-   * un, ce qui est bien la meilleure route au sens de l'objectif courant.
-   */
-  const routedColorId = useMemo(() => {
-    if (selectedColorId) return selectedColorId;
-    if (recommended?.planned) return recommended.colorId;
-    return sorted.find((row) => row.planned)?.colorId ?? null;
-  }, [selectedColorId, recommended, sorted]);
 
   /**
    * Ce que la politique entraînée ferait de l'écurie.
@@ -401,6 +234,11 @@ const BreedingPage = () => {
       // de places occupées.
       loadKamas: (supplies?.fuelCostPerCycle ?? 0) * capacity,
       kamas: toNumber(settings.kamas_available),
+      // La gen 10 que l'éleveur poursuit. Le canal est le **projet**, privé, et
+      // non le prix : `breeding_color_prices` est partagé entre les joueurs, donc
+      // gonfler une gen 10 pour l'atteindre fausserait leur marché — et les coûts
+      // affichés avec, puisque le prix sert aussi à chiffrer.
+      target: selectedColorId,
     };
   }, [
     tree,
@@ -412,6 +250,7 @@ const BreedingPage = () => {
     supplies,
     settings.enclos_count,
     settings.kamas_available,
+    selectedColorId,
   ]);
 
   const policyFill = useMemo(
@@ -435,53 +274,6 @@ const BreedingPage = () => {
     () => (policyInput ? couplesToRecordAll(policyInput) : []),
     [policyInput]
   );
-
-  /**
-   * La fournée à charger : les étapes du plan que l'écurie permet de lancer.
-   *
-   * La route se calcule sur l'arbre des recettes une bonne fois, parents avant
-   * enfants — elle ne se redevine plus coup par coup. Ce qui change à chaque
-   * saisie de naissance est ce que l'écurie **permet** d'en lancer, et le plan
-   * lui-même se reprend sur le stock. Voir `loadout.ts`.
-   */
-  const loadout = useMemo(() => {
-    const target = rows.find((row) => row.colorId === routedColorId);
-    if (!target?.planned || !routedColorId) return null;
-
-    const byId = new Map(rows.map((row) => [row.colorId, row]));
-    const colors = tree?.colors ?? [];
-
-    return buildLoadout(
-      target.planned.plan,
-      routedColorId,
-      stable,
-      {
-        colors,
-        generations: new Map(colors.map((color) => [color.id, color.generation])),
-        costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
-        fuelCostPerCycle: supplies?.fuelCostPerCycle ?? 0,
-        // La durée d'un cycle de fécondité suffit à chiffrer : la montée en
-        // niveau se glisse en grande partie dans les emplacements libres du
-        // cycle, et ce qui dépasse ne dépend pas de l'étape.
-        batchHours: supplies?.cycleHours ?? 0,
-        slots: ENCLOS_SLOTS,
-        recycleSteriles: settings.recycle_steriles,
-      },
-      Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
-      nameOf,
-      reserved
-    );
-  }, [
-    tree,
-    rows,
-    routedColorId,
-    stable,
-    supplies,
-    settings.recycle_steriles,
-    settings.enclos_count,
-    nameOf,
-    reserved,
-  ]);
 
   /**
    * Les clonages à faire, et ce qu'ils rendent.
@@ -573,6 +365,8 @@ const BreedingPage = () => {
         fill={policyFill}
         // La liste complète, pas la tranche que `fill` porte : voir #165.
         couples={policyCouples}
+        // Ce que valent les stériles, à l'étape où on les clone : voir #163.
+        cloneAdvice={clonings}
         nameOf={nameOf}
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.
@@ -598,17 +392,6 @@ const BreedingPage = () => {
           s'apprêtait à charger, et le voir après aurait consommé les montures
           qui le portent. Le panneau disparaît de lui-même tant qu'aucune
           couleur n'est planifiable. */}
-      {SHOW_HEURISTIC_PANELS && loadout && (
-        <BreedingNextMove
-          loadout={loadout}
-          drift={drift}
-          clonings={clonings}
-          nameOf={nameOf}
-          individuals={stable.individuals}
-          fuelCostPerCycle={supplies?.fuelCostPerCycle ?? null}
-        />
-      )}
-
       <BreedingStocks
         // Le catalogue et non les lignes de l'écran : l'écurie a besoin des
         // icônes de certificats, que seule `BreedingColor` porte.
@@ -627,229 +410,24 @@ const BreedingPage = () => {
         onRemoveIndividual={removeIndividual}
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
+        // Les prix de couleurs et la quantité visée, relogés ici depuis « Couleur
+        // visée » : sans eux rien ne se chiffre, et leur seul chemin était masqué.
+        rows={rows}
+        onSavePrice={savePrice}
+        drift={drift}
+        targetCount={targetCount}
+        onSetTargetCount={setTargetCount}
+        targetColorId={selectedColorId}
+        // Le découpage en vagues **est** le compte de fournées : il respecte
+        // l'ordre parents-avant-enfants, donc il ne se comprime pas en dessous du
+        // nombre de barreaux, et il part du stock réel au parc réel.
+        minBatches={waves?.length ?? null}
+        crownable={crownable}
+        onSelectTarget={(colorId) => {
+          if (colorId) project.select(colorId, targetCount);
+          else project.abandon();
+        }}
       />
-
-      {/* La couleur visée : le classement, replié derrière ce qu'on cherche. La
-          question « combien j'en veux » vient avant « laquelle », puisqu'elle
-          change la réponse — à trente exemplaires les fournées se remplissent et
-          le palmarès n'est plus le même. */}
-      <div className={`glass rounded-2xl ${SHOW_HEURISTIC_PANELS ? '' : 'hidden'}`}>
-        <button
-          type="button"
-          onClick={() => setGoalsOpen((value) => !value)}
-          className="w-full flex items-center gap-2 px-5 py-4 cursor-pointer text-left"
-        >
-          <Target size={16} className="text-kamas" />
-          <span className="text-sm font-semibold text-dark-200">Couleur visée</span>
-          <span className="text-xs text-dark-500 ml-2 truncate">
-            {project.current
-              ? `${project.current.target_count} × ${nameOf(project.current.target_color_id)}`
-              : 'aucun plan sélectionné'}
-          </span>
-          <span className="ml-auto text-xs text-dark-500 shrink-0">
-            {goalsOpen ? 'Fermer' : 'Ouvrir'}
-          </span>
-        </button>
-
-        {goalsOpen && (
-          <div className="px-5 pb-5 pt-4 border-t border-dark-700/40 space-y-4">
-            {/* Le sélecteur d'objectif vivait ici, avec la consigne
-                d'équilibre qui en découlait. Voir `objective` plus haut : un
-                arbitrage entre trois critères suppose plusieurs générateurs de
-                plans à opposer, et il n'y en a qu'un. Le classement se lit donc
-                sur la rentabilité, dite une fois ci-dessous plutôt que choisie
-                à chaque visite. */}
-            <p className="text-[11px] text-dark-600">
-              {OBJECTIVES.find((option) => option.id === objective)?.hint}
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
-              <label className="flex items-center gap-2">
-                Je veux
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={String(targetCount)}
-                  onChange={(event) =>
-                    setTargetCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))
-                  }
-                  className="w-20 px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
-                    text-dark-100 text-xs text-right transition-all hover:border-dark-500
-                    focus:border-kamas/50"
-                />
-                monture{targetCount > 1 ? 's' : ''} de la couleur visée
-              </label>
-
-              {project.current ? (
-                <span className="flex flex-wrap items-center gap-3 ml-auto">
-                  <span className="text-dark-300">
-                    Plan suivi :{' '}
-                    <strong className="text-kamas">
-                      {nameOf(project.current.target_color_id)}
-                    </strong>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={project.abandon}
-                    className="text-dark-500 hover:text-loss transition-colors cursor-pointer"
-                  >
-                    abandonner
-                  </button>
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                  className="ml-auto"
-                  disabled={!recommended}
-                  onClick={() =>
-                    recommended && project.select(recommended.colorId, targetCount, objective)
-                  }
-                >
-                  <Wand2 size={13} />
-                  {recommended
-                    ? `Suivre : ${recommended.name}${recommendation?.affordable === false ? ' (hors budget)' : ''}`
-                    : 'Aucune route chiffrable'}
-                </Button>
-              )}
-            </div>
-
-            {/* Trois états distincts, et les confondre était le défaut : aucune
-                route du tout, une route trop chère, ou rien à signaler. */}
-            {!project.current && !recommendation && (
-              <p className="text-[11px] text-amber-400/80">
-                Aucune route chiffrable pour cet objectif. Il manque des prix de
-                couleurs — renseigne-les avec « Saisir les prix ».
-              </p>
-            )}
-
-            {!project.current && recommendation && !recommendation.affordable && (
-              <p className="text-[11px] text-amber-400/80">
-                {recommended?.name} est la meilleure route pour cet objectif, mais elle
-                dépasse ton budget
-                {shortfall !== null && (
-                  <>
-                    {' '}
-                    de{' '}
-                    <strong>{Math.round(shortfall).toLocaleString('fr-FR')} kamas</strong>
-                  </>
-                )}
-                . Elle reste sélectionnable — le plan te dira où l&apos;argent manque.
-              </p>
-            )}
-
-            {/* Plus de tri manuel : l'objectif ordonne, et deux tris
-                concurrents répondraient à la même question en se contredisant.
-                Le filtre, lui, reste — il réduit la liste sans en changer
-                l'ordre. */}
-            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-              {!selectedColorId && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pricedOnly}
-                    onChange={(event) => setPricedOnly(event.target.checked)}
-                    className="accent-kamas cursor-pointer"
-                  />
-                  Seulement les couleurs tarifées
-                </label>
-              )}
-
-              {selectedColorId && (
-                <span>
-                  Les autres couleurs sont masquées tant que ce plan est suivi — abandonne-le
-                  pour revoir le classement.
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setEntryMode((value) => !value)}
-                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border
-                  transition-all cursor-pointer ${
-                    entryMode
-                      ? 'bg-kamas/15 text-kamas border-kamas/40'
-                      : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
-                  }`}
-              >
-                <PenLine size={13} />
-                {entryMode ? 'Fermer la saisie' : 'Saisir les prix'}
-              </button>
-            </div>
-
-            {entryMode && !loading && <PriceEntry rows={rows} onSavePrice={savePrice} />}
-
-            {loading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-20 w-full" count={6} />
-              </div>
-            ) : error ? (
-              <EmptyState
-                icon={AlertTriangle}
-                title="Classement indisponible"
-                description={error}
-              />
-            ) : sorted.length === 0 ? (
-              <EmptyState
-                icon={Egg}
-                title="Aucune couleur à afficher"
-                description="Décoche le filtre, ou renseigne un premier prix pour amorcer le calcul."
-              />
-            ) : (
-              <div className="space-y-2">
-                {sorted.map((row) => (
-                  <ColorRow
-                    key={row.colorId}
-                    row={row}
-                    nameOf={nameOf}
-                    generationOf={generationOf}
-                    stockBySex={stockBySex}
-                    onSaveBulk={saveBulkStock}
-                    // La part de parc à financer n'a de sens que sous
-                    // l'objectif d'équilibre, qui ne peut plus être choisi.
-                    // `ColorRow` sait toujours l'afficher, et la reprendra
-                    // quand il y aura un générateur qui la calcule.
-                    fundingShare={null}
-                    enclosCount={settings.enclos_count}
-                    targetCount={targetCount}
-                    waves={row.colorId === selectedColorId ? waves : null}
-                    selected={project.current?.target_color_id === row.colorId}
-                    onSelect={() => project.select(row.colorId, targetCount)}
-                    onAbandon={project.abandon}
-                    onSavePrice={savePrice}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
-          d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît
-          qu'une fois un plan suivi — sans cible, il n'y a rien à charger. */}
-      {SHOW_HEURISTIC_PANELS && selectedColorId && (
-        <div className="glass rounded-2xl px-5 py-4 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-dark-200">
-              Prochaines fournées — {nameOf(selectedColorId)}
-            </span>
-            <span className="text-xs text-dark-500">
-              les montures à charger, et ce qui en est né
-            </span>
-          </div>
-          <BreedingBatches
-            batches={batches}
-            nameOf={nameOf}
-            individuals={stable.individuals}
-            // Les couleurs brutes de la famille, et non les lignes de l'écran :
-            // la popin a besoin des recettes pour nommer la couleur que la
-            // recombinaison des deux lignées donnera. Voir `matingOutcomes`.
-            colors={tree?.colors ?? []}
-            onRecord={recordBirths}
-          />
-        </div>
-      )}
 
       {/* Ce sur quoi le calcul s'appuie, dit explicitement : sans ces prix, des
           pans entiers du résultat valent zéro et il vaut mieux le voir. */}

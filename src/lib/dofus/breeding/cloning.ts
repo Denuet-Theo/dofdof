@@ -47,8 +47,22 @@ import { isSterile, type Individual, type Sex, type Stable } from './stable';
  * haute avec la deuxième plus basse, et ainsi de suite. Rien de précieux n'est
  * jamais laissé de côté, et les porteuses partent de préférence avec une banale
  * — ce qui ne change pas le total mais **décorrèle les tirages** : deux porteuses
- * appairées ensemble ne peuvent jamais survivre toutes les deux, appairées
- * séparément elles ont une chance sur quatre.
+ * distinctes appairées ensemble ne peuvent jamais survivre toutes les deux,
+ * appairées séparément elles ont une chance sur quatre.
+ *
+ * ## L'exception : quand il n'y a pas de tirage du tout
+ *
+ * Tout ce qui précède raisonne sur une pièce qu'on lance. Deux stériles de même
+ * couleur **et de même ascendance** n'en lancent aucune : le clone est le même
+ * des deux côtés. Les apparier rend donc la même espérance avec **zéro
+ * variance**, et la décorrélation ci-dessus ne s'y applique pas — on n'a jamais
+ * voulu deux exemplaires de la même monture, on en voulait une, certaine.
+ *
+ * Or « la plus haute avec la plus basse » ne les rapproche jamais : à valeur
+ * égale elles se rangent côte à côte, donc du même côté du tri. Sur l'écurie
+ * réelle du 14/08, **douze propositions, toutes à pile ou face**, pendant que six
+ * clonages à ascendance certaine dormaient dans la même écurie. C'était #163.
+ * Elles passent donc en premier, et le reste garde la règle ci-dessus.
  *
  * ## Le sexe, qui est gratuit et qu'on oublie
  *
@@ -139,12 +153,42 @@ const sacrificeValue = (mount: SterileMount, { sacrificeUnitValue }: CloneContex
   mount.generation > 1 ? mount.generation * sacrificeUnitValue : 0;
 
 /**
+ * Un clonage chiffré : ce qu'il rend en espérance, contre ce qu'il renonce à
+ * extraire.
+ *
+ * `keepChance` vaut **1** quand les deux portent la même ascendance — le tirage
+ * ne change alors rien, l'une comme l'autre rend le même clone — et 0,5 sinon.
+ */
+const optionFor = (
+  keep: SterileMount,
+  partner: SterileMount,
+  context: CloneContext
+): CloneOption => {
+  const keepChance = mateSignature(keep) === mateSignature(partner) ? 1 : 0.5;
+  const expectedValue = keepChance * keep.value + (1 - keepChance) * partner.value;
+  const sacrificed = sacrificeValue(keep, context) + sacrificeValue(partner, context);
+  const certainSex = keep.sex === partner.sex;
+
+  return {
+    keep,
+    partner,
+    keepChance,
+    expectedValue,
+    sacrificed,
+    gain: expectedValue - sacrificed,
+    certainSex,
+    sex: certainSex ? keep.sex : null,
+  };
+};
+
+/**
  * Les clonages à faire, du plus rentable au moins.
  *
  * Glouton par génération, puisque le jeu n'apparie qu'à génération affichée
- * égale : dans chaque génération, la plus précieuse part avec la moins
- * précieuse, en préférant une partenaire du même sexe pour rendre le sexe du
- * clone certain.
+ * égale. Dans chaque génération, les **jumelles** partent ensemble d'abord — le
+ * clone y est certain, voir l'en-tête — puis la plus précieuse du reste part avec
+ * la moins précieuse, en préférant une partenaire du même sexe pour rendre le
+ * sexe du clone certain.
  *
  * Les appairages à gain négatif sont rendus quand même, en queue : ils disent
  * qu'il vaut mieux extraire, et c'est une décision autant qu'une autre.
@@ -164,7 +208,56 @@ export const cloneOptions = (
   const options: CloneOption[] = [];
 
   for (const group of byGeneration.values()) {
-    const pool = [...group].sort((a, b) => b.value - a.value || a.id!.localeCompare(b.id!));
+    const sorted = [...group].sort((a, b) => b.value - a.value || a.id!.localeCompare(b.id!));
+
+    /**
+     * D'abord les **jumelles** : deux stériles dont le clone est le même, quel
+     * que soit le côté de la pièce.
+     *
+     * « La plus haute avec la plus basse » ne les rapproche jamais, puisqu'elles
+     * ont exactement la même valeur et se rangent donc côte à côte du même côté
+     * du tri. Sur l'écurie réelle du 14/08 ça donnait **douze propositions,
+     * toutes à pile ou face**, pendant que six clonages à ascendance certaine
+     * dormaient dans la même écurie. C'est le défaut de #163.
+     *
+     * Les apparier ne change **rien à l'espérance** — l'argument du §3 tient, un
+     * parc apparié vaut la moitié de la somme quel que soit l'appariement — mais
+     * il retire la variance là où elle n'achète rien. Deux jumelles appariées
+     * séparément se perdent toutes les deux une fois sur quatre ; ensemble, il en
+     * ressort une à coup sûr.
+     *
+     * Et la décorrélation du §3 ne s'y oppose pas : elle vaut pour deux porteuses
+     * **distinctes**, qu'on voudrait garder toutes les deux. De deux jumelles on
+     * n'en a jamais voulu deux — le jeu ne conserve que la couleur, le sexe, le
+     * nom et la généalogie, et elles les partagent toutes. On en voulait une,
+     * certaine.
+     *
+     * Deux passes, et l'ordre dit ce qui prime. Le même sexe d'abord, parce qu'il
+     * rend le clone certain sur les deux tableaux à la fois. Puis l'ascendance
+     * seule : un sexe tiré à pile ou face se rachète à l'hôtel de vente, une
+     * ascendance perdue ne se rachète pas.
+     */
+    const taken = new Set<SterileMount>();
+    const pairTwins = (keyOf: (mount: SterileMount) => string) => {
+      const twins = new Map<string, SterileMount[]>();
+      for (const mount of sorted) {
+        if (taken.has(mount)) continue;
+        const key = keyOf(mount);
+        twins.set(key, [...(twins.get(key) ?? []), mount]);
+      }
+      for (const sisters of twins.values()) {
+        for (let i = 0; i + 1 < sisters.length; i += 2) {
+          options.push(optionFor(sisters[i], sisters[i + 1], context));
+          taken.add(sisters[i]);
+          taken.add(sisters[i + 1]);
+        }
+      }
+    };
+    pairTwins((mount) => `${mateSignature(mount)}|${mount.sex}`);
+    pairTwins((mount) => mateSignature(mount));
+
+    // Ce qui n'a pas trouvé sa jumelle garde la règle d'origine.
+    const pool = sorted.filter((mount) => !taken.has(mount));
 
     // Effectif impair : c'est la moins précieuse qui reste sur le carreau, et
     // c'est le seul choix qui coûte quelque chose. Laisser une porteuse
@@ -185,23 +278,7 @@ export const cloneOptions = (
         }
       }
       const partner = pool.splice(index, 1)[0];
-
-      const sameLineage = mateSignature(keep) === mateSignature(partner);
-      const keepChance = sameLineage ? 1 : 0.5;
-      const expectedValue = keepChance * keep.value + (1 - keepChance) * partner.value;
-      const sacrificed = sacrificeValue(keep, context) + sacrificeValue(partner, context);
-      const certainSex = keep.sex === partner.sex;
-
-      options.push({
-        keep,
-        partner,
-        keepChance,
-        expectedValue,
-        sacrificed,
-        gain: expectedValue - sacrificed,
-        certainSex,
-        sex: certainSex ? keep.sex : null,
-      });
+      options.push(optionFor(keep, partner, context));
     }
   }
 

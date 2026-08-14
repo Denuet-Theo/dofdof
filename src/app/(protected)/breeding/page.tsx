@@ -9,7 +9,7 @@ import BreedingNextMove from '@/components/breeding/BreedingNextMove';
 import BreedingTimeline from '@/components/breeding/BreedingTimeline';
 import AvailabilityPicker from '@/components/breeding/AvailabilityPicker';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
-import { stablePlan } from '@/lib/dofus/breeding/policy';
+import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
@@ -366,7 +366,7 @@ const BreedingPage = () => {
    * couleur choisie, la politique décide quoi faire de l'écurie telle qu'elle est.
    * Voir `policy.ts`.
    */
-  const policyFill = useMemo(() => {
+  const policyInput = useMemo(() => {
     const colors = tree?.colors ?? [];
     if (colors.length === 0) return null;
 
@@ -384,7 +384,7 @@ const BreedingPage = () => {
     });
 
     const capacity = Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS;
-    return stablePlan({
+    return {
       stable,
       colors,
       market: {
@@ -401,7 +401,7 @@ const BreedingPage = () => {
       // de places occupées.
       loadKamas: (supplies?.fuelCostPerCycle ?? 0) * capacity,
       kamas: toNumber(settings.kamas_available),
-    });
+    };
   }, [
     tree,
     rows,
@@ -413,6 +413,28 @@ const BreedingPage = () => {
     settings.enclos_count,
     settings.kamas_available,
   ]);
+
+  const policyFill = useMemo(
+    () => (policyInput ? stablePlan(policyInput) : null),
+    [policyInput]
+  );
+
+  /**
+   * **Tous** les accouplements réalisables maintenant, et non la première tranche.
+   *
+   * Le plan n'en publie qu'une partie — les couples à zéro place — et saisir cette
+   * partie en découvre une autre au rafraîchissement suivant, puis encore une.
+   * Voir `couplesToRecordAll` : la boucle est là-bas, parce qu'elle a besoin de
+   * l'entrée de la politique et non de son résultat.
+   *
+   * Une passe coûte une vingtaine de millisecondes sur une écurie de cent
+   * montures, et il en faut trois à cinq. C'est le prix d'une liste qui ne repousse
+   * pas.
+   */
+  const policyCouples = useMemo(
+    () => (policyInput ? couplesToRecordAll(policyInput) : []),
+    [policyInput]
+  );
 
   /**
    * La fournée à charger : les étapes du plan que l'écurie permet de lancer.
@@ -549,6 +571,8 @@ const BreedingPage = () => {
         timeline={timeline}
         enclosCount={settings.enclos_count}
         fill={policyFill}
+        // La liste complète, pas la tranche que `fill` porte : voir #165.
+        couples={policyCouples}
         nameOf={nameOf}
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.

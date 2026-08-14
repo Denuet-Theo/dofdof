@@ -31,7 +31,7 @@
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, Policy, Strategy, mount_xp_for_level, play};
 use breeding_sim::schedule::GAUGES;
-use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
+use breeding_sim::ladder::{Ladder, LadderPolicy, Route, Tuning};
 use breeding_sim::schedule::schedule;
 use breeding_sim::trees::muldo;
 
@@ -63,6 +63,67 @@ fn measure(economy: &Economy, ladder: &Ladder, strategy: Strategy) -> (f64, f64,
         mean(&outcomes.iter().map(|o| o.hours_waiting).collect::<Vec<_>>()),
         mean(&outcomes.iter().map(|o| o.gen10_held as f64).collect::<Vec<_>>()),
     )
+}
+
+/// Ce que la recherche de bande gagne, et ce qu'elle casse.
+///
+/// `rejected` compte les fournées que le moteur refuse faute de kamas : c'est la
+/// vérification de solvabilité, et c'est elle qui a empêché de basculer le défaut.
+fn duel_tuning(label: &str, economy: &Economy, ladder: &Ladder) {
+    let catalog = muldo();
+    let run = |tuning: Tuning, seed: u32| {
+        let mut policy = LadderPolicy::with_ladder(ladder.clone())
+            .with_strategies([Strategy::default(); MAX_UNITS]);
+        policy.tuning = tuning;
+        let policy = policy.tuned_for(economy);
+        let mut policy = policy;
+        play(&catalog, economy, &mut policy, seed)
+    };
+
+    let mut after = Vec::new();
+    let mut before = Vec::new();
+    let mut rejected = 0u32;
+    let mut reasons = [0u32; breeding_sim::economy::Rejected::REASONS];
+    let mut gen10 = (0.0, 0.0);
+    for seed in 0..SEEDS {
+        let a = run(Tuning::BandAndLevel, seed);
+        let b = run(Tuning::LastFreeStep, seed);
+        rejected += a.rejected_loads;
+        for (total, seen) in reasons.iter_mut().zip(a.rejected_by_reason) {
+            *total += seen;
+        }
+        gen10.0 += a.gen10_held as f64;
+        gen10.1 += b.gen10_held as f64;
+        after.push(a.score as f64);
+        before.push(b.score as f64);
+    }
+
+    println!(
+        "{label:<18} {:>8.2} M → {:>8.2} M  ({:+7.2} M), gen10 {:.1} → {:.1}, \
+         {rejected} fournées refusées",
+        median(&mut before.clone()) / 1e6,
+        median(&mut after.clone()) / 1e6,
+        (median(&mut after.clone()) - median(&mut before.clone())) / 1e6,
+        gen10.1 / f64::from(SEEDS),
+        gen10.0 / f64::from(SEEDS),
+    );
+
+    // Le compte seul laissait croire au budget. On dit lesquelles.
+    if rejected > 0 {
+        let mut detail: Vec<String> = reasons
+            .iter()
+            .enumerate()
+            .filter(|(_, count)| **count > 0)
+            .map(|(index, count)| {
+                format!(
+                    "{count} {}",
+                    breeding_sim::economy::Rejected::LABELS[index]
+                )
+            })
+            .collect();
+        detail.sort();
+        println!("{:<18}   dont {}", "", detail.join(" · "));
+    }
 }
 
 fn sweep(label: &str, economy: &Economy, ladder: &Ladder, band: usize) {
@@ -135,6 +196,42 @@ fn main() {
         "  il rend {:.2} M, {loads:.1} fournées, {waiting:.1} h d'attente, {gen10:.2} gen 10.",
         score / 1e6
     );
+
+    // Le défaut choisit désormais la bande : le témoin ci-dessus est donc celui de
+    // `BandAndLevel`. La bande retenue n'est pas un détail d'affichage — seule la
+    // **bande 3** demande un réappro manuel en cours de tâche, son carburant
+    // plafonnant à 100 000 quand le palier de 4 pt/s tombe à 90 000, soit dix mille
+    // points de marge pour une stat qui en consomme vingt mille. Les bandes 0 à 2
+    // tiennent une tâche entière sur un seul remplissage, donc le débit constant
+    // que le moteur suppose est exact tant qu'on ne monte pas à la bande 3.
+    //
+    // On imprime en regard ce que l'échappatoire choisit, pour garder les deux
+    // sous les yeux.
+    let escaped = {
+        let mut policy = LadderPolicy::with_ladder(ladder.clone())
+            .with_strategies([Strategy::default(); MAX_UNITS]);
+        policy.tuning = Tuning::LastFreeStep;
+        policy.tuned_for(&economy)
+    };
+    let bands: Vec<String> = (0..economy.unit_count().min(MAX_UNITS))
+        .map(|unit| {
+            let s = escaped.strategy(unit);
+            format!("unité {unit} : bande {} niveau {}", s.bands[0], s.level)
+        })
+        .collect();
+    println!("`Tuning::LastFreeStep`, l'échappatoire — {}", bands.join(" · "));
+
+    // ## Le levier, sur les deux régimes
+    //
+    // Le balayage dit qu'une autre bande vaut trente millions. Reste à savoir ce
+    // qu'elle coûte ailleurs, et c'est là que se joue la décision de basculer le
+    // défaut ou non.
+    println!("\n=== `Tuning::BandAndLevel` − `LastFreeStep` ===");
+    let mut scratch_economy = economy;
+    scratch_economy.pool_generations = (1, 1);
+    for (label, eco) in [("pool hérité", &economy), ("départ de zéro", &scratch_economy)] {
+        duel_tuning(label, eco, &ladder);
+    }
 
     // Les bandes uniformes, du plus lent au plus rapide.
     for band in 0..4 {

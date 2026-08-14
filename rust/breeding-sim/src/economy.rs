@@ -201,6 +201,28 @@ pub struct Economy {
     /// **Zéro par défaut**, donc toutes les mesures publiées restent valides et
     /// facturer la stérilité est un choix explicite.
     pub barren_crossing_malus: i64,
+    /// Ce qu'une fournée **réussie** rapporte quand le sommet est à un barreau.
+    ///
+    /// Le seul terme du réglage du rythme qui ne se déduise pas de l'économie :
+    /// les fournées et le carburant se calculent, ce qu'une fournée rend dépend de
+    /// la politique. Exposé plutôt que deviné, parce qu'il décide du choix de
+    /// bande et qu'un chiffre caché y serait indiscutable.
+    ///
+    /// Calibré sur le balayage de `bin/windows` : entre la bande 0 au niveau 50 et
+    /// la bande 2 au niveau 36, 59,6 fournées de plus valent 30,2 M de score plus
+    /// 41,9 M de carburant, soit 1,21 M la fournée à 40,8 % de réussite — donc
+    /// environ trois millions par réussite.
+    ///
+    /// **Ce n'est pas une constante, c'est une ancre.** Le balayage qui l'a
+    /// calibrée tourne sur le pool hérité, dont la frontière est la gen 9 : le
+    /// sommet y est à **un** barreau. Ce chiffre vaut donc pour cette distance-là,
+    /// et `value_per_success_toward` l'amortit sur la distance réelle. Voir
+    /// là-bas pour pourquoi une valeur par fournée qui ignore le chemin restant ne
+    /// peut pas régler deux régimes à la fois.
+    ///
+    /// À rejouer quand les prix bougent : c'est un rapport entre un score et un
+    /// carburant, et les deux sont dans `economy.toml`.
+    pub value_per_success: i64,
     /// Prix forfaitaire d'un chargement du bloc, tant que les prix par jauge
     /// manquent.
     pub batch_cost: i64,
@@ -261,6 +283,7 @@ impl Default for Economy {
             availability: [[(0.0, 0.0); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
             batches: 100,
             barren_crossing_malus: 0,
+            value_per_success: 3_000_000,
             batch_cost: 150_000,
             starter_price: 1_000,
             amber_per_generation: 20_000,
@@ -369,6 +392,41 @@ impl Economy {
             probe += 1;
         }
         None
+    }
+
+    /// Combien de fournées de `hours` tiennent dans `horizon`.
+    ///
+    /// Sans fenêtre, c'est la division. Avec, il faut dérouler le temps : une
+    /// fournée qui finit hors créneau attend, et cette attente décale toutes les
+    /// suivantes. C'est ce qui fait qu'une durée un peu plus longue peut coûter
+    /// bien plus qu'un peu — trente minutes de dépassement valent cinq heures.
+    ///
+    /// Le déroulé est le même que celui de `play`, en plus court : on ne suit qu'un
+    /// enclos, ce qui suffit à comparer deux rythmes.
+    pub fn loads_within(&self, horizon: f64, hours: f64) -> i64 {
+        if hours <= 0.0 {
+            return 0;
+        }
+        if !self.has_windows() {
+            return (horizon / hours).floor() as i64;
+        }
+        let mut at = 0.0f64;
+        let mut count = 0i64;
+        // Borne dure : une fournée par heure au plus, donc l'horizon borne la
+        // boucle même si `actionable` renvoyait toujours le même instant.
+        let ceiling = horizon.ceil() as i64 + 1;
+        while count < ceiling {
+            let Some(start) = self.actionable(at, horizon) else {
+                break;
+            };
+            let end = start + hours;
+            if end > horizon {
+                break;
+            }
+            count += 1;
+            at = end;
+        }
+        count
     }
 
     /// Les heures où l'on peut agir sur une semaine, pour la lecture et les tests.
@@ -507,6 +565,50 @@ impl Economy {
         } else {
             i64::from(generation) * self.amber_per_generation
         }
+    }
+
+    /// La **frontière** de l'écurie de départ : la plus haute génération qu'elle
+    /// tient. Zéro quand il n'y a pas d'écurie du tout.
+    #[inline]
+    pub fn starting_frontier(&self) -> u8 {
+        if self.starting_pool == 0 {
+            0
+        } else {
+            self.pool_generations.1
+        }
+    }
+
+    /// Ce qu'une fournée réussie vaut, **vu depuis l'écurie de départ**.
+    ///
+    /// ## Pourquoi une constante ne pouvait pas marcher
+    ///
+    /// Le critère de `tuned_for` est `fournées × (valeur − carburant)`, et la
+    /// valeur y était `value_per_success`, un nombre fixe. Il est calibré sur le
+    /// pool hérité, où cent muldos de la gen 2 à la gen 9 mettent la gen 10 à un
+    /// barreau. En partant de cent gen 1, le sommet est à neuf générations : rien
+    /// ne l'atteint dans l'horizon — un dixième de gen 10 sur toute la partie —
+    /// donc une fournée n'y vaut presque rien, et payer 520 000 de carburant
+    /// ruine la partie. Mesuré : le levier portait le pool hérité de 63,84 à
+    /// 98,34 M et **effondrait** le départ de zéro de 13,80 à 5,49 M.
+    ///
+    /// Le même nombre ne peut pas décrire les deux. Ce qui les sépare n'est ni le
+    /// prix ni l'horizon : c'est la **distance au sommet**.
+    ///
+    /// ## Le modèle
+    ///
+    /// Une fournée avance d'un cran sur un chemin qui en compte
+    /// `sommet − frontière`. Ce qu'elle rapporte est donc l'ancre amortie sur ce
+    /// chemin : à un barreau du sommet elle vaut l'ancre entière — c'est le régime
+    /// où l'ancre a été mesurée, et la valeur y est inchangée par construction —
+    /// et à neuf générations elle en vaut le neuvième.
+    ///
+    /// Le plancher à 1 n'est pas une garde : une écurie qui tient déjà le sommet
+    /// n'a plus de chemin, et sa prochaine fournée vaut bien une fournée entière.
+    #[inline]
+    pub fn value_per_success_toward(&self, summit_generation: u8) -> f64 {
+        let frontier = self.starting_frontier().min(summit_generation);
+        let climb = f64::from(u32::from(summit_generation.saturating_sub(frontier)).max(1));
+        self.value_per_success as f64 / climb
     }
 
     /// Le taux de réussite d'un croisement à ce niveau, Optimakina comprise.
@@ -871,6 +973,14 @@ pub struct RunOutcome {
     pub gen10_held: usize,
     /// Chargements refusés. Doit rester à zéro.
     pub rejected_loads: u32,
+    /// **Pourquoi** ils l'ont été, indexé par `Rejected::reason`.
+    ///
+    /// Le compte seul ne suffisait pas : la branche d'erreur jetait la raison
+    /// (`Err(_)`), donc « 191 fournées refusées » ne disait pas si le moteur
+    /// manquait de kamas, de places, ou refusait un croisement mal formé. On a
+    /// attribué ces refus au budget sans l'avoir vérifié — c'est le genre de
+    /// chiffre qu'on finit par croire.
+    pub rejected_by_reason: [u32; Rejected::REASONS],
     pub hours_used: f64,
     /// Heures passées à attendre une fenêtre, enclos libre et personne devant le
     /// jeu. Nulles sans fenêtre posée. C'est la mesure de ce que la disponibilité
@@ -889,6 +999,39 @@ pub enum Rejected {
     CloneNotSterile(usize),
     CloneGenerationMismatch(usize, usize),
     Unaffordable { needed: i64, available: i64 },
+}
+
+impl Rejected {
+    /// Le nombre de raisons, pour dimensionner le compteur.
+    pub const REASONS: usize = 9;
+
+    /// L'indice de cette raison dans `RunOutcome::rejected_by_reason`.
+    pub fn reason(&self) -> usize {
+        match self {
+            Self::TooManyCrossings { .. } => 0,
+            Self::UnknownIndex(_) => 1,
+            Self::MountUsedTwice(_) => 2,
+            Self::NotFertile(_) => 3,
+            Self::SameSex(..) => 4,
+            Self::NoOutlook(..) => 5,
+            Self::CloneNotSterile(_) => 6,
+            Self::CloneGenerationMismatch(..) => 7,
+            Self::Unaffordable { .. } => 8,
+        }
+    }
+
+    /// Le nom de chaque raison, dans l'ordre de `reason`.
+    pub const LABELS: [&'static str; Self::REASONS] = [
+        "trop de places demandées",
+        "indice inconnu",
+        "monture employée deux fois",
+        "monture non fertile",
+        "même sexe",
+        "croisement sans cible",
+        "clone non stérile",
+        "clone de génération différente",
+        "kamas insuffisants",
+    ];
 }
 
 struct Applied {
@@ -965,6 +1108,21 @@ pub fn apply_plan(
         cycles: applied.cycles,
         births,
     })
+}
+
+/// Descend la stratégie d'un cran de bande, ou dit qu'il n'y en a plus.
+///
+/// Un cran plus bas, c'est moins cher au point et plus lent : c'est exactement
+/// l'arbitrage que `tuned_for` tranche une fois pour toutes, et qu'un tour sans
+/// argent doit pouvoir retrancher pour lui seul.
+fn lower_band(strategy: &mut Strategy) -> bool {
+    if strategy.bands.iter().all(|&band| band == 0) {
+        return false;
+    }
+    for band in strategy.bands.iter_mut() {
+        *band = band.saturating_sub(1);
+    }
+    true
 }
 
 /// Applique un chargement, ou dit pourquoi il est refusé.
@@ -1348,6 +1506,7 @@ fn run(
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
         rejected_loads: 0,
+        rejected_by_reason: [0; Rejected::REASONS],
         hours_used: 0.0,
         hours_waiting: 0.0,
     };
@@ -1414,9 +1573,35 @@ fn run(
 
         // 3. on applique. Les bébés attendront la fin du cycle.
         let coord = load_coord(unit, loads[unit.min(MAX_UNITS - 1)]);
-        match apply(
-            catalog, economy, &mut stable, &mut kamas, &plan, strategy, unit, &draws, coord,
-        ) {
+
+        // ## Le repli sur la bande la plus chère finançable
+        //
+        // Un chargement refusé était un tour **entièrement** perdu : l'enclos
+        // restait vide, l'horloge avançait de l'overhead, et rien n'était tenté.
+        // Or le relevé dit que ces refus sont à **99,7 % du carburant** — le plan
+        // lui-même tient, c'est le rythme commandé qui dépasse la bourse de ce
+        // tour-là. À la médiane : 1 385 928 demandés contre 665 505 en caisse, et
+        // les achats ne pèsent que 2 000.
+        //
+        // La bande est un choix **par chargement**, pas un réglage global. Quand
+        // elle n'est pas finançable maintenant, on charge le même monde un cran
+        // moins vite plutôt que pas du tout. Le cran retenu voyage ensuite dans
+        // `strategy` : la durée du cycle est celle qu'on a réellement payée.
+        //
+        // Ne rattrape que `Unaffordable`. Un plan mal formé ne devient pas bon
+        // parce qu'il coûte moins cher, et l'attraper ici masquerait un défaut de
+        // politique.
+        let mut strategy = strategy;
+        let attempt = loop {
+            let tried = apply(
+                catalog, economy, &mut stable, &mut kamas, &plan, strategy, unit, &draws, coord,
+            );
+            match tried {
+                Err(Rejected::Unaffordable { .. }) if lower_band(&mut strategy) => continue,
+                settled => break settled,
+            }
+        };
+        match attempt {
             Ok(applied) => {
                 outcome.crossings += applied.crossings;
                 outcome.barren_crossings += applied.barren;
@@ -1466,10 +1651,12 @@ fn run(
                     free_at[unit] = now + economy.overhead_hours.max(1e-6);
                 }
             }
-            Err(_) => {
+            Err(reason) => {
                 // Un chargement refusé est un chargement perdu : on ne devine pas
-                // ce que la politique aurait voulu à la place.
+                // ce que la politique aurait voulu à la place. On note en revanche
+                // **pourquoi**, ce que la branche jetait.
                 outcome.rejected_loads += 1;
+                outcome.rejected_by_reason[reason.reason()] += 1;
                 idle[unit] += 1;
                 free_at[unit] = now + economy.overhead_hours.max(1e-6);
             }

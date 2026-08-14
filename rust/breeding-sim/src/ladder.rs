@@ -100,7 +100,7 @@
 //! | glouton | 1,9 % | 64,6 | 60,16 M | 11,80 M |
 //! | recherche / myope | 50,3 % | 9,9 | 36,70 M | 10,77 M |
 //! | échelle | **0 %** | 40,4 | 59,46 M | 11,15 M |
-//! | échelle + niveau réglé | **0 %** | 43,1 | **63,60 M** | **13,01 M** |
+//! | échelle + niveau réglé | **0 %** | 44,3 | **63,53 M** | **13,19 M** |
 //!
 //! La colonne « sans cible » est celle qui compte autant que le score : ce sont
 //! les accouplements que le jeu annonce « rien à gagner ». L'échelle n'en
@@ -263,6 +263,15 @@ pub struct Ladder {
     pub blocks: Vec<Vec<ColorId>>,
     /// Les couleurs les plus hautes du plan : ce qu'on cherche à produire.
     pub summit: Vec<ColorId>,
+    /// La génération de ce sommet — le rang où l'échelle s'arrête.
+    ///
+    /// Retenu ici plutôt que relu au besoin, parce que le seul endroit qui en a
+    /// besoin, `tuned_for`, n'a pas le catalogue sous la main : il ne voit que la
+    /// politique et l'économie. Et c'est bien une propriété de l'échelle — le rang
+    /// jusqu'où elle monte — pas une donnée de l'appelant.
+    ///
+    /// Zéro pour une échelle vide, ce que `Default` donne déjà.
+    pub summit_generation: u8,
 }
 
 /// La composition d'une couleur : ses deux teintes, telles que l'arbre les
@@ -284,6 +293,20 @@ type SecondTier = (
 type FourthTier = (usize, usize, Vec<ColorId>, Vec<[ColorId; 2]>);
 
 impl Ladder {
+    /// Relève le rang du sommet depuis les couleurs qui le composent.
+    ///
+    /// Appelé partout où `summit` est arrêté — la fin de la montée et la
+    /// couronne — parce qu'un sommet et son rang qui se contrediraient feraient
+    /// mal régler le rythme sans rien casser de visible.
+    fn note_summit_generation(&mut self, catalog: &Catalog) {
+        self.summit_generation = self
+            .summit
+            .iter()
+            .map(|&color| catalog.generation(color))
+            .max()
+            .unwrap_or(0);
+    }
+
     pub fn of(catalog: &Catalog, route: Route) -> Self {
         let mut ladder = Self::default();
         if !ladder.lay_third(catalog) {
@@ -332,6 +355,7 @@ impl Ladder {
             rung += 2;
         }
         ladder.spread_demand(catalog);
+        ladder.note_summit_generation(catalog);
         ladder
     }
 
@@ -764,6 +788,7 @@ impl Ladder {
         self.recipe_of.insert(crown, [target, partner]);
         self.summit = vec![crown];
         self.spread_demand(catalog);
+        self.note_summit_generation(catalog);
 
         // ## Tailler ce que la couronne ne réclame pas
         //
@@ -996,6 +1021,93 @@ pub enum Ordering {
 ///
 /// Et jusqu'ici les deux moitiés d'une même fournée ne raisonnaient pas pareil :
 /// `compose` choisissait au retard relatif, l'achat tournait en rond.
+/// Comment le rythme se règle : le niveau seul, ou la bande avec.
+///
+/// ## Ce que la bande vaut, et ce qu'elle coûte
+///
+/// `tuned_for` ne réglait que le **niveau**, laissant la bande la moins chère.
+/// C'était un gel méthodologique jamais levé, et `bin/windows` le chiffre : sur
+/// le pool hérité, chercher la bande **et** le niveau porte la médiane de
+/// 63,60 M à **92,32 M**, avec 89,1 gen 10 tenues contre 43,1.
+///
+/// Le départ de zéro **s'effondrait**, et c'est ce qui a tenu ce gain derrière un
+/// levier. Duel sur 200 graines appariées, avec `value_per_success` en constante :
+///
+/// | régime | avant | après | gen 10 | refusées |
+/// | --- | --- | --- | --- | --- |
+/// | pool hérité | 63,84 M | **98,34 M** | 44,1 → **95,2** | 191 |
+/// | départ de zéro | 13,80 M | **5,49 M** | 0,2 → 0,2 | **551** |
+///
+/// Les **fournées refusées** sont la vérification qui a tranché : ce sont des
+/// plans que le moteur écarte faute de kamas, donc des tours perdus.
+///
+/// ## Ce qui a levé l'obstacle
+///
+/// Le critère est `fournées × (valeur − carburant)`, et la valeur y était une
+/// constante calibrée sur le régime **avec pool**, où cent muldos de la gen 2 à
+/// la gen 9 mettent le sommet à un barreau. En partant de cent gen 1, le sommet
+/// est à neuf générations : rien ne l'atteint dans l'horizon, donc une fournée n'y
+/// vaut presque rien, et payer 520 000 de carburant ruine la partie.
+///
+/// Une valeur par fournée qui ignore la **distance au sommet** ne peut pas régler
+/// les deux régimes. `Economy::value_per_success_toward` la dérive : l'ancre
+/// mesurée reste l'ancre à un barreau du sommet, et s'amortit sur le chemin qui
+/// reste. Le même duel devient alors :
+///
+/// | régime | avant | après | gen 10 | refusées |
+/// | --- | --- | --- | --- | --- |
+/// | pool hérité | 63,84 M | **98,34 M** | 44,1 → **95,2** | 191 |
+/// | départ de zéro | 13,80 M | **15,05 M** | 0,2 → **0,6** | **0** |
+///
+/// Le pool hérité est **inchangé au chiffre près**, par construction : sa
+/// frontière est la gen 9, donc son chemin vaut un et la valeur reste l'ancre. Et
+/// le départ de zéro ne s'effondre plus, il **gagne** — et ses 551 fournées
+/// refusées tombent à zéro, ce qui dit que le refus venait bien de la
+/// mésestimation et non d'une limite du moteur.
+///
+/// ## Les refus, expliqués puis résorbés
+///
+/// Restaient **191 fournées refusées** sur le pool hérité, que la dérivation ne
+/// pouvait pas déplacer — la valeur y est inchangée. Elles ne s'expliquaient donc
+/// pas par la distance au sommet, et un chiffre obtenu *malgré* un gaspillage
+/// inexpliqué ne vaut pas qu'on bascule un défaut dessus.
+///
+/// La raison, une fois comptée plutôt que supposée : **191 sur 191 par manque de
+/// kamas**, dont 99,7 % de carburant. Le plan tenait ; c'est le rythme commandé
+/// qui dépassait la bourse de ce tour-là. Charger un cran moins vite au lieu de
+/// ne pas charger les ramène à **27**, et ces 27 ne peuvent payer même la
+/// bande 0 — voir `lower_band`.
+///
+/// ## Pourquoi le défaut bascule
+///
+/// | régime | `LastFreeStep` | `BandAndLevel` | gen 10 | refusées |
+/// | --- | --- | --- | --- | --- |
+/// | pool hérité | 63,84 M | **99,30 M** | 44,1 → **95,9** | 27 |
+/// | départ de zéro | 13,80 M | **15,05 M** | 0,2 → **0,6** | 0 |
+///
+/// Les deux régimes gagnent, il n'y en a plus un à sacrifier, et les refus qui
+/// restent sont de vrais « pas les moyens ».
+///
+/// Une réserve, consignée parce qu'elle est réelle et qu'elle ne mord pas : le
+/// moteur prend le débit d'une bande pour une constante, ce qui n'est exact que
+/// jusqu'à la **bande 2**. Au-delà, le carburant plafonne à 100 000 quand le
+/// palier de 4 pt/s tombe à 90 000, donc dix mille points de marge pour une stat
+/// qui en consomme vingt mille — la bande 3 décroche en cours de tâche et
+/// demanderait un réappro manuel. Or le réglage choisit **la bande 2 sur les deux
+/// unités**, et la bande 3 plafonne à 35,69 M contre 98,40 M. La modéliser
+/// fidèlement la rendrait plus lente, donc l'éloignerait encore.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tuning {
+    /// Le niveau seul, bande laissée telle quelle : le dernier cran gratuit.
+    ///
+    /// Ce fut le défaut, et c'est maintenant l'échappatoire — pour retrouver une
+    /// mesure d'avant la bascule, ou pour isoler ce que la bande apporte.
+    LastFreeStep,
+    /// La bande **et** le niveau, au meilleur `fournées × (valeur − carburant)`.
+    #[default]
+    BandAndLevel,
+}
+
 /// Comment la couronne se choisit parmi les vingt gen 10 candidates.
 ///
 /// Les candidates sont 4 gen 9 × 5 gen 1 partenaires. `crown` ne regardait que le
@@ -1167,6 +1279,8 @@ pub struct LadderPolicy {
     pub purchasing: Purchasing,
     /// Comment la couronne se choisit. Voir `Crowning`.
     pub crowning: Crowning,
+    /// Comment le rythme se règle. Voir `Tuning`.
+    pub tuning: Tuning,
     /// Apparier les stériles sans regarder leur sexe.
     ///
     /// **Ce n'est plus indifférent, et le tri gagne** : `−2,12 M ± 0,49` sur
@@ -1258,6 +1372,7 @@ impl LadderPolicy {
             gating: Gating::default(),
             purchasing: Purchasing::default(),
             crowning: Crowning::default(),
+            tuning: Tuning::default(),
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
@@ -1344,6 +1459,10 @@ impl LadderPolicy {
     /// achètent en partie la même chose, des tours de jeu, donc le second à
     /// mesurer trouve moins à prendre. Ils ne s'annulent pas pour autant.
     pub fn tuned_for(mut self, economy: &crate::economy::Economy) -> Self {
+        // Lu avant d'emprunter les stratégies : le rang du sommet dit ce qu'une
+        // fournée rapporte, et il vit sur l'échelle. Voir
+        // `Economy::value_per_success_toward`.
+        let summit = self.ladder.summit_generation;
         let Some(strategies) = self.strategies.as_mut() else {
             return self;
         };
@@ -1351,14 +1470,76 @@ impl LadderPolicy {
 
         let units = economy.unit_count().min(MAX_UNITS);
         for (unit, strategy) in strategies.iter_mut().enumerate().take(units) {
-            let bands = *strategy;
-            let loads = |level: u16| {
-                let mut probe = bands;
+            let base = *strategy;
+
+            // Ce qu'une configuration rend, hors simulation.
+            //
+            // Trois termes, et les deux premiers se lisent sur l'économie :
+            //
+            //   les **fournées** — combien de cycles tiennent dans l'horizon, en
+            //     comptant l'attente d'une fenêtre quand il y en a ;
+            //   le **carburant** — ce qu'une fournée coûte à la bande choisie ;
+            //   la **valeur** d'une fournée, proportionnelle au taux de réussite,
+            //     donc au niveau. C'est le seul terme qui ne se déduit pas, d'où
+            //     `value_per_success` dans l'économie.
+            let worth = |bands: [usize; crate::schedule::GAUGES], level: u16| -> f64 {
+                let mut probe = base;
+                probe.bands = bands;
                 probe.level = level;
-                (horizon / economy.unit_load(unit, probe).1).floor() as i64
+                let (fuel, hours) = economy.unit_load(unit, probe);
+                if hours <= 0.0 {
+                    return f64::NEG_INFINITY;
+                }
+                let count = economy.loads_within(horizon, hours) as f64;
+                let value = economy.value_per_success_toward(summit)
+                    * economy.success_rate(economy.level_of(probe), false);
+                count * (value - fuel as f64)
             };
 
-            // Invariant : `low` garde le compte plancher, `high` l'a perdu.
+            // Toutes les bandes uniformes, tous les niveaux du balayage. Quatre
+            // bandes et une poignée de niveaux : assez petit pour chercher
+            // exhaustivement, et déterministe.
+            //
+            // La bande **doit** être cherchée. `tuned_for` ne réglait que le
+            // niveau et laissait la bande la moins chère, ce qui était un gel
+            // méthodologique jamais levé — et `bin/windows` le chiffre à une
+            // trentaine de millions.
+            let mut best: Option<(f64, [usize; crate::schedule::GAUGES], u16)> = None;
+            // La bande n'est cherchée que si on le demande : voir `Tuning` pour ce
+            // que ça gagne avec un pool et ce que ça détruit sans.
+            let bands_to_try: &[usize] = match self.tuning {
+                Tuning::BandAndLevel => &[0, 1, 2, 3],
+                Tuning::LastFreeStep => &[],
+            };
+            for &band in bands_to_try {
+                let bands = [band; crate::schedule::GAUGES];
+                for level in [1u16, 12, 23, 36, 50, 67, 85, 100, 120] {
+                    let score = worth(bands, level);
+                    // À égalité, la bande la moins chère et le niveau le plus bas :
+                    // ce qui ne rapporte pas plus ne doit pas coûter plus.
+                    if best.is_none_or(|(top, _, _)| score > top) {
+                        best = Some((score, bands, level));
+                    }
+                }
+            }
+
+            if let Some((score, bands, level)) = best
+                && score > 0.0
+            {
+                strategy.bands = bands;
+                strategy.level = level;
+                continue;
+            }
+
+            // Aucune configuration ne se rembourse : on garde la moins chère et on
+            // remonte le niveau jusqu'au dernier cran gratuit, l'ancien réglage.
+            // C'est le cas d'une économie où le carburant dépasse ce qu'une
+            // fournée rapporte, et il ne doit pas rendre la politique inerte.
+            let loads = |level: u16| {
+                let mut probe = base;
+                probe.level = level;
+                economy.loads_within(horizon, economy.unit_load(unit, probe).1)
+            };
             let ceiling = loads(1);
             let (mut low, mut high) = (1u16, crate::economy::MAX_MOUNT_LEVEL + 1);
             while high - low > 1 {
@@ -2853,34 +3034,69 @@ mod niveaux {
     use super::*;
     use crate::config::Prices;
 
-    /// Le niveau réglé doit être **le dernier gratuit** : une de plus coûte une
-    /// fournée, et lui-même n'en coûte aucune.
+    /// Le réglage doit battre celui qu'il remplace, **sur son propre critère**.
+    ///
+    /// L'ancien verrou exigeait « le dernier cran gratuit », c'est-à-dire le plus
+    /// haut niveau qui ne coûte pas une fournée. Ce n'est plus la règle : le
+    /// réglage cherche maintenant la bande **et** le niveau qui maximisent
+    /// `fournées × (valeur − carburant)`, et ce compromis accepte volontiers de
+    /// perdre une fournée pour un taux de réussite qui la rembourse.
+    ///
+    /// Ce qui reste vérifiable, et qui casse si la recherche de bande disparaît :
+    /// la configuration retenue doit valoir **au moins autant** que l'ancienne
+    /// règle sur ce critère. C'est un verrou faible en apparence et suffisant en
+    /// pratique — supprimer le balayage des bandes le fait échouer, parce que la
+    /// bande la moins chère n'est pas celle qui gagne sur cette économie.
     #[test]
-    fn le_reglage_s_arrete_juste_avant_la_marche() {
+    fn le_reglage_bat_la_regle_qu_il_remplace() {
         let catalog = muldo_for_test();
         let economy = Prices::load_default().expect("economy.toml").economy;
-        let base = [Strategy::default(); MAX_UNITS];
         let policy = LadderPolicy::new(&catalog, Route::Shared)
-            .with_strategies(base)
+            .with_strategies([Strategy::default(); MAX_UNITS])
             .tuned_for(&economy);
 
+        // Le même critère que `tuned_for`, valeur par fournée comprise : la juger
+        // sur une autre échelle que celle qu'elle a employée ne verrouillerait
+        // rien. Voir `Economy::value_per_success_toward`.
+        let summit = policy.ladder().summit_generation;
         let horizon = economy.horizon_hours.unwrap_or(300.0);
+        let worth = |unit: usize, probe: Strategy| -> f64 {
+            let (fuel, hours) = economy.unit_load(unit, probe);
+            if hours <= 0.0 {
+                return f64::NEG_INFINITY;
+            }
+            let count = economy.loads_within(horizon, hours) as f64;
+            let value = economy.value_per_success_toward(summit)
+                * economy.success_rate(economy.level_of(probe), false);
+            count * (value - fuel as f64)
+        };
+
         for unit in 0..economy.unit_count().min(MAX_UNITS) {
-            let level = policy.strategy(unit).level;
+            // L'ancienne règle : bande par défaut, dernier cran gratuit.
             let loads = |at: u16| {
-                let mut probe = policy.strategy(unit);
+                let mut probe = Strategy::default();
                 probe.level = at;
-                (horizon / economy.unit_load(unit, probe).1).floor() as i64
+                economy.loads_within(horizon, economy.unit_load(unit, probe).1)
             };
-            assert_eq!(
-                loads(level),
-                loads(1),
-                "unité {unit} : le niveau {level} coûte déjà une fournée"
-            );
+            let ceiling = loads(1);
+            let (mut low, mut high) = (1u16, crate::economy::MAX_MOUNT_LEVEL + 1);
+            while high - low > 1 {
+                let middle = low + (high - low) / 2;
+                if loads(middle) >= ceiling {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            let mut former = Strategy::default();
+            former.level = low;
+
+            let chosen = worth(unit, policy.strategy(unit));
+            let before = worth(unit, former);
             assert!(
-                level >= crate::economy::MAX_MOUNT_LEVEL || loads(level + 1) < loads(1),
-                "unité {unit} : le niveau {} serait encore gratuit",
-                level + 1
+                chosen >= before,
+                "unité {unit} : le réglage retenu vaut {chosen:.0} contre {before:.0} \
+                 pour l'ancienne règle — la recherche a régressé"
             );
         }
     }

@@ -263,6 +263,15 @@ pub struct Ladder {
     pub blocks: Vec<Vec<ColorId>>,
     /// Les couleurs les plus hautes du plan : ce qu'on cherche à produire.
     pub summit: Vec<ColorId>,
+    /// La génération de ce sommet — le rang où l'échelle s'arrête.
+    ///
+    /// Retenu ici plutôt que relu au besoin, parce que le seul endroit qui en a
+    /// besoin, `tuned_for`, n'a pas le catalogue sous la main : il ne voit que la
+    /// politique et l'économie. Et c'est bien une propriété de l'échelle — le rang
+    /// jusqu'où elle monte — pas une donnée de l'appelant.
+    ///
+    /// Zéro pour une échelle vide, ce que `Default` donne déjà.
+    pub summit_generation: u8,
 }
 
 /// La composition d'une couleur : ses deux teintes, telles que l'arbre les
@@ -284,6 +293,20 @@ type SecondTier = (
 type FourthTier = (usize, usize, Vec<ColorId>, Vec<[ColorId; 2]>);
 
 impl Ladder {
+    /// Relève le rang du sommet depuis les couleurs qui le composent.
+    ///
+    /// Appelé partout où `summit` est arrêté — la fin de la montée et la
+    /// couronne — parce qu'un sommet et son rang qui se contrediraient feraient
+    /// mal régler le rythme sans rien casser de visible.
+    fn note_summit_generation(&mut self, catalog: &Catalog) {
+        self.summit_generation = self
+            .summit
+            .iter()
+            .map(|&color| catalog.generation(color))
+            .max()
+            .unwrap_or(0);
+    }
+
     pub fn of(catalog: &Catalog, route: Route) -> Self {
         let mut ladder = Self::default();
         if !ladder.lay_third(catalog) {
@@ -332,6 +355,7 @@ impl Ladder {
             rung += 2;
         }
         ladder.spread_demand(catalog);
+        ladder.note_summit_generation(catalog);
         ladder
     }
 
@@ -764,6 +788,7 @@ impl Ladder {
         self.recipe_of.insert(crown, [target, partner]);
         self.summit = vec![crown];
         self.spread_demand(catalog);
+        self.note_summit_generation(catalog);
 
         // ## Tailler ce que la couronne ne réclame pas
         //
@@ -1005,33 +1030,49 @@ pub enum Ordering {
 /// le pool hérité, chercher la bande **et** le niveau porte la médiane de
 /// 63,60 M à **92,32 M**, avec 89,1 gen 10 tenues contre 43,1.
 ///
-/// Mais le départ de zéro **s'effondre**. Duel sur 200 graines appariées :
+/// Le départ de zéro **s'effondrait**, et c'est ce qui a tenu ce gain derrière un
+/// levier. Duel sur 200 graines appariées, avec `value_per_success` en constante :
 ///
 /// | régime | avant | après | gen 10 | refusées |
 /// | --- | --- | --- | --- | --- |
-/// | pool hérité | 63,53 M | **92,32 M** | 44,3 → **89,1** | 231 |
-/// | départ de zéro | 13,19 M | **5,18 M** | 0,1 → 0,1 | 507 |
+/// | pool hérité | 63,84 M | **98,34 M** | 44,1 → **95,2** | 191 |
+/// | départ de zéro | 13,80 M | **5,49 M** | 0,2 → 0,2 | **551** |
 ///
 /// Les **fournées refusées** sont la vérification qui a tranché : ce sont des
-/// plans que le moteur écarte faute de kamas, donc des tours perdus. Il y en a
-/// dans les deux régimes, et cinq cents en partant de zéro.
+/// plans que le moteur écarte faute de kamas, donc des tours perdus.
 ///
-/// ## Pourquoi, et pourquoi le défaut ne bascule pas
+/// ## Ce qui a levé l'obstacle
 ///
-/// Le critère est `fournées × (valeur − carburant)`, et `value_per_success` y est
-/// une constante. Elle est calibrée sur le régime **avec pool**, où cent muldos de
-/// la gen 2 à la gen 9 mettent le sommet à portée. En partant de zéro, rien
-/// n'atteint la gen 10 dans l'horizon — un dixième de gen 10 sur toute la partie —
-/// donc une fournée ne vaut presque rien et payer 520 000 de carburant ruine la
-/// partie.
+/// Le critère est `fournées × (valeur − carburant)`, et la valeur y était une
+/// constante calibrée sur le régime **avec pool**, où cent muldos de la gen 2 à
+/// la gen 9 mettent le sommet à un barreau. En partant de cent gen 1, le sommet
+/// est à neuf générations : rien ne l'atteint dans l'horizon, donc une fournée n'y
+/// vaut presque rien, et payer 520 000 de carburant ruine la partie.
 ///
-/// Une valeur par fournée qui ne dépend pas de la **distance au sommet** ne peut
-/// donc pas régler les deux régimes. La lever demande de la dériver de l'écurie de
-/// départ, ce qui est un travail de modèle et non un réglage.
+/// Une valeur par fournée qui ignore la **distance au sommet** ne peut pas régler
+/// les deux régimes. `Economy::value_per_success_toward` la dérive : l'ancre
+/// mesurée reste l'ancre à un barreau du sommet, et s'amortit sur le chemin qui
+/// reste. Le même duel devient alors :
 ///
-/// D'où un levier plutôt qu'un défaut : le gain est réel et gros, la contre-partie
-/// l'est aussi, et publier l'un sans l'autre serait le genre de chiffre qu'on finit
-/// par croire.
+/// | régime | avant | après | gen 10 | refusées |
+/// | --- | --- | --- | --- | --- |
+/// | pool hérité | 63,84 M | **98,34 M** | 44,1 → **95,2** | 191 |
+/// | départ de zéro | 13,80 M | **15,05 M** | 0,2 → **0,6** | **0** |
+///
+/// Le pool hérité est **inchangé au chiffre près**, par construction : sa
+/// frontière est la gen 9, donc son chemin vaut un et la valeur reste l'ancre. Et
+/// le départ de zéro ne s'effondre plus, il **gagne** — et ses 551 fournées
+/// refusées tombent à zéro, ce qui dit que le refus venait bien de la
+/// mésestimation et non d'une limite du moteur.
+///
+/// ## Ce qui reste, et pourquoi le défaut ne bascule pas encore
+///
+/// Les **191 fournées refusées du pool hérité** ne bougent pas — la valeur y est
+/// inchangée, donc rien ne pouvait les déplacer. Elles ne s'expliquent donc pas
+/// par la distance au sommet, et tant qu'elles ne sont pas expliquées, les
+/// 98,34 M restent un chiffre obtenu *malgré* un gaspillage. Basculer le défaut
+/// est désormais défendable des deux côtés ; ça reste une décision à prendre les
+/// yeux ouverts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tuning {
     /// Le niveau seul, bande laissée telle quelle : le dernier cran gratuit.
@@ -1392,6 +1433,10 @@ impl LadderPolicy {
     /// achètent en partie la même chose, des tours de jeu, donc le second à
     /// mesurer trouve moins à prendre. Ils ne s'annulent pas pour autant.
     pub fn tuned_for(mut self, economy: &crate::economy::Economy) -> Self {
+        // Lu avant d'emprunter les stratégies : le rang du sommet dit ce qu'une
+        // fournée rapporte, et il vit sur l'échelle. Voir
+        // `Economy::value_per_success_toward`.
+        let summit = self.ladder.summit_generation;
         let Some(strategies) = self.strategies.as_mut() else {
             return self;
         };
@@ -1420,7 +1465,7 @@ impl LadderPolicy {
                     return f64::NEG_INFINITY;
                 }
                 let count = economy.loads_within(horizon, hours) as f64;
-                let value = economy.value_per_success as f64
+                let value = economy.value_per_success_toward(summit)
                     * economy.success_rate(economy.level_of(probe), false);
                 count * (value - fuel as f64)
             };
@@ -2984,6 +3029,10 @@ mod niveaux {
             .with_strategies([Strategy::default(); MAX_UNITS])
             .tuned_for(&economy);
 
+        // Le même critère que `tuned_for`, valeur par fournée comprise : la juger
+        // sur une autre échelle que celle qu'elle a employée ne verrouillerait
+        // rien. Voir `Economy::value_per_success_toward`.
+        let summit = policy.ladder().summit_generation;
         let horizon = economy.horizon_hours.unwrap_or(300.0);
         let worth = |unit: usize, probe: Strategy| -> f64 {
             let (fuel, hours) = economy.unit_load(unit, probe);
@@ -2991,7 +3040,7 @@ mod niveaux {
                 return f64::NEG_INFINITY;
             }
             let count = economy.loads_within(horizon, hours) as f64;
-            let value = economy.value_per_success as f64
+            let value = economy.value_per_success_toward(summit)
                 * economy.success_rate(economy.level_of(probe), false);
             count * (value - fuel as f64)
         };

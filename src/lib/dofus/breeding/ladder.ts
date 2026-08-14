@@ -798,6 +798,36 @@ export const crownAt = (
 };
 
 /**
+ * Cette couleur peut-elle porter la couronne de ce plan ?
+ *
+ * Les mêmes trois conditions que `crownAt` vérifie avant de poser : être une
+ * gen 10 dont la recette marie une gen 9 à une gen 1, et voir cette gen 1
+ * rattachée à un bloc — donc achetable. Vérifié **avant** d'imposer, parce que
+ * `crownAt` ne pose rien du tout sur une couronne introuvable et qu'un plan non
+ * couronné est plus large que celui que la politique applique.
+ */
+export const isCrownable = (
+  ladder: Ladder,
+  colors: BreedingColor[],
+  colorId: string
+): boolean => {
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const generationOf = (id: string) => byId.get(id)?.generation ?? 0;
+  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
+
+  const color = byId.get(colorId);
+  if (!color || color.generation !== top) return false;
+  const recipe = constituents(color);
+  if (!recipe) return false;
+  const [high, low] =
+    generationOf(recipe[0]) > generationOf(recipe[1])
+      ? [recipe[0], recipe[1]]
+      : [recipe[1], recipe[0]];
+  if (generationOf(high) !== top - 1 || generationOf(low) !== 1) return false;
+  return ladder.blocks.some((block) => block.includes(low));
+};
+
+/**
  * Le plan **couronné** : celui que la politique mesurée applique réellement.
  *
  * `ladderOf` s'arrête au dernier barreau impair et garde toutes ses couleurs ;
@@ -811,12 +841,35 @@ export const crownAt = (
 export const crownedLadderOf = (
   colors: BreedingColor[],
   valueOf: (colorId: string) => number,
-  route: Route = DEFAULT_ROUTE
+  route: Route = DEFAULT_ROUTE,
+  /**
+   * La gen 10 que l'éleveur **veut**, si elle est couronnable.
+   *
+   * Sans elle, la couronne se choisit sur le marché — et un marché sans prix de
+   * gen 10 saisi les rend toutes égales, si bien que c'est le partenaire qui
+   * tranche. L'éleveur, lui, poursuit peut-être autre chose : sur l'écurie du
+   * 14/08 le projet demandait Azur-Doré depuis huit jours et le plan visait
+   * Ambre-Doré, **sans que rien ne le dise**.
+   *
+   * Ce canal-là plutôt que le prix, et c'est le point : `breeding_color_prices`
+   * est **partagé entre les joueurs**. Gonfler une gen 10 pour l'atteindre
+   * fausserait le marché de tout le monde, et fausserait aussi les coûts
+   * affichés — le prix sert à chiffrer autant qu'à départager. `breeding_projects`
+   * est privé, donc viser et chiffrer redeviennent deux choses distinctes.
+   *
+   * Une cible qui n'est pas une gen 10 couronnable est **ignorée** plutôt que de
+   * ne rien poser : `crownAt` refuse une couronne imposée introuvable, et un plan
+   * non couronné serait plus large que celui que la politique applique — donc
+   * `aimsAt` y admettrait des croisements que le Rust refuse.
+   */
+  wanted?: string | null
 ): Ladder => {
   const plan = copyOf(ladderOf(colors, route));
-  // Le partenaire d'abord, puis le prix : le défaut du Rust. Voir
-  // `bestPartnerCrown` pour ce que ça vaut.
-  crownAt(plan, colors, valueOf, bestPartnerCrown(plan, colors, valueOf) ?? undefined);
+  const crownable = wanted !== null && wanted !== undefined && isCrownable(plan, colors, wanted);
+  // À défaut de cible : le partenaire d'abord, puis le prix — le défaut du Rust.
+  // Voir `bestPartnerCrown` pour ce que ça vaut.
+  const choice = crownable ? wanted : (bestPartnerCrown(plan, colors, valueOf) ?? undefined);
+  crownAt(plan, colors, valueOf, choice);
   return plan;
 };
 

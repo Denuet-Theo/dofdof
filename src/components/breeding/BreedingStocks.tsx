@@ -26,7 +26,13 @@ import {
 } from '@/lib/dofus/breeding/naming';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { DofusDBItem } from '@/lib/supabase/types';
-import type { AddResult, DEFAULT_SETTINGS, FuelPriceResult } from '@/lib/hooks/useBreeding';
+import type {
+  AddResult,
+  BreedingRow,
+  DEFAULT_SETTINGS,
+  FuelPriceResult,
+} from '@/lib/hooks/useBreeding';
+import PriceEntry from '@/components/breeding/PriceEntry';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -89,6 +95,56 @@ type Props = {
   onRemoveIndividual: (id: string) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
   onSaveSettings: (next: Settings) => Promise<boolean>;
+  /**
+   * Les lignes de couleurs, pour la saisie des prix.
+   *
+   * Elles vivaient sous « Couleur visée », qui a été masqué — et avec lui le seul
+   * chemin vers `PriceEntry`. Or sans prix de couleurs `computeBreedingCosts` n'a
+   * rien à calculer et tout l'écran s'éteint : les prix déjà en base continuaient
+   * de servir, mais aucun ne pouvait plus être corrigé. Voir #102.
+   *
+   * Ici plutôt qu'ailleurs parce que c'est déjà le toit des prix de carburants, et
+   * qu'on y vient justement quand on veut corriger un chiffre.
+   */
+  rows: BreedingRow[];
+  onSavePrice: (colorId: string, mountLevel: 0 | 200, price: number) => Promise<boolean>;
+  /**
+   * Combien d'exemplaires de la couleur visée on veut.
+   *
+   * Il dimensionne le plan et les fournées — à trente exemplaires les fournées se
+   * remplissent et le coût par monture s'effondre — donc il n'a rien d'un détail
+   * d'affichage. Il descendait aussi de « Couleur visée ».
+   */
+  targetCount: number;
+  onSetTargetCount: (count: number) => void;
+  /**
+   * La gen 10 poursuivie, et de quoi en changer.
+   *
+   * `null` veut dire « laisse le marché décider » : la couronne se choisit alors
+   * sur la valeur, et comme un marché sans prix de gen 10 les rend toutes égales,
+   * c'est le partenaire qui tranche. Voir `crownedLadderOf`.
+   *
+   * Les candidates sont les gen 10 **couronnables** — celles dont la recette marie
+   * une gen 9 à une gen 1 rattachée à un bloc. Les autres seraient ignorées.
+   */
+  targetColorId: string | null;
+  crownable: BreedingColor[];
+  onSelectTarget: (colorId: string | null) => void;
+  /**
+   * Combien de fournées au minimum avant d'espérer tenir la monture.
+   *
+   * En **espérance** : le découpage suppose les taux de réussite annoncés et les
+   * sexes moitié-moitié, ce qui est tout ce qu'on sache avant le tirage. C'est
+   * donc un plancher, pas une promesse.
+   *
+   * Il tient compte de ce que l'écurie porte déjà et du parc dont on dispose, et
+   * il ne se comprime pas en dessous du nombre de barreaux : on ne peut pas
+   * accoupler une génération avant que la précédente soit née.
+   *
+   * `null` quand la couleur visée ne s'élève pas — il vaut alors mieux l'acheter,
+   * et il n'y a pas de fournée à compter.
+   */
+  minBatches: number | null;
 };
 
 const countInput = (
@@ -193,12 +249,22 @@ const BreedingStocks = ({
   onRemoveIndividual,
   onSaveItem,
   onSaveSettings,
+  rows,
+  onSavePrice,
+  targetCount,
+  onSetTargetCount,
+  targetColorId,
+  crownable,
+  onSelectTarget,
+  minBatches,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [mountQuery, setMountQuery] = useState('');
   const [fuelQuery, setFuelQuery] = useState('');
+  /** La saisie en masse des prix de couleurs, repliée : cent vingt lignes. */
+  const [pricesOpen, setPricesOpen] = useState(false);
   const [fuelError, setFuelError] = useState('');
   /** Les deux axes sur lesquels on cherche un carburant : sa jauge et son rang. */
   const [gaugeFilter, setGaugeFilter] = useState<string | null>(null);
@@ -716,6 +782,79 @@ const BreedingStocks = ({
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Prix des couleurs, et ce qu'on veut en produire.
+              Ils vivaient sous « Couleur visée » et sont partis avec elle ; sans
+              eux `computeBreedingCosts` n'a rien à calculer et tout l'écran
+              s'éteint. Voir #102. Ici parce que c'est déjà le toit des prix de
+              carburants, et qu'on y vient pour corriger un chiffre. */}
+          <div>
+            <div className="flex flex-wrap items-center gap-4 mb-2">
+              <p className="text-xs text-dark-400">Prix des couleurs</p>
+              <label className="flex items-center gap-1.5 text-[11px] text-dark-500">
+                je vise
+                <select
+                  value={targetColorId ?? ''}
+                  onChange={(event) => onSelectTarget(event.target.value || null)}
+                  className="px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-[11px] transition-all hover:border-dark-500
+                    focus:border-kamas/50 cursor-pointer"
+                >
+                  <option value="">la mieux payée du moment</option>
+                  {crownable.map((color) => (
+                    <option key={color.id} value={color.id}>
+                      {color.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5 text-[11px] text-dark-500">
+                j&apos;en veux
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={String(targetCount)}
+                  onChange={(event) =>
+                    onSetTargetCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))
+                  }
+                  className="w-16 px-2 py-1 rounded-lg bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-[11px] text-right transition-all hover:border-dark-500
+                    focus:border-kamas/50"
+                />
+                monture{targetCount > 1 ? 's' : ''} de la couleur visée
+              </label>
+              {targetColorId && minBatches !== null && (
+                <span
+                  className="text-[11px] text-dark-400"
+                  title="En espérance : taux de réussite annoncés, sexes moitié-moitié, sur ton écurie et ton parc actuels. Un plancher, pas une promesse."
+                >
+                  <strong className="text-kamas">{minBatches}</strong> fournée
+                  {minBatches > 1 ? 's' : ''} au minimum
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setPricesOpen((value) => !value)}
+                className={`ml-auto px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer
+                  transition-all ${
+                    pricesOpen
+                      ? 'bg-kamas/15 text-kamas border-kamas/40'
+                      : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+                  }`}
+              >
+                <Coins size={12} className="inline mr-1" />
+                {pricesOpen ? 'Fermer la saisie' : 'Saisir les prix'}
+              </button>
+            </div>
+
+            {/* Cinq prix de couleurs sauvages suffisent à rendre les 120 muldos
+                chiffrables — le reste ne fait qu'affiner. Et c'est **le prix des
+                gen 10 qui décide de la couronne** quand aucune cible n'est
+                choisie : sans eux, elles valent toutes leur extraction en ambre et
+                c'est le partenaire qui tranche. Voir `crownedLadderOf`. */}
+            {pricesOpen && <PriceEntry rows={rows} onSavePrice={onSavePrice} />}
           </div>
 
           {/* Carburants */}

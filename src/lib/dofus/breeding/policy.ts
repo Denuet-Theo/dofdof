@@ -292,6 +292,18 @@ export type PolicyInput = {
   /** Le solde de l'éleveur. `0` vaut « pas de contrainte », comme ailleurs. */
   kamas: number;
   /**
+   * La gen 10 que l'éleveur poursuit, s'il en a choisi une.
+   *
+   * Sans elle la couronne se choisit sur le marché, et un marché sans prix de
+   * gen 10 saisi les rend toutes égales — c'est alors le partenaire qui tranche,
+   * pas l'éleveur. Voir `crownedLadderOf` : le canal est le projet, privé, et non
+   * le prix, qui est partagé entre les joueurs et sert aussi à chiffrer.
+   *
+   * Ignorée si elle n'est pas couronnable, plutôt que de laisser un plan non
+   * couronné admettre des croisements que la politique mesurée refuse.
+   */
+  target?: string | null;
+  /**
    * Autoriser la politique à se **procurer** des gen 1 — achat à l'hôtel de
    * vente ou capture au filet — pour compléter la fournée.
    *
@@ -375,7 +387,7 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
    * égales : le critère se rabat alors sur le partenaire, qui ne dépend pas du
    * marché.
    */
-  const ladder = crownedLadderOf(input.colors, economy.valueOf);
+  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
 
   const plan = planUnit(
     createSearcher({
@@ -532,7 +544,7 @@ const readPlan = (
    * comparer le filet d'affichage à un plan plus large que celui du filtre ferait
    * compter zéro refus par construction, ce qui ne vérifierait rien.
    */
-  const ladder = crownedLadderOf(input.colors, economy.valueOf);
+  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
 
   for (const [maleIndex, femaleIndex] of plan.crossings) {
     const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {

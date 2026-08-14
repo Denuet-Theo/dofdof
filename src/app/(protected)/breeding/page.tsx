@@ -10,6 +10,7 @@ import BreedingTimeline from '@/components/breeding/BreedingTimeline';
 import AvailabilityPicker from '@/components/breeding/AvailabilityPicker';
 import { buildLoadout } from '@/lib/dofus/breeding/loadout';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
+import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
 import PriceEntry from '@/components/breeding/PriceEntry';
@@ -154,6 +155,23 @@ const BreedingPage = () => {
 
   /** La couleur du plan suivi, qui réduit la liste à elle seule. */
   const selectedColorId = project.current?.target_color_id ?? null;
+
+  /**
+   * Les gen 10 qu'on peut réellement poursuivre.
+   *
+   * Pas toutes : `crownAt` exige une recette qui marie une gen 9 à une gen 1
+   * **rattachée à un bloc**, donc achetable. Une cible qui ne remplit pas ces
+   * conditions serait ignorée en silence, et proposer un choix sans effet est
+   * pire que ne pas le proposer.
+   */
+  const crownable = useMemo(() => {
+    const colors = tree?.colors ?? [];
+    if (colors.length === 0) return [];
+    const plan = ladderOf(colors);
+    return colors
+      .filter((color) => isCrownable(plan, colors, color.id))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [tree]);
 
   /**
    * Le programme des fournées du plan suivi, places libres comprises.
@@ -401,6 +419,11 @@ const BreedingPage = () => {
       // de places occupées.
       loadKamas: (supplies?.fuelCostPerCycle ?? 0) * capacity,
       kamas: toNumber(settings.kamas_available),
+      // La gen 10 que l'éleveur poursuit. Le canal est le **projet**, privé, et
+      // non le prix : `breeding_color_prices` est partagé entre les joueurs, donc
+      // gonfler une gen 10 pour l'atteindre fausserait leur marché — et les coûts
+      // affichés avec, puisque le prix sert aussi à chiffrer.
+      target: selectedColorId,
     };
   }, [
     tree,
@@ -412,6 +435,7 @@ const BreedingPage = () => {
     supplies,
     settings.enclos_count,
     settings.kamas_available,
+    selectedColorId,
   ]);
 
   const policyFill = useMemo(
@@ -627,6 +651,22 @@ const BreedingPage = () => {
         onRemoveIndividual={removeIndividual}
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
+        // Les prix de couleurs et la quantité visée, relogés ici depuis « Couleur
+        // visée » : sans eux rien ne se chiffre, et leur seul chemin était masqué.
+        rows={rows}
+        onSavePrice={savePrice}
+        targetCount={targetCount}
+        onSetTargetCount={setTargetCount}
+        targetColorId={selectedColorId}
+        // Le découpage en vagues **est** le compte de fournées : il respecte
+        // l'ordre parents-avant-enfants, donc il ne se comprime pas en dessous du
+        // nombre de barreaux, et il part du stock réel au parc réel.
+        minBatches={waves?.length ?? null}
+        crownable={crownable}
+        onSelectTarget={(colorId) => {
+          if (colorId) project.select(colorId, targetCount);
+          else project.abandon();
+        }}
       />
 
       {/* La couleur visée : le classement, replié derrière ce qu'on cherche. La

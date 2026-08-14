@@ -399,6 +399,9 @@ const BreedingPage = () => {
         fuelItems={fuelItems}
         individuals={stable.individuals}
         bulk={stable.bulk}
+        // Le nom de la famille tel que l'onglet l'écrit : les filtres du jeu ont
+        // une ligne « Type » qui le porte, et c'est un chiffre de plus à comparer.
+        familyLabel={FAMILIES.find((entry) => entry.id === family)?.label ?? family}
         itemStock={itemStock}
         itemPrices={fuelPrices}
         onSaveFuelPrice={saveFuelPrice}

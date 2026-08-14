@@ -35,6 +35,13 @@ import type {
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
 import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
+import BreedingStockFilters from '@/components/breeding/BreedingStockFilters';
+import {
+  matches,
+  NO_FILTERS,
+  rosterOf,
+  type RosterFilters,
+} from '@/lib/dofus/breeding/roster';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -76,6 +83,8 @@ type Props = {
    * affichés — le temps qu'on les remplace par des montures nommées.
    */
   bulk: Map<string, BulkStock>;
+  /** Le nom de la famille, pour la ligne « Type » des filtres du jeu. */
+  familyLabel: string;
   itemStock: Map<number, number>;
   /** Prix unitaire des carburants, pour les afficher et les comparer au point. */
   itemPrices: Map<number, number>;
@@ -248,6 +257,7 @@ const BreedingStocks = ({
   fuelItems,
   individuals,
   bulk,
+  familyLabel,
   itemStock,
   itemPrices,
   onSaveFuelPrice,
@@ -272,7 +282,14 @@ const BreedingStocks = ({
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [mountQuery, setMountQuery] = useState('');
+  /**
+   * Les filtres de l'écurie, calqués sur ceux du jeu.
+   *
+   * La recherche par nom y est entrée avec le reste : elle était déjà là, et deux
+   * champs de recherche sur le même écran auraient laissé se contredire ce que la
+   * liste montre et ce que les compteurs annoncent.
+   */
+  const [filters, setFilters] = useState<RosterFilters>(NO_FILTERS);
   const [fuelQuery, setFuelQuery] = useState('');
   /** La saisie en masse des prix de couleurs, repliée : cent vingt lignes. */
   const [pricesOpen, setPricesOpen] = useState(false);
@@ -349,16 +366,36 @@ const BreedingStocks = ({
    * Les fertiles remontent parce que ce sont les seules qui décident de quelque
    * chose — les autres attendent une naissance ou un clonage.
    */
+  /**
+   * L'écurie sous la forme que le jeu compte : suivies et vrac ensemble.
+   *
+   * Elle alimente les compteurs des filtres, et elle seule — un total qui
+   * n'additionnerait que les montures suivies ne serait comparable à rien, les
+   * gen 1 étant justement dans le vrac.
+   */
+  const roster = useMemo(
+    () => rosterOf({ bulk, individuals }, generationOfColor),
+    [bulk, individuals, generationOfColor]
+  );
+
   const owned = useMemo(() => {
-    const needle = mountQuery.trim().toLowerCase();
     return individuals
-      .filter((mount) => {
-        if (!needle) return true;
-        return (
-          nameOf(mount.colorId).toLowerCase().includes(needle) ||
-          (mount.name ?? '').toLowerCase().includes(needle)
-        );
-      })
+      .filter((mount) =>
+        matches(
+          {
+            colorId: mount.colorId,
+            generation: generationOfColor(mount.colorId),
+            sex: mount.sex,
+            status: mountStatus(mount),
+            level: mount.level,
+            name: mount.name,
+            mount,
+            count: 1,
+          },
+          filters,
+          nameOf
+        )
+      )
       .sort(
         (a, b) =>
           READINESS[mountStatus(b)] - READINESS[mountStatus(a)] ||
@@ -367,15 +404,30 @@ const BreedingStocks = ({
           a.level - b.level ||
           a.id.localeCompare(b.id)
       );
-  }, [individuals, mountQuery, nameOf, generationOfColor]);
+  }, [individuals, filters, nameOf, generationOfColor]);
 
-  /** Le vrac restant, couleurs vides exclues. */
+  /**
+   * Le vrac restant, couleurs vides exclues et filtres appliqués.
+   *
+   * Filtré par les mêmes facettes que la liste du dessus : le laisser entier
+   * pendant que les suivies se réduisent ferait lire un écran à moitié filtré,
+   * et c'est un écran de comparaison. Une couleur dont il ne reste aucune ligne
+   * retenue disparaît.
+   */
   const legacyBulk = useMemo(
     () =>
       [...bulk]
         .filter(([, counts]) => counts.males > 0 || counts.females > 0)
+        .filter(([colorId]) =>
+          roster.some(
+            (entry) =>
+              entry.mount === null &&
+              entry.colorId === colorId &&
+              matches(entry, filters, nameOf)
+          )
+        )
         .sort(([a], [b]) => nameOf(a).localeCompare(nameOf(b))),
-    [bulk, nameOf]
+    [bulk, roster, filters, nameOf]
   );
 
   /** Tous les carburants lisibles, avec leur jauge et leur rang, avant filtrage. */
@@ -576,9 +628,11 @@ const BreedingStocks = ({
                 />
                 <input
                   type="text"
-                  value={mountQuery}
-                  onChange={(event) => setMountQuery(event.target.value)}
-                  placeholder="Filtrer par couleur ou par nom en jeu"
+                  value={filters.query}
+                  onChange={(event) =>
+                    setFilters((current) => ({ ...current, query: event.target.value }))
+                  }
+                  placeholder="Rechercher une monture"
                   className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-dark-800/80 border
                     border-dark-600/50 text-dark-100 text-xs placeholder:text-dark-500
                     transition-all hover:border-dark-500 focus:border-kamas/50"
@@ -601,6 +655,17 @@ const BreedingStocks = ({
               ce qui les sépare est le cycle de jauges, que la féconde a déjà payé. Seule la
               stérile est hors jeu — il ne lui reste que le clonage.
             </p>
+
+            {/* Les mêmes facettes que dans le jeu, aux mêmes intitulés et dans le
+                même ordre : c'est ce qui permet de poser les deux écrans côte à
+                côte et de voir **où** un écart se loge. Voir `roster.ts`. */}
+            <BreedingStockFilters
+              entries={roster}
+              filters={filters}
+              onChange={setFilters}
+              nameOf={nameOf}
+              familyLabel={familyLabel}
+            />
 
             <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
               {owned.map((mount) => {

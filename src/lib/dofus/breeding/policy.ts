@@ -412,6 +412,13 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       // une fournée retombée à 10 places sur 40. Ici, les places vont d'emblée à
       // ce qui peut payer.
       admissible: (male, female) => aimsAt(male, female, input.colors, generations, ladder) !== null,
+      // La montée s'arrête dès que plus rien ne fait strictement mieux, et il lui
+      // arrive de rendre la main à trente-neuf places sur quarante. L'éleveur
+      // complétait alors au jugé, ce qui est le bon geste — la place est du
+      // carburant déjà payé — mais ce n'est pas à lui de le faire. Voir
+      // `fillSparePlaces` : la passe est fermée dans le modèle, qui doit rester
+      // comparable au Rust, et ouverte ici, où l'on charge un vrai enclos.
+      fillSpare: true,
     }),
     {
       mounts,

@@ -223,6 +223,17 @@ export type SearchConfig = {
    * libérées servent à autre chose.
    */
   admissible?: (male: Mate, female: Mate) => boolean;
+  /**
+   * Occuper, une fois la montée finie, les places que la recherche a laissées
+   * vides. Voir `fillSparePlaces`.
+   *
+   * Fermé par défaut, et il le faut : la passe ajoute des actions **après** le
+   * sommet, donc le plan rendu n'est plus celui que la montée a trouvé et
+   * `check-search.mjs` ne peut plus le comparer au Rust. Le modèle reste donc
+   * exactement le portage ; c'est l'écran qui ouvre le levier, comme il le fait
+   * déjà pour `admissible`.
+   */
+  fillSpare?: boolean;
 };
 
 export const DEFAULT_SEARCH: SearchConfig = {
@@ -1032,6 +1043,87 @@ const materialise = (
   return plan;
 };
 
+/**
+ * Les places que la montée n'a pas prises, comblées par des fécondations.
+ *
+ * ## Pourquoi la montée en laisse
+ *
+ * Elle n'accepte que ce qui fait **strictement** mieux (`scored > best`). Quand
+ * il ne reste qu'une place, seule une action à une place peut la prendre — une
+ * fécondation, ou un croisement dont un parent est déjà fécond. Si la fonction
+ * de valeur n'y gagne rien de mesurable, la mutation est annulée et la place
+ * reste vide. Mesuré sur vingt écuries muldo à budget serré : sept fournées
+ * incomplètes, dont deux à **39 places sur 40**, alors que vingt à trente
+ * fertiles pas encore fécondes attendaient dans l'écurie.
+ *
+ * Ce n'est pas une préférence apprise, c'est le critère d'acceptation. Et
+ * l'éleveur, lui, ne peut pas le savoir : il lit « 39/40 » et complète au
+ * jugé.
+ *
+ * ## Pourquoi c'est gratuit
+ *
+ * Le carburant se paie **à l'enclos**, pas à la monture : `feasible` facture le
+ * chargement une fois dès qu'une place est occupée. La quarantième place ne
+ * coûte donc pas un kama de plus que la trente-neuvième. Et une fécondation ne
+ * consomme pas la reproduction — la monture ressort féconde et s'accouplera
+ * gratuitement au tour suivant. Laisser la place vide ne préserve rien.
+ *
+ * ## Ce qu'on y met
+ *
+ * La génération **portée** la plus haute, et au hasard parmi les égales. Portée
+ * et non propre : c'est elle qui décide de ce qu'un accouplement peut viser
+ * — voir `carriedGeneration` — donc une gen 1 née d'un croisement gen 9 vaut
+ * mieux ici qu'une gen 2 ordinaire. Le hasard entre les égales est délibéré :
+ * rien ne les départage, et un ordre fixe viderait toujours le même groupe.
+ *
+ * ## La fournée qui n'existe pas
+ *
+ * Aucune place engagée veut dire aucun enclos chargé, donc aucun carburant déjà
+ * payé. Compléter serait alors **ouvrir** une fournée pour banquer une monture,
+ * ce qui coûte le chargement entier — l'inverse de ce que cette passe fait. On
+ * s'abstient.
+ */
+const fillSparePlaces = (
+  state: State,
+  candidates: Candidate[],
+  fertile: Group[],
+  sterile: Group[],
+  view: SearchView,
+  rng: () => number
+): void => {
+  if (state.places === 0) return;
+
+  while (state.places < view.capacity) {
+    let highest = -Infinity;
+    const usable: number[] = [];
+    for (let index = 0; index < fertile.length; index += 1) {
+      if (state.cyclableFree[index] <= 0) continue;
+      const rank = fertile[index].carried;
+      if (rank > highest) {
+        highest = rank;
+        usable.length = 0;
+      }
+      if (rank === highest) usable.push(index);
+    }
+    if (usable.length === 0) return;
+
+    const action: Action = { kind: 'cycle', group: usable[pick(rng, usable.length)] };
+    applyEffects(state, action, candidates, fertile, sterile, view);
+    state.census.places = state.places;
+
+    // Une fécondation ne dépense rien, donc ceci ne devrait jamais mordre. On le
+    // vérifie quand même : le jour où le coût d'une place cessera d'être nul,
+    // c'est ici qu'il faudra que ça s'arrête, et non à l'écran.
+    if (!feasible(state, view)) {
+      revertEffects(state, action, candidates, fertile, sterile, view);
+      state.census.places = state.places;
+      return;
+    }
+
+    state.actions.push(action);
+  }
+};
+
 /** Compose la fournée que la fonction de valeur préfère. */
 export const planUnit = (
   searcher: Searcher,
@@ -1082,6 +1174,14 @@ export const planUnit = (
 
     if (scored > best) best = scored;
     else undoMutation(state, mutation, candidates, fertile, sterile, view);
+  }
+
+  // Après le sommet, et jamais pendant : ces fécondations ne sont pas jugées par
+  // la fonction de valeur — elles occupent ce qu'elle a renoncé à prendre. Les
+  // tirer dans la montée les ferait annuler par le même critère qui laisse la
+  // place vide.
+  if (searcher.config.fillSpare) {
+    fillSparePlaces(state, candidates, fertile, sterile, view, rng);
   }
 
   return materialise(state, candidates, fertile, sterile, view.mounts.length);

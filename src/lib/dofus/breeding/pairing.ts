@@ -1,4 +1,5 @@
-import { genetonsForCrossing, targetGenerationRate, type BreedingColor } from './costs';
+import type { BreedingColor } from './costs';
+import { genetonsForCrossing, targetGenerationRate } from './mating';
 import { lineageDistribution } from './lineage';
 import type { Individual, Sex, Stable } from './stable';
 
@@ -24,8 +25,8 @@ import type { Individual, Sex, Stable } from './stable';
  *
  * De l'échec lui-même. Un croisement Amande gen 3 × Doré gen 1 qui n'atteint pas
  * la gen 4 rend quand même un bébé, d'une couleur tirée dans la généalogie —
- * c'est tout l'objet de `lineageValue`. Ce bébé-là est de génération basse et
- * porte une ascendance haute. Les commentaires de `creditOffTarget` les
+ * c'est tout l'objet de `crossingFailureShares`. Ce bébé-là est de génération
+ * basse et porte une ascendance haute. Les commentaires de `creditOffTarget` les
  * décrivaient comme des « couleurs de génération 2 dont on ne fera rien » ; ce
  * sont au contraire les montures les plus utiles de l'écurie.
  *
@@ -478,28 +479,23 @@ export type MatingOutcome = {
   kind: 'target' | 'other';
 };
 
+/** Ce dont la loi d'échec a besoin d'un parent : sa couleur et son ascendance. */
+export type CrossingParent = Pick<Mate, 'colorId' | 'parents'>;
+
 /**
- * Ce que l'accouplement peut donner, dans la forme où le jeu l'affiche.
+ * Ce qu'un croisement rend quand il rate — **sachant qu'il a raté**.
  *
- * C'est la fenêtre d'accouplement reconstituée, et elle l'est **au centième sur
- * les huit fenêtres relevées par l'issue #68** — couleurs, probabilités et
- * partage cible/autres compris. Ces huit-là couvrent ce que les relevés
- * précédents laissaient ouvert : des parents composés comme simples, avec et
- * sans ascendance, une à quatre couleurs cibles, un saut de deux générations, et
- * le cas où il n'y a rien à gagner.
+ * Les parts somment à 1 : c'est la loi conditionnelle, et non la moitié basse
+ * d'une fenêtre d'accouplement. Deux appelants en ont besoin sous cette forme.
+ * `matingOutcomes` la remet à l'échelle du complément de la réussite pour
+ * reconstituer la fenêtre ; `computeBreedingCosts` la valorise telle quelle, un
+ * bébé raté et un seul étant ce qu'une tentative manquée rend.
  *
- * ## Ce que la cible prend
+ * Le taux n'entre donc pas ici, et c'est ce qui rend la fonction utile :
+ * `optimalParentLevel` balaye les 200 niveaux d'un croisement, et le partage de
+ * l'échec est le même à tous.
  *
- * `targetGenerationRate` donne le **total** de la ligne « Génération cible », et
- * les poids de la recombinaison en donnent le **partage**. Ce partage était
- * annoncé ici comme une approximation ; il ne l'est pas. Sur le relevé à trois
- * couleurs — 33,06 % / 12,40 % / 4,65 % — les poids valent 64 / 24 / 9, et le
- * rapport tombe juste aux trois chiffres. Sur celui à quatre, de même. Le
- * contre-exemple qui fondait la réserve (40,02 % + 5,34 % + 5,34 %) s'y range
- * aussi : ce sont les poids 225 / 30 / 30 d'une lignée à parent simple et
- * grands-parents composés.
- *
- * ## Ce que l'échec prend, et pourquoi ce n'est pas moitié-moitié
+ * ## Pourquoi ce n'est pas moitié-moitié
  *
  * On lisait l'échec comme un partage 50/50 entre les deux lignées. C'est le cas
  * particulier d'une loi plus large, et il ne se voyait pas parce que les relevés
@@ -525,6 +521,79 @@ export type MatingOutcome = {
  * ensemble 88/121. Le jeu les affiche à 9,68 % et 3,63 %, et rabaisse d'autant
  * les couleurs simples : 13,31 % au lieu des 18,15 % que le partage 50/50
  * prédisait. Diviseur `2 + 88/121`, et les six lignes tombent au centième.
+ *
+ * ## Ce que la cible exclut
+ *
+ * Aucune couleur de la génération visée n'apparaît ici : celles-là sont la
+ * réussite. Et aucune ne peut la dépasser, la cible valant par construction le
+ * maximum de l'ascendance plus un. Toutes les couleurs rendues sont donc
+ * **strictement en dessous** de la cible — ce qui vaut à `computeBreedingCosts`
+ * de les trouver déjà chiffrées dans son parcours par génération croissante.
+ */
+export const crossingFailureShares = (
+  parents: readonly [CrossingParent, CrossingParent],
+  colors: BreedingColor[],
+  generations: Map<string, number>,
+  targetGeneration: number
+): Map<string, number> => {
+  const lineages = parents.map((parent) =>
+    lineageDistribution(parent.colorId, parent.parents)
+  );
+
+  const index = compositionIndexAnywhere(colors);
+  const crossings = new Map<string, number>();
+  let crossingWeight = 0;
+  for (const [colorA, shareA] of lineages[0]) {
+    for (const [colorB, shareB] of lineages[1]) {
+      const colorId = index.get([colorA, colorB].sort().join('+'));
+      if (!colorId || generations.get(colorId) === targetGeneration) continue;
+      const weight = shareA * shareB;
+      crossings.set(colorId, (crossings.get(colorId) ?? 0) + weight);
+      crossingWeight += weight;
+    }
+  }
+
+  const shares = new Map<string, number>();
+  const add = (colorId: string, share: number) =>
+    shares.set(colorId, (shares.get(colorId) ?? 0) + share);
+
+  const total = lineages.length + crossingWeight;
+  for (const distribution of lineages) {
+    for (const [colorId, share] of distribution) add(colorId, share / total);
+  }
+  for (const [colorId, weight] of crossings) add(colorId, weight / total);
+
+  return shares;
+};
+
+/**
+ * Ce que l'accouplement peut donner, dans la forme où le jeu l'affiche.
+ *
+ * C'est la fenêtre d'accouplement reconstituée, et elle l'est **au centième sur
+ * les huit fenêtres relevées par l'issue #68** — couleurs, probabilités et
+ * partage cible/autres compris. Ces huit-là couvrent ce que les relevés
+ * précédents laissaient ouvert : des parents composés comme simples, avec et
+ * sans ascendance, une à quatre couleurs cibles, un saut de deux générations, et
+ * le cas où il n'y a rien à gagner.
+ *
+ * ## Ce que la cible prend
+ *
+ * `targetGenerationRate` donne le **total** de la ligne « Génération cible », et
+ * les poids de la recombinaison en donnent le **partage**. Ce partage était
+ * annoncé ici comme une approximation ; il ne l'est pas. Sur le relevé à trois
+ * couleurs — 33,06 % / 12,40 % / 4,65 % — les poids valent 64 / 24 / 9, et le
+ * rapport tombe juste aux trois chiffres. Sur celui à quatre, de même. Le
+ * contre-exemple qui fondait la réserve (40,02 % + 5,34 % + 5,34 %) s'y range
+ * aussi : ce sont les poids 225 / 30 / 30 d'une lignée à parent simple et
+ * grands-parents composés.
+ *
+ * ## Ce que l'échec prend
+ *
+ * `crossingFailureShares` le dit, et ne dit que ça : la masse de réussite se
+ * verse sur les couleurs cibles ci-dessus, le complément se répartit selon cette
+ * loi-là. Le partage de l'échec ne dépend pas du taux, seulement des deux
+ * ascendances — ce qui est exactement ce dont `optimalParentLevel` a besoin pour
+ * balayer les niveaux sans recalculer la loi.
  *
  * ## Quand il n'y a rien à gagner
  *
@@ -580,38 +649,17 @@ export const matingOutcomes = (
     );
   }
 
-  const lineages = [
-    lineageDistribution(male.colorId, male.parents),
-    lineageDistribution(female.colorId, female.parents),
-  ];
-
-  // Les recombinaisons qui nomment une couleur **ailleurs** qu'à la génération
-  // visée. Celles qui la nomment sont la réussite, déjà comptée ci-dessus ; et
-  // aucune ne peut la dépasser, la cible valant par construction le maximum de
-  // l'ascendance plus un.
-  const index = compositionIndexAnywhere(colors);
-  const crossings = new Map<string, number>();
-  let crossingWeight = 0;
-  for (const [colorA, shareA] of lineages[0]) {
-    for (const [colorB, shareB] of lineages[1]) {
-      const colorId = index.get([colorA, colorB].sort().join('+'));
-      if (!colorId || generations.get(colorId) === outlook.targetGeneration) continue;
-      const weight = shareA * shareB;
-      crossings.set(colorId, (crossings.get(colorId) ?? 0) + weight);
-      crossingWeight += weight;
-    }
-  }
-
+  // Le complément de la réussite, réparti par la loi de l'échec. Les parts
+  // sortent normalisées à 1 : les remettre à l'échelle de `failureMass` est tout
+  // ce qui sépare la loi conditionnelle de la fenêtre du jeu.
   const failureMass = 1 - targetMass;
-  const total = lineages.length + crossingWeight;
-  for (const distribution of lineages) {
-    for (const [colorId, share] of distribution) {
-      add(colorId, (share / total) * failureMass, 'other');
-    }
-  }
-  for (const [colorId, weight] of crossings) {
-    add(colorId, (weight / total) * failureMass, 'other');
-  }
+  const failures = crossingFailureShares(
+    [male, female],
+    colors,
+    generations,
+    outlook.targetGeneration
+  );
+  for (const [colorId, share] of failures) add(colorId, share * failureMass, 'other');
 
   return [...outcomes.values()].sort(
     (a, b) =>

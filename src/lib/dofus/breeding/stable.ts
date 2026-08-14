@@ -18,7 +18,8 @@
  *   elles, sans ascendance qui compte. Un couple `(mâles, femelles)` par couleur
  *   suffit, et c'est ce qui rend la saisie supportable à cent montures.
  * - **Gen 3 et au-delà** : produites une par une, chères, et leur **généalogie
- *   décide** de la distribution des couleurs à l'échec (voir `lineageValue`).
+ *   décide** de la distribution des couleurs à l'échec (voir
+ *   `crossingFailureShares`).
  *   Deux muldos Amande ne se valent pas selon d'où ils viennent, donc les
  *   confondre dans un compteur perdrait exactement ce qui les distingue. C'est
  *   aussi ce qui rend la purification vérifiable : elle consiste à fabriquer des
@@ -172,7 +173,7 @@ export const cycledOf = (stock: BulkStock): { males: number; females: number } =
  * `parents` porte les identifiants des deux ascendants directs quand ils sont
  * connus, et `null` quand la monture a été achetée ou capturée — auquel cas elle
  * n'a pas d'ascendance dans notre écurie, et sa part de grands-parents lui
- * revient (voir `lineageValue`).
+ * revient (voir `lineageDistribution`).
  */
 export type Individual = {
   id: string;

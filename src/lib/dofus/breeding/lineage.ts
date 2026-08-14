@@ -20,8 +20,9 @@
  *    Amande », par opposition aux couleurs simples comme « Amande » ou
  *    « Doré » — voit son poids divisé par **4,5**.
  *
- * La masse d'échec se partage ensuite **exactement 50/50** entre les deux
- * lignées, et les parts se normalisent à l'intérieur de chacune.
+ * Les parts se normalisent à l'intérieur de chaque lignée. Entre les deux
+ * lignées, le partage n'est 50/50 que lorsque rien ne se recombine — voir plus
+ * bas, et `crossingFailureShares` pour la loi complète.
  *
  * Trois configurations mesurées, toutes reproduites au centième :
  *
@@ -76,14 +77,18 @@
  * des deux généalogies — un composant pris à gauche, l'autre à droite. Sur le
  * relevé 4, cela emporte 26 % de la masse d'échec.
  *
- * Leur loi est **connue depuis l'issue #68** et `matingOutcomes` l'applique :
- * chaque lignée pèse 1, chaque recombinaison qui nomme une couleur sous la cible
- * pèse le produit des deux parts, et le tout se normalise sur `2 + w`. Les
- * fonctions ci-dessous, elles, ne la produisent pas — et ne le peuvent pas :
- * `lineageValue` ne voit qu'**une** lignée à la fois, là où une recombinaison
- * naît de la rencontre des deux. Le chiffrage de `costs.ts` surestime donc les
- * couleurs de l'ascendance dès que ce cas se présente ; c'est un chantier à
- * part, qui demande de chiffrer un croisement plutôt qu'une lignée.
+ * Leur loi est **connue depuis l'issue #68** : chaque lignée pèse 1, chaque
+ * recombinaison qui nomme une couleur sous la cible pèse le produit des deux
+ * parts, et le tout se normalise sur `2 + w`. Elle vit dans
+ * `crossingFailureShares`, et pas ici — une recombinaison naît de la rencontre
+ * des **deux** lignées, là où les fonctions ci-dessous n'en voient qu'une à la
+ * fois. C'est structurel, pas un manque à combler.
+ *
+ * `costs.ts` chiffrait autrefois l'échec en sommant deux appels d'ici, un par
+ * parent. Il omettait donc la branche entière des recombinaisons, et
+ * sous-estimait le crédit d'un raté — de 688 kamas en moyenne sur le muldo,
+ * jusqu'à 9 436 sur les gen 9. Il valorise maintenant `crossingFailureShares`,
+ * et ce module n'a plus à connaître les coûts du tout.
  *
  * **Le régime « recopie ».** Quand aucune génération n'est à gagner, la masse de
  * réussite n'a nulle part où aller et retombe entièrement sur les cases de
@@ -145,24 +150,6 @@ export const slotWeight = (position: number, colorId: string) =>
   position * (isComposite(colorId) ? COMPOSITE_FACTOR : 1);
 
 /**
- * Part de la masse d'échec qui revient à chaque lignée, **hors recombinaison
- * croisée**.
- *
- * Les deux lignées pèsent 1 chacune, d'où la moitié quand elles sont seules en
- * lice. Elles ne le sont pas toujours : voir `matingOutcomes`, qui divise par
- * `2 + w`. Cette constante reste juste pour `lineageValue`, qui chiffre une
- * lignée sans connaître celle d'en face — et fausse d'autant, comme dit plus
- * haut.
- */
-export const LINEAGE_SHARE = 0.5;
-
-/** Une case d'ascendance : sa couleur, et ce qu'elle coûterait à se procurer. */
-export type LineageSlot = {
-  colorId: string;
-  cost: number;
-};
-
-/**
  * Les parts d'une lignée, cases cumulées, sommant à 1.
  *
  * C'est elle qui rend la **purification** lisible : croiser une couleur avec
@@ -210,33 +197,6 @@ export const lineageDistribution = (
 
   for (const [colorId, weight] of weights) add(colorId, weight / total);
   return shares;
-};
-
-/**
- * Ce qu'une lignée apporte à la valeur d'un bébé hors cible.
- *
- * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans payer
- * économise exactement cela. Les coûts sont bornés à zéro par l'appelant — une
- * monture ne peut pas valoir moins que rien.
- */
-export const lineageValue = (
-  parent: LineageSlot,
-  grandparents: LineageSlot[] | null
-): number => {
-  const distribution = lineageDistribution(
-    parent.colorId,
-    grandparents?.map((grandparent) => grandparent.colorId) ?? null
-  );
-
-  const costOf = new Map<string, number>([[parent.colorId, parent.cost]]);
-  for (const grandparent of grandparents ?? []) {
-    // Une couleur présente deux fois a un coût unique : le premier vu fait foi.
-    if (!costOf.has(grandparent.colorId)) costOf.set(grandparent.colorId, grandparent.cost);
-  }
-
-  let value = 0;
-  for (const [colorId, share] of distribution) value += share * (costOf.get(colorId) ?? 0);
-  return LINEAGE_SHARE * value;
 };
 
 /**

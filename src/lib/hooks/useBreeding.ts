@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/pagination';
 import { priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
+import { toNumber } from '@/lib/supabase/types';
 import type {
   BreedingColorPrice,
   DofusDBItem,
@@ -104,8 +105,25 @@ export type BirthEntry = {
 
 export type FamilyId = 'dragodinde' | 'muldo' | 'volkorne';
 
+/**
+ * Les réglages **une fois convertis** : à partir d'ici tout est nombre.
+ *
+ * `UserBreedingSettings` décrit ce qui sort du réseau, où trois champs sont des
+ * `Numeric` — voir `numericSettings`, qui est le seul endroit à les traverser.
+ * Le reste de l'app ne doit plus jamais rencontrer une chaîne, et ce type est ce
+ * qui le garantit.
+ */
+export type BreedingSettings = Omit<
+  UserBreedingSettings,
+  'user_id' | 'updated_at' | 'kamas_per_hour' | 'kamas_available' | 'net_recovery_rate'
+> & {
+  kamas_per_hour: number;
+  kamas_available: number;
+  net_recovery_rate: number;
+};
+
 /** Ce que le hook applique tant que l'utilisateur n'a rien réglé. */
-export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_at'> = {
+export const DEFAULT_SETTINGS: BreedingSettings = {
   breeder_level: 200,
   enclos_count: 6,
   kamas_per_hour: 0,
@@ -156,7 +174,7 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
  * On convertit donc à l'entrée, une fois, plutôt que chez chaque lecteur : c'est
  * le seul endroit qui sache que la valeur vient d'arriver du réseau.
  */
-const numericSettings = (row: UserBreedingSettings): typeof DEFAULT_SETTINGS => {
+const numericSettings = (row: UserBreedingSettings): BreedingSettings => {
   const merged = { ...DEFAULT_SETTINGS, ...row };
   return {
     ...merged,
@@ -475,13 +493,17 @@ export const useBreeding = (
 
   /** Prix nu d'un item, pour les co-produits qu'on ne fait que revendre. */
   const priceOf = useCallback(
-    (itemId: number) => itemPrices.get(itemId)?.price ?? 0,
+    (itemId: number) => toNumber(itemPrices.get(itemId)?.price),
     [itemPrices]
   );
 
   /** Valeur d'un généton : le meilleur des échanges de parchemins. */
   const genetonValuation = useMemo(
-    () => bestGenetonValue(GENETON_EXCHANGE, new Map([...itemPrices].map(([id, row]) => [id, row.price]))),
+    () =>
+      bestGenetonValue(
+        GENETON_EXCHANGE,
+        new Map([...itemPrices].map(([id, row]) => [id, toNumber(row.price)]))
+      ),
     [itemPrices]
   );
 
@@ -490,9 +512,9 @@ export const useBreeding = (
     () =>
       tree
         ? computeSupplyCosts(fuelItems, tree.nets, itemPrices, {
-            kamasPerHour: settings.kamas_per_hour,
+            kamasPerHour: toNumber(settings.kamas_per_hour),
             minutesPerFight: settings.minutes_per_fight,
-            netRecoveryRate: settings.net_recovery_rate,
+            netRecoveryRate: toNumber(settings.net_recovery_rate),
             // Un enclos plein amortit le cycle sur dix montures ; c'est le
             // régime visé, et le seul qui ne gaspille pas de transfert.
             mountsInEnclos: 10,
@@ -676,7 +698,7 @@ export const useBreeding = (
           waves,
           gaugeNeeds,
           estimate,
-          funding: planFunding(plan, estimates, settings.kamas_available, {
+          funding: planFunding(plan, estimates, toNumber(settings.kamas_available), {
             genetonValue,
             gaugeCredit,
           }),
@@ -1516,7 +1538,7 @@ export const useBreeding = (
     if (saveError) console.error('[breeding] réserve non enregistrée:', saveError);
   }, []);
 
-  const saveSettings = useCallback(async (next: typeof DEFAULT_SETTINGS) => {
+  const saveSettings = useCallback(async (next: BreedingSettings) => {
     const supabase = createClient();
     const { error: saveError } = await supabase
       .from('user_breeding_settings')

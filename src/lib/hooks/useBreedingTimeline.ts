@@ -9,7 +9,7 @@ import {
   useTransition,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { BreedingTimeline } from '@/lib/supabase/types';
+import { toNumber, type BreedingTimeline } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
 import {
   parsePlan,
@@ -95,7 +95,7 @@ const clockOf = (row: BreedingTimeline): TimelineClock => ({
     ])
   ),
   pausedAt: row.paused_at === null ? null : new Date(row.paused_at).getTime(),
-  pausedSeconds: row.paused_seconds,
+  pausedSeconds: toNumber(row.paused_seconds),
 });
 
 /**
@@ -238,7 +238,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         plan: row.plan,
         started_at: row.started_at,
         paused_at: row.paused_at,
-        paused_seconds: row.paused_seconds,
+        paused_seconds: toNumber(row.paused_seconds),
         track_clocks: clocks,
       });
     },
@@ -312,7 +312,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
       plan: row.plan,
       started_at: row.started_at,
       paused_at: pausedAt,
-      paused_seconds: row.paused_seconds,
+      paused_seconds: toNumber(row.paused_seconds),
     });
   }, [row, persist]);
 

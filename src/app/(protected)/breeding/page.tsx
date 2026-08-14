@@ -31,6 +31,7 @@ import {
   type ObjectiveId,
 } from '@/lib/dofus/breeding/objectives';
 import { formatHours } from '@/lib/utils/date';
+import { toNumber } from '@/lib/supabase/types';
 
 /**
  * Les panneaux qui descendent de l'heuristique sont-ils affichés.
@@ -132,7 +133,7 @@ const BreedingPage = () => {
 
   /** Les prix nus, la table complète portant aussi les noms et les icônes. */
   const fuelPrices = useMemo(
-    () => new Map([...itemPrices].map(([id, row]) => [id, row.price] as const)),
+    () => new Map([...itemPrices].map(([id, row]) => [id, toNumber(row.price)] as const)),
     [itemPrices]
   );
 
@@ -379,7 +380,7 @@ const BreedingPage = () => {
     // elle est indisponible : zéro la laisse simplement hors de portée.
     const optimakina = Array.from({ length: 11 }, (_, generation) => {
       const item = tree?.optimakinaByGeneration?.[String(generation)];
-      return item ? (itemPrices.get(item.id)?.price ?? 0) : 0;
+      return item ? (toNumber(itemPrices.get(item.id)?.price)) : 0;
     });
 
     const capacity = Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS;
@@ -399,7 +400,7 @@ const BreedingPage = () => {
       // rythme de l'enclos, pas de l'animal. Le chargement en coûte donc autant que
       // de places occupées.
       loadKamas: (supplies?.fuelCostPerCycle ?? 0) * capacity,
-      kamas: settings.kamas_available,
+      kamas: toNumber(settings.kamas_available),
     });
   }, [
     tree,

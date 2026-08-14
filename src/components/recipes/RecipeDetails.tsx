@@ -4,7 +4,7 @@ import ItemCard from '@/components/ui/ItemCard';
 import CopyableIcon from '@/components/ui/CopyableIcon';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import Button from '@/components/ui/Button';
-import { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
+import { toNumber, DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
 import { ShoppingCart, Edit2, Hammer } from 'lucide-react';
 import { formatTimeAgo } from '@/lib/utils/date';
 import { getHdvLabel } from '@/lib/dofus/hdv';
@@ -108,7 +108,7 @@ const RecipeDetails = ({
             id: ingredient.id,
             name: ingredient.name?.fr || '',
             iconUrl: ingredient.img,
-            price: unitPrice,
+            price: toNumber(unitPrice),
             superTypeId: ingredient.superTypeId,
           };
           const craftable = ingredient.hasRecipe && onOpenSubRecipe !== undefined;

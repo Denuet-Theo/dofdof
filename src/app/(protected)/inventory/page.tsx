@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/pagination';
-import { UserSale } from '@/lib/supabase/types';
+import { toNumber, UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
 import { useItemJobs } from '@/lib/hooks/useItemJobs';
@@ -131,7 +131,10 @@ const InventoryPage = () => {
     // Taxe de modification = 1% de la valeur totale de la vente (nouveau prix * lot_count)
     const newTotalSaleValue = price * editingSale.lot_count;
     const modTax = Math.floor(newTotalSaleValue * PRICE_EDIT_TAX_RATE);
-    const newTaxPaid = (editingSale.tax_paid || 0) + modTax;
+    // `tax_paid` est un `bigint` : il arrive en **chaîne**, et `"5000" + 120`
+    // concatène au lieu d'additionner — la taxe enregistrée devenait 5 000 120.
+    // Voir `Numeric`.
+    const newTaxPaid = toNumber(editingSale.tax_paid) + modTax;
     const newUnitPrice = Math.floor(price / editingSale.lot_size);
 
     try {
@@ -178,7 +181,7 @@ const InventoryPage = () => {
 
   const handleOpenEdit = (sale: UserSale) => {
     setEditingSale(sale);
-    setNewLotPrice((sale.unit_price * sale.lot_size).toString());
+    setNewLotPrice((toNumber(sale.unit_price) * sale.lot_size).toString());
     setEditError('');
   };
 

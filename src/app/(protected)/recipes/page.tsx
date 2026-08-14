@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useTransition, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { DofusDBRecipe, DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
+import { toNumber, DofusDBRecipe, DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
 import RecipeCard from '@/components/recipes/RecipeCard';
 import { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
 import SellModal from '@/components/recipes/SellModal';
@@ -101,7 +101,9 @@ const RecipesContent = () => {
         params.set('resultIds', itemIds.join(','));
       } else if (!hasLevelOrJobFilter) {
         // No search or filter: fetch recipes for items we have priced
-        const pricedIds = Array.from(prices.values()).filter(p => p.price > 0).map(p => p.item_id);
+        const pricedIds = Array.from(prices.values())
+          .filter((p) => toNumber(p.price) > 0)
+          .map((p) => p.item_id);
         // User has no prices set and no search, don't fetch random recipes
         if (pricedIds.length === 0) return { data: [], total: 0 };
 
@@ -180,7 +182,7 @@ const RecipesContent = () => {
   }
 
   function getMargin(recipe: DofusDBRecipe): number {
-    const resultPrice = prices.get(recipe.resultId)?.price || 0;
+    const resultPrice = toNumber(prices.get(recipe.resultId)?.price);
     return computeMargin(resultPrice, craftCostOf(recipe)).margin;
   }
 
@@ -395,7 +397,7 @@ const RecipesContent = () => {
                 key={recipe.id}
                 recipe={recipe}
                 ingredientPrices={prices}
-                resultPrice={prices.get(recipe.resultId)?.price || 0}
+                resultPrice={toNumber(prices.get(recipe.resultId)?.price)}
                 onSell={handleSell}
                 onIngredientClick={handleIngredientClick}
                 expanded={expandedId === recipe.id}

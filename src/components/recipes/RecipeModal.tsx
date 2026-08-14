@@ -9,7 +9,7 @@ import HdvBadge from '@/components/items/HdvBadge';
 import RecipeDetails, { PriceTarget, SellTarget } from '@/components/recipes/RecipeDetails';
 import PriceModal from '@/components/recipes/PriceModal';
 import SellModal from '@/components/recipes/SellModal';
-import { DofusDBRecipe, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
+import { toNumber, DofusDBRecipe, DofusDBResponse, ItemPrice } from '@/lib/supabase/types';
 import type { RecipeIndex } from '@/lib/utils/recipes';
 import { Edit2 } from 'lucide-react';
 
@@ -93,7 +93,7 @@ const RecipeModal = ({
 
   const name = active?.resultName?.fr || `Item #${active?.resultId ?? ''}`;
   const iconUrl = active?.result?.img || '';
-  const resultPrice = active ? prices.get(active.resultId)?.price || 0 : 0;
+  const resultPrice = active ? toNumber(prices.get(active.resultId)?.price) : 0;
 
   return (
     <>

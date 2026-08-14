@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
+import { toNumber, DofusDBItem, DofusDBResponse } from '@/lib/supabase/types';
 import SearchBar from '@/components/items/SearchBar';
 import ItemPriceCard from '@/components/items/ItemPriceCard';
 import Skeleton from '@/components/ui/Skeleton';
@@ -115,7 +115,7 @@ const ItemsPage = () => {
                 key={item.id}
                 item={item}
                 prices={prices}
-                currentPrice={itemPrice?.price}
+                currentPrice={itemPrice && toNumber(itemPrice.price)}
                 updatedAt={itemPrice?.updated_at}
                 onPriceSaved={applyPriceSaved}
               />

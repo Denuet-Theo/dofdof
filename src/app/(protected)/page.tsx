@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/pagination';
-import { UserSale } from '@/lib/supabase/types';
+import { toNumber, UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import {
   computeCraftCost,
@@ -73,7 +73,7 @@ const DashboardPage = () => {
     if (prices.size === 0) return;
 
     const itemIds = Array.from(prices.values())
-      .filter((p) => p.price > 0)
+      .filter((p) => toNumber(p.price) > 0)
       .map((p) => p.item_id);
 
     startLoadingRecipes(async () => {
@@ -97,7 +97,7 @@ const DashboardPage = () => {
         const computed: TopRecipe[] = recipesList
           .filter((recipe) => recipeHasAllPrices(recipe, prices, craftIndex, costs))
           .map((recipe) => {
-            const resultPrice = prices.get(recipe.resultId)?.price || 0;
+            const resultPrice = toNumber(prices.get(recipe.resultId)?.price);
             const craftCost = computeCraftCost(recipe, prices, craftIndex, costs);
             const { margin, marginPercent } = computeMargin(resultPrice, craftCost);
 

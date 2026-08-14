@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { UserSale } from '@/lib/supabase/types';
+import { toNumber, UserSale } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
 import { getSaleProfit } from '@/lib/utils/sales';
 import ItemCard from '@/components/ui/ItemCard';
@@ -90,7 +90,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
   // lot_size=10, lot_count=5. unit_price=100.
   // Prix d'un lot = unit_price * lot_size (ex: 100 * 10 = 1000)
   // Total vente = prix d'un lot * lot_count (ex: 1000 * 5 = 5000)
-  const lotPrice = sale.unit_price * sale.lot_size;
+  const lotPrice = toNumber(sale.unit_price) * sale.lot_size;
 
   // Profit = Valeur totale - coût de craft - taxes payées
   const netProfit = getSaleProfit(sale);
@@ -143,10 +143,10 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
 
       <ItemCard.Metrics className="gap-4">
         <ItemCard.Metric label={sale.is_resale ? "Coût d'achat" : 'Coût craft'} hideOnMobile>
-          <KamasDisplay amount={sale.craft_cost || 0} size="sm" className="text-dark-300" />
+          <KamasDisplay amount={toNumber(sale.craft_cost)} size="sm" className="text-dark-300" />
         </ItemCard.Metric>
         <ItemCard.Metric label="Taxes HDV" hideOnMobile>
-          <KamasDisplay amount={sale.tax_paid || 0} size="sm" className="text-loss" />
+          <KamasDisplay amount={toNumber(sale.tax_paid)} size="sm" className="text-loss" />
         </ItemCard.Metric>
         <ItemCard.Metric label={`prix du lot (x${sale.lot_size})`}>
           <KamasDisplay amount={lotPrice} size="sm" className="text-dark-300" />

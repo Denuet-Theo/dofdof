@@ -1267,6 +1267,70 @@ struct Building {
     places: usize,
 }
 
+/// Ce qu'on fait d'une gen 10 une fois qu'on l'a.
+///
+/// La question ne se posait pas : tant que la cible dépassait le plafond, le
+/// couple était refusé et une gen 10 n'avait plus qu'à attendre la liquidation.
+/// Le plafond (issue #185) la rouvre, et l'arithmétique dit qu'elle vaut plus
+/// que ce qu'on croyait — c'est le seul endroit de l'arbre où une **réussite
+/// rend la génération qu'on vient de dépenser** au lieu de la suivante.
+/// ## Elle ne vaut rien sans le cloneur retenu, et réciproquement
+///
+/// C'est la mesure qui l'a dit, pas le raisonnement. 200 graines appariées,
+/// contre l'échelle d'aujourd'hui :
+///
+/// | variante | score | gen 10 tenues |
+/// | --- | --- | --- |
+/// | dupliquer seul | **−8,38 M** (22/200) | −4,38 |
+/// | ne plus refondre le sommet, seul | 0,00 M | 0,00 |
+/// | **les deux** | **+43,18 M** (200/200) | **+63,43** |
+///
+/// Dupliquer seul **perd**, parce que la boucle fabrique des stériles gen 10 et
+/// que le cloneur les refond aussitôt deux en une — il mange sa production. Ne
+/// plus refondre, seul, ne vaut exactement rien : sans la boucle une gen 10 ne
+/// s'accouple jamais, donc elle ne devient jamais stérile et le cloneur ne la
+/// voit pas. Voir `clonable`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Summit {
+    /// Rien. La fécondité d'une gen 10 se garde, faute de savoir quoi en faire.
+    Hold,
+    /// La boucle décrite par Olxinos-etenn#1917 sur le forum officiel, et
+    /// vérifiée ici sur `mating_outcomes`.
+    ///
+    /// Accoupler une gen 10 avec une gen 1, réaccoupler le raté — il porte la
+    /// gen 10 dans son ascendance, donc il revise la gen 10 — et cloner les
+    /// stériles deux par deux. Par gen 10 féconde consommée, à niveau 67 :
+    ///
+    /// | terme | valeur |
+    /// | --- | --- |
+    /// | réussite directe | 0,501 |
+    /// | la chaîne des ratés, `Σ (1−t)ⁿ t` | +0,499 |
+    /// | clonage de la stérile | +0,5 |
+    ///
+    /// La chaîne seule somme à `t / (1 − (1 − t)) = 1` : les accouplements
+    /// rendent exactement ce qu'ils consomment, et c'est le clonage qui fait
+    /// basculer au-dessus de 1. L'issue annonce 1,16 à niveau 39 ; le simulateur
+    /// joue au niveau 67, où le même calcul donne 1,5.
+    ///
+    /// ## Le partenaire décide de **quelle** gen 10 sort
+    ///
+    /// Ça, l'issue ne le dit pas, et c'est ce que le plafond rend visible. La
+    /// masse cible vaut le taux quel que soit le partenaire — mais son
+    /// **partage** dépend de lui. Sur une Ambre-Doré [Ambre, Doré] :
+    ///
+    /// | partenaire | part qui reproduit la mère |
+    /// | --- | --- |
+    /// | Doré — sa propre gen 1 | **100 %** |
+    /// | Ébène | 62,5 % |
+    ///
+    /// Avec Ébène, `Ambre × Ébène` nomme Ambre-Ébène et se partage la cible.
+    /// Avec Doré, aucune recombinaison ne concurrence la mère. Dupliquer une
+    /// gen 10 précise se joue donc entièrement sur le choix de la gen 1, à
+    /// mille kamas pièce.
+    #[default]
+    Duplicate,
+}
+
 pub struct LadderPolicy {
     ladder: Ladder,
     pub threshold: usize,
@@ -1308,6 +1372,13 @@ pub struct LadderPolicy {
     pub sex_blind_cloning: bool,
     /// Monnayer les montures hors plan. Exposé pour pouvoir isoler son effet.
     pub harvesting: bool,
+    /// Ce qu'on fait d'une gen 10 une fois qu'on l'a. Voir `Summit`.
+    pub summit: Summit,
+    /// Laisser le cloneur refondre les montures du **plafond**.
+    ///
+    /// `false` par défaut depuis que la boucle du sommet existe : les deux vont
+    /// ensemble et ne valent rien séparément. Voir `clonable` et `Summit`.
+    pub clone_top: bool,
     /// Cloner entre lignées différentes, à la seule condition que le jeu pose —
     /// la même génération affichée. Sinon on n'apparie qu'à signature égale, ce
     /// qui rend le tirage sans enjeu mais ne se déclenche presque jamais.
@@ -1376,6 +1447,8 @@ impl LadderPolicy {
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
+            summit: Summit::default(),
+            clone_top: false,
             next_starter: 0,
             crowned: false,
             forced_crown: None,
@@ -1392,6 +1465,12 @@ impl LadderPolicy {
     /// `forced_crown` — c'est un instrument de mesure, pas un réglage de jeu.
     pub fn with_forced_crown(mut self, crown: ColorId) -> Self {
         self.forced_crown = Some(crown);
+        self
+    }
+
+    /// Ce qu'on fait du sommet. Voir `Summit`.
+    pub fn with_summit(mut self, summit: Summit) -> Self {
+        self.summit = summit;
         self
     }
 
@@ -1733,6 +1812,155 @@ impl LadderPolicy {
                 *places += cost;
             }
         }
+    }
+
+    /// La boucle du sommet : dupliquer ce qui porte déjà une gen 10.
+    ///
+    /// Voir `Summit::Duplicate` pour l'arithmétique et pour ce que le partenaire
+    /// décide. Ici on n'a plus qu'à l'appliquer.
+    ///
+    /// ## Qui est sujet
+    ///
+    /// Tout ce qui **porte** le plafond dans ses six cases, pas seulement les
+    /// gen 10 elles-mêmes. C'est le point qui rend la boucle rentable : le raté
+    /// d'un croisement au sommet est une monture de basse génération dont la
+    /// généalogie contient la gen 10, donc elle revise la gen 10 — c'est le
+    /// raccourci d'ascendance de #59, et il ne coûte rien de plus.
+    ///
+    /// ## Pourquoi on achète le partenaire au lieu de le prendre en écurie
+    ///
+    /// Une gen 1 neuve coûte mille kamas et n'appartient à aucun bloc tant qu'on
+    /// ne la range pas. Puiser dans les gen 1 de l'écurie brûlerait la matière
+    /// première de l'étage 1 — c'est exactement l'exclusion que la moisson a dû
+    /// apprendre à ses dépens, 1,5 M sur le départ de zéro. Et le partenaire ne
+    /// se choisit pas au hasard : c'est lui qui décide de quelle gen 10 sort.
+    ///
+    /// ## Après la composition, jamais avant
+    ///
+    /// La montée passe d'abord. Le sommet ne prend que les places qui restent,
+    /// sans quoi il financerait la duplication en cessant de grimper — et la
+    /// première gen 10 est ce qu'il faut avoir pour que la boucle existe.
+    fn summit(&mut self, view: &UnitView<'_>, groups: &[crate::stable::MateGroup], free: &mut [Vec<usize>], batch: &mut Building) {
+        if self.summit != Summit::Duplicate {
+            return;
+        }
+        let Building {
+            crossings,
+            purchases,
+            budget,
+            places,
+        } = batch;
+        let catalog = view.catalog;
+        let top = catalog.top_generation();
+        let starter = view.economy.starter_price;
+
+        /// Ce que la monture porte : sa couleur et celles de ses deux parents.
+        fn carried(catalog: &Catalog, mate: &crate::pairing::Mate) -> u8 {
+            let mut highest = catalog.generation(mate.color);
+            for parent in mate.parents.into_iter().flatten() {
+                highest = highest.max(catalog.generation(parent));
+            }
+            highest
+        }
+
+        // Les porteuses, les vraies gen 10 d'abord : ce sont elles dont la
+        // réussite est une duplication, et elles ne se remplacent pas.
+        let mut subjects: Vec<usize> = (0..groups.len())
+            .filter(|&at| carried(catalog, &groups[at].sample) >= top)
+            .collect();
+        if subjects.is_empty() {
+            return;
+        }
+        subjects.sort_by_key(|&at| {
+            std::cmp::Reverse((
+                catalog.generation(groups[at].sample.color),
+                view.economy
+                    .value_of(catalog, groups[at].sample.color),
+            ))
+        });
+
+        for subject in subjects {
+            while *places < view.capacity && *budget >= starter && !free[subject].is_empty() {
+                let sex = groups[subject].sex;
+                let Some((color, _)) = self.summit_partner(view, &groups[subject].sample, sex)
+                else {
+                    break;
+                };
+
+                let index = view.stable.len() + purchases.len();
+                let subject_index = *free[subject].last().expect("non vide");
+                let pair = if sex == Sex::Male {
+                    [subject_index, index]
+                } else {
+                    [index, subject_index]
+                };
+                let cost = places_for(view.stable, pair);
+                if *places + cost > view.capacity {
+                    break;
+                }
+
+                free[subject].pop();
+                purchases.push((color, sex.other()));
+                crossings.push(pair);
+                *places += cost;
+                *budget -= starter;
+            }
+        }
+    }
+
+    /// La gen 1 à acheter pour dupliquer une porteuse de gen 10.
+    ///
+    /// On note chaque teinte par l'**espérance de valeur du bloc cible** : la
+    /// masse cible vaut le taux quel que soit le partenaire, mais son partage
+    /// dépend de lui, et les gen 10 ne se valent pas au marché. Maximiser
+    /// l'espérance revient donc à concentrer la cible sur la mieux payée — ce qui
+    /// choisit tout seul la propre gen 1 de la mère quand c'est elle la plus
+    /// chère, sans qu'on ait à écrire la règle.
+    ///
+    /// `None` quand aucune teinte ne nomme quoi que ce soit au rang visé : la
+    /// monture retombe alors dans le régime de recopie, et deux fécondités
+    /// brûlées pour une recopie ne valent pas mille kamas.
+    fn summit_partner(
+        &self,
+        view: &UnitView<'_>,
+        subject: &crate::pairing::Mate,
+        subject_sex: Sex,
+    ) -> Option<(ColorId, f64)> {
+        let catalog = view.catalog;
+        let mut best: Option<(ColorId, f64)> = None;
+        for color in catalog.ids_at_generation(1) {
+            let partner = crate::pairing::Mate {
+                color,
+                level: view.economy.mount_level,
+                parents: None,
+            };
+            let (male, female) = if subject_sex == Sex::Male {
+                (subject, &partner)
+            } else {
+                (&partner, subject)
+            };
+            let outlook = pair_outlook(catalog, male, female);
+            if outlook.target_colors.is_empty() {
+                continue;
+            }
+            let total: f64 = outlook.target_colors.iter().map(|t| t.weight).sum();
+            if total <= 0.0 {
+                continue;
+            }
+            let worth: f64 = outlook
+                .target_colors
+                .iter()
+                .map(|t| {
+                    (t.weight / total) * view.economy.value_of(catalog, t.color) as f64
+                })
+                .sum::<f64>()
+                * outlook.success_rate;
+            if best.is_none_or(|(current, seen)| worth > seen || (worth == seen && color < current))
+            {
+                best = Some((color, worth));
+            }
+        }
+        best
     }
 
     /// La gen 1 à acheter pour accompagner une monture : celle qui rend la
@@ -2153,15 +2381,20 @@ impl Policy for LadderPolicy {
         let starter = view.economy.starter_price;
         let mut budget = view.kamas - view.economy.batch_cost;
 
-        // La moisson : monnayer ce que le plan ne sait pas employer.
-        if self.harvesting {
+        // Le sommet, puis la moisson. Dans cet ordre parce qu'ils se disputent
+        // les mêmes places et que la gen 10 vaut cinq cents fois le géneton
+        // qu'une moisson en tirerait — voir `Summit`.
+        if self.summit == Summit::Duplicate || self.harvesting {
             let mut batch = Building {
                 crossings,
                 purchases,
                 budget,
                 places,
             };
-            self.harvest(view, &groups, &mut free, &mut batch);
+            self.summit(view, &groups, &mut free, &mut batch);
+            if self.harvesting {
+                self.harvest(view, &groups, &mut free, &mut batch);
+            }
             crossings = batch.crossings;
             purchases = batch.purchases;
             budget = batch.budget;
@@ -2237,9 +2470,9 @@ impl Policy for LadderPolicy {
         // sinon on perd la bonne une fois sur deux. On préfère en plus le même
         // sexe, qui rend celui du clone certain et ne coûte rien.
         let clonings = if self.clone_across_lineages {
-            clone_by_generation(view.stable, catalog, self.sex_blind_cloning)
+            clone_by_generation(view.stable, catalog, self.sex_blind_cloning, self.clone_top)
         } else {
-            clone_same_lineage(view.stable, catalog, self.sex_blind_cloning)
+            clone_same_lineage(view.stable, catalog, self.sex_blind_cloning, self.clone_top)
         };
 
         // L'ambre : ce qui est né hors plan, et rien d'autre. Une gen 1 ne
@@ -2381,10 +2614,34 @@ fn geneton_weight(generation: u8) -> i64 {
 ///
 /// Gardée pour la mesure : c'est le seul moyen de dire ce que le relâchement
 /// vers `clone_by_generation` rapporte, et dans quel régime.
-fn clone_same_lineage(stable: &Stable, catalog: &Catalog, sex_blind: bool) -> Vec<[usize; 2]> {
+/// Une stérile se laisse-t-elle refondre ?
+///
+/// Un clonage échange **une monture contre une fécondité** : deux stériles
+/// entrent, une féconde sort. Le marché est bon tant que la monture détruite ne
+/// vaut presque rien et que la fécondité rendue ouvre la montée — c'est le cas
+/// partout sous le sommet.
+///
+/// Au sommet il s'inverse, et il s'inverse **doublement**. La monture détruite
+/// est ce qu'on possède de plus cher, et la fécondité rendue n'achète qu'une
+/// chance de plus sur deux d'en refaire une. Tant que `Summit::Hold` régnait,
+/// elle n'achetait même rien du tout : aucun croisement au plafond n'était
+/// admissible, donc refondre deux gen 10 en une était une perte sèche que rien
+/// ne compensait.
+///
+/// Mesuré : voir `mod sommet`.
+fn clonable(catalog: &Catalog, mount: &crate::stable::Mount, clone_top: bool) -> bool {
+    clone_top || catalog.generation(mount.color) < catalog.top_generation()
+}
+
+fn clone_same_lineage(
+    stable: &Stable,
+    catalog: &Catalog,
+    sex_blind: bool,
+    clone_top: bool,
+) -> Vec<[usize; 2]> {
     let mut by_lineage: HashMap<(u8, MateSignature), (Vec<usize>, Vec<usize>)> = HashMap::new();
     for (index, mount) in stable.mounts.iter().enumerate() {
-        if mount.fertile {
+        if mount.fertile || !clonable(catalog, mount, clone_top) {
             continue;
         }
         let slot = by_lineage
@@ -2433,10 +2690,15 @@ fn clone_same_lineage(stable: &Stable, catalog: &Catalog, sex_blind: bool) -> Ve
     pairs
 }
 
-fn clone_by_generation(stable: &Stable, catalog: &Catalog, sex_blind: bool) -> Vec<[usize; 2]> {
+fn clone_by_generation(
+    stable: &Stable,
+    catalog: &Catalog,
+    sex_blind: bool,
+    clone_top: bool,
+) -> Vec<[usize; 2]> {
     let mut by_generation: HashMap<u8, Vec<usize>> = HashMap::new();
     for (index, mount) in stable.mounts.iter().enumerate() {
-        if mount.fertile {
+        if mount.fertile || !clonable(catalog, mount, clone_top) {
             continue;
         }
         by_generation
@@ -2976,6 +3238,106 @@ mod moisson {
         let mut scratch = base;
         scratch.pool_generations = (1, 1);
         duel("départ de zéro", &scratch);
+    }
+}
+
+#[cfg(test)]
+mod sommet {
+    use super::*;
+    use crate::config::Prices;
+    use crate::economy::play;
+    use crate::trees::muldo;
+
+    /// La boucle du sommet contre l'attente. Score **et** gen 10 tenues : la
+    /// boucle produit des gen 10, donc c'est elle qu'il faut regarder d'abord,
+    /// et le score dit ensuite ce que les places dépensées ont coûté ailleurs.
+    /// Un bras : la boucle allumée ou non, le cloneur autorisé au sommet ou non.
+    fn arm(
+        catalog: &Catalog,
+        economy: &crate::economy::Economy,
+        seed: u32,
+        summit: Summit,
+        clone_top: bool,
+    ) -> (f64, f64) {
+        let mut policy = LadderPolicy::new(catalog, Route::Shared).with_summit(summit);
+        policy.clone_top = clone_top;
+        let outcome = play(catalog, economy, &mut policy, seed);
+        (outcome.score as f64, outcome.gen10_held as f64)
+    }
+
+    fn duel(
+        label: &str,
+        economy: &crate::economy::Economy,
+        after: (Summit, bool),
+        before: (Summit, bool),
+    ) {
+        let catalog = muldo();
+        let mut deltas = Vec::new();
+        let mut tops = Vec::new();
+        let mut wins = 0;
+        for seed in 0..200 {
+            let (on, on_top) = arm(&catalog, economy, seed, after.0, after.1);
+            let (off, off_top) = arm(&catalog, economy, seed, before.0, before.1);
+            if on - off > 0.0 {
+                wins += 1;
+            }
+            deltas.push(on - off);
+            tops.push(on_top - off_top);
+        }
+        let stats = |values: &[f64]| {
+            let n = values.len() as f64;
+            let mean = values.iter().sum::<f64>() / n;
+            let variance = values.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / (n - 1.0);
+            (mean, (variance / n).sqrt())
+        };
+        let (mean, stderr) = stats(&deltas);
+        let (top_mean, top_stderr) = stats(&tops);
+        println!(
+            "{label:<22} score {:+.3} M ± {:.3} (t = {:>6.2}, gagne {wins}/200) · \
+             gen 10 {:+.2} ± {:.2} (t = {:>6.2})",
+            mean / 1e6,
+            stderr / 1e6,
+            mean / stderr,
+            top_mean,
+            top_stderr,
+            top_mean / top_stderr
+        );
+    }
+
+    /// Ce que la boucle du sommet rapporte, dans les deux régimes.
+    ///
+    /// Elle n'a de gisement que si une gen 10 existe : en partant de cent gen 1,
+    /// rien n'atteint le sommet dans l'horizon et la boucle n'a rien à mordre.
+    /// C'est la mesure qui décide du défaut de `Summit`, pas l'arithmétique — la
+    /// boucle rend plus de 1 par gen 10 consommée, mais elle dépense des places
+    /// que la montée réclame, et ce sont deux comptes différents.
+    #[test]
+    fn ce_que_la_boucle_du_sommet_rapporte() {
+        let base = Prices::load_default().expect("economy.toml").economy;
+        const HOLD: (Summit, bool) = (Summit::Hold, true);
+
+        println!("\nboucle du sommet, contre l'échelle d'aujourd'hui :");
+        // La boucle seule, cloneur inchangé : elle perd, et c'est le résultat
+        // qui a fait chercher pourquoi.
+        duel("dupliquer seul", &base, (Summit::Duplicate, true), HOLD);
+        // Ne plus refondre les gen 10, boucle éteinte : le levier vaut-il quelque
+        // chose à lui seul, sans rien pour employer la fécondité rendue ?
+        duel("ne pas refondre seul", &base, (Summit::Hold, false), HOLD);
+        // Les deux : c'est la proposition.
+        duel("les deux", &base, (Summit::Duplicate, false), HOLD);
+
+        println!("\nce que la boucle ajoute une fois le cloneur retenu :");
+        duel(
+            "dupliquer | sans refonte",
+            &base,
+            (Summit::Duplicate, false),
+            (Summit::Hold, false),
+        );
+
+        println!("\ndépart de zéro — rien n'atteint le sommet, donc rien à mordre :");
+        let mut scratch = base;
+        scratch.pool_generations = (1, 1);
+        duel("les deux", &scratch, (Summit::Duplicate, false), HOLD);
     }
 }
 

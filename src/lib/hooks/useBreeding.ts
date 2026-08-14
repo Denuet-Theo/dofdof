@@ -1223,7 +1223,14 @@ export const useBreeding = (
 
       for (const entry of entries) {
         for (const side of [entry.male, entry.female]) {
-          if (side.mountId) {
+          // Une monture comptée n'a **pas** de ligne à passer stérile : `flatten`
+          // lui fabrique un identifiant pour que le plan puisse la désigner par
+          // son indice, et cet identifiant ne désigne aucune ligne. Le producteur
+          // rend maintenant `null` dans ce cas (voir `couplesToRecord`) ; le
+          // relire ici est le second verrou, parce que la panne était muette —
+          // Postgres refusait `dore#M0` sur une colonne `uuid`, la fournée
+          // repartait en lecture, et les poulains étaient déjà insérés.
+          if (side.mountId && parseCountedMountId(side.mountId) === null) {
             steriles.add(side.mountId);
             continue;
           }

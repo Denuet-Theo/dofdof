@@ -112,10 +112,45 @@ export type FamilyId = 'dragodinde' | 'muldo' | 'volkorne';
  * `Numeric` — voir `numericSettings`, qui est le seul endroit à les traverser.
  * Le reste de l'app ne doit plus jamais rencontrer une chaîne, et ce type est ce
  * qui le garantit.
+ *
+ * ## Les trois colonnes retirées de ce type
+ *
+ * `credit_off_target`, `never_sell_mounts` et `breeder_level` restent en base —
+ * les retirer du type est ce qui les met hors de portée. #81 avait retiré les
+ * trois de l'écran, en tranchant : le crédit hors cible s'applique toujours, la
+ * revente est toujours valorisée, et le niveau d'Éleveur ne nourrissait qu'un
+ * avertissement sur le champ d'en dessous.
+ *
+ * Mais le hook, lui, continuait d'en lire deux. Une ligne enregistrée avant le
+ * 6 août figeait donc le comportement à ce qu'elle portait, sans case pour le
+ * changer ni rien à l'écran qui le dise — c'est #179, et c'est le genre de panne
+ * qui ne ressemble pas à une panne : l'écran affichait une écurie où **aucune**
+ * couleur n'est rentable, ce qui se lit comme un marché difficile et non comme
+ * un réglage bloqué.
+ *
+ * Le type est maintenant ce qui l'empêche : plus aucun code ne peut atteindre
+ * ces colonnes, et `saveSettings` cesse de les écrire. Elles survivent en base
+ * le temps qu'une migration les enlève, avec le commentaire qui dit pourquoi.
+ *
+ * **Ce n'est pas fini.** #94 avait retiré six réglages de plus au nom du même
+ * principe — « the model now gives the answer on its own », en prévenant qu'« a
+ * wrong value there silently moves every figure on the screen ». Cinq d'entre
+ * eux sont dans le même état : lus ici, sans contrôle nulle part —
+ * `count_net_cost`, `gauge_cap`, `minutes_per_fight`, `kamas_per_hour`,
+ * `net_recovery_rate`. Ils ne sont pas traités ici parce que les figer demande
+ * de décider **quelle** réponse le modèle donne, et que trois d'entre eux
+ * portent des valeurs délibérées qu'un défaut écraserait. Voir #181.
  */
 export type BreedingSettings = Omit<
   UserBreedingSettings,
-  'user_id' | 'updated_at' | 'kamas_per_hour' | 'kamas_available' | 'net_recovery_rate'
+  | 'user_id'
+  | 'updated_at'
+  | 'kamas_per_hour'
+  | 'kamas_available'
+  | 'net_recovery_rate'
+  | 'credit_off_target'
+  | 'never_sell_mounts'
+  | 'breeder_level'
 > & {
   kamas_per_hour: number;
   kamas_available: number;
@@ -124,7 +159,6 @@ export type BreedingSettings = Omit<
 
 /** Ce que le hook applique tant que l'utilisateur n'a rien réglé. */
 export const DEFAULT_SETTINGS: BreedingSettings = {
-  breeder_level: 200,
   enclos_count: 6,
   kamas_per_hour: 0,
   // 0 = pas de contrainte. Refuser tous les plans à qui n'a pas renseigné son
@@ -133,12 +167,9 @@ export const DEFAULT_SETTINGS: BreedingSettings = {
   minutes_per_fight: 12,
   net_recovery_rate: 0.8,
   recycle_steriles: true,
-  never_sell_mounts: false,
-  // Le comportement d'avant : le crédit s'applique. Le couper est un choix
-  // explicite, pas un défaut imposé.
-  credit_off_target: true,
   // Le prix des filets compte par défaut : c'est vrai de qui les achète, et
-  // celui qui récolte ses matériaux sait, lui, qu'il doit décocher.
+  // celui qui récolte ses matériaux sait, lui, qu'il doit décocher — sauf que la
+  // case a disparu avec #94. Réglage encore lu, plus réglable : voir #181.
   count_net_cost: true,
   gauge_cap: null,
 };
@@ -176,14 +207,18 @@ export const DEFAULT_SETTINGS: BreedingSettings = {
  */
 const numericSettings = (row: UserBreedingSettings): BreedingSettings => {
   const merged = { ...DEFAULT_SETTINGS, ...row };
+  // Champ par champ, et non par diffusion : les colonnes retirées voyagent
+  // encore dans `row`, et un `...merged` les ferait rentrer par la fenêtre —
+  // jusque dans l'`upsert` de `saveSettings`, qui réécrirait ce qu'on vient de
+  // cesser de lire.
   return {
-    ...merged,
-    breeder_level: Number(merged.breeder_level),
     enclos_count: Number(merged.enclos_count),
     kamas_per_hour: Number(merged.kamas_per_hour),
     kamas_available: Number(merged.kamas_available),
     minutes_per_fight: Number(merged.minutes_per_fight),
     net_recovery_rate: Number(merged.net_recovery_rate),
+    recycle_steriles: merged.recycle_steriles,
+    count_net_cost: merged.count_net_cost,
     // Seul champ qui a le droit d'être absent : `null` veut dire « laisse
     // l'arbitrage décider », et `Number(null)` vaudrait zéro, c'est-à-dire
     // « plafond nul ». Les deux ne disent pas la même chose.
@@ -615,8 +650,6 @@ export const useBreeding = (
         ),
         recycleSteriles: settings.recycle_steriles,
         freeXpPoints,
-        neverSell: settings.never_sell_mounts,
-        creditOffTarget: settings.credit_off_target,
       })
     );
   }, [tree, prices, supplies, genetonValuation, priceOf, settings]);

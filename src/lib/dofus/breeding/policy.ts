@@ -39,6 +39,7 @@ import { featuresOf, pairDelta, type EconomyView } from './census';
 import {
   createSearcher,
   flatten,
+  parseCountedMountId,
   planUnit,
   type SearchStrategy,
   type UnitPlan,
@@ -665,6 +666,26 @@ const readPlan = (
  * d'eux-mêmes : la sortie d'enclos passe leurs parents en fécondes, la politique
  * recompose, et le couple retombe à zéro place — c'est-à-dire réalisable.
  */
+/**
+ * L'identifiant de **ligne** d'une monture, ou `null` si elle se compte.
+ *
+ * `Pairing.mountId` vaut `null` du côté du vrac — voir `stable.ts` — parce qu'il
+ * n'y a pas d'individu à désigner, seulement un effectif à décrémenter. Or
+ * `flatten` fabrique un identifiant à chaque tête de vrac pour que le plan puisse
+ * la nommer par son indice, et le recopier tel quel ici le faisait passer pour un
+ * uuid.
+ *
+ * C'est le défaut de #165, et il se payait deux fois sur la même saisie : la
+ * naissance rangeait `dore#M0` parmi les lignes à passer stériles, donc aucun
+ * effectif de vrac n'était décrémenté — le même stock revenait au coup suivant —
+ * et Postgres refusait l'identifiant sur une colonne `uuid`, ce qui faisait
+ * repartir la fournée en lecture **après** que les poulains, eux, aient été
+ * insérés. Les parents suivis restaient fertiles avec. D'où la fournée qui
+ * repoussait à chaque rafraîchissement, plusieurs fois de suite.
+ */
+const rowIdOf = (id: string | undefined): string | null =>
+  id !== undefined && parseCountedMountId(id) === null ? id : null;
+
 export const couplesToRecord = (plan: StablePlan): Couple[] => {
   const out: Couple[] = [];
   for (const line of plan.couples) {
@@ -682,13 +703,13 @@ export const couplesToRecord = (plan: StablePlan): Couple[] => {
         male: {
           colorId: line.male.colorId,
           sex: 'M',
-          mountId: line.male.mountIds[index] ?? null,
+          mountId: rowIdOf(line.male.mountIds[index]),
           bought: line.male.mountIds.length === 0,
         },
         female: {
           colorId: line.female.colorId,
           sex: 'F',
-          mountId: line.female.mountIds[index] ?? null,
+          mountId: rowIdOf(line.female.mountIds[index]),
           bought: line.female.mountIds.length === 0,
         },
       });

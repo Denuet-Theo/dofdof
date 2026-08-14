@@ -83,11 +83,15 @@ fn duel_tuning(label: &str, economy: &Economy, ladder: &Ladder) {
     let mut after = Vec::new();
     let mut before = Vec::new();
     let mut rejected = 0u32;
+    let mut reasons = [0u32; breeding_sim::economy::Rejected::REASONS];
     let mut gen10 = (0.0, 0.0);
     for seed in 0..SEEDS {
         let a = run(Tuning::BandAndLevel, seed);
         let b = run(Tuning::LastFreeStep, seed);
         rejected += a.rejected_loads;
+        for (total, seen) in reasons.iter_mut().zip(a.rejected_by_reason) {
+            *total += seen;
+        }
         gen10.0 += a.gen10_held as f64;
         gen10.1 += b.gen10_held as f64;
         after.push(a.score as f64);
@@ -103,6 +107,23 @@ fn duel_tuning(label: &str, economy: &Economy, ladder: &Ladder) {
         gen10.1 / f64::from(SEEDS),
         gen10.0 / f64::from(SEEDS),
     );
+
+    // Le compte seul laissait croire au budget. On dit lesquelles.
+    if rejected > 0 {
+        let mut detail: Vec<String> = reasons
+            .iter()
+            .enumerate()
+            .filter(|(_, count)| **count > 0)
+            .map(|(index, count)| {
+                format!(
+                    "{count} {}",
+                    breeding_sim::economy::Rejected::LABELS[index]
+                )
+            })
+            .collect();
+        detail.sort();
+        println!("{:<18}   dont {}", "", detail.join(" · "));
+    }
 }
 
 fn sweep(label: &str, economy: &Economy, ladder: &Ladder, band: usize) {

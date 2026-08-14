@@ -973,6 +973,14 @@ pub struct RunOutcome {
     pub gen10_held: usize,
     /// Chargements refusés. Doit rester à zéro.
     pub rejected_loads: u32,
+    /// **Pourquoi** ils l'ont été, indexé par `Rejected::reason`.
+    ///
+    /// Le compte seul ne suffisait pas : la branche d'erreur jetait la raison
+    /// (`Err(_)`), donc « 191 fournées refusées » ne disait pas si le moteur
+    /// manquait de kamas, de places, ou refusait un croisement mal formé. On a
+    /// attribué ces refus au budget sans l'avoir vérifié — c'est le genre de
+    /// chiffre qu'on finit par croire.
+    pub rejected_by_reason: [u32; Rejected::REASONS],
     pub hours_used: f64,
     /// Heures passées à attendre une fenêtre, enclos libre et personne devant le
     /// jeu. Nulles sans fenêtre posée. C'est la mesure de ce que la disponibilité
@@ -991,6 +999,39 @@ pub enum Rejected {
     CloneNotSterile(usize),
     CloneGenerationMismatch(usize, usize),
     Unaffordable { needed: i64, available: i64 },
+}
+
+impl Rejected {
+    /// Le nombre de raisons, pour dimensionner le compteur.
+    pub const REASONS: usize = 9;
+
+    /// L'indice de cette raison dans `RunOutcome::rejected_by_reason`.
+    pub fn reason(&self) -> usize {
+        match self {
+            Self::TooManyCrossings { .. } => 0,
+            Self::UnknownIndex(_) => 1,
+            Self::MountUsedTwice(_) => 2,
+            Self::NotFertile(_) => 3,
+            Self::SameSex(..) => 4,
+            Self::NoOutlook(..) => 5,
+            Self::CloneNotSterile(_) => 6,
+            Self::CloneGenerationMismatch(..) => 7,
+            Self::Unaffordable { .. } => 8,
+        }
+    }
+
+    /// Le nom de chaque raison, dans l'ordre de `reason`.
+    pub const LABELS: [&'static str; Self::REASONS] = [
+        "trop de places demandées",
+        "indice inconnu",
+        "monture employée deux fois",
+        "monture non fertile",
+        "même sexe",
+        "croisement sans cible",
+        "clone non stérile",
+        "clone de génération différente",
+        "kamas insuffisants",
+    ];
 }
 
 struct Applied {
@@ -1450,6 +1491,7 @@ fn run(
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
         rejected_loads: 0,
+        rejected_by_reason: [0; Rejected::REASONS],
         hours_used: 0.0,
         hours_waiting: 0.0,
     };
@@ -1568,10 +1610,12 @@ fn run(
                     free_at[unit] = now + economy.overhead_hours.max(1e-6);
                 }
             }
-            Err(_) => {
+            Err(reason) => {
                 // Un chargement refusé est un chargement perdu : on ne devine pas
-                // ce que la politique aurait voulu à la place.
+                // ce que la politique aurait voulu à la place. On note en revanche
+                // **pourquoi**, ce que la branche jetait.
                 outcome.rejected_loads += 1;
+                outcome.rejected_by_reason[reason.reason()] += 1;
                 idle[unit] += 1;
                 free_at[unit] = now + economy.overhead_hours.max(1e-6);
             }

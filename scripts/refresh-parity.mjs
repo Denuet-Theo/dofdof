@@ -28,17 +28,31 @@
  * périme pas le premier.
  */
 
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const RUST = join(ROOT, 'rust');
+const FIXTURES = join(ROOT, 'scripts/fixtures');
 const EMBEDDED = join(ROOT, 'src/lib/dofus/breeding/champion.json');
 
 const argv = process.argv.slice(2);
 const checkOnly = argv.includes('--check');
-const source = resolve(ROOT, argv.find((arg) => !arg.startsWith('--')) ?? 'rust/champion.json');
+const asked = argv.find((arg) => !arg.startsWith('--'));
+const source = resolve(ROOT, asked ?? 'rust/champion.json');
+
+/**
+ * Le champion que les dumpers reçoivent.
+ *
+ * En vérification sans argument, c'est l'**embarqué** et non `rust/champion.json` :
+ * les gardes comparent le portage à l'artefact de `src/`, donc c'est celui-là dont
+ * il faut demander « produit-il encore ces références ». Dumper avec un champion
+ * fraîchement entraîné qui traîne dans `rust/` ferait crier la reproductibilité
+ * pour une raison qui n'en est pas une.
+ */
+const dumpChampion = checkOnly && !asked && existsSync(EMBEDDED) ? EMBEDDED : source;
 
 const say = (message) => console.log(message);
 /** Le chemin, court quand il est dans le dépôt et entier quand il en sort. */
@@ -60,7 +74,7 @@ if (!existsSync(source)) {
   process.exit(1);
 }
 
-const champion = JSON.parse(readFileSync(source, 'utf8'));
+const champion = JSON.parse(readFileSync(dumpChampion, 'utf8'));
 const embedded = existsSync(EMBEDDED) ? JSON.parse(readFileSync(EMBEDDED, 'utf8')) : null;
 
 // L'arité est le seul contrat que l'artefact porte lui-même, et le seul dont la
@@ -73,7 +87,7 @@ const FEATURES = Number(
 );
 if (champion.features !== FEATURES) {
   console.error(
-    `${shown(source)} attend ${champion.features} entrées, le portage en ` +
+    `${shown(dumpChampion)} attend ${champion.features} entrées, le portage en ` +
       `déclare ${FEATURES}. Ce champion est d'une autre génération d'encodage : il ` +
       `n'est pas rechargeable, il faut réentraîner.`
   );
@@ -83,11 +97,11 @@ if (champion.features !== FEATURES) {
 const scoreOf = (artifact) =>
   artifact?.validation_score ? `${(artifact.validation_score / 1e6).toFixed(2)} M au départage` : '—';
 
-say(`champion   : ${shown(source)} · ${scoreOf(champion)}`);
+say(`champion   : ${shown(dumpChampion)} · ${scoreOf(champion)}`);
 say(`embarqué   : ${embedded ? scoreOf(embedded) : 'aucun'}`);
 
 if (checkOnly) {
-  say('\n--check : rien n’est réécrit, on rejoue seulement les gardes.\n');
+  say('\n--check : rien n’est réécrit, on refait les références à côté pour les comparer.\n');
 } else {
   copyFileSync(source, EMBEDDED);
   say(`\n${shown(EMBEDDED)} remplacé.\n`);
@@ -95,55 +109,72 @@ if (checkOnly) {
 
 /* ------------------------------------------------------------ les fixtures */
 
-if (!checkOnly) {
+/**
+ * Les six références et leur dumper. `dump-network` et `dump-search` prennent le
+ * champion ; les autres n'en dépendent pas, mais ils dépendent de `FEATURES` et
+ * de `trees.json` — les refaire coûte quelques secondes et évite d'avoir à se
+ * demander lesquels.
+ *
+ * `dump-schedule` est de l'ordonnancement pur et `dump-ladder` se déduit de
+ * `trees.json` et de `ladder.rs` : les refaire par réflexe évite d'avoir à se
+ * demander lequel des deux a bougé.
+ */
+const DUMPS = [
+  ['dump-network', 'network-parity.json', true],
+  ['dump-census', 'census-parity.json', false],
+  ['dump-delta', 'delta-parity.json', false],
+  ['dump-search', 'search-parity.json', true],
+  ['dump-schedule', 'schedule-parity.json', false],
+  ['dump-ladder', 'ladder-parity.json', false],
+];
+
+/** Refait les six références dans `outDir`. */
+const runDumps = (outDir) => {
   // Les six dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
   // les demander séparément relançait six fois la même vérification de crate.
   say('--- compilation des dumpers ---');
   run(
     'cargo',
-    [
-      'build',
-      '--release',
-      '-q',
-      '-p',
-      'breeding-neat',
-      '--bin',
-      'dump-network',
-      '--bin',
-      'dump-census',
-      '--bin',
-      'dump-delta',
-      '--bin',
-      'dump-search',
-      '--bin',
-      'dump-schedule',
-      '--bin',
-      'dump-ladder',
-    ],
+    ['build', '--release', '-q', '-p', 'breeding-neat', ...DUMPS.flatMap(([bin]) => ['--bin', bin])],
     RUST
   );
 
-  // `dump-network` et `dump-search` prennent le champion ; les deux autres n'en
-  // dépendent pas, mais ils dépendent de `FEATURES` et de `trees.json` — les
-  // refaire coûte quelques secondes et évite d'avoir à se demander lesquels.
-  const target = (name) => join(ROOT, 'scripts/fixtures', name);
-  const dumps = [
-    ['dump-network', [source, target('network-parity.json')]],
-    ['dump-census', [target('census-parity.json')]],
-    ['dump-delta', [target('delta-parity.json')]],
-    ['dump-search', [source, target('search-parity.json')]],
-    // Celle-ci ne dépend d'aucun champion — c'est de l'ordonnancement pur — mais
-    // elle dépend de `schedule.rs`, et la refaire coûte deux secondes.
-    ['dump-schedule', [target('schedule-parity.json')]],
-    // Celle-ci non plus : le plan de l'échelle se déduit de `trees.json` et de
-    // `ladder.rs`, donc c'est l'un des deux qui bouge quand elle change. La
-    // refaire par réflexe évite d'avoir à se demander lequel.
-    ['dump-ladder', [target('ladder-parity.json')]],
-  ];
   say('\n--- références ---');
-  for (const [binary, args] of dumps) {
+  for (const [binary, name, takesChampion] of DUMPS) {
+    const args = takesChampion
+      ? [dumpChampion, join(outDir, name)]
+      : [join(outDir, name)];
     run(join(RUST, 'target/release', binary), args, RUST);
   }
+};
+
+/**
+ * Références qui ne se reproduisent plus — vide hors `--check`.
+ *
+ * C'est le défaut que relevait #161, et il était **silencieux** : les trois
+ * références concernées passaient leurs gardes, parce qu'elles portent leur
+ * propre économie en entrée et restent donc auto-cohérentes. Ce qu'elles avaient
+ * cessé d'être, c'est **reproductibles** — et une référence de parité ne vaut que
+ * par là. Sans ce contrôle, la seule façon de s'en apercevoir est de lancer
+ * `npm run parity` et de voir trois fichiers salir un diff sans rapport.
+ */
+const stale = [];
+
+if (checkOnly) {
+  // À côté, jamais par-dessus : `--check` ne réécrit rien, c'est son contrat.
+  const scratch = mkdtempSync(join(tmpdir(), 'dofdof-parity-'));
+  try {
+    runDumps(scratch);
+    for (const [, name] of DUMPS) {
+      const fresh = readFileSync(join(scratch, name));
+      const kept = existsSync(join(FIXTURES, name)) ? readFileSync(join(FIXTURES, name)) : null;
+      if (kept === null || !fresh.equals(kept)) stale.push(name);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+} else {
+  runDumps(FIXTURES);
 }
 
 /* --------------------------------------------------------------- les gardes */
@@ -163,6 +194,29 @@ if (failed > 0) {
     `\n${failed} garde(s) en échec. Une divergence ici n'est pas un défaut de ` +
       `référence : elle dit que le portage et le Rust ne font plus la même chose.`
   );
-  process.exit(1);
 }
-say('\nles six gardes passent — le portage rejoue ce champion-ci');
+
+/* ------------------------------------------------- la reproductibilité */
+
+if (stale.length > 0) {
+  // Distinct d'une garde en échec, et le message doit le dire : ici le portage
+  // et le Rust s'accordent toujours, c'est la **référence** qui a vieilli. Le
+  // Rust a bougé dans ce qui l'alimente et personne ne l'a régénérée.
+  console.error(
+    `\n${stale.length} référence(s) ne se reproduisent plus depuis le Rust ` +
+      `d'aujourd'hui :\n` +
+      stale.map((name) => `  ${name}`).join('\n') +
+      `\n\nCe n'est pas une divergence portage/Rust — les gardes le disent ` +
+      `séparément. C'est que ces fichiers ont été produits par un Rust antérieur.\n` +
+      `Trouver ce qui a bougé, décider si la nouvelle valeur fait foi, puis ` +
+      `régénérer dans un commit dédié :\n  npm run parity`
+  );
+}
+
+if (failed > 0 || stale.length > 0) process.exit(1);
+
+say(
+  checkOnly
+    ? '\nles six gardes passent, et les six références se reproduisent'
+    : '\nles six gardes passent — le portage rejoue ce champion-ci'
+);

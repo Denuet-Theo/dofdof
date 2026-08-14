@@ -337,12 +337,20 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
     if (!row) return;
     const startedAt = new Date().toISOString();
 
-    setRow({ ...row, started_at: startedAt, paused_at: null, paused_seconds: 0 });
+    // Les horloges d'enclos repartent avec le plan, exactement comme dans `load`.
+    // Les laisser était le défaut de #167 : chaque enclos gardait son ancien
+    // `started_at`, donc `elapsedFor` continuait de rendre le temps écoulé de la
+    // fournée précédente, la piste restait « lancée » — et une piste lancée
+    // n'offre que pause et reprise, jamais un départ. Le bandeau « Le plan ne
+    // porte plus au-delà d'ici — relance-le » survivait donc à sa propre relance,
+    // et rien ne permettait de repartir sans recharger un plan entier.
+    setRow({ ...row, started_at: startedAt, paused_at: null, paused_seconds: 0, track_clocks: {} });
     await persist({
       plan: row.plan,
       started_at: startedAt,
       paused_at: null,
       paused_seconds: 0,
+      track_clocks: {},
     });
   }, [row, persist]);
 

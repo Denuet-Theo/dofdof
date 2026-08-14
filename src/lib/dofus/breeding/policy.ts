@@ -48,6 +48,7 @@ import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
 import type { BreedingColor } from './costs';
+import { consumeCouples, copyStable } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
@@ -716,6 +717,80 @@ export const couplesToRecord = (plan: StablePlan): Couple[] => {
     }
   }
   return out;
+};
+
+/**
+ * Combien de fois au plus on redemande un plan avant de rendre la liste.
+ *
+ * Cinq passes suffisent sur une écurie de cent montures — mesuré, la convergence
+ * tombe à la cinquième — et la borne n'est pas là pour ça : elle est là pour
+ * qu'un jour où la convergence ne viendrait pas, l'écran rende une liste courte
+ * au lieu de tourner.
+ */
+const RECORD_PASSES = 8;
+
+/**
+ * **Tous** les accouplements réalisables tout de suite, et pas seulement la
+ * première tranche.
+ *
+ * `couplesToRecord` ne publie que les couples à zéro place, ce qui est juste :
+ * un couple qui coûte une place n'a pas ses deux fécondes, donc il n'a pas pu
+ * avoir lieu. Mais l'en-tête de cette fonction promet que les autres
+ * « reviendront d'eux-mêmes » par la **sortie d'enclos**, et c'est faux — c'est
+ * le défaut de #165.
+ *
+ * Ce qui se passe réellement : le plan sature le parc, la recherche dépense des
+ * fécondes sur des couples qui coûtent une place, et la tranche à zéro place n'en
+ * est qu'une partie. Saisir cette tranche libère les fécondes qu'elle réservait ;
+ * la replanification les apparie alors **entre elles**, à zéro place, sans qu'un
+ * enclos soit jamais passé par là. D'où une nouvelle liste au rafraîchissement
+ * suivant, puis encore une. Sur l'écurie du 14/08 : 12 couples, puis 4, puis 3,
+ * puis rien.
+ *
+ * L'éleveur, lui, lit ça comme une répétition pure, parce qu'une gen 1 n'a pas de
+ * nom en jeu : « Ébène × Orchidée » lui est proposé aux trois tours.
+ *
+ * On boucle donc jusqu'au point fixe et on rend l'union.
+ *
+ * ## On stérilise, on n'invente pas le poulain
+ *
+ * Entre deux passes, les parents consommés passent stériles — et rien d'autre.
+ * Projeter la naissance ferait dépendre la liste d'un tirage que l'éleveur n'a
+ * pas encore fait : 19 couples si le croisement réussit, 21 s'il rate. Une liste
+ * de ce qu'on peut faire maintenant ne doit pas parier sur un résultat.
+ *
+ * Et rien ne s'y perd : un poulain naît niveau 1 et non fécond, donc il ne peut
+ * pas figurer dans un couple à zéro place de toute façon.
+ */
+export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
+  const all: Couple[] = [];
+  let working = input.stable;
+
+  for (let pass = 0; pass < RECORD_PASSES; pass += 1) {
+    const plan = stablePlan({ ...input, stable: working });
+    if (!plan) break;
+
+    const wave = couplesToRecord(plan);
+    if (wave.length === 0) break;
+    all.push(...wave);
+
+    // Une copie par passe : la vraie écurie est celle de l'éleveur, et la
+    // parcourir en la vidant effacerait son parc à chaque rendu.
+    working = copyStable(working);
+    consumeCouples(working, wave);
+    // `consumeCouples` retire la fécondité, pas le cycle. L'accouplement consomme
+    // les deux — c'est ce que `recordBirths` écrit en base — et la passe suivante
+    // doit voir la même écurie que celle qu'une vraie saisie aurait laissée.
+    for (const couple of wave) {
+      for (const side of [couple.male, couple.female]) {
+        if (!side.mountId) continue;
+        const mount = working.individuals.find((candidate) => candidate.id === side.mountId);
+        if (mount) mount.cycled = false;
+      }
+    }
+  }
+
+  return all;
 };
 
 /**

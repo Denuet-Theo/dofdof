@@ -70,7 +70,7 @@ import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 // leur en fabrique une, dans l'espace de noms que `search.ts` définit.
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
-import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
+import type { Couple, Individual, Sex } from '@/lib/dofus/breeding/stable';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
@@ -145,6 +145,11 @@ type Props = {
    * `policy.ts`.
    */
   fill?: StablePlan | null;
+  /**
+   * Tous les accouplements réalisables maintenant, bouclés jusqu'au point fixe
+   * par la page — elle seule tient l'entrée de la politique. Voir #165.
+   */
+  couples?: Couple[];
   /**
    * Les couleurs et leurs générations, pour la saisie des naissances et des
    * clonages — la fenêtre d'accouplement propose les issues, donc elle a besoin du
@@ -633,6 +638,7 @@ const Agenda = ({
  */
 const Fill = ({
   fill,
+  couples,
   nameOf,
   individuals = [],
   colors,
@@ -645,6 +651,12 @@ const Fill = ({
   onEnclosExit,
 }: {
   fill: StablePlan;
+  /**
+   * Tous les accouplements réalisables maintenant, bouclés jusqu'au point fixe
+   * par la page. Absent, l'écran retombe sur la tranche de `fill` — ce qui est
+   * exactement le défaut de #165, donc c'est un repli, pas un mode.
+   */
+  couples?: Couple[];
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
   colors?: BreedingColor[];
@@ -778,7 +790,15 @@ const Fill = ({
       pulled.includes(colorId) ? pulled.filter((id) => id !== colorId) : [...pulled, colorId]
     );
 
-  const toRecord = useMemo(() => couplesToRecord(fill), [fill]);
+  /**
+   * Les accouplements à saisir.
+   *
+   * `couples` vient de la page, qui seule tient l'entrée de la politique et peut
+   * donc boucler jusqu'au point fixe — c'est ce qui empêche la liste de repousser
+   * à chaque rafraîchissement (#165). Sans elle, on retombe sur la tranche que le
+   * plan porte, qui est ce que faisait cet écran.
+   */
+  const toRecord = useMemo(() => couples ?? couplesToRecord(fill), [couples, fill]);
   const toClone = useMemo(
     () => (generations ? cloningsToRecord(fill, generations) : []),
     [fill, generations]
@@ -1573,6 +1593,7 @@ const BreedingTimeline = ({
   timeline,
   enclosCount,
   fill,
+  couples,
   nameOf,
   individuals,
   colors,
@@ -1856,6 +1877,7 @@ const BreedingTimeline = ({
       {fill && (
         <Fill
           fill={fill}
+          couples={couples}
           nameOf={nameOf}
           individuals={individuals}
           colors={colors}

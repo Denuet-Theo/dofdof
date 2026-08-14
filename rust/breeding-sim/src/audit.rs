@@ -28,9 +28,17 @@ pub struct Tally {
     /// Ceux dont la génération visée n'est nommée par aucune couleur : le jeu
     /// dit « rien à gagner ».
     pub barren: usize,
-    /// Ceux dont la cible est hors du catalogue — au-dessus du plafond de la
-    /// famille. `pair_outlook` refuse alors de répondre.
-    pub impossible: usize,
+    /// Ceux dont la cible est **plafonnée** : elle vaut la génération que le
+    /// couple porte déjà, donc le poulain ne peut pas la dépasser.
+    ///
+    /// Ce compteur s'appelait `impossible` et comptait tout autre chose — les
+    /// couples que `pair_outlook` refusait au-dessus du plafond. Le jeu ne les
+    /// refuse pas, il les plafonne (issue #185), donc ils existent et se
+    /// jouent : la fenêtre est pleine, seulement elle ne monte pas. Pour une
+    /// politique qui grimpe, c'est le même gâchis qu'un croisement sans cible —
+    /// deux fécondités consommées, zéro géneton, aucun rang gagné — d'où le
+    /// même traitement dans `wasted_share`.
+    pub capped: usize,
     /// L'effectif de l'écurie à la **dernière** fournée vue.
     ///
     /// Un stérile ne s'accouple plus, mais le recensement le compte à plein
@@ -49,7 +57,7 @@ impl Tally {
         if self.crossings == 0 {
             return 0.0;
         }
-        (self.barren + self.impossible) as f64 / self.crossings as f64
+        (self.barren + self.capped) as f64 / self.crossings as f64
     }
 }
 
@@ -115,10 +123,11 @@ impl<P: Policy> Policy for Audit<P> {
                 continue;
             };
             self.tally.crossings += 1;
-            match pair_outlook(view.catalog, &male, &female) {
-                None => self.tally.impossible += 1,
-                Some(outlook) if outlook.target_colors.is_empty() => self.tally.barren += 1,
-                Some(_) => {}
+            let outlook = pair_outlook(view.catalog, &male, &female);
+            if outlook.target_colors.is_empty() {
+                self.tally.barren += 1;
+            } else if !outlook.climbs() {
+                self.tally.capped += 1;
             }
         }
 
@@ -148,7 +157,7 @@ mod tests {
                 "graine {seed} : rien n'a été tenté"
             );
             assert_eq!(
-                audit.tally.barren + audit.tally.impossible,
+                audit.tally.barren + audit.tally.capped,
                 0,
                 "graine {seed} : {:?}",
                 audit.tally

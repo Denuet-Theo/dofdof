@@ -26,7 +26,13 @@
  */
 
 import { carriedGeneration } from './naming';
-import { matingOutcomes, pairTargetGeneration, type Mate } from './pairing';
+import {
+  matingOutcomes,
+  pairAncestryGeneration,
+  pairTargetGeneration,
+  topGenerationOf,
+  type Mate,
+} from './pairing';
 import type { BreedingColor } from './costs';
 import { cycledOf, type Sex, type Stable } from './stable';
 
@@ -108,8 +114,14 @@ export const successRate = (level: number, economy: EconomyView, optimakina: boo
   Math.min(1, 0.3 + 0.0015 * (2 * level) + (optimakina ? economy.optimakinaBonus : 0));
 
 /**
- * Génétons rendus par une monture de ce rang. Relevé en jeu. Une gen 10 n'en rend
- * pas : elle ne peut plus s'accoupler.
+ * Génétons rendus par une monture de ce rang. Relevé en jeu.
+ *
+ * L'entrée 10 vaut zéro, et la raison a changé : on la croyait inaccessible
+ * — « une gen 10 ne peut plus s'accoupler » — alors qu'elle s'accouple très
+ * bien, voir `pairTargetGeneration`. Elle reste hors de portée pour une autre
+ * raison, plus solide : un parent gen 10 porte l'ascendance au plafond, donc la
+ * cible n'y dépasse plus rien et le croisement ne paie pas. Sa valeur propre
+ * n'est simplement jamais lue.
  */
 const GENETONS_BY_GENERATION = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 0];
 
@@ -119,15 +131,18 @@ const GENETONS_BY_GENERATION = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 0];
  * Ils suivent les **parents directs** et non la cible : deux gen 2 visant la gen 4
  * — parce que leur ascendance porte une gen 3 — rendent 4 génétons et non 16.
  *
- * Zéro quand aucune couleur ne nomme la cible : purifier et recopier ne rapportent
- * rien, ce que la fenêtre du jeu affiche noir sur blanc.
+ * `paying` est faux dans deux cas, qui n'en font qu'un : l'enfant ne **dépasse**
+ * pas l'ascendance. Soit aucune couleur ne nomme la cible — purifier et recopier
+ * ne rapportent rien —, soit la cible est plafonnée et vaut ce que l'ascendance
+ * porte déjà. Les trois fenêtres du 14/08 montrent le second : une ligne
+ * « Génération cible » pleine, et zéro géneton.
  */
 export const genetonsForCrossing = (
   maleGeneration: number,
   femaleGeneration: number,
-  namesTarget: boolean
+  paying: boolean
 ): number =>
-  namesTarget
+  paying
     ? GENETONS_BY_GENERATION[Math.min(maleGeneration, 10)] +
       GENETONS_BY_GENERATION[Math.min(femaleGeneration, 10)]
     : 0;
@@ -347,7 +362,7 @@ export type PairDelta = {
   expectedValue: number;
   targetGeneration: number;
   /**
-   * Une couleur **nomme** ce rang, donc le croisement peut y monter.
+   * Une couleur **nomme** ce rang.
    *
    * Faux pour deux Ébène : la paire vise la génération 2, mais aucune recette ne
    * s'écrit `[ebene, ebene]`, et toute la masse retombe sur la recopie. Le calcul
@@ -356,6 +371,17 @@ export type PairDelta = {
    * annonçait « gen 2 » là où il ne sortira qu'un Ébène de plus.
    */
   namesTarget: boolean;
+  /**
+   * Le croisement gagne-t-il une génération ?
+   *
+   * Ce champ disait « donc le croisement peut y monter » à la suite du
+   * précédent, et cette inférence-là est tombée : au **plafond**, une paire
+   * nomme des couleurs de la génération visée sans que celle-ci dépasse ce que
+   * le couple porte déjà. Les deux se confondaient tant que ces couples étaient
+   * refusés ; ils se séparent depuis, et c'est celui-ci que les génétons et
+   * l'admissibilité veulent. Voir `climbs` dans `pairing.ts`.
+   */
+  climbs: boolean;
   optimakinaCost: number;
   genetonKamas: number;
 };
@@ -387,11 +413,11 @@ export const pairDelta = (
   level: number,
   optimakinaFrom: number
 ): PairDelta | null => {
-  const top = colors.reduce((highest, color) => Math.max(highest, color.generation), 0);
-  const targetGeneration = pairTargetGeneration(male, female, generations);
+  const top = topGenerationOf(colors);
+  const targetGeneration = pairTargetGeneration(male, female, generations, top);
   if (targetGeneration === null) return null;
 
-  const withOptimakina = targetGeneration >= optimakinaFrom && targetGeneration <= top;
+  const withOptimakina = targetGeneration >= optimakinaFrom;
   const optimakinaCost = withOptimakina
     ? (economy.optimakina[Math.min(targetGeneration, 10)] ?? 0)
     : 0;
@@ -400,15 +426,17 @@ export const pairDelta = (
   const outcomes = matingOutcomes(male, female, colors, generations, rate);
   if (outcomes.length === 0) return null;
 
-  // La masse de réussite vaut `rate` quand une couleur nomme la cible, et zéro
-  // sinon — c'est exactement la condition des génétons.
+  // Le croisement paie quand une couleur nomme la cible **et** que la cible
+  // dépasse ce que l'ascendance porte déjà. La seconde moitié ne se voyait pas
+  // tant que le plafond refusait le couple : sous le plafond la cible vaut
+  // toujours l'ascendance plus un, donc elle la dépasse toujours.
   const namesTarget = outcomes.some((outcome) => outcome.kind === 'target');
+  const carriedByPair = pairAncestryGeneration(male, female, generations);
+  const climbs = namesTarget && carriedByPair !== null && targetGeneration > carriedByPair;
   const maleGeneration = generations.get(male.colorId) ?? 1;
   const femaleGeneration = generations.get(female.colorId) ?? 1;
   const genetonKamas =
-    rate *
-    genetonsForCrossing(maleGeneration, femaleGeneration, namesTarget) *
-    economy.genetonValue;
+    rate * genetonsForCrossing(maleGeneration, femaleGeneration, climbs) * economy.genetonValue;
 
   const births: [string, number, number][] = [];
   let expectedValue = 0;
@@ -436,6 +464,7 @@ export const pairDelta = (
     expectedValue,
     targetGeneration,
     namesTarget,
+    climbs,
     optimakinaCost,
     genetonKamas,
   };

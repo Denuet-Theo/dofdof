@@ -51,24 +51,51 @@
  * part : la valeur d'une lignée étant une somme pondérée de coûts, compter deux
  * fois la même couleur avec ses deux poids revient exactement à la fusionner.
  *
- * ## « Composée » et « génération paire » ne font qu'un
+ * ## « Composée » se lit sur la génération, et la gen 9 en est
  *
- * On a longtemps cru le contraire : la génération 9 du muldo passait pour une
- * exception, et c'est ce qui justifiait de lire la composition sur
- * l'identifiant. **Il n'y a pas d'exception.** Sur les 306 couleurs des trois
- * familles, lue sur le nom affiché, la parité est parfaite — générations
- * impaires 0 % composées, paires 100 %.
+ * On l'a lue successivement sur le souligné de l'identifiant, puis sur la parité
+ * du nom affiché — « une couleur composée porte deux teintes ». Les deux
+ * lectures sont **fausses au même endroit** : la génération 9. Le relevé du
+ * 14/08 (issue #185) la prend en défaut de trois façons indépendantes, sur une
+ * mère Azur-Turquoise dont la généalogie porte Azur (gen 9) et Pourpre (gen 1) :
  *
- * L'exception venait du slug. « Aigue-marine » est **une** couleur de deux
- * mots, comme n'importe quel nom composé de mots ; son identifiant
- * `aigue_marine` porte donc un souligné sans être une composition. Elle était
- * seule dans ce cas sur tout le catalogue, et elle voyait son poids divisé par
- * 4,5 à tort — sa part de lignée tombait à 15,63 % au lieu de 45,45 %, ce qui
- * sous-estimait de 150 % le crédit d'un raté sur les routes qui la traversent.
+ * | rapport relevé | ce que le nom prédisait | ce qu'il vaut |
+ * | --- | --- | --- |
+ * | Azur 3,28 % contre Pourpre 14,75 % | 1 — deux grands-parents simples | **1/4,5** |
+ * | Amande gen 3 9,91 % contre Doré gen 1 9,91 % | 1 | 1 ✓ |
+ * | Doré-Amande gen 4 3,67 % contre ses gen 1 9,91 % | (5/4,5)/3 | (5/4,5)/3 ✓ |
  *
- * On continue de lire la composition sur l'identifiant, faute d'avoir la
- * génération ou le nom sous la main ici, mais avec l'exception nommée : voir
- * `SIMPLE_COLORS_WITH_UNDERSCORE`.
+ * Azur et Pourpre occupent la **même position** — grands-parents de la mère — et
+ * portent tous deux un nom d'un seul mot. Le jeu les sépare pourtant d'un facteur
+ * 4,5, qui est le facteur de composition et rien d'autre. Les gen 9 *sont* des
+ * compositions de deux gen 8 ; elles reçoivent seulement un nom d'un seul mot.
+ *
+ * `aigue_marine` cesse du même coup d'être une exception à nommer : elle est
+ * gen 9, donc composée, et son souligné n'a plus voix au chapitre. C'est le seul
+ * bénéfice net d'un changement qui, par ailleurs, remplace une règle par un
+ * ajustement.
+ *
+ * ## Ce qui reste ouvert, et il faut le dire
+ *
+ * `paire OU 9` **ajuste les données ; ce n'est pas encore une loi.** Un cas
+ * particulier sur une seule génération sent l'erreur de modèle. Les deux
+ * généralisations naturelles sont réfutées : « impaire ⇒ simple » par la gen 9,
+ * « ≥ 2 ⇒ composée » par la gen 3, qui pèse exactement autant qu'une gen 1.
+ *
+ * | génération | statut | d'où |
+ * | --- | --- | --- |
+ * | 1 (Doré, Pourpre, Ébène) | simple | #59, fenêtres 1–3 |
+ * | 2 (Ébène-Orchidée) | composée | #49, #59 |
+ * | 3 (Amande) | **simple** | #59, fenêtre 3 |
+ * | 4 (Doré-Amande) | composée | fenêtre 3 |
+ * | 5, 6, 7, 8 | **inconnues** | — |
+ * | 9 (Azur) | **composée** | fenêtres 1 et 3 |
+ * | 10 (Azur-Turquoise) | composée | fenêtres 1–3 |
+ *
+ * Le relevé qui trancherait demande une **gen 5 ou une gen 7** dans l'une des six
+ * cases. Le moins cher n'est pas de les acheter : une gen 6 porte une gen 5 dans
+ * sa généalogie, une gen 8 porte une gen 7. Deux fenêtres d'accouplement de plus
+ * — ouvrir la fenêtre ne consomme rien — épinglent la règle sur tout l'arbre.
  *
  * ## Ce que ceci ne décrit pas
  *
@@ -112,42 +139,29 @@ export const GRANDPARENT_WEIGHT = 3;
 export const COMPOSITE_FACTOR = 2 / 9;
 
 /**
- * Les couleurs **simples** dont l'identifiant porte quand même un souligné.
+ * Une couleur composée voit son poids divisé par 4,5.
  *
- * Le souligné sépare deux teintes dans `dore_amande`, mais il sépare deux
- * **mots d'un même nom** dans `aigue_marine` — « Aigue-marine », la couleur de
- * génération 9 du muldo, qui n'est pas plus une composition d'« Aigue » et de
- * « marine » que « Prune » n'en est une.
- *
- * La liste est courte et elle est exhaustive : sur les 306 couleurs des trois
- * familles, c'est la **seule** dont la composition lue sur l'identifiant
- * contredise celle lue sur le nom affiché. Le discriminant sur le nom est la
- * casse — un composant commence par une majuscule (« Aigue-marine-Doré »), une
- * continuation par une minuscule — et il donne la parité parfaite.
- *
- * Pour revérifier après une mise à jour des arbres : comparer, sur chaque
- * couleur, `id.includes('_')` au fait que le nom porte plus d'un mot capitalisé.
- * Toute nouvelle divergence est à ajouter ici.
+ * La génération décide, et elle seule — voir l'en-tête pour les trois rapports
+ * relevés qui l'imposent, et pour ce que cette règle a encore d'inachevé. Le
+ * `|| 9` est un ajustement en attente d'un relevé de gen 5 ou 7 ; il est écrit
+ * comme tel plutôt que noyé dans une expression, pour qu'on le retrouve le jour
+ * où ce relevé arrive.
  */
-export const SIMPLE_COLORS_WITH_UNDERSCORE = new Set(['aigue_marine']);
-
-/**
- * Une couleur composée porte deux teintes — « doré_amande », affiché « Doré et
- * Amande ». Les couleurs simples n'en portent qu'une.
- *
- * Lu sur l'identifiant, parce que c'est tout ce dont `lineageDistribution`
- * dispose : elle reçoit des identifiants de couleurs, pas des générations ni des
- * noms. L'exception nommée rattrape le seul cas où le slug ment.
- *
- * `aigue_marine_dore` reste composée, et sans traitement particulier : ce n'est
- * pas `aigue_marine`, donc l'exception ne s'y applique pas.
- */
-export const isComposite = (colorId: string) =>
-  colorId.includes('_') && !SIMPLE_COLORS_WITH_UNDERSCORE.has(colorId);
+export const isComposite = (generation: number) => generation % 2 === 0 || generation === 9;
 
 /** Le poids d'une case, position et composition combinées. */
-export const slotWeight = (position: number, colorId: string) =>
-  position * (isComposite(colorId) ? COMPOSITE_FACTOR : 1);
+export const slotWeight = (position: number, generation: number) =>
+  position * (isComposite(generation) ? COMPOSITE_FACTOR : 1);
+
+/**
+ * La génération prêtée à une couleur que le catalogue ne connaît pas.
+ *
+ * Gen 1 plutôt que zéro : zéro est **pair**, donc composé, et une couleur
+ * inconnue verrait son poids divisé par 4,5 en silence. Un croisement dont une
+ * case manque au catalogue est de toute façon refusé en amont par `pairOutlook`
+ * ; ce défaut ne sert que les lectures d'écran, où mieux vaut le poids plein.
+ */
+const UNKNOWN_GENERATION = 1;
 
 /**
  * Les parts d'une lignée, cases cumulées, sommant à 1.
@@ -164,17 +178,28 @@ export const slotWeight = (position: number, colorId: string) =>
  * `[Indigo, Indigo]`. C'est ce qui donne sa valeur à la purification : le bébé
  * ne se contente pas de reprendre la couleur, il en fait une lignée pure.
  *
- * Purifier une génération **impaire** est doublement gagnant : ces couleurs sont
- * simples, donc déjà de poids plein, et concentrer leur lignée porte la part
- * dominante à 100 %.
+ * Purifier une génération **impaire sauf la 9** est doublement gagnant : ces
+ * couleurs-là sont simples, donc déjà de poids plein, et concentrer leur lignée
+ * porte la part dominante à 100 %. La gen 9 fait exception depuis le relevé du
+ * 14/08 — elle est composée comme les paires, et sa purification ne gagne que le
+ * second terme.
  */
 export const lineageDistribution = (
   parentColorId: string,
-  grandparentColorIds: string[] | null
+  grandparentColorIds: string[] | null,
+  /**
+   * Les générations du catalogue, seule chose qui dise si une case est composée.
+   *
+   * Passées en argument plutôt que lues sur l'identifiant : c'est la génération
+   * qui porte la règle depuis le relevé du 14/08, et l'identifiant s'en trompait
+   * — dans les deux sens, `azur` sans souligné et `aigue_marine` avec.
+   */
+  generations: Map<string, number>
 ): Map<string, number> => {
   const shares = new Map<string, number>();
   const add = (colorId: string, share: number) =>
     shares.set(colorId, (shares.get(colorId) ?? 0) + share);
+  const generationOf = (colorId: string) => generations.get(colorId) ?? UNKNOWN_GENERATION;
 
   // Sans ascendance connue — monture achetée ou capturée — le parent prend tout.
   if (!grandparentColorIds || grandparentColorIds.length === 0) {
@@ -183,9 +208,9 @@ export const lineageDistribution = (
   }
 
   const weights: [string, number][] = [
-    [parentColorId, slotWeight(PARENT_WEIGHT, parentColorId)],
+    [parentColorId, slotWeight(PARENT_WEIGHT, generationOf(parentColorId))],
     ...grandparentColorIds.map(
-      (colorId): [string, number] => [colorId, slotWeight(GRANDPARENT_WEIGHT, colorId)]
+      (colorId): [string, number] => [colorId, slotWeight(GRANDPARENT_WEIGHT, generationOf(colorId))]
     ),
   ];
 

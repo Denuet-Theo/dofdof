@@ -298,19 +298,15 @@ pub fn available_moves(scoring: &Scoring<'_>, stable: &Stable, limit: usize) -> 
 
     for male in &males {
         for female in &females {
-            let Some(outlook) = pair_outlook(scoring.catalog, &male.sample, &female.sample) else {
-                continue;
-            };
+            let outlook = pair_outlook(scoring.catalog, &male.sample, &female.sample);
 
             let held = scoring
                 .catalog
                 .generation(male.sample.color)
                 .max(scoring.catalog.generation(female.sample.color));
-            let gained = f64::from(
-                outlook
-                    .target_generation
-                    .min(scoring.catalog.top_generation()),
-            ) - f64::from(held);
+            // La cible sort déjà plafonnée de `pair_outlook` : le `min` qui
+            // traînait ici la rebornait une seconde fois, sans effet.
+            let gained = f64::from(outlook.target_generation) - f64::from(held);
 
             // Deux parents consommés, plus deux cycles de carburant.
             let parents = scoring.value_of(male.sample.color).max(0.0)

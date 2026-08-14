@@ -106,11 +106,14 @@ const GENETONS_BY_GENERATION: [i64; 11] = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 
 /// la gen 4 — parce que leur ascendance porte une gen 3 — rendent 4 génétons et
 /// non 16 (relevé #59).
 ///
-/// Zéro quand aucune couleur ne nomme la cible : purifier et recopier ne
-/// rapportent rien, ce que la fenêtre du jeu affiche noir sur blanc (#68).
+/// `climbs` est faux dans deux cas, qui n'en font qu'un : l'enfant ne **dépasse**
+/// pas l'ascendance. Soit aucune couleur ne nomme la cible — purifier et recopier
+/// ne rapportent rien, ce que la fenêtre affiche noir sur blanc (#68) —, soit la
+/// cible est plafonnée et vaut ce que le couple porte déjà. Les trois fenêtres du
+/// 14/08 montrent le second : une ligne cible pleine, et zéro géneton.
 #[inline]
-pub fn genetons_for_crossing(male_generation: u8, female_generation: u8, names_target: bool) -> i64 {
-    if !names_target {
+pub fn genetons_for_crossing(male_generation: u8, female_generation: u8, climbs: bool) -> i64 {
+    if !climbs {
         return 0;
     }
     GENETONS_BY_GENERATION[usize::from(male_generation).min(10)]
@@ -995,7 +998,10 @@ pub enum Rejected {
     MountUsedTwice(usize),
     NotFertile(usize),
     SameSex(usize, usize),
-    NoOutlook(usize, usize),
+    // `NoOutlook` a été retirée. Elle disait « le jeu ne propose pas cet
+    // accouplement », ce que le jeu ne dit jamais : au sommet il plafonne la
+    // cible (issue #185). Une politique qui apparie deux gen 10 ne commet plus
+    // une faute de règle mais un mauvais choix, et c'est `barren` qui le compte.
     CloneNotSterile(usize),
     CloneGenerationMismatch(usize, usize),
     Unaffordable { needed: i64, available: i64 },
@@ -1003,7 +1009,7 @@ pub enum Rejected {
 
 impl Rejected {
     /// Le nombre de raisons, pour dimensionner le compteur.
-    pub const REASONS: usize = 9;
+    pub const REASONS: usize = 8;
 
     /// L'indice de cette raison dans `RunOutcome::rejected_by_reason`.
     pub fn reason(&self) -> usize {
@@ -1013,10 +1019,9 @@ impl Rejected {
             Self::MountUsedTwice(_) => 2,
             Self::NotFertile(_) => 3,
             Self::SameSex(..) => 4,
-            Self::NoOutlook(..) => 5,
-            Self::CloneNotSterile(_) => 6,
-            Self::CloneGenerationMismatch(..) => 7,
-            Self::Unaffordable { .. } => 8,
+            Self::CloneNotSterile(_) => 5,
+            Self::CloneGenerationMismatch(..) => 6,
+            Self::Unaffordable { .. } => 7,
         }
     }
 
@@ -1027,7 +1032,6 @@ impl Rejected {
         "monture employée deux fois",
         "monture non fertile",
         "même sexe",
-        "croisement sans cible",
         "clone non stérile",
         "clone de génération différente",
         "kamas insuffisants",
@@ -1320,19 +1324,18 @@ fn apply(
             return Err(Rejected::SameSex(male, female));
         }
 
+        // Le jeu ne refuse jamais un accouplement : il plafonne la cible quand
+        // l'ascendance est déjà au sommet. Il n'y a donc plus rien à rejeter ici
+        // — voir `pair_outlook`, qui répond toujours.
         let (m, f) = (stable.mounts[male].mate(), stable.mounts[female].mate());
-        let Some(outlook) = pair_outlook(catalog, &m, &f) else {
-            // Cible au-dessus du plafond de la famille : le jeu ne propose pas
-            // l'accouplement, donc la politique ne doit pas le demander.
-            return Err(Rejected::NoOutlook(male, female));
-        };
+        let outlook = pair_outlook(catalog, &m, &f);
 
-        let names_target = !outlook.target_colors.is_empty();
-        // Une cible que personne ne nomme : toute la masse de réussite retombe sur
-        // l'ascendance, donc le poulain **ne peut pas** dépasser la génération que
-        // le couple portait déjà. Le croisement est stérile au sens qui compte —
-        // pas qu'il ne donne rien, mais qu'il ne peut rien donner de nouveau.
-        if !names_target {
+        // Le poulain **ne peut pas** dépasser la génération que le couple portait
+        // déjà, de deux façons : personne ne nomme la cible, ou la cible est
+        // plafonnée. Le croisement est stérile au sens qui compte — pas qu'il ne
+        // donne rien, mais qu'il ne peut rien donner de nouveau.
+        let climbs = outlook.climbs();
+        if !climbs {
             barren += 1;
         }
 
@@ -1367,7 +1370,7 @@ fn apply(
             genetons += genetons_for_crossing(
                 catalog.generation(m.color),
                 catalog.generation(f.color),
-                names_target,
+                climbs,
             );
         }
 

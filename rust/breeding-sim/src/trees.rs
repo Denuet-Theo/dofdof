@@ -37,17 +37,25 @@ use serde_json::Value;
 /// trois familles.
 pub type ColorId = u16;
 
-/// Les couleurs **simples** dont l'identifiant porte quand même un souligné.
+/// Une couleur composée voit son poids de lignée divisé par 4,5, et c'est la
+/// **génération** qui le dit.
 ///
-/// Le souligné sépare deux teintes dans `dore_amande`, mais deux **mots d'un
-/// même nom** dans `aigue_marine` — « Aigue-marine », la couleur de génération 9
-/// du muldo. Sur les 306 couleurs des trois familles, c'est la seule dont la
-/// composition lue sur l'identifiant contredise celle lue sur le nom affiché.
+/// On l'a lue successivement sur le souligné de l'identifiant, puis sur la
+/// parité du nom affiché. Les deux se trompent au même endroit : la gen 9. Le
+/// relevé du 14/08 (issue #185) donne Azur (gen 9) à 3,28 % contre Pourpre
+/// (gen 1) à 14,75 % — deux grands-parents de même position, et pourtant
+/// exactement le facteur 4,5 entre eux. Les gen 9 *sont* des compositions de
+/// deux gen 8 ; elles reçoivent seulement un nom d'un seul mot.
 ///
-/// Porté tel quel depuis `lineage.ts`. Si la liste diverge un jour entre les
-/// deux implémentations, la porte de parité le dira : une couleur mal classée
-/// voit son poids divisé par 4,5 à tort, ce qui déplace toute la lignée.
-pub const SIMPLE_COLORS_WITH_UNDERSCORE: &[&str] = &["aigue_marine"];
+/// `aigue_marine` cesse du même coup d'être une exception à nommer : elle est
+/// gen 9, donc composée.
+///
+/// Le `|| 9` reste un **ajustement et non une loi** — les gen 5 et 7 n'ont
+/// jamais été relevées, et « impaire ⇒ simple » comme « ≥ 2 ⇒ composée » sont
+/// réfutées. Voir `lineage.ts`, qui porte le tableau complet de ce qui est su.
+pub const fn is_composite(generation: u8) -> bool {
+    generation % 2 == 0 || generation == 9
+}
 
 #[derive(Debug, Clone)]
 pub struct Color {
@@ -57,8 +65,9 @@ pub struct Color {
     /// Recettes internées. Une recette dont un composant est inconnu du
     /// catalogue est écartée au chargement — voir `Catalog::dropped_recipes`.
     pub recipes: Vec<[ColorId; 2]>,
-    /// « Composée » au sens de `lineage.ts` : deux teintes, donc poids divisé
-    /// par 4,5. Calculé une fois ici plutôt qu'à chaque lecture de lignée.
+    /// « Composée » au sens de `lineage.ts` : poids de lignée divisé par 4,5.
+    /// Lu sur la génération — voir `is_composite` — et calculé une fois ici
+    /// plutôt qu'à chaque lecture de lignée.
     pub composite: bool,
 }
 
@@ -198,8 +207,7 @@ impl Catalog {
                 name: color.name.to_owned(),
                 generation: color.generation,
                 recipes,
-                composite: color.slug.contains('_')
-                    && !SIMPLE_COLORS_WITH_UNDERSCORE.contains(&color.slug),
+                composite: is_composite(color.generation),
             });
         }
 
@@ -372,26 +380,43 @@ mod tests {
         );
     }
 
+    /// La gen 9 est composée, et son souligné n'y est pour rien.
+    ///
+    /// Ce test a dit successivement les deux choses. `aigue_marine` a d'abord été
+    /// classée composée par son souligné, puis simple par son nom d'un seul mot —
+    /// et c'est le relevé du 14/08 qui tranche : les gen 9 sont composées, quelle
+    /// que soit la forme de leur nom. Les deux couleurs ci-dessous en attestent
+    /// depuis les deux bords.
     #[test]
-    fn aigue_marine_est_simple_malgre_son_souligne() {
+    fn la_generation_9_est_composee_quelle_que_soit_la_forme_du_nom() {
         let catalog = muldo();
-        let aigue = catalog.id_of("aigue_marine").expect("aigue_marine existe");
-        assert!(!catalog.is_composite(aigue));
-        assert_eq!(catalog.generation(aigue), 9);
 
-        // Mais sa composée l'est, et sans traitement particulier.
+        // Un souligné, mais c'est un nom d'un seul mot en deux morceaux.
+        let aigue = catalog.id_of("aigue_marine").expect("aigue_marine existe");
+        assert_eq!(catalog.generation(aigue), 9);
+        assert!(catalog.is_composite(aigue));
+
+        // Aucun souligné, et pourtant pénalisée : c'est Azur qui l'a montré.
+        let azur = catalog.id_of("azur").expect("azur existe");
+        assert_eq!(catalog.generation(azur), 9);
+        assert!(catalog.is_composite(azur));
+
+        // Et sa composée l'est aussi, sans traitement particulier.
         let compose = catalog.id_of("aigue_marine_dore").expect("existe");
         assert!(catalog.is_composite(compose));
     }
 
+    /// La composition suit la parité — **plus la gen 9**, qui est l'écart connu.
+    ///
+    /// Ce test disait la parité pure, et le relevé du 14/08 l'a démentie sur une
+    /// génération. Il l'épingle donc telle qu'elle est mesurée, exception
+    /// comprise : le jour où une gen 5 ou une gen 7 sera relevée, c'est ici que
+    /// la règle définitive s'écrira, et ce test-là dira laquelle était fausse.
     #[test]
-    fn la_parite_generation_composition_est_parfaite() {
-        // Générations impaires 0 % composées, paires 100 %. C'est ce que
-        // `lineage.ts` affirme sur les 306 couleurs des trois familles ; on le
-        // vérifie ici sur le muldo, seule famille que ce crate joue.
+    fn la_composition_suit_la_parite_sauf_a_la_generation_9() {
         let catalog = muldo();
         for (index, color) in catalog.colors().iter().enumerate() {
-            let expected = color.generation % 2 == 0;
+            let expected = color.generation % 2 == 0 || color.generation == 9;
             assert_eq!(
                 color.composite,
                 expected,
@@ -421,9 +446,10 @@ mod tests {
     /// Ce test existe parce que l'inférence inverse est séduisante et fausse :
     /// on avait écrit ici que les générations **impaires** ne se composaient
     /// pas, au motif que leurs couleurs sont simples. *Roux* (gen 3) est simple
-    /// et porte six recettes ; *Ambre* (gen 9) en porte cinq. Si cette
-    /// distinction se reperdait, `pair_target_colors` court-circuiterait à tort
-    /// et la moitié des cibles disparaîtrait en silence.
+    /// et porte six recettes ; *Ambre* (gen 9) en porte cinq. Se composer et
+    /// être composée sont deux choses : *Ambre* est produite par croisement et
+    /// pèse comme une composée, *Roux* est produite par croisement et pèse
+    /// plein.
     #[test]
     fn seule_la_generation_1_ne_se_compose_pas() {
         let catalog = muldo();

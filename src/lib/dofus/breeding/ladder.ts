@@ -1,4 +1,4 @@
-import { pairOutlook, type Mate } from './pairing';
+import { climbs, pairOutlook, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
 
 /**
@@ -24,14 +24,19 @@ import type { BreedingColor } from './costs';
  *
  * ## La règle, et elle seule
  *
- * > **Un croisement est admissible si et seulement si ses couleurs cibles sont
- * > non vides et toutes dans le plan.**
+ * > **Un croisement est admissible si et seulement s'il gagne une génération et
+ * > que toutes ses couleurs cibles sont dans le plan.**
  *
  * Elle suffit parce que la cible se lit sur les six cases d'ascendance et sur
  * rien d'autre — voir `pairTargetGeneration`. Elle rejette d'elle-même tout ce
  * qu'il aurait fallu écarter à la main : deux gen 1 de blocs différents, une
  * rescapée mariée à une gen 1 ordinaire, deux rescapées de barreaux différents,
  * deux `Doré-*` identiques là où le Roux exige deux teintes distinctes.
+ *
+ * La première moitié se lisait « ses couleurs cibles sont non vides », ce qui
+ * était le même énoncé tant qu'un couple au plafond était refusé en amont. Ce
+ * n'est plus le cas depuis #185 : au sommet la fenêtre est pleine et ne gagne
+ * rien. Voir `aimsAt`, et `climbs` dans `pairing.ts`.
  *
  * ## Ce qui n'est pas porté
  *
@@ -876,10 +881,25 @@ export const crownedLadderOf = (
 /**
  * La couleur qu'un couple vise, **s'il est admissible**.
  *
- * `null` dès qu'il ne nomme rien — recopie, deux fécondités brûlées pour rien —
- * ou qu'une de ses cibles sort du plan. Quand plusieurs couleurs voulues sont
- * atteignables, on retient la plus probable : `targetColors` est triée par poids
- * décroissant.
+ * `null` dès qu'il ne **monte** pas — recopie ou plafond, deux fécondités
+ * brûlées pour rester au même barreau — ou qu'une de ses cibles sort du plan.
+ * Quand plusieurs couleurs voulues sont atteignables, on retient la plus
+ * probable : `targetColors` est triée par poids décroissant.
+ *
+ * ## Pourquoi `climbs` et non « la cible n'est pas vide »
+ *
+ * Les deux disaient la même chose tant qu'un couple au plafond était refusé par
+ * `pairOutlook`. Ils divergent depuis #185 : une gen 10 mariée à une gen 1 nomme
+ * des couleurs gen 10 — dont la sienne, à 27,19 % — sans gagner un rang. Pour
+ * une échelle, qui existe pour monter, c'est exactement le même gâchis qu'une
+ * recopie.
+ *
+ * Ce n'est **pas** un jugement sur la valeur de ces croisements. Le forum en
+ * décrit une boucle qui duplique les gen 10, et le plafond est précisément ce
+ * qui la rend possible — une réussite y rend la génération qu'on vient de
+ * dépenser au lieu de la suivante. Mais l'échelle chiffre une montée depuis
+ * zéro, pas une exploitation du sommet ; l'y admettre en silence changerait la
+ * politique sans que rien ne l'ait mesurée. C'est un plan à part.
  */
 export const aimsAt = (
   male: Mate,
@@ -889,18 +909,18 @@ export const aimsAt = (
   ladder: Ladder
 ): string | null => {
   const outlook = pairOutlook(male, female, colors, generations);
-  if (!outlook || outlook.targetColors.length === 0) return null;
+  if (!outlook || !climbs(outlook)) return null;
   if (!outlook.targetColors.every((target) => ladder.wanted.has(target.colorId))) return null;
   return outlook.targetColors[0].colorId;
 };
 
 /**
- * Le couple nomme-t-il quelque chose, plan mis à part ?
+ * Le couple monte-t-il d'un rang, plan mis à part ?
  *
  * C'est la moitié de la règle, et la seule qui vaille sur une écurie **qu'on n'a
  * pas montée à l'échelle** : le plan décrit une route depuis zéro, alors qu'un
  * éleveur arrive avec ce qu'il a. Refuser tout ce qui sort du plan lui
- * supprimerait des croisements qui, eux, rendent bien une couleur — voir
+ * supprimerait des croisements qui, eux, gagnent bien une génération — voir
  * `admissibility` dans l'écran, qui choisit laquelle des deux lectures appliquer.
  */
 export const namesSomething = (
@@ -910,5 +930,5 @@ export const namesSomething = (
   generations: Map<string, number>
 ): boolean => {
   const outlook = pairOutlook(male, female, colors, generations);
-  return outlook !== null && outlook.targetColors.length > 0;
+  return outlook !== null && climbs(outlook);
 };

@@ -285,6 +285,11 @@ const BreedingStocks = ({
   const [savedBudget, setSavedBudget] = useState(false);
 
   const byId = useMemo(() => new Map(colors.map((color) => [color.id, color])), [colors]);
+  /** Ce dont les poids de lignée ont besoin : la génération dit si une case est composée. */
+  const generations = useMemo(
+    () => new Map(colors.map((color) => [color.id, color.generation])),
+    [colors]
+  );
   /** Les ascendances ne portent que des identifiants ; le catalogue a les noms. */
   const nameOf = useCallback(
     (colorId: string) => byId.get(colorId)?.name ?? colorId,
@@ -314,7 +319,9 @@ const BreedingStocks = ({
    * qu'afficher un chiffre bâti sur une ascendance à moitié connue.
    */
   const purityOf = (mount: Individual): number | null =>
-    mount.parents ? lineagePurity(lineageDistribution(mount.colorId, mount.parents)) : null;
+    mount.parents
+      ? lineagePurity(lineageDistribution(mount.colorId, mount.parents, generations))
+      : null;
 
   /**
    * Le nom que cette monture devrait porter en jeu, d'après sa généalogie.

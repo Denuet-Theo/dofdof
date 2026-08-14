@@ -1650,9 +1650,11 @@ impl LadderPolicy {
                     } else {
                         (&groups[other].sample, &groups[subject].sample)
                     };
-                    if !pair_outlook(catalog, male, female)
-                        .is_some_and(|outlook| !outlook.target_colors.is_empty())
-                    {
+                    // `climbs` et non « a une cible » : la moisson vit des
+                    // génétons, et ils ne tombent que si l'enfant dépasse
+                    // l'ascendance. Un couple plafonné en affiche une, pleine, et
+                    // n'en paie aucun.
+                    if !pair_outlook(catalog, male, female).climbs() {
                         continue;
                     }
                     let cost = weight(groups[other].sample.color);
@@ -1754,9 +1756,10 @@ impl LadderPolicy {
             } else {
                 (&partner, subject)
             };
-            let Some(outlook) = pair_outlook(catalog, male, female) else {
+            let outlook = pair_outlook(catalog, male, female);
+            if !outlook.climbs() {
                 continue;
-            };
+            }
             let Some(target) = outlook.target_colors.first() else {
                 continue;
             };
@@ -2043,18 +2046,23 @@ impl LadderPolicy {
         if let Some(hit) = self.admissible.get(&key) {
             return *hit;
         }
-        let answer = pair_outlook(catalog, male, female).and_then(|outlook| {
-            let targets = &outlook.target_colors;
-            if targets.is_empty()
-                || !targets
-                    .iter()
-                    .all(|t| self.ladder.wanted.contains(&t.color))
-            {
-                None
-            } else {
-                Some(targets[0].color)
-            }
-        });
+        let outlook = pair_outlook(catalog, male, female);
+        let targets = &outlook.target_colors;
+        // `climbs` remplace « la cible n'est pas vide ». Les deux disaient la
+        // même chose tant qu'un couple au plafond était refusé ; ils divergent
+        // depuis. Un couple plafonné nomme des couleurs et n'en gagne aucune
+        // génération : deux fécondités consommées pour rester au même barreau,
+        // ce que l'échelle ne propose pas. Ce que la boucle du sommet en ferait
+        // est un autre plan, et il se mesurera à part.
+        let answer = if !outlook.climbs()
+            || !targets
+                .iter()
+                .all(|t| self.ladder.wanted.contains(&t.color))
+        {
+            None
+        } else {
+            Some(targets[0].color)
+        };
         self.admissible.insert(key, answer);
         answer
     }

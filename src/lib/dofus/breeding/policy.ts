@@ -508,7 +508,9 @@ const readPlan = (
       strategy.level,
       strategy.optimakinaFrom
     );
-    if (!delta?.namesTarget) return null;
+    // `climbs` et non `namesTarget` : au plafond la fenêtre est pleine et ne
+    // gagne rien, donc il n'y a rien à annoncer comme visé.
+    if (!delta?.climbs) return null;
     const best = delta.births
       .filter(([colorId]) => (generations.get(colorId) ?? 1) === delta.targetGeneration)
       .sort((a, b) => b[1] - a[1])[0];

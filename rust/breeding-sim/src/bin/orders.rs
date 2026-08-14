@@ -172,7 +172,7 @@ fn barren(economy: &Economy, ladder: &Ladder, variant: &Variant) -> usize {
                     .with_ordering(variant.ordering, variant.gating),
             );
             play(&catalog, economy, &mut audit, seed);
-            audit.tally.barren + audit.tally.impossible
+            audit.tally.barren + audit.tally.capped
         })
         .sum()
 }

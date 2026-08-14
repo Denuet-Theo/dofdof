@@ -805,18 +805,43 @@ const Fill = ({
   );
 
   /**
-   * Ce qu'on met en enclos, **par ordre alphabétique du nom en jeu**.
+   * Ce qu'on met en enclos : **les nommées d'abord, les anonymes ensuite**.
    *
-   * Pas dans l'ordre du plan : devant le coffre on cherche des noms, et l'écurie du
-   * jeu les trie. Suivre son tri évite de la reparcourir à chaque monture.
+   * Ce sont deux gestes différents devant le coffre, et les mélanger faisait
+   * perdre les deux. Une monture nommée se **cherche** — le nom est le seul repère
+   * que l'écurie du jeu donne, d'où le tri alphabétique, qui est celui du jeu.
+   * Une anonyme ne se cherche pas : on en prend le compte annoncé dans le tas de
+   * sa couleur, et ce qu'il faut alors lire est « cinq Pourpre mâles », pas cinq
+   * lignes indiscernables.
+   *
+   * La liste regroupait tout par nom, `Anonyme` compris. Trois choses s'y
+   * perdaient : le vrac de **toutes** les couleurs et des deux sexes fondait en
+   * une seule entrée — `flatten` lui fabrique un identifiant qui n'est dans
+   * `individuals` par construction — et `'Anonyme'` se classant avant `'G…'`,
+   * ce tas passait **devant** les montures nommées, qui sont les seules qu'on ait
+   * à chercher. Voir #164.
    */
   const toLoad = useMemo(() => {
-    const names = new Map<string, number>();
-    const add = (id: string) => {
-      const mount = individuals.find((entry) => entry.id === id);
-      const name = mount?.name ?? ANONYMOUS_NAME;
-      names.set(name, (names.get(name) ?? 0) + 1);
+    /** Les nommées, par nom : c'est sous ce nom qu'on les trouvera. */
+    const named = new Map<string, number>();
+    /** Les anonymes, par couleur **et par sexe** : les deux se comptent à part. */
+    const anonymous = new Map<string, { colorId: string; sex: Sex; count: number }>();
+
+    const add = (mount: Individual) => {
+      // Le nom porté en jeu, et non l'identifiant : une monture de vrac n'a pas
+      // de ligne, et une monture née pas encore renommée n'a pas de nom non plus.
+      // Les deux se rangent avec les anonymes, ce qu'elles sont réellement.
+      const name = individuals.find((entry) => entry.id === mount.id)?.name ?? mount.name;
+      if (name) {
+        named.set(name, (named.get(name) ?? 0) + 1);
+        return;
+      }
+      const key = `${mount.colorId}|${mount.sex}`;
+      const row = anonymous.get(key) ?? { colorId: mount.colorId, sex: mount.sex, count: 0 };
+      row.count += 1;
+      anonymous.set(key, row);
     };
+
     for (const [male, female] of fill.raw.crossings) {
       const at = (index: number) => fill.mounts[index];
       // Une féconde ne passe pas par l'enclos : son cycle est payé, elle
@@ -825,12 +850,20 @@ const Fill = ({
       // que les parents qui doivent leur cycle.
       for (const index of [male, female]) {
         const mount = at(index);
-        if (mount && !mount.cycled) add(mount.id);
+        if (mount && !mount.cycled) add(mount);
       }
     }
-    for (const index of fill.raw.cycles) if (fill.mounts[index]) add(fill.mounts[index].id);
-    return [...names].sort(([a], [b]) => a.localeCompare(b, 'fr'));
-  }, [fill, individuals]);
+    for (const index of fill.raw.cycles) if (fill.mounts[index]) add(fill.mounts[index]);
+
+    return {
+      named: [...named].sort(([a], [b]) => a.localeCompare(b, 'fr')),
+      // Par couleur puis mâles avant femelles, comme le reste de l'écran.
+      anonymous: [...anonymous.values()].sort(
+        (a, b) =>
+          nameOf(a.colorId).localeCompare(nameOf(b.colorId), 'fr') || a.sex.localeCompare(b.sex)
+      ),
+    };
+  }, [fill, individuals, nameOf]);
   /**
    * Le nom qu'une monture suivie porte en jeu.
    *
@@ -1094,8 +1127,9 @@ const Fill = ({
                   noms qu'on cherche **dans le coffre**, et rien d'autre ne s'y
                   cherche. */}
               <span className="text-[11px] text-dark-500">
-                {toLoad.reduce((total, [, count]) => total + count, 0)} à chercher dans le coffre,
-                par ordre alphabétique
+                {toLoad.named.reduce((total, [, count]) => total + count, 0) +
+                  toLoad.anonymous.reduce((total, { count }) => total + count, 0)}{' '}
+                à chercher dans le coffre, les nommées par ordre alphabétique
                 {loadTotals.buys > 0 && ` · ${loadTotals.buys} à procurer`}
               </span>
               {/* La sortie, qui ferme la boucle : sans elle le chargement ne
@@ -1158,23 +1192,43 @@ const Fill = ({
         </div>
       )}
 
-      {/* La liste de chargement, quand on y est : des noms à chercher, triés comme
-          l'écurie du jeu les trie. */}
-      {step === 'load' && toLoad.length > 0 && (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 py-2 rounded-xl
+      {/* La liste de chargement, quand on y est. Les nommées d'abord — des noms à
+          chercher, triés comme l'écurie du jeu les trie — puis les anonymes, qui
+          ne se cherchent pas : elles se comptent dans le tas de leur couleur. */}
+      {step === 'load' && (toLoad.named.length > 0 || toLoad.anonymous.length > 0) && (
+        <div className="flex flex-col gap-1.5 px-3 py-2 rounded-xl
           bg-emerald-500/5 border border-emerald-500/20">
-          {toLoad.map(([name, count]) => (
-            <span key={name} className="inline-flex items-center gap-1">
-              {name === ANONYMOUS_NAME ? (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500">
-                  {name}
+          {toLoad.named.length > 0 && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {toLoad.named.map(([name, count]) => (
+                <span key={name} className="inline-flex items-center gap-1">
+                  <CopyableText value={name} title={`Copier « ${name} »`} />
+                  {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
                 </span>
-              ) : (
-                <CopyableText value={name} title={`Copier « ${name} »`} />
-              )}
-              {count > 1 && <span className="text-[10px] text-dark-500">× {count}</span>}
-            </span>
-          ))}
+              ))}
+            </div>
+          )}
+          {toLoad.anonymous.length > 0 && (
+            <div
+              className={`flex flex-wrap gap-x-3 gap-y-1 ${
+                // Le trait ne sépare que s'il y a deux blocs à séparer.
+                toLoad.named.length > 0 ? 'pt-1.5 border-t border-emerald-500/15' : ''
+              }`}
+            >
+              {toLoad.anonymous.map(({ colorId, sex, count }) => (
+                <span
+                  key={`${colorId}|${sex}`}
+                  className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-400"
+                  // Le nom du tas où aller les prendre : elles n'en ont pas d'autre.
+                  title={`${count} ${nameOf(colorId)} ${sex === 'M' ? 'mâle' : 'femelle'} sans nom`}
+                >
+                  <span className="text-dark-200">{count}</span> {nameOf(colorId)}{' '}
+                  {sex === 'M' ? 'mâle' : 'femelle'}
+                  {count > 1 ? 's' : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

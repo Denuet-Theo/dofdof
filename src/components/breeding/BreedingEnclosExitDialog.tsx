@@ -8,7 +8,7 @@ import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME, colorCoder } from '@/lib/dofus/breeding/naming';
 import { parseCountedMountId } from '@/lib/dofus/breeding/search';
-import type { Individual } from '@/lib/dofus/breeding/stable';
+import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
 
 /**
  * La sortie d'enclos : ce que le parcours n'écrivait nulle part.
@@ -99,6 +99,57 @@ const BreedingEnclosExitDialog = ({
   const climbed = mounts.filter((mount) => levelOf(mount) !== mount.level).length;
 
   /**
+   * Le lot rangé pour être lu : **les nommées d'abord, les sans-nom ensuite**.
+   *
+   * L'ordre était celui du chargement, donc nommées et anonymes alternaient, et
+   * une fournée de cinquante places posait quarante lignes « Anonyme » identiques
+   * entre lesquelles il n'y avait rien à distinguer — ni couleur lisible en un
+   * coup d'œil, ni sexe, ni moyen de savoir si on en avait déjà traité une. Voir
+   * #164.
+   *
+   * Les sans-nom se **groupent**, et c'est ce qui rend l'écran tenable : elles
+   * n'ont pas d'identité à saisir, seulement un effectif. La clé porte le niveau
+   * en plus de la couleur et du sexe, pour que le groupe reste exactement ce qui
+   * est interchangeable — les comptées sortent toutes de `BULK_MATE_LEVEL` et se
+   * réunissent d'elles-mêmes, une monture née pas encore renommée garde le sien
+   * et donc sa ligne.
+   *
+   * Le champ de niveau du groupe écrit sur **toutes** ses montures : c'est ce qui
+   * garde `missing` juste, puisqu'il se lit monture par monture.
+   */
+  const rows = useMemo(() => {
+    const named = mounts.filter((mount) => mount.name);
+    const unnamed = new Map<string, { mounts: Individual[]; colorId: string; sex: Sex }>();
+    for (const mount of mounts) {
+      if (mount.name) continue;
+      const key = `${mount.colorId}|${mount.sex}|${mount.level}`;
+      const group = unnamed.get(key) ?? { mounts: [], colorId: mount.colorId, sex: mount.sex };
+      group.mounts.push(mount);
+      unnamed.set(key, group);
+    }
+    return {
+      named: [...named].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', 'fr')),
+      unnamed: [...unnamed.values()].sort(
+        (a, b) =>
+          nameOf(a.colorId).localeCompare(nameOf(b.colorId), 'fr') || a.sex.localeCompare(b.sex)
+      ),
+    };
+  }, [mounts, nameOf]);
+
+  /** Pose un niveau sur tout un groupe d'un coup : il n'y a rien à y distinguer. */
+  const setGroupLevel = (group: Individual[], value: number) =>
+    setDraft({
+      key: signature,
+      done: null,
+      levels: {
+        ...levels,
+        ...Object.fromEntries(
+          group.map((mount) => [mount.id, Math.max(1, Math.min(200, value || 1))])
+        ),
+      },
+    });
+
+  /**
    * Les montures dont le niveau n'est **pas** connu, et que la sortie ne doit pas
    * enregistrer sans qu'on l'ait saisi.
    *
@@ -149,7 +200,7 @@ const BreedingEnclosExitDialog = ({
         )}
 
         <div className="space-y-1 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-          {mounts.map((mount) => {
+          {rows.named.map((mount) => {
             const color = byId.get(mount.colorId);
             return (
               <div
@@ -169,14 +220,8 @@ const BreedingEnclosExitDialog = ({
                 <span className={mount.sex === 'M' ? 'text-info' : 'text-loss-light'}>
                   {mount.sex === 'M' ? '♂' : '♀'}
                 </span>
-                <code
-                  className={`text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 ${
-                    (mount.name ?? ANONYMOUS_NAME) === ANONYMOUS_NAME
-                      ? 'text-dark-500'
-                      : 'text-kamas'
-                  }`}
-                >
-                  {mount.name ?? ANONYMOUS_NAME}
+                <code className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-kamas">
+                  {mount.name}
                 </code>
                 {/* Toute monture qui sort d'ici prend son niveau, vrac et
                     procurées comprises. Sans lui elles vaudraient
@@ -201,6 +246,60 @@ const BreedingEnclosExitDialog = ({
                   <span className="text-[10px] text-dark-600 tabular-nums">
                     était {mount.level}
                   </span>
+                )}
+              </div>
+            );
+          })}
+
+          {rows.unnamed.map((group) => {
+            const color = byId.get(group.colorId);
+            const head = group.mounts[0];
+            return (
+              <div
+                key={`${group.colorId}|${group.sex}|${head.level}`}
+                className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
+                  bg-dark-800/40 border border-dark-700/40"
+              >
+                <ColorChip
+                  name={nameOf(group.colorId)}
+                  code={code(nameOf(group.colorId))}
+                  icon={color ? colorIconUrl(color) : null}
+                  size="sm"
+                />
+                {/* L'effectif tient la place du nom : c'est la seule chose qui
+                    distingue cette ligne, et c'est ce qu'on va compter dans le
+                    tas. */}
+                <span className="text-xs text-dark-100 tabular-nums font-semibold">
+                  {group.mounts.length}
+                </span>
+                <span className="text-xs text-dark-200 truncate max-w-[9rem]">
+                  {nameOf(group.colorId)}
+                </span>
+                <GenBadge generation={color?.generation ?? 1} />
+                <span className={group.sex === 'M' ? 'text-info' : 'text-loss-light'}>
+                  {group.sex === 'M' ? '♂' : '♀'}
+                </span>
+                <code className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500">
+                  {ANONYMOUS_NAME}
+                </code>
+                {/* Un seul champ pour le groupe : elles n'ont rien qui les
+                    distingue, donc rien à saisir séparément. Il écrit sur chacune,
+                    ce qui garde `missing` juste. */}
+                <label className="ml-auto flex items-center gap-1 text-[10px] text-dark-500">
+                  niv
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={String(levelOf(head))}
+                    onChange={(event) => setGroupLevel(group.mounts, Number(event.target.value))}
+                    className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                      border-dark-600/50 text-dark-100 text-[11px] text-right transition-all
+                      hover:border-dark-500 focus:border-kamas/50"
+                  />
+                </label>
+                {levelOf(head) !== head.level && (
+                  <span className="text-[10px] text-dark-600 tabular-nums">était {head.level}</span>
                 )}
               </div>
             );

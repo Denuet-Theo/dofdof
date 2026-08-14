@@ -18,6 +18,7 @@ import {
   type Sex,
 } from '@/lib/dofus/breeding/stable';
 import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage';
+import type { DriftSignal } from '@/lib/dofus/breeding/drift';
 import {
   ANONYMOUS_NAME,
   carriedGeneration,
@@ -33,6 +34,7 @@ import type {
   FuelPriceResult,
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
+import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
 
 /**
  * Ce que l'éleveur a déjà : en écurie, en réserve et en caisse.
@@ -145,6 +147,14 @@ type Props = {
    * et il n'y a pas de fournée à compter.
    */
   minBatches: number | null;
+  /**
+   * Les occasions hors recette que l'écurie porte. Voir `drift.ts`.
+   *
+   * Ici parce que ça se lit sur l'écurie **seule** : pas sur un plan, pas sur un
+   * marché. C'est en regardant ses montures qu'on se demande laquelle vaut plus
+   * qu'elle n'en a l'air.
+   */
+  drift: DriftSignal[];
 };
 
 const countInput = (
@@ -257,6 +267,7 @@ const BreedingStocks = ({
   crownable,
   onSelectTarget,
   minBatches,
+  drift,
 }: Props) => {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -783,6 +794,8 @@ const BreedingStocks = ({
               </div>
             )}
           </div>
+
+          <BreedingDriftSignals drift={drift} nameOf={nameOf} individuals={individuals} />
 
           {/* Prix des couleurs, et ce qu'on veut en produire.
               Ils vivaient sous « Couleur visée » et sont partis avec elle ; sans

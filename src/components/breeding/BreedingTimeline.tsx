@@ -71,6 +71,8 @@ import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { Couple, Individual, Sex } from '@/lib/dofus/breeding/stable';
+import type { CloneOption } from '@/lib/dofus/breeding/cloning';
+import BreedingCloneAdvice from '@/components/breeding/BreedingCloneAdvice';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
@@ -150,6 +152,11 @@ type Props = {
    * par la page — elle seule tient l'entrée de la politique. Voir #165.
    */
   couples?: Couple[];
+  /**
+   * Ce que valent les stériles de l'écurie, affiché à l'étape « cloner ». Voir
+   * `Fill` et `cloning.ts`.
+   */
+  cloneAdvice?: CloneOption[];
   /**
    * Les couleurs et leurs générations, pour la saisie des naissances et des
    * clonages — la fenêtre d'accouplement propose les issues, donc elle a besoin du
@@ -639,6 +646,7 @@ const Agenda = ({
 const Fill = ({
   fill,
   couples,
+  cloneAdvice = [],
   nameOf,
   individuals = [],
   colors,
@@ -657,6 +665,14 @@ const Fill = ({
    * exactement le défaut de #165, donc c'est un repli, pas un mode.
    */
   couples?: Couple[];
+  /**
+   * Ce que valent les stériles de l'écurie, et laquelle apparier avec laquelle.
+   *
+   * À côté de l'étape « cloner » parce que c'est le même geste au même moment. Le
+   * ruban dit déjà quels clonages la **politique** a planifiés ; ceci dit ce que
+   * tes stériles valent et si mieux vaut les extraire. Voir `cloning.ts`.
+   */
+  cloneAdvice?: CloneOption[];
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
   colors?: BreedingColor[];
@@ -1210,6 +1226,15 @@ const Fill = ({
       {/* La liste de chargement, quand on y est. Les nommées d'abord — des noms à
           chercher, triés comme l'écurie du jeu les trie — puis les anonymes, qui
           ne se cherchent pas : elles se comptent dans le tas de leur couleur. */}
+      {/* Ce que valent les stériles, à l'étape où on les clone. */}
+      {step === 'clone' && (
+        <BreedingCloneAdvice
+          clonings={cloneAdvice}
+          nameOf={nameOf}
+          individuals={individuals}
+        />
+      )}
+
       {step === 'load' && (toLoad.named.length > 0 || toLoad.anonymous.length > 0) && (
         <div className="flex flex-col gap-1.5 px-3 py-2 rounded-xl
           bg-emerald-500/5 border border-emerald-500/20">
@@ -1672,6 +1697,7 @@ const BreedingTimeline = ({
   enclosCount,
   fill,
   couples,
+  cloneAdvice,
   nameOf,
   individuals,
   colors,
@@ -1956,6 +1982,7 @@ const BreedingTimeline = ({
         <Fill
           fill={fill}
           couples={couples}
+          cloneAdvice={cloneAdvice}
           nameOf={nameOf}
           individuals={individuals}
           colors={colors}

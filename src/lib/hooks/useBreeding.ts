@@ -125,6 +125,54 @@ export const DEFAULT_SETTINGS: Omit<UserBreedingSettings, 'user_id' | 'updated_a
   gauge_cap: null,
 };
 
+/**
+ * Les réglages relus **en nombres**, et pas tels que PostgREST les rend.
+ *
+ * `kamas_available` et `kamas_per_hour` sont des `bigint`, `net_recovery_rate` un
+ * `numeric`. PostgREST les sérialise en **chaînes décimales** — un `bigint`
+ * dépasse `Number.MAX_SAFE_INTEGER`, donc il ne peut pas voyager en nombre JSON
+ * sans risque de perdre des unités. `UserBreedingSettings` les déclare `number` :
+ * le type ment sur ce qui arrive vraiment, et `tsc` ne peut rien y voir puisque
+ * la valeur ne traverse aucune frontière qu'il inspecte.
+ *
+ * Le coût de ce mensonge est démesuré. `census.kamas` part de ce champ, et
+ * `census.ts` le fait avancer avec `+=` : sur une chaîne, `+=` **concatène**. Le
+ * solde devient alors un texte, `expectedScore` et `myopic` rendent un texte à
+ * leur tour, et la recherche compare ses candidats **lexicographiquement**. Le
+ * classement de la politique n'a plus aucun rapport avec des kamas.
+ *
+ * Mesuré sur l'écurie du 14/08, à 3 000 000 kamas et 50 places :
+ *
+ * | | places | croisements | achats |
+ * | --- | --- | --- | --- |
+ * | solde en chaîne | 2 | 1 | 0 |
+ * | solde en nombre | **50** | **23** | **30** |
+ *
+ * Et ça ne se voyait pas comme une panne : l'écran affichait « 1 accouplement ·
+ * 2/50 places », ce qui ressemble à une écurie pauvre, pas à un défaut. Ni le
+ * nombre d'enclos ni le budget n'y changeaient rien — 300 M donnaient le même
+ * plan que 3 M, ce qui est le seul indice qu'il y avait quelque chose à voir.
+ *
+ * On convertit donc à l'entrée, une fois, plutôt que chez chaque lecteur : c'est
+ * le seul endroit qui sache que la valeur vient d'arriver du réseau.
+ */
+const numericSettings = (row: UserBreedingSettings): typeof DEFAULT_SETTINGS => {
+  const merged = { ...DEFAULT_SETTINGS, ...row };
+  return {
+    ...merged,
+    breeder_level: Number(merged.breeder_level),
+    enclos_count: Number(merged.enclos_count),
+    kamas_per_hour: Number(merged.kamas_per_hour),
+    kamas_available: Number(merged.kamas_available),
+    minutes_per_fight: Number(merged.minutes_per_fight),
+    net_recovery_rate: Number(merged.net_recovery_rate),
+    // Seul champ qui a le droit d'être absent : `null` veut dire « laisse
+    // l'arbitrage décider », et `Number(null)` vaudrait zéro, c'est-à-dire
+    // « plafond nul ». Les deux ne disent pas la même chose.
+    gauge_cap: merged.gauge_cap === null ? null : Number(merged.gauge_cap),
+  };
+};
+
 export type BreedingRow = {
   colorId: string;
   name: string;
@@ -344,7 +392,7 @@ export const useBreeding = (
 
         // Absence de ligne = utilisateur qui n'a jamais réglé : les défauts
         // s'appliquent sans qu'il faille créer la ligne à l'avance.
-        if (settingRows.data) setSettings({ ...DEFAULT_SETTINGS, ...settingRows.data });
+        if (settingRows.data) setSettings(numericSettings(settingRows.data));
         setError(null);
       } catch (err) {
         console.error('[breeding] chargement impossible:', err);

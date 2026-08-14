@@ -19,17 +19,6 @@ import { isSterile, type Individual, type Sex, type Stable } from './stable';
  * arbitrage entre deux emplois d'une monture précieuse : c'est le seul moyen de
  * lui rendre une valeur.
  *
- * **Sauf au sommet, et c'est la seule exception.** Une gen 10 stérile se **vend**
- * à son prix d'HDV, qui est le plus haut de l'arbre ; la refondre en échange
- * d'une fécondité détruit la monture la plus chère qu'on possède pour une chance
- * sur deux d'en refaire une. Le marché s'inverse donc exactement au plafond, et
- * `cloneOptions` n'y propose plus rien.
- *
- * Ce n'est pas un raisonnement, c'est une mesure : jouée sans cette exception, la
- * boucle du sommet — voir `aimsAtSummit` — **perd 8,38 M** sur 200 graines,
- * parce que le cloneur refond exactement ce qu'elle vient de produire. Avec, elle
- * en gagne 43,18 et remporte les 200. Les deux règles ne valent rien séparément.
- *
  * ## 2. Ce qui fait la valeur d'une monture, c'est son ascendance
  *
  * Depuis #59, une gen 1 dont un parent est gen 9 vise la gen 10 — comme une
@@ -209,14 +198,8 @@ export const cloneOptions = (
   context: CloneContext,
   limit = 10
 ): CloneOption[] => {
-  // Le plafond de la famille, lu sur les générations connues. C'est la borne
-  // au-delà de laquelle un clonage cesse d'être une bonne affaire.
-  const top = Math.max(0, ...context.generations.values());
-
   const byGeneration = new Map<number, SterileMount[]>();
   for (const mount of sterileMounts(stable, context)) {
-    // Le sommet ne se refond pas — voir l'en-tête.
-    if (mount.generation >= top) continue;
     const group = byGeneration.get(mount.generation) ?? [];
     group.push(mount);
     byGeneration.set(mount.generation, group);

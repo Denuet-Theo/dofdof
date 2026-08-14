@@ -912,11 +912,12 @@ export const aimsAt = (
    * Admettre aussi les croisements du **sommet**, ceux que le plafond empêche de
    * monter. Voir `aimsAtSummit`.
    *
-   * Séparé plutôt que fondu dans la règle : ce sont deux régimes, et le second
-   * n'a de sens qu'une fois le premier arrivé au bout. Un éleveur sans gen 10
-   * n'en voit jamais un seul.
+   * `false` par défaut, comme `Summit::Hold` côté Rust — et pour la raison qui y
+   * est écrite : la boucle gagne dans le modèle et perd au marché, que le modèle
+   * ne sait pas encore chiffrer. Les deux défauts doivent bouger ensemble, sans
+   * quoi l'écran proposerait ce que la politique mesurée refuse.
    */
-  summit = true
+  summit = false
 ): string | null => {
   const outlook = pairOutlook(male, female, colors, generations);
   if (!outlook || outlook.targetColors.length === 0) return null;
@@ -951,6 +952,18 @@ export const aimsAt = (
  * | dupliquer seul | −8,38 M | −4,38 |
  * | ne plus refondre le sommet, seul | 0,00 M | 0,00 |
  * | **les deux** | **+43,18 M** (200/200) | **+63,43** |
+ *
+ * ## Et pourtant c'est éteint par défaut
+ *
+ * Ces 43 M sont **justes selon le modèle et faux dans le jeu**. La simulation
+ * valorise une gen 10 stérile à son prix d'HDV plein quel que soit le nombre
+ * qu'on en tienne ; la boucle finit la partie avec 162 gen 10, et l'HDV n'en
+ * absorbe pas autant. La profondeur du marché n'est pas modélisée, et c'est elle
+ * qui décide ici.
+ *
+ * La boucle reste donc écrite, mesurée et prête, derrière `summit` — comme
+ * `Summit::Hold` côté Rust. Elle s'allumera le jour où l'économie saura dire à
+ * quel prix le centième exemplaire se vend.
  *
  * ## Le partenaire décide de quelle gen 10 sort
  *

@@ -1290,9 +1290,22 @@ struct Building {
 /// plus refondre, seul, ne vaut exactement rien : sans la boucle une gen 10 ne
 /// s'accouple jamais, donc elle ne devient jamais stérile et le cloneur ne la
 /// voit pas. Voir `clonable`.
+/// ## Pourquoi le défaut reste `Hold`
+///
+/// Ce n'est pas la simulation qui l'a décidé — elle dit l'inverse, et fort. C'est
+/// le **marché**, que la simulation ne modélise pas : elle valorise une gen 10
+/// stérile à son prix d'HDV plein, quel que soit le nombre qu'on en tienne. La
+/// boucle finit la partie avec **162 gen 10**, et le mainteneur, qui joue le jeu,
+/// dit que l'HDV n'en absorbe pas autant.
+///
+/// Le score de `Duplicate` est donc juste **selon le modèle** et faux dans le
+/// jeu, à hauteur de ce que 162 gen 10 ne valent pas. On garde la boucle
+/// mesurée, écrite et prête ; on ne l'allume pas. Elle le redeviendra le jour où
+/// l'économie saura dire à quel prix le centième exemplaire se vend.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Summit {
     /// Rien. La fécondité d'une gen 10 se garde, faute de savoir quoi en faire.
+    #[default]
     Hold,
     /// La boucle décrite par Olxinos-etenn#1917 sur le forum officiel, et
     /// vérifiée ici sur `mating_outcomes`.
@@ -1327,7 +1340,6 @@ pub enum Summit {
     /// Avec Doré, aucune recombinaison ne concurrence la mère. Dupliquer une
     /// gen 10 précise se joue donc entièrement sur le choix de la gen 1, à
     /// mille kamas pièce.
-    #[default]
     Duplicate,
 }
 
@@ -1376,8 +1388,11 @@ pub struct LadderPolicy {
     pub summit: Summit,
     /// Laisser le cloneur refondre les montures du **plafond**.
     ///
-    /// `false` par défaut depuis que la boucle du sommet existe : les deux vont
-    /// ensemble et ne valent rien séparément. Voir `clonable` et `Summit`.
+    /// `true` par défaut, comme avant : le levier ne sert qu'avec
+    /// `Summit::Duplicate`, et il est mesuré **exactement nul** sans elle — sans
+    /// la boucle une gen 10 ne s'accouple jamais, donc ne devient jamais stérile,
+    /// donc le cloneur ne la voit pas. Les deux s'allument ensemble ou pas du
+    /// tout. Voir `clonable` et `Summit`.
     pub clone_top: bool,
     /// Cloner entre lignées différentes, à la seule condition que le jeu pose —
     /// la même génération affichée. Sinon on n'apparie qu'à signature égale, ce
@@ -1448,7 +1463,7 @@ impl LadderPolicy {
             clone_across_lineages: true,
             harvesting: true,
             summit: Summit::default(),
-            clone_top: false,
+            clone_top: true,
             next_starter: 0,
             crowned: false,
             forced_crown: None,

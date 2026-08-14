@@ -1,4 +1,4 @@
-import { climbs, pairOutlook, type Mate } from './pairing';
+import { climbs, pairOutlook, type Mate, type PairOutlook } from './pairing';
 import type { BreedingColor } from './costs';
 
 /**
@@ -25,7 +25,8 @@ import type { BreedingColor } from './costs';
  * ## La règle, et elle seule
  *
  * > **Un croisement est admissible si et seulement s'il gagne une génération et
- * > que toutes ses couleurs cibles sont dans le plan.**
+ * > que toutes ses couleurs cibles sont dans le plan — ou qu'il est au sommet,
+ * > où il n'y a plus de route à suivre.**
  *
  * Elle suffit parce que la cible se lit sur les six cases d'ascendance et sur
  * rien d'autre — voir `pairTargetGeneration`. Elle rejette d'elle-même tout ce
@@ -906,12 +907,68 @@ export const aimsAt = (
   female: Mate,
   colors: BreedingColor[],
   generations: Map<string, number>,
-  ladder: Ladder
+  ladder: Ladder,
+  /**
+   * Admettre aussi les croisements du **sommet**, ceux que le plafond empêche de
+   * monter. Voir `aimsAtSummit`.
+   *
+   * Séparé plutôt que fondu dans la règle : ce sont deux régimes, et le second
+   * n'a de sens qu'une fois le premier arrivé au bout. Un éleveur sans gen 10
+   * n'en voit jamais un seul.
+   */
+  summit = true
 ): string | null => {
   const outlook = pairOutlook(male, female, colors, generations);
-  if (!outlook || !climbs(outlook)) return null;
+  if (!outlook || outlook.targetColors.length === 0) return null;
+  if (!climbs(outlook)) {
+    return summit && aimsAtSummit(outlook, generations) ? outlook.targetColors[0].colorId : null;
+  }
   if (!outlook.targetColors.every((target) => ladder.wanted.has(target.colorId))) return null;
   return outlook.targetColors[0].colorId;
+};
+
+/**
+ * Un croisement du sommet : plafonné, et dont **toute** la cible est au plafond.
+ *
+ * C'est la boucle que le forum décrit et que #185 a rendue représentable —
+ * accoupler une gen 10 avec une gen 1, réaccoupler le raté qui porte encore la
+ * gen 10, et ne pas laisser le cloneur refondre les stériles. Le plan n'y entre
+ * pas : au sommet il n'y a plus de route, il n'y a que la génération la plus
+ * haute de l'arbre, et toutes ses couleurs sont ce qu'on peut posséder de mieux.
+ *
+ * ## Ce que la mesure a dit, et ce qu'elle a corrigé
+ *
+ * L'issue #185 annonce 1,16 gen 10 féconde par gen 10 consommée. C'est juste, et
+ * ce n'était pas suffisant : jouée telle quelle, la boucle **perd 8,38 M** sur
+ * 200 graines. Le terme « + 0,5 » de ce calcul est le clonage, et un clonage
+ * détruit une monture pour rendre une fécondité — au sommet il refond deux gen 10
+ * en une seule et mange la production de la boucle.
+ *
+ * Les deux règles ne valent donc rien séparément et beaucoup ensemble :
+ *
+ * | variante | score | gen 10 tenues |
+ * | --- | --- | --- |
+ * | dupliquer seul | −8,38 M | −4,38 |
+ * | ne plus refondre le sommet, seul | 0,00 M | 0,00 |
+ * | **les deux** | **+43,18 M** (200/200) | **+63,43** |
+ *
+ * ## Le partenaire décide de quelle gen 10 sort
+ *
+ * La masse cible vaut le taux quel que soit le partenaire ; son **partage** non.
+ * Sur une Ambre-Doré [Ambre, Doré], la marier à Doré — sa propre gen 1 — met
+ * 100 % de la cible sur sa propre couleur, là où Ébène n'en met que 62,5 %
+ * parce qu'`Ambre × Ébène` nomme une concurrente. Dupliquer une gen 10 précise
+ * se joue entièrement là, à mille kamas pièce.
+ */
+export const aimsAtSummit = (
+  outlook: PairOutlook,
+  generations: Map<string, number>
+): boolean => {
+  const top = Math.max(...generations.values());
+  return (
+    outlook.targetGeneration >= top &&
+    outlook.targetColors.every((target) => generations.get(target.colorId) === top)
+  );
 };
 
 /**

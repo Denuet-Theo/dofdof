@@ -163,6 +163,10 @@ fn run(economy: &Economy, ladder: &Ladder, variant: &Variant, tuned: bool) -> Ve
 /// n'entre en jeu — mais c'est la propriété que l'échelle revendique, et un
 /// réordonnancement est exactement le genre de changement qui pourrait la casser
 /// sans que le score bouge. On la recompte donc pour chaque ordre.
+///
+/// `capped` n'entre plus dans le compte : depuis la boucle du sommet, ces
+/// croisements-là sont la **production** et non le gâchis. Les additionner ferait
+/// crier cette garde sur un ordre parfaitement sain. Voir `Tally::capped`.
 fn barren(economy: &Economy, ladder: &Ladder, variant: &Variant) -> usize {
     let catalog = muldo();
     (0..25u32)
@@ -172,7 +176,7 @@ fn barren(economy: &Economy, ladder: &Ladder, variant: &Variant) -> usize {
                     .with_ordering(variant.ordering, variant.gating),
             );
             play(&catalog, economy, &mut audit, seed);
-            audit.tally.barren + audit.tally.capped
+            audit.tally.barren
         })
         .sum()
 }

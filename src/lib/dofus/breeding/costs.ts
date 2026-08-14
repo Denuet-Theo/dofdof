@@ -33,8 +33,9 @@
  * n'est pas fait ici.
  */
 
-import { lineageValue } from './lineage';
 import { ladderOf } from './ladder';
+import { genetonsForCrossing, targetGenerationRate } from './mating';
+import { crossingFailureShares, type CrossingParent } from './pairing';
 
 export type BreedingRecipe = [string, string];
 
@@ -203,66 +204,6 @@ export type BreedingFamily = {
 };
 
 /**
- * Génétons produits à la naissance, selon la génération de **chaque parent**.
- * Les deux apports s'additionnent : gen 8 × gen 4 → 120 + 8 = 128.
- *
- * La table s'arrête à la génération 9 et c'est suffisant : un parent doit être
- * d'une génération strictement inférieure à son enfant, et les arbres plafonnent
- * à 10. Vérifié sur les 382 croisements des trois familles — la génération de
- * parent la plus haute rencontrée est 9.
- */
-const GENETONS_BY_GENERATION: Record<number, number> = {
-  1: 1,
-  2: 2,
-  3: 4,
-  4: 8,
-  5: 15,
-  6: 30,
-  7: 60,
-  8: 120,
-  9: 250,
-};
-
-/**
- * Génétons rendus par un croisement, co-produit revendable de l'élevage.
- *
- * Deux générations différentes entrent dans ce calcul, et les confondre était
- * l'erreur :
- *
- * - **la validité** du croisement se juge sur toute la généalogie — l'enfant
- *   doit dépasser l'ascendance entière, pas seulement ses deux parents ;
- * - **la quantité** rendue suit la génération des **parents directs**.
- *
- * Les deux coïncident sur les recettes des arbres, où la génération croît à
- * chaque croisement : le maximum d'une ascendance y est toujours celui du parent
- * lui-même. Vérifié sur les 382 croisements des trois familles — d'où le défaut
- * de `ancestryGeneration`, qui laisse ce calcul inchangé pour eux.
- *
- * Elles cessent de coïncider sur un croisement libre, et le relevé de l'issue
- * #59 tranche : deux parents **gen 2** visant la **gen 4** — parce que leur
- * ascendance porte une gen 3 — rendent **4 génétons**, soit 2 + 2. Ce sont bien
- * les parents qui comptent, pas la cible, qui en aurait donné 8 + 8.
- */
-export const genetonsForCrossing = (
-  childGeneration: number,
-  parentGenerations: [number, number],
-  /**
-   * Génération la plus haute de toute l'ascendance du couple.
-   *
-   * Voir `pairTargetGeneration` : elle vaut le maximum des six cases que la
-   * fenêtre d'accouplement affiche. Par défaut celle des parents directs, ce qui
-   * est exact partout où le graphe de recettes s'applique.
-   */
-  ancestryGeneration = Math.max(...parentGenerations)
-): number => {
-  if (ancestryGeneration >= childGeneration) return 0;
-  return parentGenerations.reduce(
-    (total, generation) => total + (GENETONS_BY_GENERATION[generation] ?? 0),
-    0
-  );
-};
-
-/**
  * Points de Mangeoire à dépenser pour amener une monture au niveau `level`.
  *
  * Loi de puissance ajustée sur cinq relevés en jeu (niveaux 50, 67, 100, 150 et
@@ -291,34 +232,6 @@ export const levelForMountXp = (points: number) => {
   const level = Math.pow(points / MOUNT_XP_COEFFICIENT, 1 / MOUNT_XP_EXPONENT);
   return Math.min(MAX_MOUNT_LEVEL, Math.max(1, Math.floor(level)));
 };
-
-/**
- * Probabilité d'obtenir la **génération** cible : 30 % de base, plus 0,15 % par
- * niveau, les niveaux des deux parents s'additionnant.
- *
- * Vérifié au point près en jeu. Deux parents niveau 69 donnent 50,70 %, et le
- * jeu affiche bien 40,02 % + 5,34 % + 5,34 % pour les trois couleurs de la
- * génération visée, soit 50,70 %. Le complément, 27,55 % + 21,75 % = 49,30 %,
- * couvre les deux couleurs de génération inférieure.
- *
- * La génération, donc, et **pas la couleur** : c'est le piège de cette formule.
- * Voir `lineageValue` pour ce que ça implique.
- *
- * Et la génération **visée**, quel que soit l'écart : deux parents niveau 61
- * visant deux générations au-dessus d'eux — un raccourci d'ascendance, voir
- * `pairTargetGeneration` — affichent 48,3 %, soit exactement
- * `0,3 + 0,0015 × (61 + 61)`. Le saut ne coûte rien en probabilité, ce qui est
- * précisément ce qui le rend intéressant.
- *
- * Deux parents niveau 200 plafonnent à 90 % — la certitude n'est pas atteignable
- * par le niveau seul (il y faudrait 233 niveaux par parent). Les Optimakina
- * poussent au-delà mais ne sont pas modélisées ici.
- */
-const TARGET_GENERATION_BASE_RATE = 0.3;
-const RATE_PER_PARENT_LEVEL = 0.0015;
-
-export const targetGenerationRate = (levelA: number, levelB: number) =>
-  Math.min(1, TARGET_GENERATION_BASE_RATE + RATE_PER_PARENT_LEVEL * (levelA + levelB));
 
 /** Ce qu'une Optimakina ajoute à la probabilité d'obtenir la génération cible. */
 const OPTIMAKINA_BONUS = 0.1;
@@ -633,21 +546,28 @@ export type BreedingOptions = {
   /**
    * Valoriser les bébés hors cible à ce qu'ils auraient coûté à se procurer.
    *
-   * Un accouplement produit toujours un bébé, et `lineageValue` sait désormais
-   * ce qu'il vaut — le modèle d'ascendance est mesuré, pas supposé. C'est exact
-   * pour **valoriser**, et optimiste pour **planifier** : un raté rend une
-   * couleur tirée dans l'ascendance, pas celle dont le plan a besoin. Sur une
-   * route vers la génération 10, on accumule des couleurs de génération 2 dont
-   * on ne fera rien.
+   * Un accouplement produit toujours un bébé, et `crossingFailureShares` sait ce
+   * qu'il vaut — la loi est mesurée, pas supposée. C'est exact pour
+   * **valoriser**, et optimiste pour **planifier** : un raté rend une couleur
+   * tirée dans l'ascendance, pas celle dont le plan a besoin. Sur une route vers
+   * la génération 10, on accumule des couleurs de génération 2 dont on ne fera
+   * rien.
    *
-   * L'écart n'est pas cosmétique : une gen 10 revient à 472 000 kamas sans
-   * crédit, et ressort à gain net avec. Et le crédit change le **comportement**
-   * de l'optimiseur, pas seulement le chiffre — plus un raté rapporte, moins il
-   * vaut la peine de monter les parents, jusqu'à choisir de rater exprès.
+   * L'écart n'est pas cosmétique, et il a grandi depuis la mesure d'origine : sur
+   * le dump du 14/08, une gen 10 revient à **5 073 068** kamas sans crédit et à
+   * **702 266** avec. Le crédit change le **comportement** de l'optimiseur, pas
+   * seulement le chiffre — plus un raté rapporte, moins il vaut la peine de
+   * monter les parents : niveau **200** sans, niveau **19** avec.
    *
    * `false` coupe le crédit : chaque tentative se paie plein pot. Les deux
    * lectures sont défendables, aucune n'est « la » vérité, et c'est pourquoi
    * c'est un réglage.
+   *
+   * **Attention, ce réglage n'a plus d'interrupteur.** #81 a retiré la case à
+   * cocher en annonçant « the credit is now always on », et le badge « ratés non
+   * crédités » avec elle — mais `useBreeding` lit toujours la colonne. Une ligne
+   * enregistrée à `false` avant le 6 août fige donc le crédit à l'arrêt, sans
+   * rien à l'écran qui le dise et sans moyen de le rallumer. Voir #179.
    */
   creditOffTarget?: boolean;
   /**
@@ -822,19 +742,44 @@ export const computeBreedingCosts = (
    */
   const ladder = ladderOf(colors);
 
+  const generations = new Map(colors.map((color) => [color.id, color.generation]));
+
   /**
-   * Ce qu'apporte un parent à la valeur d'un bébé hors cible.
+   * L'ascendance d'un parent, telle que ce parcours peut la connaître.
    *
-   * Les poids ne sont plus posés par symétrie : ils sont **mesurés**, sur sept
-   * relevés en jeu consignés dans l'issue #49. Voir `lineage.ts`, qui porte la
-   * table et ce qu'elle recouvre — un parent pèse 15/19 de sa lignée quand ses
-   * grands-parents sont d'une génération inférieure, là où le modèle précédent
-   * lui en donnait la moitié.
+   * `null` pour une monture achetée ou capturée : elle n'a pas d'ascendants dans
+   * notre plan, et toute sa part revient sur elle — ce que le relevé 2 de l'issue
+   * #49 confirme. Sinon, la recette **retenue** pour elle, et non une recette du
+   * catalogue : c'est celle par laquelle le plan la produit.
+   */
+  const ancestryOf = (parentId: string): CrossingParent => {
+    const parent = estimates.get(parentId);
+    return {
+      colorId: parentId,
+      parents: parent?.strategy === 'breed' ? parent.breedRecipe : null,
+    };
+  };
+
+  /**
+   * Ce que vaut le bébé d'une tentative hors cible, pour un croisement donné.
    *
-   * Une couleur vaut ce qu'elle aurait coûté à se procurer : l'obtenir sans
-   * payer économise exactement cela. Quand un parent est acheté ou capturé, il
-   * n'a pas d'ascendants dans notre plan, et sa part de grands-parents revient
-   * sur lui — ce que le relevé 2 confirme.
+   * On sommait ici deux lignées, une par parent, chacune pesant la moitié. C'était
+   * le cas particulier d'une loi plus large, et il omettait une branche entière :
+   * les **recombinaisons croisées**, une teinte prise à gauche et l'autre à
+   * droite, qui nomment une couleur en dessous de la cible. Elles ne sont pas
+   * marginales — la loi les normalise sur `2 + w` — et elles valent plus cher que
+   * les couleurs simples des lignées, étant composées. L'ancien crédit était donc
+   * systématiquement **trop bas** : de 688 kamas en moyenne sur le muldo, jusqu'à
+   * 9 436 sur les gen 9, et le niveau retenu bougeait d'un cran sur une couleur
+   * sur dix.
+   *
+   * La bonne loi était déjà écrite à deux modules d'ici, vérifiée au centième sur
+   * les huit fenêtres de l'issue #68 : c'est `crossingFailureShares`. Il n'y avait
+   * qu'à la valoriser au lieu de la réinventer de travers.
+   *
+   * Un croisement, donc, et non deux lignées : l'unité qui compte est la paire,
+   * parce que ce sont les deux ascendances **ensemble** qui décident de ce que le
+   * raté rend. Une lignée seule ne peut pas le savoir.
    *
    * Limite de fond, inchangée : la répartition dépend de la généalogie de
    * l'**individu**, pas de la couleur. Deux muldos Amande ne se valent pas selon
@@ -842,23 +787,21 @@ export const computeBreedingCosts = (
    * lignée d'un parent par sa recette ; il ne peut pas coller à l'individu. Le
    * suivi individuel de l'écurie, lui, le peut — voir `lineageDistribution`.
    */
-  const lineageValueOf = (parentId: string): number => {
-    const parent = estimates.get(parentId);
-    if (!parent?.cost) return 0;
-
-    const slot = { colorId: parentId, cost: Math.max(parent.cost, 0) };
-    const recipe = parent.strategy === 'breed' ? parent.breedRecipe : null;
-    if (!recipe) return lineageValue(slot, null);
-
-    return lineageValue(
-      slot,
-      recipe.map((id) => ({
-        colorId: id,
-        // Borné à zéro comme ailleurs : une monture ne vaut pas moins que rien,
-        // et un coût négatif ferait baisser le crédit au lieu de le monter.
-        cost: Math.max(estimates.get(id)?.cost ?? 0, 0),
-      }))
+  const offTargetValue = (recipe: BreedingRecipe, targetGeneration: number): number => {
+    const shares = crossingFailureShares(
+      [ancestryOf(recipe[0]), ancestryOf(recipe[1])],
+      colors,
+      generations,
+      targetGeneration
     );
+
+    let value = 0;
+    for (const [colorId, share] of shares) {
+      // Borné à zéro comme ailleurs : une monture ne vaut pas moins que rien, et
+      // un coût négatif ferait baisser le crédit au lieu de le monter.
+      value += share * Math.max(estimates.get(colorId)?.cost ?? 0, 0);
+    }
+    return value;
   };
   const byGeneration = [...colors].sort((a, b) => a.generation - b.generation);
   /** Un prix nul ou négatif vaut « non renseigné » : la saisie part de 0. */
@@ -944,9 +887,7 @@ export const computeBreedingCosts = (
 
         // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
         // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
-        const failureValue = creditOffTarget
-          ? lineageValueOf(recipe[0]) + lineageValueOf(recipe[1])
-          : 0;
+        const failureValue = creditOffTarget ? offTargetValue(recipe, color.generation) : 0;
 
         const parents =
           parentLevel === 'auto'

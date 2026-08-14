@@ -1065,20 +1065,46 @@ pub enum Ordering {
 /// refusées tombent à zéro, ce qui dit que le refus venait bien de la
 /// mésestimation et non d'une limite du moteur.
 ///
-/// ## Ce qui reste, et pourquoi le défaut ne bascule pas encore
+/// ## Les refus, expliqués puis résorbés
 ///
-/// Les **191 fournées refusées du pool hérité** ne bougent pas — la valeur y est
-/// inchangée, donc rien ne pouvait les déplacer. Elles ne s'expliquent donc pas
-/// par la distance au sommet, et tant qu'elles ne sont pas expliquées, les
-/// 98,34 M restent un chiffre obtenu *malgré* un gaspillage. Basculer le défaut
-/// est désormais défendable des deux côtés ; ça reste une décision à prendre les
-/// yeux ouverts.
+/// Restaient **191 fournées refusées** sur le pool hérité, que la dérivation ne
+/// pouvait pas déplacer — la valeur y est inchangée. Elles ne s'expliquaient donc
+/// pas par la distance au sommet, et un chiffre obtenu *malgré* un gaspillage
+/// inexpliqué ne vaut pas qu'on bascule un défaut dessus.
+///
+/// La raison, une fois comptée plutôt que supposée : **191 sur 191 par manque de
+/// kamas**, dont 99,7 % de carburant. Le plan tenait ; c'est le rythme commandé
+/// qui dépassait la bourse de ce tour-là. Charger un cran moins vite au lieu de
+/// ne pas charger les ramène à **27**, et ces 27 ne peuvent payer même la
+/// bande 0 — voir `lower_band`.
+///
+/// ## Pourquoi le défaut bascule
+///
+/// | régime | `LastFreeStep` | `BandAndLevel` | gen 10 | refusées |
+/// | --- | --- | --- | --- | --- |
+/// | pool hérité | 63,84 M | **99,30 M** | 44,1 → **95,9** | 27 |
+/// | départ de zéro | 13,80 M | **15,05 M** | 0,2 → **0,6** | 0 |
+///
+/// Les deux régimes gagnent, il n'y en a plus un à sacrifier, et les refus qui
+/// restent sont de vrais « pas les moyens ».
+///
+/// Une réserve, consignée parce qu'elle est réelle et qu'elle ne mord pas : le
+/// moteur prend le débit d'une bande pour une constante, ce qui n'est exact que
+/// jusqu'à la **bande 2**. Au-delà, le carburant plafonne à 100 000 quand le
+/// palier de 4 pt/s tombe à 90 000, donc dix mille points de marge pour une stat
+/// qui en consomme vingt mille — la bande 3 décroche en cours de tâche et
+/// demanderait un réappro manuel. Or le réglage choisit **la bande 2 sur les deux
+/// unités**, et la bande 3 plafonne à 35,69 M contre 98,40 M. La modéliser
+/// fidèlement la rendrait plus lente, donc l'éloignerait encore.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tuning {
     /// Le niveau seul, bande laissée telle quelle : le dernier cran gratuit.
-    #[default]
+    ///
+    /// Ce fut le défaut, et c'est maintenant l'échappatoire — pour retrouver une
+    /// mesure d'avant la bascule, ou pour isoler ce que la bande apporte.
     LastFreeStep,
     /// La bande **et** le niveau, au meilleur `fournées × (valeur − carburant)`.
+    #[default]
     BandAndLevel,
 }
 

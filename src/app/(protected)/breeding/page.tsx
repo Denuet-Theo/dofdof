@@ -1,8 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Egg, AlertTriangle, Info, PenLine, Target, Wand2 } from 'lucide-react';
-import ColorRow from '@/components/breeding/ColorRow';
+import { Egg, Info } from 'lucide-react';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingBatches from '@/components/breeding/BreedingBatches';
 import BreedingNextMove from '@/components/breeding/BreedingNextMove';
@@ -13,10 +12,6 @@ import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
-import PriceEntry from '@/components/breeding/PriceEntry';
-import Button from '@/components/ui/Button';
-import EmptyState from '@/components/ui/EmptyState';
-import Skeleton from '@/components/ui/Skeleton';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
 import { nextBatches } from '@/lib/dofus/breeding/batches';
@@ -25,7 +20,6 @@ import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
 import { useAvailability } from '@/lib/hooks/useAvailability';
 import {
-  OBJECTIVES,
   rankFor,
   recommendedFor,
   type Candidate,
@@ -74,9 +68,6 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
 
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
-  const [pricedOnly, setPricedOnly] = useState(false);
-  const [entryMode, setEntryMode] = useState(false);
-  const [goalsOpen, setGoalsOpen] = useState(true);
   /**
    * Combien d'exemplaires viser, tant qu'aucun plan n'est sélectionné.
    *
@@ -118,8 +109,6 @@ const BreedingPage = () => {
     stockBySex,
     itemStock,
     ownedGaugePoints,
-    loading,
-    error,
     savePrice,
     saveSettings,
     saveBulkStock,
@@ -280,12 +269,6 @@ const BreedingPage = () => {
      atteindre. `fundingSplit`, `combinedRate` et `minimumFunderPercent` restent
      dans `objectives.ts`, et `ColorRow` sait toujours afficher une part. */
 
-  /** Ce qui manque au pire moment de la route recommandée, quand elle déborde. */
-  const shortfall =
-    recommendation && !recommendation.affordable
-      ? (recommendation.item.row.planned?.funding?.shortfall ?? null)
-      : null;
-
   const sorted = useMemo(() => {
     // Suivre un plan, c'est avoir tranché : le classement a servi à choisir, il
     // n'a plus rien à départager. Garder les autres couleurs à l'écran invite à
@@ -297,9 +280,10 @@ const BreedingPage = () => {
     // L'objectif décide seul de l'ordre. Les deux objectifs « gen 10 » ne
     // gardent que la génération maximale ; « rentabilité » n'écarte rien, et
     // c'est donc là qu'on va chercher une couleur précise à la main.
-    const ranked = rankFor(candidates, objective).map((entry) => entry.item.row);
-    return pricedOnly ? ranked.filter((row) => row.estimate.priceLevel0 !== null) : ranked;
-  }, [candidates, objective, pricedOnly, selectedColorId, rows]);
+    // Le filtre « seulement les tarifées » est parti avec le classement qu'il
+    // filtrait : plus personne ne lit cette liste pour choisir à l'œil.
+    return rankFor(candidates, objective).map((entry) => entry.item.row);
+  }, [candidates, objective, selectedColorId, rows]);
 
   /**
    * Les occasions que l'arbre ne peut pas exprimer.
@@ -668,202 +652,6 @@ const BreedingPage = () => {
           else project.abandon();
         }}
       />
-
-      {/* La couleur visée : le classement, replié derrière ce qu'on cherche. La
-          question « combien j'en veux » vient avant « laquelle », puisqu'elle
-          change la réponse — à trente exemplaires les fournées se remplissent et
-          le palmarès n'est plus le même. */}
-      <div className={`glass rounded-2xl ${SHOW_HEURISTIC_PANELS ? '' : 'hidden'}`}>
-        <button
-          type="button"
-          onClick={() => setGoalsOpen((value) => !value)}
-          className="w-full flex items-center gap-2 px-5 py-4 cursor-pointer text-left"
-        >
-          <Target size={16} className="text-kamas" />
-          <span className="text-sm font-semibold text-dark-200">Couleur visée</span>
-          <span className="text-xs text-dark-500 ml-2 truncate">
-            {project.current
-              ? `${project.current.target_count} × ${nameOf(project.current.target_color_id)}`
-              : 'aucun plan sélectionné'}
-          </span>
-          <span className="ml-auto text-xs text-dark-500 shrink-0">
-            {goalsOpen ? 'Fermer' : 'Ouvrir'}
-          </span>
-        </button>
-
-        {goalsOpen && (
-          <div className="px-5 pb-5 pt-4 border-t border-dark-700/40 space-y-4">
-            {/* Le sélecteur d'objectif vivait ici, avec la consigne
-                d'équilibre qui en découlait. Voir `objective` plus haut : un
-                arbitrage entre trois critères suppose plusieurs générateurs de
-                plans à opposer, et il n'y en a qu'un. Le classement se lit donc
-                sur la rentabilité, dite une fois ci-dessous plutôt que choisie
-                à chaque visite. */}
-            <p className="text-[11px] text-dark-600">
-              {OBJECTIVES.find((option) => option.id === objective)?.hint}
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-400">
-              <label className="flex items-center gap-2">
-                Je veux
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={String(targetCount)}
-                  onChange={(event) =>
-                    setTargetCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))
-                  }
-                  className="w-20 px-2 py-1.5 rounded-xl bg-dark-800/80 border border-dark-600/50
-                    text-dark-100 text-xs text-right transition-all hover:border-dark-500
-                    focus:border-kamas/50"
-                />
-                monture{targetCount > 1 ? 's' : ''} de la couleur visée
-              </label>
-
-              {project.current ? (
-                <span className="flex flex-wrap items-center gap-3 ml-auto">
-                  <span className="text-dark-300">
-                    Plan suivi :{' '}
-                    <strong className="text-kamas">
-                      {nameOf(project.current.target_color_id)}
-                    </strong>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={project.abandon}
-                    className="text-dark-500 hover:text-loss transition-colors cursor-pointer"
-                  >
-                    abandonner
-                  </button>
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                  className="ml-auto"
-                  disabled={!recommended}
-                  onClick={() =>
-                    recommended && project.select(recommended.colorId, targetCount, objective)
-                  }
-                >
-                  <Wand2 size={13} />
-                  {recommended
-                    ? `Suivre : ${recommended.name}${recommendation?.affordable === false ? ' (hors budget)' : ''}`
-                    : 'Aucune route chiffrable'}
-                </Button>
-              )}
-            </div>
-
-            {/* Trois états distincts, et les confondre était le défaut : aucune
-                route du tout, une route trop chère, ou rien à signaler. */}
-            {!project.current && !recommendation && (
-              <p className="text-[11px] text-amber-400/80">
-                Aucune route chiffrable pour cet objectif. Il manque des prix de
-                couleurs — renseigne-les avec « Saisir les prix ».
-              </p>
-            )}
-
-            {!project.current && recommendation && !recommendation.affordable && (
-              <p className="text-[11px] text-amber-400/80">
-                {recommended?.name} est la meilleure route pour cet objectif, mais elle
-                dépasse ton budget
-                {shortfall !== null && (
-                  <>
-                    {' '}
-                    de{' '}
-                    <strong>{Math.round(shortfall).toLocaleString('fr-FR')} kamas</strong>
-                  </>
-                )}
-                . Elle reste sélectionnable — le plan te dira où l&apos;argent manque.
-              </p>
-            )}
-
-            {/* Plus de tri manuel : l'objectif ordonne, et deux tris
-                concurrents répondraient à la même question en se contredisant.
-                Le filtre, lui, reste — il réduit la liste sans en changer
-                l'ordre. */}
-            <div className="flex flex-wrap items-center gap-3 text-xs text-dark-500">
-              {!selectedColorId && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pricedOnly}
-                    onChange={(event) => setPricedOnly(event.target.checked)}
-                    className="accent-kamas cursor-pointer"
-                  />
-                  Seulement les couleurs tarifées
-                </label>
-              )}
-
-              {selectedColorId && (
-                <span>
-                  Les autres couleurs sont masquées tant que ce plan est suivi — abandonne-le
-                  pour revoir le classement.
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setEntryMode((value) => !value)}
-                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl border
-                  transition-all cursor-pointer ${
-                    entryMode
-                      ? 'bg-kamas/15 text-kamas border-kamas/40'
-                      : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
-                  }`}
-              >
-                <PenLine size={13} />
-                {entryMode ? 'Fermer la saisie' : 'Saisir les prix'}
-              </button>
-            </div>
-
-            {entryMode && !loading && <PriceEntry rows={rows} onSavePrice={savePrice} />}
-
-            {loading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-20 w-full" count={6} />
-              </div>
-            ) : error ? (
-              <EmptyState
-                icon={AlertTriangle}
-                title="Classement indisponible"
-                description={error}
-              />
-            ) : sorted.length === 0 ? (
-              <EmptyState
-                icon={Egg}
-                title="Aucune couleur à afficher"
-                description="Décoche le filtre, ou renseigne un premier prix pour amorcer le calcul."
-              />
-            ) : (
-              <div className="space-y-2">
-                {sorted.map((row) => (
-                  <ColorRow
-                    key={row.colorId}
-                    row={row}
-                    nameOf={nameOf}
-                    generationOf={generationOf}
-                    stockBySex={stockBySex}
-                    onSaveBulk={saveBulkStock}
-                    // La part de parc à financer n'a de sens que sous
-                    // l'objectif d'équilibre, qui ne peut plus être choisi.
-                    // `ColorRow` sait toujours l'afficher, et la reprendra
-                    // quand il y aura un générateur qui la calcule.
-                    fundingShare={null}
-                    enclosCount={settings.enclos_count}
-                    targetCount={targetCount}
-                    waves={row.colorId === selectedColorId ? waves : null}
-                    selected={project.current?.target_color_id === row.colorId}
-                    onSelect={() => project.select(row.colorId, targetCount)}
-                    onAbandon={project.abandon}
-                    onSavePrice={savePrice}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
 
       {/* Les fournées : la seule partie de l'écran qui se lise devant l'enclos,
           d'où sa place, juste sous les stocks qu'elle consomme. Elle n'apparaît

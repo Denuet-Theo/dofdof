@@ -543,44 +543,6 @@ export type BreedingOptions = {
    * `null` si on ne capture pas : les couleurs sauvages s'achètent alors.
    */
   captureCost?: number | null;
-  /**
-   * Valoriser les bébés hors cible à ce qu'ils auraient coûté à se procurer.
-   *
-   * Un accouplement produit toujours un bébé, et `crossingFailureShares` sait ce
-   * qu'il vaut — la loi est mesurée, pas supposée. C'est exact pour
-   * **valoriser**, et optimiste pour **planifier** : un raté rend une couleur
-   * tirée dans l'ascendance, pas celle dont le plan a besoin. Sur une route vers
-   * la génération 10, on accumule des couleurs de génération 2 dont on ne fera
-   * rien.
-   *
-   * L'écart n'est pas cosmétique, et il a grandi depuis la mesure d'origine : sur
-   * le dump du 14/08, une gen 10 revient à **5 073 068** kamas sans crédit et à
-   * **702 266** avec. Le crédit change le **comportement** de l'optimiseur, pas
-   * seulement le chiffre — plus un raté rapporte, moins il vaut la peine de
-   * monter les parents : niveau **200** sans, niveau **19** avec.
-   *
-   * `false` coupe le crédit : chaque tentative se paie plein pot. Les deux
-   * lectures sont défendables, aucune n'est « la » vérité, et c'est pourquoi
-   * c'est un réglage.
-   *
-   * **Attention, ce réglage n'a plus d'interrupteur.** #81 a retiré la case à
-   * cocher en annonçant « the credit is now always on », et le badge « ratés non
-   * crédités » avec elle — mais `useBreeding` lit toujours la colonne. Une ligne
-   * enregistrée à `false` avant le 6 août fige donc le crédit à l'arrêt, sans
-   * rien à l'écran qui le dise et sans moyen de le rallumer. Voir #179.
-   */
-  creditOffTarget?: boolean;
-  /**
-   * Écarter la revente des montures et ne valoriser que l'extraction.
-   *
-   * Le marché des certificats est peu liquide : un prix saisi ne garantit pas
-   * un acheteur. Classer sur une revente qui n'aura pas lieu donne un palmarès
-   * flatteur mais faux. L'extraction, elle, ne dépend de personne.
-   *
-   * Les prix restent lus et affichés — ils servent toujours à **acheter** une
-   * couleur plutôt que l'élever. Seule la sortie change.
-   */
-  neverSell?: boolean;
 };
 
 /**
@@ -699,8 +661,6 @@ export const computeBreedingCosts = (
     recycleSteriles,
     freeXpPoints = 0,
     captureCost,
-    neverSell = false,
-    creditOffTarget = true,
   }: BreedingOptions
 ): Map<string, BreedingEstimate> => {
   if (parentLevel !== 'auto' && (parentLevel < 1 || parentLevel > MAX_MOUNT_LEVEL)) {
@@ -887,7 +847,12 @@ export const computeBreedingCosts = (
 
         // Un accouplement rend toujours un bébé : celui d'une tentative hors cible
         // a une couleur de la généalogie proche, et vaut ce qu'elle coûte.
-        const failureValue = creditOffTarget ? offTargetValue(recipe, color.generation) : 0;
+        //
+        // Ce crédit fut un réglage, et #81 l'a tranché : il s'applique toujours.
+        // Son argument tient — le texte d'aide invoquait « des couleurs basses
+        // dont on ne fera rien », ce que #59 a démenti. Ces bébés-là portent
+        // l'ascendance et sont les montures les plus utiles de l'écurie.
+        const failureValue = offTargetValue(recipe, color.generation);
 
         const parents =
           parentLevel === 'auto'
@@ -976,17 +941,18 @@ export const computeBreedingCosts = (
     // dépend d'aucun prix saisi, donc il reste disponible pour les couleurs que
     // personne n'a cotées — souvent les plus rares, faute d'un marché liquide.
     const net200 = netSale(priceLevel200);
-    // Sans revente il ne reste que l'extraction — elle ne dépend d'aucun
-    // acheteur, ce qui est précisément l'intérêt de l'option.
-    const exits = neverSell
-      ? [{ exit: 'sacrifice' as const, value: sacrificeValue }]
-      : [
-          { exit: 'sell0' as const, value: netSale(priceLevel0) },
-          // La montée se paie avant la vente : ce qu'elle coûte sort d'ici,
-          // sinon le niveau 200 gagnerait toujours par construction.
-          { exit: 'sell200' as const, value: net200 === null ? null : net200 - levelUpCost },
-          { exit: 'sacrifice' as const, value: sacrificeValue },
-        ];
+    // Écarter la revente fut un réglage, et #81 l'a tranché de même : elle est
+    // toujours valorisée. Le sacrifice reste dans la liste et ne dépend d'aucun
+    // acheteur — c'est lui qui répond pour les couleurs que personne n'a cotées,
+    // et il gagne de lui-même quand la revente ne vaut rien. Il n'y avait donc
+    // rien à couper : la comparaison faisait déjà le travail.
+    const exits = [
+      { exit: 'sell0' as const, value: netSale(priceLevel0) },
+      // La montée se paie avant la vente : ce qu'elle coûte sort d'ici,
+      // sinon le niveau 200 gagnerait toujours par construction.
+      { exit: 'sell200' as const, value: net200 === null ? null : net200 - levelUpCost },
+      { exit: 'sacrifice' as const, value: sacrificeValue },
+    ];
     const best = exits.reduce((chosen, candidate) =>
       (candidate.value ?? -Infinity) > (chosen.value ?? -Infinity) ? candidate : chosen
     );

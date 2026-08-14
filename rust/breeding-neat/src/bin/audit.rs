@@ -94,7 +94,9 @@ fn audit(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy
     println!(
         "{:<22} {:>8.1} % {:>8.1} {:>8.0} {:>8.0} {:>7.0} % {:>10.2} M {:>11.2} M",
         name,
-        (barren + capped) as f64 / crossings.max(1) as f64 * 100.0,
+        // `barren` seul : depuis la boucle du sommet, `capped` compte la
+        // production et non le gâchis. Voir `Tally::capped`.
+        barren as f64 / crossings.max(1) as f64 * 100.0,
         gen10 / n,
         head / n,
         ster / n,

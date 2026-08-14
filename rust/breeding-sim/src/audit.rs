@@ -33,11 +33,14 @@ pub struct Tally {
     ///
     /// Ce compteur s'appelait `impossible` et comptait tout autre chose — les
     /// couples que `pair_outlook` refusait au-dessus du plafond. Le jeu ne les
-    /// refuse pas, il les plafonne (issue #185), donc ils existent et se
-    /// jouent : la fenêtre est pleine, seulement elle ne monte pas. Pour une
-    /// politique qui grimpe, c'est le même gâchis qu'un croisement sans cible —
-    /// deux fécondités consommées, zéro géneton, aucun rang gagné — d'où le
-    /// même traitement dans `wasted_share`.
+    /// refuse pas, il les plafonne (issue #185), donc ils existent et se jouent :
+    /// la fenêtre est pleine, seulement elle ne monte pas.
+    ///
+    /// **Ce n'est du gâchis que pour qui grimpe.** Une politique qui monte y perd
+    /// deux fécondités pour rester au même barreau ; la boucle du sommet, elle,
+    /// ne fait que ça et c'est sa production — voir `Summit::Duplicate`. Le
+    /// compteur ne tranche pas entre les deux, il compte ; `wasted_share`, lui,
+    /// suppose qu'on grimpe et sur-compte donc dès que la boucle tourne.
     pub capped: usize,
     /// L'effectif de l'écurie à la **dernière** fournée vue.
     ///
@@ -52,7 +55,11 @@ pub struct Tally {
 }
 
 impl Tally {
-    /// Part des croisements qui ne pouvaient rien rapporter.
+    /// Part des croisements qui ne pouvaient rien rapporter, **pour qui grimpe**.
+    ///
+    /// Compte `capped` comme perdu, ce qui est faux dès que la boucle du sommet
+    /// tourne : là, les croisements plafonnés sont la production. Lire ce chiffre
+    /// sur une politique qui duplique, c'est lire son rendement comme un déchet.
     pub fn wasted_share(&self) -> f64 {
         if self.crossings == 0 {
             return 0.0;
@@ -140,29 +147,56 @@ mod tests {
     use super::*;
     use crate::config::Prices;
     use crate::economy::{genetons_for_crossing, play};
-    use crate::ladder::{LadderPolicy, Route};
+    use crate::ladder::{LadderPolicy, Route, Summit};
     use crate::trees::muldo;
 
     /// L'échelle ne propose **jamais** un croisement sans cible : c'est
     /// exactement ce que sa règle d'admissibilité écarte.
+    ///
+    /// Les deux compteurs ne disent plus la même chose depuis que la boucle du
+    /// sommet existe, et c'est tout l'objet de les avoir séparés :
+    ///
+    /// - `barren` — une cible que personne ne nomme — reste **zéro dans les deux
+    ///   régimes**. Rien ne justifie jamais de brûler deux fécondités pour une
+    ///   recopie ;
+    /// - `capped` — une cible plafonnée — vaut zéro quand la boucle dort, et
+    ///   compte les croisements du sommet quand elle tourne. Ce n'est plus du
+    ///   gâchis mais la production, donc `wasted_share` sur-compte dès que
+    ///   `Summit::Duplicate` est en jeu.
     #[test]
     fn l_echelle_ne_propose_aucun_croisement_sterile() {
         let catalog = muldo();
         let economy = Prices::load_default().expect("economy.toml").economy;
+        let mut capped_when_duplicating = 0;
         for seed in 0..25 {
-            let mut audit = Audit::new(LadderPolicy::new(&catalog, Route::default()));
-            play(&catalog, &economy, &mut audit, seed);
-            assert!(
-                audit.tally.crossings > 0,
-                "graine {seed} : rien n'a été tenté"
-            );
-            assert_eq!(
-                audit.tally.barren + audit.tally.capped,
-                0,
-                "graine {seed} : {:?}",
-                audit.tally
-            );
+            for summit in [Summit::Hold, Summit::Duplicate] {
+                let mut audit = Audit::new(
+                    LadderPolicy::new(&catalog, Route::default()).with_summit(summit),
+                );
+                play(&catalog, &economy, &mut audit, seed);
+                assert!(
+                    audit.tally.crossings > 0,
+                    "graine {seed} / {summit:?} : rien n'a été tenté"
+                );
+                assert_eq!(
+                    audit.tally.barren, 0,
+                    "graine {seed} / {summit:?} : {:?}",
+                    audit.tally
+                );
+                match summit {
+                    Summit::Hold => assert_eq!(
+                        audit.tally.capped, 0,
+                        "graine {seed} : le sommet dort, rien ne doit être plafonné — {:?}",
+                        audit.tally
+                    ),
+                    Summit::Duplicate => capped_when_duplicating += audit.tally.capped,
+                }
+            }
         }
+        assert!(
+            capped_when_duplicating > 0,
+            "la boucle du sommet n'a proposé aucun croisement plafonné : elle ne tourne pas"
+        );
     }
 
     /// L'arithmétique sur laquelle repose la règle de moisson de `ladder.rs`.

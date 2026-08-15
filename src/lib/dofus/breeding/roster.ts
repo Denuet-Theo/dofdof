@@ -1,3 +1,4 @@
+import { ANONYMOUS_NAME } from './naming';
 import {
   cycledOf,
   mountStatus,
@@ -176,9 +177,18 @@ export const matches = (
   if (except !== 'query') {
     const needle = filters.query.trim().toLowerCase();
     if (needle) {
+      // Une monture sans nom se cherche sous **celui qu'elle porte à l'écran**,
+      // et c'est « Anonyme » — ici comme dans l'écurie du jeu, qui l'écrit sur
+      // toute monture non renommée. `?? ''` la rendait introuvable : la seule
+      // façon d'isoler les non renommées était de lire les cent trente lignes.
+      // Or c'est le tri qu'on vient faire — les nommées portent leur généalogie
+      // dans leur nom, les autres sont interchangeables.
+      //
+      // Le vrac tombe dedans, et c'est juste : il n'a pas de nom non plus, et le
+      // jeu le montre lui aussi anonyme.
       const hit =
         nameOf(entry.colorId).toLowerCase().includes(needle) ||
-        (entry.name ?? '').toLowerCase().includes(needle);
+        (entry.name ?? ANONYMOUS_NAME).toLowerCase().includes(needle);
       if (!hit) return false;
     }
   }

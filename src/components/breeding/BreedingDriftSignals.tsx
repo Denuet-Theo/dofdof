@@ -38,7 +38,7 @@ const BreedingDriftSignals = ({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <Sparkles size={13} className="text-profit" />
+        <Sparkles size={13} className="text-gain" />
         <p className="text-xs text-dark-400">Hors recette</p>
         <span className="text-[11px] text-dark-500">
           l&apos;arbre ne sait pas les voir : à toi de décider
@@ -49,7 +49,7 @@ const BreedingDriftSignals = ({
         {drift.map((signal) => (
           <div
             key={signal.mount.id}
-            className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-profit/10 text-xs"
+            className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-gain/10 text-xs"
           >
             <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
               {signal.mount.sex === 'M' ? '♂' : '♀'} {nameOf(signal.mount.colorId)}
@@ -66,7 +66,7 @@ const BreedingDriftSignals = ({
               {signal.partner.sex === 'M' ? '♂' : '♀'} {nameOf(signal.partner.colorId)}
             </span>
             <span
-              className="px-1.5 py-0.5 rounded-lg bg-profit/20 text-profit text-[10px] font-semibold"
+              className="px-1.5 py-0.5 rounded-lg bg-gain/20 text-gain text-[10px] font-semibold"
               title={`Aucune recette ne porte ce croisement : elle annoncerait la génération ${signal.targetGeneration - signal.leap}.`}
             >
               VISE GEN. {signal.targetGeneration}

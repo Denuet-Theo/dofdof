@@ -171,7 +171,7 @@ const BreedingEnclosExitDialog = ({
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
       <div className="space-y-4">
         <p className="text-[11px] text-dark-500">
-          Elles en sortent <strong className="text-profit">fécondes</strong> : leur cycle est
+          Elles en sortent <strong className="text-gain">fécondes</strong> : leur cycle est
           payé, elles s&apos;accoupleront sans repasser par l&apos;enclos. Le niveau, lui, a
           monté pendant le cycle et rien d&apos;autre ne le dira — c&apos;est lui qui décide du
           taux de réussite des croisements à venir.
@@ -307,7 +307,7 @@ const BreedingEnclosExitDialog = ({
         </div>
 
         {done !== null && (
-          <p className="flex items-center gap-1.5 text-[11px] text-profit">
+          <p className="flex items-center gap-1.5 text-[11px] text-gain">
             <Check size={12} /> {done} monture{done > 1 ? 's' : ''} sortie{done > 1 ? 's' : ''},
             féconde{done > 1 ? 's' : ''}.
           </p>

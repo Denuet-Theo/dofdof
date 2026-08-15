@@ -245,7 +245,7 @@ const fuelRank = (info: GaugeInfo): FuelRank =>
 /** Le vert va à la plus avancée : une féconde part sans repayer de cycle. */
 const STATUS_TONE: Record<MountStatus, string> = {
   fertile: 'bg-kamas/15 border-kamas/40 text-kamas',
-  feconde: 'bg-profit/15 border-profit/40 text-profit',
+  feconde: 'bg-gain/15 border-gain/40 text-gain',
   sterile: 'bg-dark-700/60 border-dark-600/50 text-dark-300',
 };
 
@@ -605,7 +605,7 @@ const BreedingStocks = ({
                 Enregistrer
               </Button>
               {savedBudget && (
-                <span className="flex items-center gap-1 text-xs text-profit">
+                <span className="flex items-center gap-1 text-xs text-gain">
                   <Check size={13} /> Enregistré
                 </span>
               )}
@@ -787,7 +787,7 @@ const BreedingStocks = ({
                           <span
                             className={`text-[10px] shrink-0 ${
                               purity >= 0.99
-                                ? 'text-profit'
+                                ? 'text-gain'
                                 : purity >= 0.75
                                   ? 'text-dark-400'
                                   : 'text-amber-400/70'
@@ -1051,7 +1051,7 @@ const BreedingStocks = ({
                           </span>
                           <span
                             className={`text-[10px] shrink-0 w-24 text-right tabular-nums ${
-                              cheapest ? 'text-profit' : 'text-dark-500'
+                              cheapest ? 'text-gain' : 'text-dark-500'
                             }`}
                             title={
                               perPoint === null

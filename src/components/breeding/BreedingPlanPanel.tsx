@@ -131,7 +131,7 @@ const BreedingPlanPanel = ({
       )}
 
       {done ? (
-        <p className="text-xs text-profit">
+        <p className="text-xs text-gain">
           Plus rien à produire : l&apos;écurie couvre l&apos;objectif.
         </p>
       ) : (

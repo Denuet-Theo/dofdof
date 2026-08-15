@@ -77,8 +77,38 @@ const BreedingCloneDialog = ({
     return (colorId: string) => icons.get(colorId) ?? null;
   }, [colors]);
 
-  const at = clonings.findIndex((_, index) => !kept.has(index));
-  const current = at >= 0 ? clonings[at] : null;
+  /**
+   * Les clonages où il y a réellement quelque chose à trancher.
+   *
+   * Un clonage entre **deux anonymes** n'en est pas un : elles ont la même
+   * couleur, la même génération, aucune ascendance et aucun nom. Rien ne les
+   * distingue à l'écran parce que rien ne les distingue en jeu, et « laquelle
+   * gardes-tu » n'a alors pas de réponse — les deux mènent au même clone. Les
+   * faire défiler une par une, c'est vingt écrans qui demandent de choisir
+   * entre une chose et elle-même.
+   *
+   * Elles ne disparaissent pas pour autant : elles se font en jeu comme les
+   * autres, et deux stériles y partent bien pour une fertile. Elles se comptent
+   * donc en tête, dans une ligne qui dit combien il y en a, et se tranchent
+   * toutes seules — le premier des deux identifiants, puisque le choix est vide.
+   */
+  const undecidable = (entry: CloningToRecord) =>
+    !byId.get(entry.first)?.name && !byId.get(entry.second)?.name;
+
+  const anonymous = useMemo(
+    () => clonings.filter(undecidable),
+    // `byId` suffit : `undecidable` n'en dépend que par lui.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clonings, byId]
+  );
+  const decisions = useMemo(
+    () => clonings.filter((entry) => !undecidable(entry)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clonings, byId]
+  );
+
+  const at = decisions.findIndex((_, index) => !kept.has(index));
+  const current = at >= 0 ? decisions[at] : null;
   const done = kept.size;
 
   /**
@@ -172,9 +202,35 @@ const BreedingCloneDialog = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Clonage ${Math.min(done + 1, clonings.length)} / ${clonings.length}`}
+      title={
+        decisions.length === 0
+          ? `Clonages — ${clonings.length} à faire`
+          : `Clonage ${Math.min(done + 1, decisions.length)} / ${decisions.length}`
+      }
     >
       <div className="space-y-4">
+        {/* Les clonages sans arbitrage, comptés en tête plutôt que déroulés un
+            par un. Ils restent à faire **en jeu** : c'est tout ce que cette
+            ligne a à dire, et c'est pour ça qu'elle existe. */}
+        {anonymous.length > 0 && (
+          <p
+            data-testid="clone-anonymous-note"
+            className="flex items-start gap-2 px-3 py-2 rounded-xl bg-dark-800/60
+              border border-dark-600/50 text-[11px] text-dark-300"
+          >
+            <Dna size={13} className="text-dark-500 mt-0.5 shrink-0" />
+            <span>
+              <strong className="text-dark-100">
+                {anonymous.length} clonage{anonymous.length > 1 ? 's' : ''} entre anonymes
+              </strong>{' '}
+              — rien à départager : elles ont la même couleur, la même génération et aucune
+              ascendance, donc les deux mènent au même clone. Prends-en deux au hasard dans le
+              tas. <strong className="text-dark-100">Ne les oublie pas</strong> : elles comptent
+              dans la fournée et sont enregistrées avec les autres.
+            </span>
+          </p>
+        )}
+
         {current ? (
           <>
             <p className="text-[11px] text-dark-400">
@@ -198,8 +254,9 @@ const BreedingCloneDialog = ({
         ) : (
           <div className="space-y-3">
             <p className="text-[11px] text-dark-300">
-              Les {clonings.length} clonages sont tranchés. Les noms à chercher dans
-              l’écurie du jeu :
+              {decisions.length === 0
+                ? 'Aucun clonage ne demande d’arbitrage sur cette fournée.'
+                : `Les ${decisions.length} clonages à départager sont tranchés. Les noms à chercher dans l’écurie du jeu :`}
             </p>
             {/* Le sexe accompagne chaque nom, et il n'est pas décoratif sur les
                 anonymes : c'est le seul tri dont on dispose devant un tas
@@ -207,7 +264,7 @@ const BreedingCloneDialog = ({
                 ne dit pas lesquelles aller chercher. */}
             <div className="flex flex-wrap gap-2">
               {[...kept].map(([index, choice]) => {
-                const entry = clonings[index];
+                const entry = decisions[index];
                 const id = choice === 'first' ? entry.first : entry.second;
                 const mount = byId.get(id);
                 const name = mount?.name ?? ANONYMOUS_NAME;
@@ -265,7 +322,7 @@ const BreedingCloneDialog = ({
             </Button>
           )}
           <span className="text-[11px] text-dark-500 tabular-nums">
-            {done} / {clonings.length}
+            {done} / {decisions.length}
           </span>
           <Button
             size="sm"
@@ -274,14 +331,21 @@ const BreedingCloneDialog = ({
             disabled={saving}
             onClick={async () => {
               setSaving(true);
-              await onRecord(
-                [...kept].map(([index, choice]) => {
-                  const entry = clonings[index];
+              await onRecord([
+                ...[...kept].map(([index, choice]) => {
+                  const entry = decisions[index];
                   return choice === 'first'
                     ? { keep: entry.first, drop: entry.second }
                     : { keep: entry.second, drop: entry.first };
-                })
-              );
+                }),
+                // Les clonages entre anonymes n'ont pas été tranchés parce qu'il
+                // n'y avait rien à trancher. Ils sont faits en jeu comme les
+                // autres, donc ils s'enregistrent comme les autres — sur le
+                // premier des deux, arbitrairement, puisque les deux mènent au
+                // même clone. Les omettre laisserait l'écurie avec des stériles
+                // que le jeu n'a plus.
+                ...anonymous.map((entry) => ({ keep: entry.first, drop: entry.second })),
+              ]);
               setSaving(false);
               onClose();
             }}

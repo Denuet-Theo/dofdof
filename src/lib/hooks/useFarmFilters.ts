@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import {
   DEFAULT_FILTERS,
   countAdvanced,
@@ -134,7 +135,7 @@ export const useFarmFilters = () => {
       // On ne marque enregistré qu'en cas de succès : sinon le prochain
       // changement repartira du dernier état réellement écrit.
       if (error) {
-        console.error('[farm] filtres non enregistrés:', error);
+        reportWriteFailure('tes filtres de ferme', error);
       } else {
         saved.current = payload;
         pending.current = null;
@@ -157,7 +158,7 @@ export const useFarmFilters = () => {
         .from('user_farm_filters')
         .upsert({ filters: last, updated_at: new Date().toISOString() })
         .then(({ error }) => {
-          if (error) console.error('[farm] filtres non enregistrés au départ:', error);
+          if (error) reportWriteFailure('tes filtres de ferme, en quittant l’écran', error);
         });
     },
     []

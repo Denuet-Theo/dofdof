@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { toNumber, UserSale } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import { getSaleProfit } from '@/lib/utils/sales';
 import ItemCard from '@/components/ui/ItemCard';
 import KamasDisplay from '@/components/ui/KamasDisplay';
@@ -49,7 +50,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
       setIsSellModalOpen(false);
       onUpdate();
     } catch (err) {
-      console.error('Error marking sold:', err);
+      reportWriteFailure('la vente à marquer comme faite', err);
       setError(err instanceof Error ? err.message : 'Erreur lors de la vente');
     } finally {
       setLoading(false);
@@ -79,7 +80,7 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
       if (error) throw error;
       onUpdate();
     } catch (err) {
-      console.error('Error deleting sale:', err);
+      reportWriteFailure('la suppression de cette mise en vente', err);
     } finally {
       setLoading(false);
     }

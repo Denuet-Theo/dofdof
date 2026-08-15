@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Button from '@/components/ui/Button';
 import { Save, Check } from 'lucide-react';
 import { priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 
 interface ItemPriceInputProps {
   itemId: number;
@@ -51,7 +52,7 @@ const ItemPriceInput = ({
       setTimeout(() => setSaved(false), 2000);
       onPriceSaved?.(itemId, numPrice, updatedAt);
     } catch (err) {
-      console.error('Error saving price:', err);
+      reportWriteFailure(`le prix de ${itemName}`, err);
       // La saisie reste dans le champ : c'est un échec d'enregistrement, pas une
       // frappe à refaire. L'item est nommé parce que la page en aligne des
       // dizaines, et qu'un message sous une carte perdue au milieu d'une grille

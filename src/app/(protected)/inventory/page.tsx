@@ -7,6 +7,7 @@ import { toNumber, UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
 import { useItemJobs } from '@/lib/hooks/useItemJobs';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import { JOBS } from '@/lib/constants/jobs';
 import SaleRow from '@/components/inventory/SaleRow';
 import ItemPreview from '@/components/items/ItemPreview';
@@ -166,7 +167,11 @@ const InventoryPage = () => {
         { onConflict: 'item_id' }
       );
       
-      if (priceError) console.error('Error updating global price:', priceError); // non-blocking
+      // « Non bloquant » ne veut pas dire « sans conséquence » : ce prix nourrit
+      // tous les arbitrages de craft et d'élevage, et il vient d'être saisi à la
+      // main. S'il n'est pas passé, il faut le savoir maintenant plutôt que de
+      // le retrouver faux dans un classement trois jours après.
+      if (priceError) reportWriteFailure(`le prix public de ${editingSale.item_name}`, priceError);
 
       loadSales();
       setEditingSale(null);

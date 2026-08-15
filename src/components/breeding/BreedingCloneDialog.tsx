@@ -84,8 +84,19 @@ const BreedingCloneDialog = ({
   /**
    * Une des deux stériles, telle qu'on la choisit.
    *
-   * L'ascendance est affichée parce que c'est la seule chose qui les sépare : même
-   * génération — le clonage l'exige — mais pas les mêmes cibles ensuite.
+   * L'ascendance est affichée parce que c'est ce qui décide de leurs cibles : même
+   * génération — le clonage l'exige — mais pas les mêmes possibilités ensuite.
+   *
+   * Le **sexe** est affiché parce que c'est ce qui permet de les retrouver. Deux
+   * gen 1 anonymes de même couleur et sans ascendance donnaient deux cartes
+   * rigoureusement identiques : même vignette, même « Doré », même « sans
+   * ascendance connue », même « Anonyme ». L'écran demandait alors de choisir
+   * entre deux choses indiscernables, et le choix ne pouvait pas se reporter en
+   * jeu — où le sexe est justement le seul tri disponible sur un tas d'Anonymes.
+   *
+   * Tous les autres écrans d'élevage le portent déjà — l'écurie, l'extraction,
+   * la sortie d'enclos, la fenêtre d'accouplement. Celui-ci était le seul à
+   * l'oublier, et c'est celui où deux montures se ressemblent le plus.
    */
   const card = (mountId: string, side: 'left' | 'right') => {
     const mount = byId.get(mountId);
@@ -96,24 +107,64 @@ const BreedingCloneDialog = ({
       : 'sans ascendance connue';
 
     return (
-      <button
-        type="button"
-        onClick={() => setKept((current) => new Map(current).set(at, side === 'left' ? 'first' : 'second'))}
-        className={`flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-2xl border
-          transition-all cursor-pointer bg-dark-800/60 border-dark-600/50
-          hover:border-kamas/50 hover:bg-dark-800 ${side === 'left' ? 'text-left' : 'text-right'}`}
-        title={`Garder cette monture : le clone prend sa place, son nom et son ascendance.`}
+      // Une carte **et** un bouton, et non une carte qui **est** un bouton.
+      //
+      // Toute la carte était cliquable, ce qui rendait son texte inatteignable :
+      // sélectionner le nom pour le copier revenait à trancher le clonage. Or
+      // c'est ce nom-là qu'on va chercher dans l'écurie du jeu — la carte
+      // existe pour lui autant que pour le choix.
+      //
+      // D'où la séparation : le contenu se lit et se sélectionne, et le geste a
+      // son bouton, nommé. Ça règle aussi un défaut de structure — `CopyableText`
+      // est un bouton, et un bouton dans un bouton n'est pas du HTML valide,
+      // donc le nom ne pouvait pas devenir copiable tant que la carte en était un.
+      <div
+        data-testid="clone-card"
+        className="flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-2xl border
+          bg-dark-800/60 border-dark-600/50 transition-all hover:border-dark-500"
       >
         {icon && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={icon} alt="" className="w-12 h-12 object-contain" />
         )}
-        <span className="text-sm font-semibold text-dark-100">{nameOf(mount.colorId)}</span>
-        <span className="text-[11px] text-dark-400">{parents}</span>
-        <span className="text-[11px] text-dark-300">
-          {mount.name ?? <em className="not-italic text-dark-500">{ANONYMOUS_NAME}</em>}
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-dark-100">
+          <span
+            data-testid="clone-sex"
+            className={mount.sex === 'M' ? 'text-info' : 'text-loss-light'}
+            title={mount.sex === 'M' ? 'Mâle' : 'Femelle'}
+          >
+            {mount.sex === 'M' ? '♂' : '♀'}
+          </span>
+          {nameOf(mount.colorId)}
         </span>
-      </button>
+        <span className={`text-[11px] text-dark-400 ${side === 'left' ? 'text-left' : 'text-right'}`}>
+          {parents}
+        </span>
+        {mount.name ? (
+          <CopyableText
+            value={mount.name}
+            title={`Copier « ${mount.name} » — le nom à chercher dans l’écurie du jeu`}
+          />
+        ) : (
+          <span
+            className="text-[11px] text-dark-500"
+            title="Monture non renommée : prends-en une de ce sexe dans le tas, elles sont interchangeables."
+          >
+            {ANONYMOUS_NAME}
+          </span>
+        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-1 w-full"
+          onClick={() =>
+            setKept((current) => new Map(current).set(at, side === 'left' ? 'first' : 'second'))
+          }
+          title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît."
+        >
+          Garder celle-ci
+        </Button>
+      </div>
     );
   };
 
@@ -150,28 +201,42 @@ const BreedingCloneDialog = ({
               Les {clonings.length} clonages sont tranchés. Les noms à chercher dans
               l’écurie du jeu :
             </p>
+            {/* Le sexe accompagne chaque nom, et il n'est pas décoratif sur les
+                anonymes : c'est le seul tri dont on dispose devant un tas
+                d'« Anonyme » de même couleur. Une liste de six « Anonyme » nus
+                ne dit pas lesquelles aller chercher. */}
             <div className="flex flex-wrap gap-2">
               {[...kept].map(([index, choice]) => {
                 const entry = clonings[index];
                 const id = choice === 'first' ? entry.first : entry.second;
-                return byId.get(id)?.name ?? ANONYMOUS_NAME;
-              }).map((name, index) =>
-                name === ANONYMOUS_NAME ? (
-                  <span
-                    key={`${name}-${index}`}
-                    className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"
-                    title="Monture non renommée : prends-en une dans le tas, elles sont interchangeables."
-                  >
-                    {name}
+                const mount = byId.get(id);
+                const name = mount?.name ?? ANONYMOUS_NAME;
+
+                return (
+                  <span key={`${id}-${index}`} className="flex items-center gap-1.5">
+                    {mount && (
+                      <span
+                        className={`text-[11px] ${
+                          mount.sex === 'M' ? 'text-info' : 'text-loss-light'
+                        }`}
+                        title={mount.sex === 'M' ? 'Mâle' : 'Femelle'}
+                      >
+                        {mount.sex === 'M' ? '♂' : '♀'}
+                      </span>
+                    )}
+                    {name === ANONYMOUS_NAME ? (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"
+                        title="Monture non renommée : prends-en une de ce sexe dans le tas, elles sont interchangeables."
+                      >
+                        {name}
+                      </span>
+                    ) : (
+                      <CopyableText value={name} title={`Copier « ${name} »`} />
+                    )}
                   </span>
-                ) : (
-                  <CopyableText
-                    key={`${name}-${index}`}
-                    value={name}
-                    title={`Copier « ${name} »`}
-                  />
-                )
-              )}
+                );
+              })}
             </div>
           </div>
         )}

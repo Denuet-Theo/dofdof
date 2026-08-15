@@ -49,6 +49,11 @@ const CopyableText = ({ value, title, className = '', onCopy }: Props) => {
     <button
       type="button"
       onClick={copy}
+      // Le nom accessible de ce bouton est la **valeur** qu'il porte, pas son
+      // libellé : il n'y a pas d'autre texte dedans. D'où la prise explicite,
+      // sans quoi un test ne peut désigner « le bouton de copie » qu'en
+      // connaissant d'avance ce qu'il copie.
+      data-testid="copyable"
       title={title ?? `Copier « ${value} » dans le presse-papier`}
       className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-md bg-dark-900/60
         border border-dark-700/50 transition-all cursor-pointer hover:border-kamas/40 ${className}`}

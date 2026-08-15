@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, Dna, RotateCcw } from 'lucide-react';
+import { Check, Dna } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
@@ -9,6 +9,7 @@ import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 import type { CloningToRecord } from '@/lib/dofus/breeding/policy';
+import type { CloningResult } from '@/lib/hooks/useBreeding';
 
 /**
  * Le clonage, un par un — le pendant de `BreedingBirthDialog`.
@@ -51,8 +52,8 @@ type Props = {
   individuals: Individual[];
   colors: BreedingColor[];
   nameOf: (colorId: string) => string;
-  /** Enregistre les clonages tranchés : deux stériles partent, une fertile entre. */
-  onRecord: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  /** Enregistre un clonage : deux stériles partent, une fertile entre. */
+  onRecord: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
 };
 
 const BreedingCloneDialog = ({
@@ -65,8 +66,44 @@ const BreedingCloneDialog = ({
   onRecord,
 }: Props) => {
   const [saving, setSaving] = useState(false);
-  /** Les clonages tranchés : l'indice, et **quelle** des deux on garde. */
-  const [kept, setKept] = useState<Map<number, 'first' | 'second'>>(new Map());
+  /**
+   * Les clonages **déjà écrits en base**, par identifiant de stérile gardée.
+   *
+   * Un clonage s'enregistre au clic, comme une naissance. Ce n'était pas le cas
+   * — tout s'empilait dans un `Map` et partait au bouton final — et c'est la
+   * forme exacte qui a coûté 22 montures à la saisie de naissance : un échec, ou
+   * une fenêtre refermée, et tout le lot disparaissait sans un mot.
+   *
+   * On retient donc l'identifiant de ce qui est fait, et non l'indice d'un
+   * brouillon : c'est ce qui permet de retirer un clonage du lot restant sans
+   * dépendre d'une position dans une liste qui se recalcule.
+   */
+  const [done, setDone] = useState<Map<string, string>>(new Map());
+  /** Le dernier refus de la base, affiché là où il faut recliquer. */
+  const [refused, setRefused] = useState<string | null>(null);
+
+  /**
+   * Le lot **figé à l'ouverture**, pour la même raison que la fournée de
+   * naissances — voir `BreedingBirthDialog`.
+   *
+   * `clonings` vient de `cloneOptions`, qui réapparie **toute** l'écurie à
+   * chaque changement. Or un clonage écrit en retire deux stériles : les paires
+   * suivantes se reforment donc autrement, et le lot se réordonne sous les
+   * doigts. Mesuré : un « Fait » sur quatorze clonages anonymes en laissait
+   * sept, pas treize — les douze stériles restantes s'étaient réappariées
+   * différemment.
+   *
+   * On saisit donc contre le lot qu'on avait sous les yeux en ouvrant, et la
+   * réouverture le rafraîchit.
+   */
+  const [batch, setBatch] = useState<CloningToRecord[] | null>(null);
+  if (isOpen && batch === null) setBatch(clonings);
+  if (!isOpen && batch !== null) {
+    setBatch(null);
+    setDone(new Map());
+    setRefused(null);
+  }
+  const lot = batch ?? clonings;
 
   const byId = useMemo(
     () => new Map(individuals.map((mount) => [mount.id, mount])),
@@ -96,20 +133,48 @@ const BreedingCloneDialog = ({
     !byId.get(entry.first)?.name && !byId.get(entry.second)?.name;
 
   const anonymous = useMemo(
-    () => clonings.filter(undecidable),
+    () => lot.filter(undecidable),
     // `byId` suffit : `undecidable` n'en dépend que par lui.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [clonings, byId]
+    [lot, byId]
   );
   const decisions = useMemo(
-    () => clonings.filter((entry) => !undecidable(entry)),
+    () => lot.filter((entry) => !undecidable(entry)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [clonings, byId]
+    [lot, byId]
   );
 
-  const at = decisions.findIndex((_, index) => !kept.has(index));
-  const current = at >= 0 ? decisions[at] : null;
-  const done = kept.size;
+  /** Ce qui reste à faire, des deux côtés : le fait s'en retire aussitôt écrit. */
+  const pending = (entry: CloningToRecord) => !done.has(entry.first);
+  const remaining = decisions.filter(pending);
+  const remainingAnonymous = anonymous.filter(pending);
+  const current = remaining[0] ?? null;
+
+  /**
+   * Enregistre un clonage, et ne le retire du lot que s'il est passé.
+   *
+   * `keep` est l'identifiant gardé ; `entry.first` sert de clé, parce que c'est
+   * lui qui identifie le clonage quelle que soit la monture retenue.
+   */
+  const record = async (entry: CloningToRecord, keep: 'first' | 'second') => {
+    if (saving) return;
+    setSaving(true);
+    setRefused(null);
+    const result = await onRecord([
+      keep === 'first'
+        ? { keep: entry.first, drop: entry.second }
+        : { keep: entry.second, drop: entry.first },
+    ]);
+    setSaving(false);
+
+    if (!result.ok) {
+      setRefused(result.message);
+      return;
+    }
+    setDone((current) =>
+      new Map(current).set(entry.first, keep === 'first' ? entry.first : entry.second)
+    );
+  };
 
   /**
    * Une des deux stériles, telle qu'on la choisit.
@@ -187,12 +252,11 @@ const BreedingCloneDialog = ({
           size="sm"
           variant="secondary"
           className="mt-1 w-full"
-          onClick={() =>
-            setKept((current) => new Map(current).set(at, side === 'left' ? 'first' : 'second'))
-          }
-          title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît."
+          disabled={saving}
+          onClick={() => current && record(current, side === 'left' ? 'first' : 'second')}
+          title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic."
         >
-          Garder celle-ci
+          {saving ? 'Enregistrement…' : 'Garder celle-ci'}
         </Button>
       </div>
     );
@@ -204,30 +268,54 @@ const BreedingCloneDialog = ({
       onClose={onClose}
       title={
         decisions.length === 0
-          ? `Clonages — ${clonings.length} à faire`
-          : `Clonage ${Math.min(done + 1, decisions.length)} / ${decisions.length}`
+          ? `Clonages — ${remainingAnonymous.length} à faire`
+          : `Clonage ${decisions.length - remaining.length + (current ? 1 : 0)} / ${decisions.length}`
       }
     >
       <div className="space-y-4">
         {/* Les clonages sans arbitrage, comptés en tête plutôt que déroulés un
             par un. Ils restent à faire **en jeu** : c'est tout ce que cette
             ligne a à dire, et c'est pour ça qu'elle existe. */}
-        {anonymous.length > 0 && (
-          <p
+        {remainingAnonymous.length > 0 && (
+          <div
             data-testid="clone-anonymous-note"
-            className="flex items-start gap-2 px-3 py-2 rounded-xl bg-dark-800/60
+            className="flex flex-wrap items-start gap-2 px-3 py-2 rounded-xl bg-dark-800/60
               border border-dark-600/50 text-[11px] text-dark-300"
           >
             <Dna size={13} className="text-dark-500 mt-0.5 shrink-0" />
-            <span>
+            <span className="flex-1 min-w-48">
               <strong className="text-dark-100">
-                {anonymous.length} clonage{anonymous.length > 1 ? 's' : ''} entre anonymes
+                {remainingAnonymous.length} clonage{remainingAnonymous.length > 1 ? 's' : ''} entre
+                anonymes
               </strong>{' '}
               — rien à départager : elles ont la même couleur, la même génération et aucune
               ascendance, donc les deux mènent au même clone. Prends-en deux au hasard dans le
-              tas. <strong className="text-dark-100">Ne les oublie pas</strong> : elles comptent
-              dans la fournée et sont enregistrées avec les autres.
+              tas. <strong className="text-dark-100">Ne les oublie pas.</strong>
             </span>
+            {/* Un bouton par clonage fait, et non un seul qui les solderait tous.
+                C'est le compteur qu'on regarde entre deux allers-retours en jeu :
+                « il m'en reste combien ». Un bouton « tout est fait » se cliquerait
+                avant de les avoir faits, et il n'y aurait plus rien pour le dire. */}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={saving}
+              onClick={() => record(remainingAnonymous[0], 'first')}
+              title="Retire un clonage du lot : deux stériles partent, une fertile entre. Enregistré au clic."
+            >
+              <Check size={12} />
+              {saving ? 'Enregistrement…' : 'Fait — il en reste ' + (remainingAnonymous.length - 1)}
+            </Button>
+          </div>
+        )}
+
+        {refused && (
+          <p
+            data-testid="clone-refusal"
+            className="px-3 py-2 rounded-xl bg-loss/15 border border-loss/40 text-[11px]
+              text-loss-light"
+          >
+            Pas enregistré — {refused}
           </p>
         )}
 
@@ -263,9 +351,7 @@ const BreedingCloneDialog = ({
                 d'« Anonyme » de même couleur. Une liste de six « Anonyme » nus
                 ne dit pas lesquelles aller chercher. */}
             <div className="flex flex-wrap gap-2">
-              {[...kept].map(([index, choice]) => {
-                const entry = decisions[index];
-                const id = choice === 'first' ? entry.first : entry.second;
+              {[...done.values()].map((id, index) => {
                 const mount = byId.get(id);
                 const name = mount?.name ?? ANONYMOUS_NAME;
 
@@ -300,58 +386,28 @@ const BreedingCloneDialog = ({
 
         {/* Collée en bas, pour la même raison qu'à la saisie des naissances : un
             bouton qui sort de l'écran fait croire que le geste est fait. Voir
-            `BreedingBirthDialog`, où ça a coûté une soirée de saisie. */}
+            `BreedingBirthDialog`, où ça a coûté une soirée de saisie.
+
+            Plus de « Revenir » : il défaisait un brouillon, et il n'y en a plus.
+            Un clonage écrit est un clonage fait en jeu, où il est irréversible —
+            deux montures détruites. Une saisie de travers se corrige dans
+            « Mon écurie », qui montre ce qu'il y a vraiment. */}
         <div
           className="sticky bottom-0 -mx-1 px-1 py-3 flex items-center gap-2
             bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"
         >
-          {done > 0 && (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() =>
-                setKept((current) => {
-                  const next = new Map(current);
-                  next.delete(Math.max(...[...next.keys()]));
-                  return next;
-                })
-              }
-            >
-              <RotateCcw size={13} />
-              Revenir
-            </Button>
-          )}
           <span className="text-[11px] text-dark-500 tabular-nums">
-            {done} / {decisions.length}
+            {done.size} / {lot.length} enregistré{done.size > 1 ? 's' : ''}
           </span>
           <Button
             size="sm"
-            variant={current ? 'secondary' : 'primary'}
+            variant={current || remainingAnonymous.length > 0 ? 'secondary' : 'primary'}
             className="ml-auto"
             disabled={saving}
-            onClick={async () => {
-              setSaving(true);
-              await onRecord([
-                ...[...kept].map(([index, choice]) => {
-                  const entry = decisions[index];
-                  return choice === 'first'
-                    ? { keep: entry.first, drop: entry.second }
-                    : { keep: entry.second, drop: entry.first };
-                }),
-                // Les clonages entre anonymes n'ont pas été tranchés parce qu'il
-                // n'y avait rien à trancher. Ils sont faits en jeu comme les
-                // autres, donc ils s'enregistrent comme les autres — sur le
-                // premier des deux, arbitrairement, puisque les deux mènent au
-                // même clone. Les omettre laisserait l'écurie avec des stériles
-                // que le jeu n'a plus.
-                ...anonymous.map((entry) => ({ keep: entry.first, drop: entry.second })),
-              ]);
-              setSaving(false);
-              onClose();
-            }}
+            onClick={onClose}
           >
             <Check size={13} />
-            {current ? 'Terminer plus tard' : 'C’est fait'}
+            {current || remainingAnonymous.length > 0 ? 'Fermer — rien ne se perd' : 'Fermer'}
           </Button>
         </div>
       </div>

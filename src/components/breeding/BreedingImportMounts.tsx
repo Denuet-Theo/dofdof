@@ -41,6 +41,21 @@ import type { AddResult } from '@/lib/hooks/useBreeding';
  * dise. La colonne `GEN. 4` que la liste du jeu affiche est ignorée au passage :
  * elle est redondante avec le nom, et son chiffre passait pour un niveau.
  *
+ * ## La monture qui n'a pas de nom à recopier
+ *
+ * Tout ce qui précède suppose un nom dicté par l'outil, donc une **généalogie**.
+ * Une monture achetée ou capturée n'en a pas : elle s'appelle « Anonyme » en jeu,
+ * et cent lignes identiques ne se distinguent par rien. Elle n'avait donc aucun
+ * chemin ici, et le seul autre — le compteur de vrac — ne sait dire ni féconde
+ * ni stérile (`onSaveBulk` n'écrit que `males` et `females`, et la table n'a pas
+ * de colonne pour les stériles du tout).
+ *
+ * D'où `EB M anon`, avec un `×12` facultatif : le code de couleur, le sexe, et
+ * la déclaration explicite qu'il n'y a pas d'ascendance. Réservé aux **gen 1**,
+ * parce qu'au-delà une monture est née chez soi et porte forcément des parents,
+ * et aux états **féconde et stérile**, parce que la fertile a déjà sa porte au
+ * compteur de vrac et que l'importer en individu la compterait deux fois.
+ *
  * ## Pourquoi une prévisualisation, et pas un simple bouton
  *
  * Une ligne mal recopiée ne doit pas passer en silence. Chacune est donc relue
@@ -75,9 +90,12 @@ type Row =
       raw: string;
       colorId: string;
       sex: Sex;
-      parents: [string, string];
+      /** `null` pour une anonyme : achetée ou capturée, elle n'a pas d'ascendance. */
+      parents: [string, string] | null;
       level: number;
       status: MountStatus;
+      /** Combien d'exemplaires cette ligne écrit. Toujours 1 hors ligne anonyme. */
+      count: number;
       /** Signalé sans bloquer : la génération écrite ne colle pas au calcul. */
       warning: string | null;
     }
@@ -103,6 +121,23 @@ const STATUS_BY_WORD = new Map<string, MountStatus>([
 const plainWord = (token: string): string =>
   token.normalize('NFD').replace(/[^A-Za-z]/g, '').toLowerCase();
 
+/**
+ * Les mots qui disent « cette monture n'a pas d'ascendance ».
+ *
+ * `plainWord` ôte accents et ponctuation, donc « Anonyme » recopié de l'écurie du
+ * jeu, « anon » tapé vite et « ANONYME, » collé d'un tableur tombent tous ici.
+ */
+const ANONYMOUS_WORDS = new Set(['anon', 'anonyme']);
+
+/**
+ * Le multiplicateur d'une ligne : `×12`, `x12`, `*12`.
+ *
+ * Marqué et non écrit en clair, parce qu'un nombre nu est déjà le **niveau** et
+ * que les deux se ressemblent trop pour être devinés — « 12 » sur une ligne
+ * anonyme ne peut pas vouloir dire les deux.
+ */
+const COUNT_TOKEN = /^[x×*](\d{1,3})$/i;
+
 /** Ce qu'une ligne porte en plus du nom, et ce qui cloche s'il y a lieu. */
 type LineExtras = {
   /** La ligne débarrassée du niveau, de l'état et du bruit de la liste du jeu. */
@@ -110,6 +145,10 @@ type LineExtras = {
   /** `null` quand la ligne s'en remet au réglage du lot. */
   level: number | null;
   status: MountStatus | null;
+  /** La ligne se déclare sans ascendance : `EB M anon`. */
+  anonymous: boolean;
+  /** `null` quand la ligne n'en porte pas — donc un exemplaire. */
+  count: number | null;
   problem: string | null;
 };
 
@@ -131,6 +170,8 @@ const readExtras = (raw: string): LineExtras => {
   const kept: string[] = [];
   let level: number | null = null;
   let status: MountStatus | null = null;
+  let anonymous = false;
+  let count: number | null = null;
   let problem: string | null = null;
 
   const tokens = raw.trim().split(/\s+/);
@@ -153,6 +194,21 @@ const readExtras = (raw: string): LineExtras => {
       continue;
     }
 
+    if (ANONYMOUS_WORDS.has(word)) {
+      anonymous = true;
+      continue;
+    }
+
+    const multiplier = token.match(COUNT_TOKEN);
+    if (multiplier) {
+      const value = Number(multiplier[1]);
+      if (value >= 1) {
+        if (count !== null && count !== value) problem = 'Deux quantités sur la même ligne.';
+        count = value;
+        continue;
+      }
+    }
+
     if (/^\d{1,3}$/.test(token)) {
       const value = Number(token);
       if (value >= 1 && value <= 200) {
@@ -165,8 +221,24 @@ const readExtras = (raw: string): LineExtras => {
     kept.push(token);
   }
 
-  return { name: kept.join(' '), level, status, problem };
+  return { name: kept.join(' '), level, status, anonymous, count, problem };
 };
+
+/**
+ * Les états dans lesquels une gen 1 sans ascendance mérite sa propre ligne.
+ *
+ * Une gen 1 **fertile** sans ascendance est exactement ce que le vrac
+ * représente — c'est son compteur, dans « Mon écurie », et l'importer en
+ * individu la compterait deux fois. Les deux autres n'ont pas cette porte :
+ * `onSaveBulk` n'écrit que `males` et `females`, si bien qu'aucun écran ne sait
+ * dire « féconde » au vrac, et la table `user_breeding_mounts` ne sait pas dire
+ * « stérile » du tout — voir l'en-tête de `roster.ts` sur ce trou-là.
+ *
+ * D'où la règle : le suivi individuel est la seule façon d'enregistrer ces
+ * deux-là, et c'est la seule raison pour laquelle on l'ouvre à une génération
+ * qui, autrement, n'a rien à y faire.
+ */
+const ANONYMOUS_STATUSES: MountStatus[] = ['feconde', 'sterile'];
 
 const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const [text, setText] = useState('');
@@ -218,6 +290,11 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
     (colorId: string) => byId.get(colorId)?.generation ?? 1,
     [byId]
   );
+  /** Le même que `nameOf`, mais stable : la relecture des lignes le mémoïse. */
+  const nameOfColor = useCallback(
+    (colorId: string) => byId.get(colorId)?.name ?? colorId,
+    [byId]
+  );
   const iconOf = (colorId: string) => {
     const color = byId.get(colorId);
     return color ? colorIconUrl(color) : null;
@@ -236,6 +313,85 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
 
         const lineLevel = extras.level ?? level;
         const lineStatus = extras.status ?? status;
+        const lineCount = extras.count ?? 1;
+
+        /**
+         * `EB M anon` : une gen 1 sans ascendance, en autant d'exemplaires qu'on
+         * en demande.
+         *
+         * Elle ne passe pas par `parseMountName`, et pour une raison de fond : ce
+         * format encode une **généalogie**, et celle-ci n'en a pas. Lui en
+         * inventer une pour pouvoir la relire serait écrire dans la base une
+         * ascendance qui n'existe pas — exactement ce que `addIndividual` refuse
+         * de faire en laissant son nom à `null`.
+         *
+         * L'ordre des deux morceaux est libre : `EB M anon` et `anon M EB`
+         * disent la même chose, et personne ne se souvient de la convention d'un
+         * format qu'on tape trois fois par an.
+         */
+        if (extras.anonymous) {
+          const words = extras.name.split(/\s+/).filter(Boolean);
+          const sexIndex = words.findIndex((word) => /^[MF]$/i.test(word));
+          if (sexIndex === -1 || words.length !== 2) {
+            return {
+              ok: false,
+              line,
+              raw,
+              problem: 'Attendu « EB M anon » — un code de couleur, un sexe, et rien d’autre.',
+            };
+          }
+
+          const sex = words[sexIndex].toUpperCase() as Sex;
+          const colorId = colorByCode.get(words[1 - sexIndex].toUpperCase());
+          if (colorId === undefined) {
+            return {
+              ok: false,
+              line,
+              raw,
+              problem: `Code de couleur inconnu : ${words[1 - sexIndex].toUpperCase()}.`,
+            };
+          }
+          if (colorId === null) {
+            return { ok: false, line, raw, problem: `Code ambigu : ${words[1 - sexIndex]}.` };
+          }
+
+          if (generationOf(colorId) !== 1) {
+            return {
+              ok: false,
+              line,
+              raw,
+              problem:
+                `${nameOfColor(colorId)} est de génération ${generationOf(colorId)} : au-delà ` +
+                'de la première, une monture est née chez toi et porte donc une ascendance. ' +
+                'Écris son nom.',
+            };
+          }
+
+          if (!ANONYMOUS_STATUSES.includes(lineStatus)) {
+            return {
+              ok: false,
+              line,
+              raw,
+              problem:
+                'Une gen 1 fertile sans ascendance, c’est du vrac : compte-la au compteur de ' +
+                '« Mon écurie ». Seules les fécondes et les stériles, que le vrac ne sait pas ' +
+                'dire, s’importent une par une.',
+            };
+          }
+
+          return {
+            ok: true,
+            line,
+            raw,
+            colorId,
+            sex,
+            parents: null,
+            level: lineLevel,
+            status: lineStatus,
+            count: lineCount,
+            warning: null,
+          };
+        }
 
         const parsed = parseMountName(extras.name);
         if (!parsed) {
@@ -276,13 +432,14 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
           parents,
           level: lineLevel,
           status: lineStatus,
+          count: lineCount,
           warning:
             expected === parsed.carriedGeneration
               ? null
               : `Le nom annonce G${parsed.carriedGeneration}, la généalogie donne G${expected}.`,
         };
       });
-  }, [text, level, status, colorByCode, generationOf]);
+  }, [text, level, status, colorByCode, generationOf, nameOfColor]);
 
   const valid = rows.filter((row): row is Extract<Row, { ok: true }> => row.ok);
   const broken = rows.filter((row): row is Extract<Row, { ok: false }> => !row.ok);
@@ -302,12 +459,17 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
       status: { fertile: 0, feconde: 0, sterile: 0 } as Record<MountStatus, number>,
     };
     for (const row of valid) {
-      if (row.sex === 'M') counts.males += 1;
-      else counts.females += 1;
-      counts.status[row.status] += 1;
+      // `count` et non 1 : une ligne anonyme en écrit plusieurs, et c'est
+      // précisément ce total-là qu'on vient comparer à celui du jeu.
+      if (row.sex === 'M') counts.males += row.count;
+      else counts.females += row.count;
+      counts.status[row.status] += row.count;
     }
     return counts;
   }, [valid]);
+
+  /** Les montures que l'import va écrire, lignes anonymes déployées. */
+  const total = valid.reduce((sum, row) => sum + row.count, 0);
 
   const run = async () => {
     setRunning(true);
@@ -319,15 +481,27 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
     // base partagée n'iront pas plus vite qu'elles, et une erreur au milieu doit
     // pouvoir être rapportée à **sa** ligne.
     for (const row of valid) {
-      const result = await onAdd({
-        colorId: row.colorId,
-        sex: row.sex,
-        level: row.level,
-        status: row.status,
-        parents: row.parents,
-      });
-      if (result.ok) added += 1;
-      else failures.push(`ligne ${row.line} — ${result.message}`);
+      // Une ligne anonyme en écrit `count`, une à une : elles sont
+      // interchangeables mais ce sont bien N montures distinctes en base, et un
+      // échec au milieu doit se rapporter à sa ligne comme les autres.
+      for (let copy = 0; copy < row.count; copy += 1) {
+        const result = await onAdd({
+          colorId: row.colorId,
+          sex: row.sex,
+          level: row.level,
+          status: row.status,
+          parents: row.parents,
+        });
+        if (result.ok) added += 1;
+        else {
+          failures.push(
+            `ligne ${row.line}${row.count > 1 ? ` (${copy + 1}/${row.count})` : ''} — ${result.message}`
+          );
+          // Quarante échecs identiques sur la même ligne n'apprennent rien de
+          // plus que le premier, et noieraient les autres lignes.
+          break;
+        }
+      }
     }
 
     setRunning(false);
@@ -349,6 +523,24 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
           <code className="text-dark-400">G3 AM M DO-DO 120 féconde</code>. Leur place sur la
           ligne est libre, accents et majuscules indifférents, et la colonne{' '}
           <code className="text-dark-400">GEN. 4</code> de la liste du jeu est ignorée.
+        </p>
+
+        {/* Le format anonyme, expliqué là où on le taperait. Il ne se devine pas
+            — rien dans l'écurie du jeu ne ressemble à « EB M anon » — et la
+            restriction aux gen 1 fécondes ou stériles a une raison qu'il vaut
+            mieux lire ici que découvrir sur un refus. */}
+        <p className="text-[11px] text-dark-500">
+          {/* Les espaces après une balise fermante sont explicites : sans elles
+              le rendu recolle « ascendancen'a » et « ×12pour ». */}
+          Une monture <strong>sans ascendance</strong>{' '}
+          n&apos;a pas de nom à recopier : écris-la{' '}
+          <code className="text-dark-400">EB M anon</code> — code de couleur, sexe,{' '}
+          <code className="text-dark-400">anon</code>, dans l&apos;ordre que tu veux. Ajoute{' '}
+          <code className="text-dark-400">×12</code>{' '}
+          pour en écrire douze d&apos;un coup. Réservé aux{' '}
+          <strong>gen 1 fécondes ou stériles</strong> : au-delà de la première génération une
+          monture est née chez toi et porte une ascendance, et une gen 1 fertile est déjà comptée
+          au compteur de vrac de « Mon écurie » — l&apos;importer ici la compterait deux fois.
         </p>
 
         <div className="flex flex-wrap items-end gap-4">
@@ -393,7 +585,7 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
           onChange={(event) => setText(event.target.value)}
           rows={8}
           spellCheck={false}
-          placeholder={'G3 AM M DO-DO\nG3 AM F DO-DO\nG4 RO M AM-DO 120'}
+          placeholder={'G3 AM M DO-DO\nG3 AM F DO-DO\nG4 RO M AM-DO 120\nEB M anon ×12 stérile'}
           className="w-full px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
             text-dark-100 text-xs font-mono placeholder:text-dark-600 transition-all
             hover:border-dark-500 focus:border-kamas/50"
@@ -433,13 +625,27 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
                   <span className={row.sex === 'M' ? 'text-info' : 'text-loss-light'}>
                     {row.sex === 'M' ? '♂' : '♀'}
                   </span>
+                  {row.count > 1 && (
+                    <span className="text-[10px] text-kamas font-semibold tabular-nums">
+                      × {row.count}
+                    </span>
+                  )}
                   <span className="text-[10px] text-dark-500">niv. {row.level}</span>
                   <span className="text-[10px] text-dark-500">
                     {MOUNT_STATUS_LABEL[row.status]}
                   </span>
-                  <span className="text-[10px] text-dark-600 truncate">
-                    ← {row.parents.map(nameOf).join(' × ')}
-                  </span>
+                  {row.parents ? (
+                    <span className="text-[10px] text-dark-600 truncate">
+                      ← {row.parents.map(nameOf).join(' × ')}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[10px] text-dark-600"
+                      title="Achetée ou capturée : aucune ascendance, donc elle restera « Anonyme » en jeu — c'est déjà son nom."
+                    >
+                      sans ascendance
+                    </span>
+                  )}
                   {row.warning && (
                     <span className="text-[10px] text-amber-400/80" title={row.warning}>
                       ⚠ génération
@@ -480,7 +686,7 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
             <Upload size={13} />
             {running
               ? 'Import en cours…'
-              : `Importer ${valid.length} monture${valid.length > 1 ? 's' : ''}`}
+              : `Importer ${total} monture${total > 1 ? 's' : ''}`}
           </Button>
           {broken.length > 0 && (
             <span className="text-[11px] text-amber-400/80">

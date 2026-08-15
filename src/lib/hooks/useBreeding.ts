@@ -132,6 +132,15 @@ export type RecordBirthsResult =
   | { ok: false; message: string };
 
 /**
+ * Ce qu'un clonage enregistré a donné.
+ *
+ * `ok: false` veut dire **rien n'a été écrit** : le clone n'est pas en base et
+ * les deux stériles y sont toujours. La fenêtre peut donc laisser le clonage
+ * dans le lot à faire au lieu de le compter fait.
+ */
+export type CloningResult = { ok: true } | { ok: false; message: string };
+
+/**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
  * figés, les prix de couleurs partagés, et les réglages privés de l'éleveur.
  *
@@ -1627,8 +1636,8 @@ export const useBreeding = (
    * fertiles, par construction du type. Il n'y a donc jamais rien à deviner ici.
    */
   const recordClonings = useCallback(
-    async (entries: { keep: string; drop: string }[]) => {
-      if (entries.length === 0) return;
+    async (entries: { keep: string; drop: string }[]): Promise<CloningResult> => {
+      if (entries.length === 0) return { ok: true as const };
       const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
       const kept = entries
         .map((entry) => byId.get(entry.keep))
@@ -1663,11 +1672,13 @@ export const useBreeding = (
         .select();
 
       if (insertResult.error) {
-        reportWriteFailure(
-          entries.length > 1 ? `les ${entries.length} clonages` : 'le clonage',
-          insertResult.error
-        );
-        return;
+        return {
+          ok: false as const,
+          message: reportWriteFailure(
+            entries.length > 1 ? `les ${entries.length} clonages` : 'le clonage',
+            insertResult.error
+          ),
+        };
       }
 
       const { error: dropError } = await supabase
@@ -1681,7 +1692,9 @@ export const useBreeding = (
           dropError
         );
         load();
-        return;
+        // Le clone **est** en base. L'appelant peut avancer : le rattrapage
+        // porte sur les stériles restées, et la bannière le dit.
+        return { ok: true as const };
       }
 
       setStable((current) => ({
@@ -1703,6 +1716,8 @@ export const useBreeding = (
           })),
         ],
       }));
+
+      return { ok: true as const };
     },
     [family, stable.individuals, load]
   );

@@ -65,7 +65,7 @@ import {
   couplesToRecord,
   type StablePlan,
 } from '@/lib/dofus/breeding/policy';
-import type { BirthEntry, BirthRecord, RecordBirthsResult } from '@/lib/hooks/useBreeding';
+import type { BirthEntry, BirthRecord, CloningResult, RecordBirthsResult } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 // Les montures que le plan se procure n'ont pas d'identité : la liste de sortie
 // leur en fabrique une, dans l'espace de noms que `search.ts` définit.
@@ -181,7 +181,7 @@ type Props = {
   /** Défait une naissance déjà écrite — voir `undoBirth`. */
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   /** Enregistre les clonages : deux stériles partent, une fertile entre. */
-  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
   /**
    * Sort les montures de l'enclos : niveaux relevés, lot passé en fécondes.
    *
@@ -724,7 +724,7 @@ const Fill = ({
   onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   /** Défait une naissance déjà écrite — voir `undoBirth`. */
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
-  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
+  onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
   /** Sortie d'enclos : niveaux relevés, tout le lot passé en fécondes. */
   onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
   /** Les enclos du plan, leur état, et ce qui les bloque. */
@@ -1494,13 +1494,18 @@ const Fill = ({
       {colors && (
         <BreedingCloneDialog
           isOpen={open === 'clone'}
-          onClose={() => setOpen(null)}
           clonings={toClone}
           individuals={individuals}
           colors={colors}
           nameOf={nameOf}
-          onRecord={async (entries) => {
-            await onRecordClonings?.(entries);
+          /* L'étape suivante s'ouvre à la fermeture, pas à chaque clonage : il
+             y en a un par clic maintenant, et changer d'étape sous les doigts
+             au milieu de vingt clonages ferait perdre la fenêtre. */
+          onRecord={async (entries) =>
+            (await onRecordClonings?.(entries)) ?? { ok: true as const }
+          }
+          onClose={() => {
+            setOpen(null);
             setStep('load');
           }}
         />

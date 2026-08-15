@@ -122,7 +122,7 @@ test.describe('clonage', () => {
     await expect(titre).toHaveText(avant);
   });
 
-  test('les anonymes sont enregistrées avec les autres', async ({ page }) => {
+  test('« Fait » retire un clonage anonyme du lot, et l’écrit', async ({ page }) => {
     // C'est la moitié qui compte : les sortir de l'arbitrage ne doit pas les
     // sortir de la base. Sans ça l'écurie garderait des stériles que le jeu n'a
     // plus, et le compte repartirait de travers — 203 contre 225.
@@ -130,17 +130,43 @@ test.describe('clonage', () => {
     await openBreeding(page);
     await openCloning(page);
 
-    const note = await page.getByTestId('clone-anonymous-note').innerText();
-    const attendus = Number(note.match(/(\d+) clonages? entre anonymes/)![1]);
-    expect(attendus).toBeGreaterThan(0);
+    const note = page.getByTestId('clone-anonymous-note');
+    const compte = async () =>
+      Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1]);
 
-    const avant = supabase.rows(individus).length;
-    await page.getByRole('button', { name: /C’est fait|Terminer plus tard/ }).click();
-    await expect(page.getByTestId('clone-anonymous-note')).toBeHidden();
+    const avant = await compte();
+    expect(avant).toBeGreaterThan(1);
+    const lignes = supabase.rows(individus).length;
 
-    // Chaque clonage retire deux stériles et en insère une : le solde est de −1.
-    await expect
-      .poll(() => supabase.rows(individus).length, { timeout: 15_000 })
-      .toBe(avant - attendus);
+    await note.getByRole('button', { name: /^Fait/ }).click();
+
+    // Un clonage consomme deux stériles et rend une fertile : le solde est −1.
+    await expect.poll(() => supabase.rows(individus).length).toBe(lignes - 1);
+    await expect.poll(compte).toBe(avant - 1);
+
+    // Et il n'y revient pas : le lot restant est ce qui reste à faire en jeu.
+    await note.getByRole('button', { name: /^Fait/ }).click();
+    await expect.poll(compte).toBe(avant - 2);
+    await expect.poll(() => supabase.rows(individus).length).toBe(lignes - 2);
+  });
+
+  test('un clonage refusé ne quitte pas le lot', async ({ page }) => {
+    // La règle de toute la maison : ce que l'écran retire du lot est ce que la
+    // base a pris. Un refus laisse le clonage à faire, et le dit.
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openCloning(page);
+
+    const note = page.getByTestId('clone-anonymous-note');
+    const avant = Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1]);
+    const lignes = supabase.rows(individus).length;
+
+    supabase.refuse({ table: individus, method: 'POST' });
+    await note.getByRole('button', { name: /^Fait/ }).click();
+
+    await expect(page.getByTestId('clone-refusal')).toBeVisible();
+    await expect(page.locator('[role="alert"]').filter({ hasText: 'Pas enregistré' })).toBeVisible();
+    expect(supabase.rows(individus)).toHaveLength(lignes);
+    expect(Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1])).toBe(avant);
   });
 });

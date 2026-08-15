@@ -83,6 +83,22 @@ const BreedingCloneDialog = ({
   const [refused, setRefused] = useState<string | null>(null);
 
   /**
+   * Les clonages écartés à la main, sans rien écrire.
+   *
+   * Le lot est figé à l'ouverture, et le jeu, lui, ne l'est pas : une paire
+   * proposée peut ne plus exister — les montures ont été clonées entre-temps,
+   * ou l'une d'elles a servi ailleurs. Sans porte de sortie, l'écran restait
+   * planté sur un clonage infaisable, et le seul geste disponible était de le
+   * déclarer fait, c'est-à-dire d'écrire en base un clonage qui n'a pas eu lieu.
+   *
+   * Écarter n'enregistre donc rien du tout et ne compte pas comme fait : la
+   * paire réapparaîtra à la prochaine ouverture si `cloneOptions` la propose
+   * encore, ce qui est exactement le comportement voulu — l'outil ne voit pas
+   * le jeu, et c'est l'éleveur qui tranche.
+   */
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+
+  /**
    * Le lot **figé à l'ouverture**, pour la même raison que la fournée de
    * naissances — voir `BreedingBirthDialog`.
    *
@@ -101,6 +117,7 @@ const BreedingCloneDialog = ({
   if (!isOpen && batch !== null) {
     setBatch(null);
     setDone(new Map());
+    setSkipped(new Set());
     setRefused(null);
   }
   const lot = batch ?? clonings;
@@ -144,8 +161,12 @@ const BreedingCloneDialog = ({
     [lot, byId]
   );
 
-  /** Ce qui reste à faire, des deux côtés : le fait s'en retire aussitôt écrit. */
-  const pending = (entry: CloningToRecord) => !done.has(entry.first);
+  const skip = (entry: CloningToRecord) =>
+    setSkipped((current) => new Set(current).add(entry.first));
+
+  /** Ce qui reste à faire : le fait s'en retire écrit, l'écarté s'en retire nu. */
+  const pending = (entry: CloningToRecord) =>
+    !done.has(entry.first) && !skipped.has(entry.first);
   const remaining = decisions.filter(pending);
   const remainingAnonymous = anonymous.filter(pending);
   const current = remaining[0] ?? null;
@@ -306,6 +327,19 @@ const BreedingCloneDialog = ({
               <Check size={12} />
               {saving ? 'Enregistrement…' : 'Fait — il en reste ' + (remainingAnonymous.length - 1)}
             </Button>
+            {/* Même sortie que sur l'arbitrage : le tas peut être vide en jeu
+                alors que le compteur en annonce encore. */}
+            <button
+              type="button"
+              data-testid="clone-skip-anonymous"
+              disabled={saving}
+              onClick={() => skip(remainingAnonymous[0])}
+              title="Rien n’est enregistré : ce clonage sort du lot pour cette fois."
+              className="text-[11px] text-dark-500 hover:text-dark-200 transition-colors
+                cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Passer
+            </button>
           </div>
         )}
 
@@ -337,6 +371,23 @@ const BreedingCloneDialog = ({
                 </span>
               </div>
               {card(current.second, 'right')}
+            </div>
+
+            {/* La sortie. Discrète — ce n'est pas le geste courant — mais
+                présente, parce que sans elle le seul moyen d'avancer sur une
+                paire que le jeu n'a plus était de la déclarer faite. */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                data-testid="clone-skip"
+                disabled={saving}
+                onClick={() => skip(current)}
+                title="Rien n’est enregistré : ce clonage sort de la liste pour cette fois, et reviendra à la prochaine ouverture s’il est encore proposé."
+                className="text-[11px] text-dark-500 hover:text-dark-200 transition-colors
+                  cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Passer — infaisable en jeu
+              </button>
             </div>
           </>
         ) : (
@@ -396,8 +447,11 @@ const BreedingCloneDialog = ({
           className="sticky bottom-0 -mx-1 px-1 py-3 flex items-center gap-2
             bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"
         >
+          {/* Les écartés se comptent à part, et surtout pas avec les
+              enregistrés : ce compteur dit ce que la base a pris. */}
           <span className="text-[11px] text-dark-500 tabular-nums">
             {done.size} / {lot.length} enregistré{done.size > 1 ? 's' : ''}
+            {skipped.size > 0 && ` · ${skipped.size} passé${skipped.size > 1 ? 's' : ''}`}
           </span>
           <Button
             size="sm"

@@ -150,6 +150,34 @@ test.describe('clonage', () => {
     await expect.poll(() => supabase.rows(individus).length).toBe(lignes - 2);
   });
 
+  test('« Passer » écarte un arbitrage sans rien écrire', async ({ page }) => {
+    // Le lot est figé à l'ouverture, le jeu ne l'est pas : une paire proposée
+    // peut ne plus exister. Sans sortie, l'écran restait planté dessus et le
+    // seul geste possible était de la déclarer faite — donc d'écrire en base un
+    // clonage qui n'a pas eu lieu.
+    const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
+    await openBreeding(page);
+    await openCloning(page);
+
+    const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
+    const avant = await titre.innerText();
+    const cartes = await page.getByTestId('clone-card').allInnerTexts();
+    const lignes = supabase.rows(individus).length;
+
+    await page.getByTestId('clone-skip').click();
+
+    // On passe au suivant : d'autres montures, et rien de plus en base.
+    await expect(page.getByTestId('clone-card').first()).not.toHaveText(cartes[0]);
+    expect(supabase.rows(individus)).toHaveLength(lignes);
+    expect(supabase.writes).toHaveLength(0);
+
+    // Et l'écarté ne se compte pas comme enregistré.
+    await expect(titre).not.toHaveText(avant);
+    await expect(page.getByText(/0 \/ \d+ enregistré/)).toBeVisible();
+    await expect(page.getByText(/1 passé/)).toBeVisible();
+  });
+
   test('un clonage refusé ne quitte pas le lot', async ({ page }) => {
     // La règle de toute la maison : ce que l'écran retire du lot est ce que la
     // base a pris. Un refus laisse le clonage à faire, et le dit.

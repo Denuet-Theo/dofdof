@@ -27,6 +27,21 @@ Do not explain a lost commit as the maintainer having "merged while I was
 pushing". They merged what existed; the extra commits came after. The mistake
 is on this side.
 
+## Fixing a bug means fixing its whole class
+
+See the top of `AGENTS.md`. Restated here because it belongs to the sequence and
+not to the reading: **step 2 is not "fix the bug", it is "fix every place that
+bug can happen".**
+
+Name the class, grep the class, fix every hit, and say in the PR body which hits
+you found and which you deliberately left. If a shared mechanism can make the
+class unrepresentable, build the mechanism instead of patching the sites.
+
+The maintainer has been bitten by the same class four times — three local fixes
+that each left the other call sites alone, and one that cost 22 mounts. A PR
+that patches a single call site of a known class will be read as the fifth
+report of the same bug.
+
 ## Sequence
 
 1. **Branch off up-to-date `main`.** `git fetch origin && git checkout -b <name> origin/main`.

@@ -638,7 +638,12 @@ const BreedingStocks = ({
                   onChange={(event) =>
                     setFilters((current) => ({ ...current, query: event.target.value }))
                   }
-                  placeholder="Rechercher une monture"
+                  // « Anonyme » est nommé parce que c'est le seul terme de
+                  // recherche qu'on ne devinerait pas : il ne figure sur aucune
+                  // ligne comme un nom saisi, et c'est pourtant lui qui sépare
+                  // les montures interchangeables de celles qui portent leur
+                  // généalogie dans leur nom.
+                  placeholder="Rechercher une monture — « Anonyme » pour les non renommées"
                   className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-dark-800/80 border
                     border-dark-600/50 text-dark-100 text-xs placeholder:text-dark-500
                     transition-all hover:border-dark-500 focus:border-kamas/50"

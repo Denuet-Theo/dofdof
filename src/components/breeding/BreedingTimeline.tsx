@@ -9,6 +9,7 @@ import {
   LogOut,
   Egg,
   Fuel,
+  Gem,
   Heart,
   Bell,
   BellOff,
@@ -72,7 +73,9 @@ import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { Couple, Individual, Sex } from '@/lib/dofus/breeding/stable';
 import type { CloneOption } from '@/lib/dofus/breeding/cloning';
+import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
 import BreedingCloneAdvice from '@/components/breeding/BreedingCloneAdvice';
+import BreedingExtraction from '@/components/breeding/BreedingExtraction';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { BreedingTimelineState } from '@/lib/hooks/useBreedingTimeline';
 
@@ -157,6 +160,14 @@ type Props = {
    * `Fill` et `cloning.ts`.
    */
   cloneAdvice?: CloneOption[];
+  /**
+   * Toutes les stériles de l'écurie, de la moins intéressante à reproduire à la
+   * plus, affichées à l'étape « extraction ». Voir `extraction.ts` : ce n'est pas
+   * la même liste que `cloneAdvice`, qui n'énumère que les stériles appariables.
+   */
+  extraction?: ExtractionCandidate[];
+  /** Ambre, neurone ou corne : ce que l'extraction rend dans cette famille. */
+  sacrificeName?: string;
   /**
    * Les couleurs et leurs générations, pour la saisie des naissances et des
    * clonages — la fenêtre d'accouplement propose les issues, donc elle a besoin du
@@ -619,6 +630,26 @@ const Agenda = ({
 /* -------------------------------------------------------------- fournée ---- */
 
 /**
+ * Les quatre gestes de l'écran, et l'ordre dans lequel ils sont **rangés** —
+ * qui n'est plus celui dans lequel il faut les faire.
+ *
+ * L'ordre de lecture reste celui de la partie : on accouple ce qui est fécond, on
+ * clone ce qui ne sert plus, on charge l'enclos avec le reste, et on extrait ce
+ * qui ne sert plus à rien. Mais chaque onglet est directement cliquable, parce
+ * que le matin on n'a le temps que de charger les enclos — et un enclos qu'on n'a
+ * pas lancé avant de partir ne tourne pas de la journée, là où un accouplement
+ * qu'on n'a pas fait attend sans rien coûter.
+ */
+type Step = 'mate' | 'clone' | 'load' | 'extract';
+
+const STEPS: { id: Step; label: string; icon: typeof Heart }[] = [
+  { id: 'mate', label: 'Accouplement', icon: Heart },
+  { id: 'clone', label: 'Clonage', icon: Dna },
+  { id: 'load', label: 'Fournée', icon: Egg },
+  { id: 'extract', label: 'Extraction', icon: Gem },
+];
+
+/**
  * Ce que la politique entraînée ferait de l'écurie, montures nommées.
  *
  * Une fois pour tout le parc, et non sur chaque piste : la fournée se dimensionne
@@ -647,6 +678,8 @@ const Fill = ({
   fill,
   couples,
   cloneAdvice = [],
+  extraction = [],
+  sacrificeName = 'ambre',
   nameOf,
   individuals = [],
   colors,
@@ -673,6 +706,13 @@ const Fill = ({
    * tes stériles valent et si mieux vaut les extraire. Voir `cloning.ts`.
    */
   cloneAdvice?: CloneOption[];
+  /**
+   * Toutes les stériles, classées pour l'extraction — y compris celles qu'aucun
+   * clonage n'apparie, qui sont justement celles à vider. Voir `extraction.ts`.
+   */
+  extraction?: ExtractionCandidate[];
+  /** Ambre, neurone ou corne, selon la famille. */
+  sacrificeName?: string;
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
   colors?: BreedingColor[];
@@ -693,14 +733,28 @@ const Fill = ({
   onToggleTrack?: (trackId: string) => Promise<void>;
 }) => {
   /**
-   * Où en est le parcours : accoupler, cloner, charger.
+   * Quel geste on est en train de faire : accoupler, cloner, charger, extraire.
    *
-   * Trois temps et non trois panneaux ouverts en même temps, parce que c'est
-   * l'ordre dans lequel on joue — on accouple ce qui est déjà fécond, on clone ce
-   * qui ne sert plus, et **ensuite** on charge l'enclos avec ce qui reste. Chaque
-   * phase se fait dans le jeu, une monture à la fois, en cherchant un nom.
+   * Un seul à l'écran à la fois, parce que chaque phase se fait dans le jeu, une
+   * monture à la fois, en cherchant un nom — quatre panneaux ouverts feraient
+   * perdre la ligne où l'on en est.
+   *
+   * ## Mais l'ordre n'est plus imposé
+   *
+   * C'était un parcours : accoupler, puis cloner, puis charger, avec « passer → »
+   * pour avancer d'un cran. L'ordre est le bon quand on a le temps de tout faire,
+   * et c'est précisément ce qu'on n'a pas le matin : lancer les fournées prend
+   * quelques minutes, les accouplements et les clonages en prennent beaucoup, et
+   * les enclos qu'on n'a pas chargés avant de partir ne tournent pas de la
+   * journée. Les fournées d'abord n'est donc pas un raccourci, c'est le bon ordre
+   * ce matin-là.
+   *
+   * D'où quatre onglets toujours cliquables plutôt qu'un fil à dérouler. Les
+   * enchaînements automatiques restent — une naissance saisie mène au clonage,
+   * une sortie d'enclos ramène aux accouplements — parce qu'ils décrivent ce qui
+   * vient de devenir possible, et non ce qu'il faut faire ensuite.
    */
-  const [step, setStep] = useState<'mate' | 'clone' | 'load'>('mate');
+  const [step, setStep] = useState<Step>('mate');
   const [open, setOpen] = useState<'mate' | 'clone' | 'exit' | null>(null);
 
   /**
@@ -1103,25 +1157,76 @@ const Fill = ({
         </p>
       )}
 
-      {/* Le parcours : un bouton qui dit ce qu'il reste à faire et l'ouvre. Les
-          listes en dessous restent lisibles — on veut pouvoir tout voir d'un coup
-          d'œil — mais c'est ce bouton qui mène le geste, phase après phase. */}
-      {!nothing && colors && (
+      {/* Les quatre gestes, tous à un clic. C'était un fil à dérouler — accoupler,
+          puis cloner, puis charger — et le fil se paie le matin : on n'a le temps
+          que des fournées, et il fallait traverser deux étapes pour y arriver. Un
+          onglet vide reste cliquable et le dit, ce qui vaut mieux que de le
+          sauter automatiquement : la liste des stériles a de la valeur même quand
+          la politique ne propose rien. */}
+      {colors && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {STEPS.map(({ id, label, icon: Icon }) => {
+            const count =
+              id === 'mate'
+                ? toRecord.length
+                : id === 'clone'
+                  ? toClone.length
+                  : id === 'load'
+                    ? loadTotals.mounts
+                    : extraction.length;
+            const active = step === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setStep(id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px]
+                  font-medium border transition-all cursor-pointer ${
+                    active
+                      ? 'bg-kamas/15 text-kamas border-kamas/40'
+                      : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+                  }`}
+              >
+                <Icon size={13} />
+                {label}
+                <span
+                  className={`tabular-nums ${
+                    // Un zéro se dit mat : l'onglet reste là — on veut pouvoir y
+                    // aller pour vérifier — mais il n'appelle pas le regard.
+                    count > 0 ? (active ? 'text-kamas' : 'text-dark-200') : 'text-dark-600'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ce que l'étape en cours demande de faire, et le bouton qui l'ouvre. */}
+      {!nothing && colors && step !== 'extract' && (
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
           bg-dark-800/60 border border-dark-600/50">
-          {step === 'mate' && toRecord.length > 0 && (
-            <>
-              <Button size="sm" variant="primary" onClick={() => setOpen('mate')}>
-                <Heart size={13} />
-                {toRecord.length} reproduction{toRecord.length > 1 ? 's' : ''} à faire
-              </Button>
+          {step === 'mate' &&
+            (toRecord.length > 0 ? (
+              <>
+                <Button size="sm" variant="primary" onClick={() => setOpen('mate')}>
+                  <Heart size={13} />
+                  {toRecord.length} reproduction{toRecord.length > 1 ? 's' : ''} à faire
+                </Button>
+                <span className="text-[11px] text-dark-500">
+                  un couple à la fois, avec le nom du poulain à copier
+                </span>
+              </>
+            ) : (
               <span className="text-[11px] text-dark-500">
-                un couple à la fois, avec le nom du poulain à copier
+                Aucun accouplement possible tout de suite — il faut d’abord une fournée
+                d’enclos, ou de quoi apparier ce qui en est sorti.
               </span>
-            </>
-          )}
-          {(step === 'clone' || (step === 'mate' && toRecord.length === 0)) &&
-            toClone.length > 0 && (
+            ))}
+          {step === 'clone' &&
+            (toClone.length > 0 ? (
               <>
                 <Button size="sm" variant="primary" onClick={() => setOpen('clone')}>
                   <Dna size={13} />
@@ -1131,8 +1236,24 @@ const Fill = ({
                   deux stériles, une survivante — c’est toi qui choisis laquelle
                 </span>
               </>
-            )}
-          {(step === 'load' || (toRecord.length === 0 && toClone.length === 0)) && (
+            ) : cloneAdvice.length > 0 ? (
+              /* Les deux listes ne répondent pas à la même question, et un état
+                 vide écrit sans le savoir se contredisait à l'écran : « aucun
+                 clonage à faire » s'affichait au-dessus de deux appariements
+                 proposés. `toClone` est ce que la **politique** planifie ;
+                 `cloneAdvice` est ce que l'écurie **permet**, et il reste
+                 actionnable quand la première n'a rien retenu. */
+              <span className="text-[11px] text-dark-500">
+                La politique n’en planifie aucun. Les appariements ci-dessous sont ceux que
+                tes stériles permettent — à faire dans le jeu, sans rien à saisir ici.
+              </span>
+            ) : (
+              <span className="text-[11px] text-dark-500">
+                Aucun clonage possible — deux stériles ne s’apparient qu’à génération
+                affichée égale. Ce qui reste dépareillé est dans « Extraction ».
+              </span>
+            ))}
+          {step === 'load' && (
             <>
               <span className="text-[11px] font-semibold text-dark-200">
                 {loadTotals.mounts} montures à mettre en enclos
@@ -1196,30 +1317,10 @@ const Fill = ({
               ))}
             </span>
           )}
-          {/* La navigation va dans les deux sens. Elle n'allait que vers l'avant,
-              si bien qu'une étape dépassée ne se rouvrait plus : après une sortie
-              d'enclos l'écran restait sur « charger », vide, et il fallait
-              recharger la page pour revenir aux accouplements. Voir #167. */}
-          {step !== 'mate' && (
-            <button
-              type="button"
-              onClick={() => setStep(step === 'load' ? 'clone' : 'mate')}
-              className="ml-auto text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer"
-            >
-              ← revenir
-            </button>
-          )}
-          {step !== 'load' && (
-            <button
-              type="button"
-              onClick={() => setStep(step === 'mate' ? 'clone' : 'load')}
-              className={`text-[11px] text-dark-500 hover:text-dark-300 cursor-pointer ${
-                step === 'mate' ? 'ml-auto' : ''
-              }`}
-            >
-              passer →
-            </button>
-          )}
+          {/* Les liens « ← revenir » et « passer → » ont disparu : les onglets
+              au-dessus vont partout, dans les deux sens, et en un clic. C'est le
+              même besoin que #167 — une étape dépassée devait pouvoir se rouvrir
+              — mais réglé par la navigation plutôt que par un chemin. */}
         </div>
       )}
 
@@ -1232,6 +1333,18 @@ const Fill = ({
           clonings={cloneAdvice}
           nameOf={nameOf}
           individuals={individuals}
+        />
+      )}
+
+      {/* L'extraction, qui n'attend pas que la politique ait quelque chose à
+          proposer : une écurie sans monture fertile est justement celle qui a le
+          plus de stériles à vider. */}
+      {step === 'extract' && (
+        <BreedingExtraction
+          candidates={extraction}
+          nameOf={nameOf}
+          individuals={individuals}
+          resourceName={sacrificeName}
         />
       )}
 
@@ -1320,7 +1433,11 @@ const Fill = ({
         />
       )}
 
-      {nothing ? (
+      {/* Le récapitulatif de la fournée ne suit pas l'onglet « Extraction » : il
+          décrit ce que la politique fait des **fertiles**, et l'extraction ne
+          parle que des stériles. Les deux à l'écran ensemble donneraient deux
+          listes de montures qui ne se recoupent jamais. */}
+      {step === 'extract' ? null : nothing ? (
         /* Une fournée vide se dit, plutôt que de laisser un cadre vide qu'on
            prendrait pour un défaut d'affichage. C'est le cas quand l'écurie n'a
            aucune monture fertile, ou quand aucun prix n'est saisi — la politique
@@ -1698,6 +1815,8 @@ const BreedingTimeline = ({
   fill,
   couples,
   cloneAdvice,
+  extraction,
+  sacrificeName,
   nameOf,
   individuals,
   colors,
@@ -1983,6 +2102,8 @@ const BreedingTimeline = ({
           fill={fill}
           couples={couples}
           cloneAdvice={cloneAdvice}
+          extraction={extraction}
+          sacrificeName={sacrificeName}
           nameOf={nameOf}
           individuals={individuals}
           colors={colors}

@@ -9,6 +9,7 @@ import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions } from '@/lib/dofus/breeding/cloning';
+import { extractionOrder } from '@/lib/dofus/breeding/extraction';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
@@ -283,8 +284,8 @@ const BreedingPage = () => {
    * la valeur d'une monture s'y lit sur la génération que son ascendance porte
    * — une gen 1 à parent gen 9 vaut une gen 9. Voir `cloning.ts`.
    */
-  const clonings = useMemo(() => {
-    if (!tree) return [];
+  const cloneContext = useMemo(() => {
+    if (!tree) return null;
 
     const byId = new Map(rows.map((row) => [row.colorId, row]));
     /** La couleur la moins chère d'une génération : le prix de remplacement du rôle. */
@@ -296,13 +297,32 @@ const BreedingPage = () => {
       if (current === undefined || cost < current) cheapest.set(row.generation, cost);
     }
 
-    return cloneOptions(stable, {
+    return {
       generations: new Map(tree.colors.map((color) => [color.id, color.generation])),
-      costOf: (colorId) => byId.get(colorId)?.estimate.cost ?? 0,
-      cheapestAt: (generation) => cheapest.get(generation) ?? 0,
+      costOf: (colorId: string) => byId.get(colorId)?.estimate.cost ?? 0,
+      cheapestAt: (generation: number) => cheapest.get(generation) ?? 0,
       sacrificeUnitValue: sacrificePrice,
-    });
-  }, [tree, rows, stable, sacrificePrice]);
+    };
+  }, [tree, rows, sacrificePrice]);
+
+  const clonings = useMemo(
+    () => (cloneContext ? cloneOptions(stable, cloneContext) : []),
+    [cloneContext, stable]
+  );
+
+  /**
+   * Toutes les stériles, de la moins intéressante à reproduire à la plus.
+   *
+   * Ce n'est pas le complément de `clonings` : celui-ci n'énumère que les
+   * stériles qu'il a réussi à **apparier**, donc l'effectif impair d'une
+   * génération et les rangs à monture unique n'y sont dans aucune ligne. Or ce
+   * sont exactement celles à extraire — dépareillée, une stérile ne vaut plus que
+   * son ambre. Voir `extraction.ts`.
+   */
+  const extraction = useMemo(
+    () => (cloneContext ? extractionOrder(stable, cloneContext) : []),
+    [cloneContext, stable]
+  );
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
 
@@ -367,6 +387,10 @@ const BreedingPage = () => {
         couples={policyCouples}
         // Ce que valent les stériles, à l'étape où on les clone : voir #163.
         cloneAdvice={clonings}
+        // Toutes les stériles, appariables ou non : l'onglet « Extraction ».
+        extraction={extraction}
+        // Ambre, neurone ou corne — la ressource dépend de la famille.
+        sacrificeName={tree?.sacrificeItem.name ?? 'ambre'}
         nameOf={nameOf}
         // Les montures suivies, pour que la fournée nomme celles qui portent un
         // nom : le vrac est interchangeable, une gen 3+ ne l'est pas.

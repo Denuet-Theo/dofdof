@@ -69,3 +69,9 @@ next-env.d.ts
 # Les journaux d'entraînement. Une manche en produit des milliers de lignes, et
 # c'est une sortie de calcul : elle se relit une fois, elle ne se partage pas.
 /rust/*.log
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

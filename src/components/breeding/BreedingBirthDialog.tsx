@@ -325,9 +325,26 @@ const BreedingBirthDialog = ({
     // en trop.
     if (pending !== null) return;
     const done = recordedFor(group.indices).length;
-    // Un accouplement, une naissance : au-delà du nombre de couples du groupe,
-    // il n'y a plus rien à saisir. Les boutons se désactivent, ceci est la ceinture.
-    if (done >= group.indices.length) return;
+    /**
+     * Un accouplement, une naissance : au-delà du nombre de couples du groupe,
+     * il n'y a plus rien à saisir. Les boutons se désactivent déjà, ceci est la
+     * ceinture.
+     *
+     * Elle a servi, et en silence : quand la fournée se réordonnait sous les
+     * doigts, un panneau pouvait se croire complet à tort et ce `return`
+     * avalait le clic — rien d'écrit, rien d'affiché, et l'éleveur croyait sa
+     * naissance enregistrée. C'est arrivé le 15/08 sur la deuxième d'une série
+     * de deux. Un geste sans effet se dit maintenant, comme un refus de la base.
+     */
+    if (done >= group.indices.length) {
+      setRefused({
+        groupIndex,
+        message:
+          'les accouplements de ce croisement ont déjà tous leur résultat — rien n’a été ' +
+          'enregistré. Referme et rouvre la fenêtre pour repartir de la fournée à jour.',
+      });
+      return;
+    }
     const coupleIndex = group.indices[done];
 
     setPending(groupIndex);

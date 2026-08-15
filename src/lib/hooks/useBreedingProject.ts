@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import type { BreedingProject } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
 import type { ObjectiveId } from '@/lib/dofus/breeding/objectives';
@@ -85,7 +86,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .single();
 
       if (error) {
-        console.error('[breeding] plan non sélectionné:', error);
+        reportWriteFailure('la couleur visée par le projet', error);
         return;
       }
       setCurrent(data as BreedingProject);
@@ -104,7 +105,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .update({ target_count: count, updated_at: new Date().toISOString() })
         .eq('id', current.id);
 
-      if (error) console.error('[breeding] objectif non enregistré:', error);
+      if (error) reportWriteFailure('la quantité visée par le projet', error);
     },
     [current]
   );
@@ -120,7 +121,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .update({ objective, updated_at: new Date().toISOString() })
         .eq('id', current.id);
 
-      if (error) console.error('[breeding] objectif non enregistré:', error);
+      if (error) reportWriteFailure('l’objectif du projet', error);
     },
     [current]
   );
@@ -131,7 +132,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
     const { error } = await supabase.from('breeding_projects').delete().eq('id', current.id);
 
     if (error) {
-      console.error('[breeding] plan non abandonné:', error);
+      reportWriteFailure('l’abandon du plan', error);
       return;
     }
     setCurrent(null);

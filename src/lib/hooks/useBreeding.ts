@@ -57,6 +57,9 @@ import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/n
 // Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
 // c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
 import { parseCountedMountId } from '@/lib/dofus/breeding/search';
+// Toute écriture qui échoue passe par là : voir l'en-tête du module sur
+// pourquoi un `console.error` ne compte pas comme un signalement.
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -94,6 +97,39 @@ export type BirthEntry = {
   colorId: string;
   sex: Sex;
 };
+
+/**
+ * Un parent tel qu'il était **avant** l'accouplement qui l'a consommé.
+ *
+ * C'est ce qui rend l'annulation possible. Une monture accouplée passe stérile
+ * et perd son cycle ; la remettre « fertile » ne suffirait pas à défaire le
+ * geste, puisqu'une féconde doit retrouver sa fécondité et pas seulement sa
+ * fertilité — sans quoi l'annulation coûterait un cycle d'enclos que l'éleveur
+ * n'a jamais dépensé.
+ */
+export type ConsumedParent = { id: string; fertile: boolean; cycled: boolean };
+
+/** Une naissance écrite en base, et de quoi la défaire. */
+export type BirthRecord = {
+  /** L'identifiant du poulain, celui que la base a attribué. */
+  id: string;
+  colorId: string;
+  sex: Sex;
+  /** Le nom dicté, celui à recopier en jeu. */
+  name: string;
+  parents: ConsumedParent[];
+};
+
+/**
+ * Ce qu'une saisie de naissance a donné.
+ *
+ * `ok: false` veut dire **rien n'a été écrit** : ni poulain, ni parent stérilisé.
+ * C'est ce que garantit l'ordre des écritures dans `recordBirths`, et c'est ce
+ * qui permet à la fenêtre de saisie de garder le clic pour le rejouer.
+ */
+export type RecordBirthsResult =
+  | { ok: true; born: BirthRecord[] }
+  | { ok: false; message: string };
 
 /**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
@@ -838,7 +874,7 @@ export const useBreeding = (
       );
 
       if (saveError) {
-        console.error('[breeding] enregistrement du prix impossible:', saveError);
+        reportWriteFailure('le prix de cette couleur', saveError);
         return false;
       }
 
@@ -920,7 +956,11 @@ export const useBreeding = (
           { onConflict: 'user_id,family,color_id' }
         );
 
-      if (saveError) console.error('[breeding] monture non enregistrée:', saveError);
+      // L'état local est déjà parti devant — c'est voulu, le classement entier
+      // se recalcule à chaque frappe — donc l'écran montre le compteur saisi
+      // que la base l'ait pris ou non. D'où le signalement : sans lui, rien ne
+      // distingue les deux jusqu'au rechargement.
+      if (saveError) reportWriteFailure('le compteur de vrac de cette couleur', saveError);
     },
     [family, stable.bulk, stable.individuals]
   );
@@ -962,7 +1002,7 @@ export const useBreeding = (
         .single();
 
       if (saveError || !data) {
-        console.error('[breeding] individu non enregistré:', saveError);
+        reportWriteFailure('la monture à ajouter à l’écurie', saveError);
         // Le message de la base et non un texte à nous : une colonne absente,
         // une contrainte violée ou une session expirée demandent trois gestes
         // différents, et seul PostgREST sait lequel. Le résumer en « échec »
@@ -1152,7 +1192,10 @@ export const useBreeding = (
           .select();
 
         if (promoteError) {
-          console.error('[breeding] montures non inscrites à l’écurie:', promoteError);
+          reportWriteFailure(
+            `les ${promoted.length} montures comptées à inscrire à l’écurie`,
+            promoteError
+          );
         }
 
         inserted = (data ?? []).map((row) => ({
@@ -1185,7 +1228,9 @@ export const useBreeding = (
           .from('user_breeding_individuals')
           .update({ cycled: true, level, updated_at: stamp })
           .in('id', ids);
-        if (saveError) console.error('[breeding] sortie d’enclos non enregistrée:', saveError);
+        if (saveError) {
+          reportWriteFailure(`la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`, saveError);
+        }
       }
 
       if (bulkExits.size > 0) {
@@ -1201,7 +1246,7 @@ export const useBreeding = (
           })),
           { onConflict: 'user_id,family,color_id' }
         );
-        if (bulkError) console.error('[breeding] vrac sorti d’enclos non enregistré:', bulkError);
+        if (bulkError) reportWriteFailure('le vrac sorti d’enclos', bulkError);
       }
 
       // Le compte rendu à l'écran couvre les deux, sinon la sortie annoncerait
@@ -1227,7 +1272,7 @@ export const useBreeding = (
         .update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-      if (saveError) console.error('[breeding] individu non mis à jour:', saveError);
+      if (saveError) reportWriteFailure('la correction de cette monture', saveError);
     },
     []
   );
@@ -1243,18 +1288,51 @@ export const useBreeding = (
    * Les parents passent stériles dans le même mouvement : c'est l'accouplement
    * qui les consomme, et les laisser fertiles ferait reproposer à la fournée
    * suivante des montures déjà dépensées.
+   *
+   * ## L'ordre des deux écritures, qui a coûté 22 montures
+   *
+   * Les deux partaient ensemble, dans un `Promise.all`. Le 15 août 2026 à
+   * 12:44:26, sur une fournée de 22 accouplements, la stérilisation est passée
+   * et l'insertion a échoué : 44 parents stériles, zéro poulain, et un
+   * `console.error` dans une console que personne ne regardait. La fenêtre a
+   * annoncé « 22 naissances enregistrées » et s'est refermée en effaçant la
+   * saisie. L'écart s'est vu le lendemain, à la main, en comparant l'écurie du
+   * jeu — 225 — à celle de l'outil — 203.
+   *
+   * Les deux sens d'échec ne se valent pas, et c'est ce qui décide de l'ordre :
+   *
+   * * **poulain écrit, parents encore fertiles** — la fournée suivante
+   *   reproposera deux montures déjà dépensées. L'éleveur le voit devant
+   *   l'enclos, qui refuse l'accouplement, et corrige en deux clics.
+   * * **parents stérilisés, poulain perdu** — rien à l'écran ne le dit, et la
+   *   seule information qui manquait, c'est-à-dire *ce qui est né*, n'existait
+   *   que dans la fenêtre qui vient de se fermer. Irrécupérable.
+   *
+   * Donc : **le poulain d'abord, seul, et les parents seulement s'il est
+   * passé.** Un échec à la première étape ne laisse rien derrière lui — d'où le
+   * `ok: false` que la fenêtre relit pour garder le clic.
    */
   const recordBirths = useCallback(
-    async (entries: BirthEntry[]) => {
-      if (entries.length === 0 || !tree) return;
+    async (entries: BirthEntry[]): Promise<RecordBirthsResult> => {
+      if (entries.length === 0 || !tree) return { ok: true as const, born: [] };
       const supabase = createClient();
       const generations = new Map(tree.colors.map((color) => [color.id, color.generation]));
 
       /** Individus à passer stériles, et effectifs de vrac à décrémenter. */
       const steriles = new Set<string>();
       const bulkSpent = new Map<string, { males: number; females: number }>();
+      const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+      /**
+       * L'état de chaque parent **avant** qu'on le consomme, retenu couple par
+       * couple : c'est ce que l'annulation d'une naissance rendra. Voir
+       * `ConsumedParent` — une féconde doit retrouver sa fécondité, pas
+       * seulement sa fertilité.
+       */
+      const consumedBy: ConsumedParent[][] = [];
 
       for (const entry of entries) {
+        const consumed: ConsumedParent[] = [];
+        consumedBy.push(consumed);
         for (const side of [entry.male, entry.female]) {
           // Une monture comptée n'a **pas** de ligne à passer stérile : `flatten`
           // lui fabrique un identifiant pour que le plan puisse la désigner par
@@ -1265,6 +1343,14 @@ export const useBreeding = (
           // repartait en lecture, et les poulains étaient déjà insérés.
           if (side.mountId && parseCountedMountId(side.mountId) === null) {
             steriles.add(side.mountId);
+            const before = byId.get(side.mountId);
+            if (before) {
+              consumed.push({
+                id: before.id,
+                fertile: before.fertile,
+                cycled: before.cycled,
+              });
+            }
             continue;
           }
           const spent = bulkSpent.get(side.colorId) ?? { males: 0, females: 0 };
@@ -1345,47 +1431,28 @@ export const useBreeding = (
         });
       }
 
-      const [sterileResult, insertResult] = await Promise.all([
-        steriles.size > 0
-          ? supabase
-              .from('user_breeding_individuals')
-              // L'accouplement consomme les deux parents **et** leur cycle : une
-              // stérile n'est plus cyclée, elle n'a plus de jauges à porter.
-              .update({ fertile: false, cycled: false, updated_at: new Date().toISOString() })
-              .in('id', [...steriles])
-          : Promise.resolve({ error: null }),
+      // 1. Le poulain, seul et en premier. Tant que cette ligne n'est pas en
+      //    base, rien d'autre ne bouge : un échec ici doit laisser la fournée
+      //    exactement dans l'état où on l'a trouvée, pour qu'elle se rejoue.
+      const insertResult =
         individualsBorn.length > 0
-          ? supabase.from('user_breeding_individuals').insert(individualsBorn).select()
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+          ? await supabase.from('user_breeding_individuals').insert(individualsBorn).select()
+          : { data: [] as UserBreedingIndividual[], error: null };
 
-      const touched = [...bulkSpent.keys(), ...bulkBorn.keys()];
-      const bulkResult = await (touched.length > 0
-        ? supabase.from('user_breeding_mounts').upsert(
-            [...new Set(touched)].map((colorId) => ({
-              family,
-              color_id: colorId,
-              males: nextBulk.get(colorId)?.males ?? 0,
-              females: nextBulk.get(colorId)?.females ?? 0,
-              cycled_males: nextBulk.get(colorId)?.cycledMales ?? 0,
-              cycled_females: nextBulk.get(colorId)?.cycledFemales ?? 0,
-              updated_at: new Date().toISOString(),
-            })),
-            { onConflict: 'user_id,family,color_id' }
-          )
-        : Promise.resolve({ error: null }));
-
-      if (sterileResult.error || insertResult.error || bulkResult.error) {
-        console.error(
-          '[breeding] fournée non enregistrée:',
-          sterileResult.error ?? insertResult.error ?? bulkResult.error
-        );
-        // L'écriture a pu passer à moitié : on relit plutôt que de deviner.
-        load();
-        return;
+      if (insertResult.error || !insertResult.data) {
+        return {
+          ok: false as const,
+          message: reportWriteFailure(
+            entries.length > 1
+              ? `${entries.length} naissances de la fournée`
+              : 'la naissance saisie',
+            insertResult.error ?? 'La base n’a rien renvoyé.'
+          ),
+        };
       }
 
-      const added = ((insertResult.data ?? []) as UserBreedingIndividual[]).map((row) => ({
+      const rows = insertResult.data as UserBreedingIndividual[];
+      const added = rows.map((row) => ({
         id: row.id,
         colorId: row.color_id,
         name: row.name ?? null,
@@ -1399,6 +1466,48 @@ export const useBreeding = (
             : null,
       }));
 
+      // 2. Les parents. Le poulain est acquis : ce qui suit ne peut plus rien
+      //    faire perdre, seulement laisser une monture dépensée en trop dans la
+      //    fournée suivante — ce que l'enclos signalera de lui-même. On le dit
+      //    quand même, fort, parce que « visible plus tard » n'est pas
+      //    « visible ».
+      let partial = false;
+      if (steriles.size > 0) {
+        const { error: sterileError } = await supabase
+          .from('user_breeding_individuals')
+          // L'accouplement consomme les deux parents **et** leur cycle : une
+          // stérile n'est plus cyclée, elle n'a plus de jauges à porter.
+          .update({ fertile: false, cycled: false, updated_at: new Date().toISOString() })
+          .in('id', [...steriles]);
+        if (sterileError) {
+          partial = true;
+          reportWriteFailure(
+            `les ${steriles.size} parents à passer stériles — le poulain, lui, est bien enregistré`,
+            sterileError
+          );
+        }
+      }
+
+      const touched = [...new Set([...bulkSpent.keys(), ...bulkBorn.keys()])];
+      if (touched.length > 0) {
+        const { error: bulkError } = await supabase.from('user_breeding_mounts').upsert(
+          touched.map((colorId) => ({
+            family,
+            color_id: colorId,
+            males: nextBulk.get(colorId)?.males ?? 0,
+            females: nextBulk.get(colorId)?.females ?? 0,
+            cycled_males: nextBulk.get(colorId)?.cycledMales ?? 0,
+            cycled_females: nextBulk.get(colorId)?.cycledFemales ?? 0,
+            updated_at: new Date().toISOString(),
+          })),
+          { onConflict: 'user_id,family,color_id' }
+        );
+        if (bulkError) {
+          partial = true;
+          reportWriteFailure('le compteur de vrac de la fournée', bulkError);
+        }
+      }
+
       setStable((current) => ({
         bulk: nextBulk,
         individuals: [
@@ -1408,8 +1517,99 @@ export const useBreeding = (
           ...added,
         ],
       }));
+
+      // Une écriture d'après-naissance a manqué : l'état local vient d'être posé
+      // sur une base qui ne dit pas la même chose. On relit plutôt que de garder
+      // les deux versions.
+      if (partial) load();
+
+      return {
+        ok: true as const,
+        // L'ordre des lignes rendues est celui de l'insertion, donc celui des
+        // entrées : c'est ce qui rattache chaque poulain aux parents qu'il a
+        // consommés. La fenêtre de saisie n'en écrit qu'un à la fois depuis
+        // qu'elle enregistre au clic, donc le cas à plusieurs ne sert plus qu'aux
+        // rattrapages.
+        born: rows.map((row, index) => ({
+          id: row.id,
+          colorId: row.color_id,
+          sex: row.sex,
+          name: row.name ?? '',
+          parents: consumedBy[index] ?? [],
+        })),
+      };
     },
     [family, tree, stable, load, nameForBirth]
+  );
+
+  /**
+   * Défait une naissance déjà écrite : le poulain part, les parents reviennent.
+   *
+   * Existe parce que la saisie enregistre désormais **au clic**. Le brouillon
+   * qui permettait de se reprendre avant d'écrire n'existe plus — c'était lui le
+   * défaut, puisqu'il pouvait disparaître avec la fenêtre — donc « annuler le
+   * dernier » doit maintenant défaire quelque chose de réel.
+   *
+   * Les parents retrouvent l'état retenu au moment du clic, et non « fertile » :
+   * une féconde accouplée par erreur doit récupérer son cycle, sans quoi
+   * l'annulation lui coûterait une place d'enclos qu'elle a déjà payée.
+   */
+  const undoBirth = useCallback(
+    async (record: BirthRecord): Promise<boolean> => {
+      const supabase = createClient();
+
+      const { error: deleteError } = await supabase
+        .from('user_breeding_individuals')
+        .delete()
+        .eq('id', record.id);
+
+      if (deleteError) {
+        reportWriteFailure(`l’annulation de « ${record.name} »`, deleteError);
+        return false;
+      }
+
+      // À partir d'ici la naissance **est** défaite : le poulain n'est plus en
+      // base. Ce qui suit ne peut plus la ramener, donc l'appelant reçoit `true`
+      // même si un parent résiste — sinon la fenêtre garderait à l'écran une
+      // naissance qui n'existe plus, ce qui est précisément le mensonge qu'on
+      // vient de supprimer partout ailleurs. Le parent récalcitrant, lui, part
+      // dans la bannière.
+      //
+      // Les parents un par un : ils ne reviennent pas tous au même état, et un
+      // `update … in(…)` écrirait le même couple de booléens sur les deux.
+      let restored = true;
+      for (const parent of record.parents) {
+        const { error: restoreError } = await supabase
+          .from('user_breeding_individuals')
+          .update({
+            fertile: parent.fertile,
+            cycled: parent.cycled,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', parent.id);
+        if (restoreError) {
+          restored = false;
+          reportWriteFailure(
+            'un parent à remettre dans son état d’avant l’accouplement',
+            restoreError
+          );
+        }
+      }
+
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals
+          .filter((mount) => mount.id !== record.id)
+          .map((mount) => {
+            const parent = record.parents.find((candidate) => candidate.id === mount.id);
+            return parent ? { ...mount, fertile: parent.fertile, cycled: parent.cycled } : mount;
+          }),
+      }));
+
+      if (!restored) load();
+      return true;
+    },
+    [load]
   );
 
   /** Retire une monture de l'écurie — vendue, sacrifiée, ou saisie par erreur. */
@@ -1436,30 +1636,51 @@ export const useBreeding = (
       const gone = entries.flatMap((entry) => [entry.keep, entry.drop]);
 
       const supabase = createClient();
-      const [, insertResult] = await Promise.all([
-        supabase.from('user_breeding_individuals').delete().in('id', gone),
-        supabase
-          .from('user_breeding_individuals')
-          .insert(
-            kept.map((mount) => ({
-              family,
-              color_id: mount.colorId,
-              name: mount.name,
-              sex: mount.sex,
-              level: mount.level,
-              // Le clone naît **fertile et non fécond** : son cycle est à payer,
-              // comme celui d'un poulain.
-              fertile: true,
-              cycled: false,
-              parent_a_color: mount.parents?.[0] ?? null,
-              parent_b_color: mount.parents?.[1] ?? null,
-            }))
-          )
-          .select(),
-      ]);
+
+      // Le clone d'abord, les originales ensuite — même règle que `recordBirths`,
+      // et pour la même raison. Les deux écritures partaient ensemble : une
+      // insertion refusée laissait la suppression passer, donc **deux montures
+      // détruites pour rien** et aucun clone en échange. C'est le sens
+      // irrécupérable. Dans l'autre, on garde trois lignes au lieu de deux, ce
+      // qui se voit dans l'écurie et se corrige à la main.
+      const insertResult = await supabase
+        .from('user_breeding_individuals')
+        .insert(
+          kept.map((mount) => ({
+            family,
+            color_id: mount.colorId,
+            name: mount.name,
+            sex: mount.sex,
+            level: mount.level,
+            // Le clone naît **fertile et non fécond** : son cycle est à payer,
+            // comme celui d'un poulain.
+            fertile: true,
+            cycled: false,
+            parent_a_color: mount.parents?.[0] ?? null,
+            parent_b_color: mount.parents?.[1] ?? null,
+          }))
+        )
+        .select();
 
       if (insertResult.error) {
-        console.error('[breeding] clonage non enregistré:', insertResult.error);
+        reportWriteFailure(
+          entries.length > 1 ? `les ${entries.length} clonages` : 'le clonage',
+          insertResult.error
+        );
+        return;
+      }
+
+      const { error: dropError } = await supabase
+        .from('user_breeding_individuals')
+        .delete()
+        .in('id', gone);
+
+      if (dropError) {
+        reportWriteFailure(
+          `les ${gone.length} stériles à retirer — le clone, lui, est bien enregistré`,
+          dropError
+        );
+        load();
         return;
       }
 
@@ -1483,23 +1704,42 @@ export const useBreeding = (
         ],
       }));
     },
-    [family, stable.individuals]
+    [family, stable.individuals, load]
   );
 
-  const removeIndividual = useCallback(async (id: string) => {
-    setStable((current) => ({
-      ...current,
-      individuals: current.individuals.filter((mount) => mount.id !== id),
-    }));
+  const removeIndividual = useCallback(
+    async (id: string) => {
+      // Ce qu'on retire de l'écran, gardé de côté : une suppression refusée
+      // laissait la monture disparue à l'écran et bien vivante en base, donc
+      // ressuscitée au rechargement suivant sans que rien n'ait prévenu.
+      const removed = stable.individuals.find((mount) => mount.id === id);
 
-    const supabase = createClient();
-    const { error: saveError } = await supabase
-      .from('user_breeding_individuals')
-      .delete()
-      .eq('id', id);
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.filter((mount) => mount.id !== id),
+      }));
 
-    if (saveError) console.error('[breeding] individu non supprimé:', saveError);
-  }, []);
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from('user_breeding_individuals')
+        .delete()
+        .eq('id', id);
+
+      if (saveError) {
+        reportWriteFailure(
+          `le retrait de « ${removed?.name ?? 'cette monture'} » de l’écurie`,
+          saveError
+        );
+        if (removed) {
+          setStable((current) => ({
+            ...current,
+            individuals: [...current.individuals, removed],
+          }));
+        }
+      }
+    },
+    [stable.individuals]
+  );
 
   /**
    * Enregistre le prix d'un carburant, et le reflète aussitôt localement.
@@ -1545,7 +1785,7 @@ export const useBreeding = (
         await saveItemPrice({ itemId, itemName, price });
         return { ok: true as const };
       } catch (saveError) {
-        console.error('[breeding] prix de carburant non enregistré:', saveError);
+        reportWriteFailure(`le prix de ${itemName}`, saveError);
         setItemPrices((current) => {
           const next = new Map(current);
           if (previous) next.set(itemId, previous);
@@ -1575,7 +1815,9 @@ export const useBreeding = (
         { onConflict: 'user_id,item_id' }
       );
 
-    if (saveError) console.error('[breeding] réserve non enregistrée:', saveError);
+    // Comme le compteur de vrac : l'état local est déjà parti devant, donc rien
+    // ne distingue à l'écran une réserve enregistrée d'une réserve perdue.
+    if (saveError) reportWriteFailure('la quantité en réserve de ce carburant', saveError);
   }, []);
 
   const saveSettings = useCallback(async (next: BreedingSettings) => {
@@ -1585,7 +1827,7 @@ export const useBreeding = (
       .upsert({ ...next, updated_at: new Date().toISOString() });
 
     if (saveError) {
-      console.error('[breeding] enregistrement des réglages impossible:', saveError);
+      reportWriteFailure('les réglages d’élevage', saveError);
       return false;
     }
     setSettings(next);
@@ -1613,6 +1855,7 @@ export const useBreeding = (
     recordEnclosExit,
     removeIndividual,
     recordBirths,
+    undoBirth,
     recordClonings,
     saveItemStock,
     sacrificePrice: tree ? priceOf(tree.sacrificeItem.id) : 0,

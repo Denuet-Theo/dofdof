@@ -76,6 +76,7 @@ const BreedingPage = () => {
     recordEnclosExit,
     removeIndividual,
     recordBirths,
+    undoBirth,
     recordClonings,
     saveItemStock,
   } = useBreeding(family, targetCount);
@@ -402,6 +403,7 @@ const BreedingPage = () => {
           new Map((tree?.colors ?? []).map((color) => [color.id, color.generation]))
         }
         onRecordBirths={recordBirths}
+        onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}
         onEnclosExit={recordEnclosExit}
       />

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import {
   EMPTY_STATE,
   activePreset,
@@ -80,7 +81,7 @@ export const useAvailability = () => {
         .upsert({ availability: state, updated_at: new Date().toISOString() });
 
       if (error) {
-        console.error('[élevage] disponibilités non enregistrées:', error);
+        reportWriteFailure('tes disponibilités d’élevage', error);
       } else {
         saved.current = payload;
         pending.current = null;
@@ -102,7 +103,7 @@ export const useAvailability = () => {
         .from('user_breeding_availability')
         .upsert({ availability: last, updated_at: new Date().toISOString() })
         .then(({ error }) => {
-          if (error) console.error('[élevage] disponibilités non enregistrées au départ:', error);
+          if (error) reportWriteFailure('tes disponibilités d’élevage, en quittant l’écran', error);
         });
     },
     []

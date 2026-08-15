@@ -9,6 +9,7 @@ import {
   useTransition,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { reportWriteFailure } from '@/lib/errors/write-failures';
 import { toNumber, type BreedingTimeline } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
 import {
@@ -212,7 +213,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
         .single();
 
       if (failure) {
-        console.error('[breeding] timeline non enregistrée:', failure);
+        reportWriteFailure('le planning de la fournée', failure);
         setError('Timeline non enregistrée.');
         return;
       }
@@ -364,7 +365,7 @@ export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => 
       .delete()
       .eq('family', family);
 
-    if (failure) console.error('[breeding] timeline non effacée:', failure);
+    if (failure) reportWriteFailure('l’effacement du planning', failure);
   }, [family]);
 
   return {

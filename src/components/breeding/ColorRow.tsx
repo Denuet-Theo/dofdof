@@ -198,7 +198,7 @@ const ColorRow = ({
           {planCost === null ? (
             <p className="text-sm text-dark-600">—</p>
           ) : planCost < 0 ? (
-            <p className="text-sm font-semibold text-profit">
+            <p className="text-sm font-semibold text-gain">
               +{Math.round(-planCost).toLocaleString('fr-FR')}
             </p>
           ) : (
@@ -241,7 +241,7 @@ const ColorRow = ({
             <p
               className={`text-sm font-semibold ${
                 fundingShare <= 0.3
-                  ? 'text-profit'
+                  ? 'text-gain'
                   : fundingShare <= 0.6
                     ? 'text-dark-100'
                     : 'text-amber-400/90'
@@ -264,7 +264,7 @@ const ColorRow = ({
             // acheter, ni capturer, ni élever — pas d'un prix de vente absent.
             <p className="text-sm text-dark-600">coût inconnu</p>
           ) : (
-            <p className={`text-sm font-semibold ${margin > 0 ? 'text-profit' : 'text-loss'}`}>
+            <p className={`text-sm font-semibold ${margin > 0 ? 'text-gain' : 'text-loss'}`}>
               {margin > 0 ? '+' : ''}
               {Math.round(margin).toLocaleString('fr-FR')}
             </p>
@@ -288,7 +288,7 @@ const ColorRow = ({
           ) : (
             <p
               className={`text-sm font-semibold ${
-                row.marginPerHour > 0 ? 'text-profit' : 'text-loss'
+                row.marginPerHour > 0 ? 'text-gain' : 'text-loss'
               }`}
             >
               {row.marginPerHour > 0 ? '+' : ''}

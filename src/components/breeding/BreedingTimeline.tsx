@@ -1510,7 +1510,7 @@ const Fill = ({
                       out ? 'text-dark-600 line-through' : 'text-dark-300 hover:text-dark-100'
                     }`}
                   >
-                    {out && <Check size={11} className="inline -mt-0.5 mr-0.5 text-profit" />}
+                    {out && <Check size={11} className="inline -mt-0.5 mr-0.5 text-gain" />}
                     {nameOf(pull.colorId)}{' '}
                     <span
                       className={`tabular-nums font-semibold ${out ? '' : 'text-dark-100'}`}

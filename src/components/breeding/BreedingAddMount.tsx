@@ -542,7 +542,7 @@ const BreedingAddMount = ({ isOpen, onClose, colors, onAdd }: Props) => {
                     onCopy={() => setCopied(true)}
                   />
                   {copied && (
-                    <span className="flex items-center gap-1 text-[11px] text-profit">
+                    <span className="flex items-center gap-1 text-[11px] text-gain">
                       <Check size={12} /> copié — colle-le dans le jeu
                     </span>
                   )}

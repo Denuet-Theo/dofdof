@@ -74,7 +74,7 @@ const BreedingCloneAdvice = ({
             </span>
             <span
               className={`text-[10px] tabular-nums ${
-                option.keepChance === 1 ? 'text-profit' : 'text-dark-500'
+                option.keepChance === 1 ? 'text-gain' : 'text-dark-500'
               }`}
               title={
                 option.keepChance === 1
@@ -85,7 +85,7 @@ const BreedingCloneAdvice = ({
               {(option.keepChance * 100).toFixed(0)} % de la garder
             </span>
             <span
-              className={`text-[10px] ${option.certainSex ? 'text-profit' : 'text-amber-400/70'}`}
+              className={`text-[10px] ${option.certainSex ? 'text-gain' : 'text-amber-400/70'}`}
               title={
                 option.certainSex
                   ? 'Les deux sont du même sexe : celui du clone est certain.'

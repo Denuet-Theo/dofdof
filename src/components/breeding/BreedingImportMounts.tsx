@@ -444,7 +444,7 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
 
         {done && (
           <div className="space-y-1">
-            <p className="flex items-center gap-1.5 text-[11px] text-profit">
+            <p className="flex items-center gap-1.5 text-[11px] text-gain">
               <Check size={12} /> {done.added} monture{done.added > 1 ? 's' : ''} enregistrée
               {done.added > 1 ? 's' : ''}.
             </p>

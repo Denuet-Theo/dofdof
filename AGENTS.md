@@ -32,3 +32,22 @@ So the fix is never the line that broke. It is:
 
 A PR that fixes one instance of a class the maintainer has already been bitten
 by three times is not a fix, it is a fourth report of the same bug.
+
+# A fix to a write path ships with an e2e test
+
+`npm run test:e2e` — Playwright, a real browser, a real Next server, and a
+Supabase mocked at the network layer so a **specific write can be refused at a
+specific moment**. That last part is the whole point: no test that cannot fail
+an insert would have caught the 22 mounts.
+
+Two rules, both learned the expensive way:
+
+- **Touching a write path means adding or extending a spec in `e2e/`.** `tsc`,
+  `eslint` and a screenshot all passed on both of the bugs that cost mounts.
+- **Click twice.** The regression that followed the first fix only appears on
+  the *second* click, once the first write has changed the stable underneath.
+  A spec that exercises one click proves almost nothing about a batch of
+  seventeen.
+
+Prove the test fails on the bug: reintroduce the defect, watch the spec go red,
+put it back. A green suite that stays green with the bug restored is decoration.

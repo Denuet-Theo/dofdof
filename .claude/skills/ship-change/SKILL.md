@@ -52,14 +52,20 @@ report of the same bug.
 3. **Verify.** `npx tsc --noEmit` and `npx eslint src`. Three `<img>` warnings in
    `ItemPriceInput`, `ItemCard` and `KamasDisplay` are pre-existing — anything
    beyond those is yours.
-4. **Verify in the browser** for anything a user sees. See the `browser-test`
-   skill. Read the screenshot back; do not trust an exit code.
-5. **Simulate, if you touched the breeding policy.** See below — this is not
-   optional and it is not covered by the two steps above.
-6. **Commit**, one commit per idea. Split before pushing if two ideas crept into
+4. **Run `npm run test:e2e`**, and extend it if you touched a write path — see
+   `AGENTS.md`. The suite lives in `e2e/`, mocks Supabase at the network layer,
+   and can refuse a chosen write; that is what makes it able to catch lost
+   writes at all. Prove any new spec fails on the bug it covers before trusting
+   it.
+5. **Verify in the browser** for anything a user sees that the suite does not
+   assert — layout, wording, a screenshot to read back. See the `browser-test`
+   skill for driving it by hand. Read the screenshot; do not trust an exit code.
+6. **Simulate, if you touched the breeding policy.** See below — this is not
+   optional and none of the steps above covers it.
+7. **Commit**, one commit per idea. Split before pushing if two ideas crept into
    one — `git reset --soft HEAD~1 && git reset` then stage in parts.
-7. **Push and open the PR.**
-8. **Stop touching that branch.**
+8. **Push and open the PR.**
+9. **Stop touching that branch.**
 
 ## Simulate before merging a policy change
 

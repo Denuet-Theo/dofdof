@@ -267,12 +267,20 @@ const BreedingMatingPanel = ({
   };
 
   return (
-    <div className="rounded-2xl border border-dark-700/40 bg-dark-900/40 p-3 sm:p-4 space-y-4">
+    // Les `data-testid` sont là pour les tests de bout en bout, et c'est
+    // délibéré : les accrocher au texte français rendrait la suite fausse au
+    // premier mot réécrit, alors qu'elle doit justement survivre aux
+    // reformulations pour surveiller le **comportement**. Voir `e2e/`.
+    <div
+      data-testid="mating-panel"
+      className="rounded-2xl border border-dark-700/40 bg-dark-900/40 p-3 sm:p-4 space-y-4"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-dark-200">
           {total} accouplement{total > 1 ? 's' : ''} de cette forme
         </span>
         <span
+          data-testid="panel-progress"
           className={`text-[11px] tabular-nums ${complete ? 'text-gain' : 'text-dark-500'}`}
         >
           {done}/{total} enregistré{done > 1 ? 's' : ''}
@@ -393,6 +401,8 @@ const BreedingMatingPanel = ({
             {births.map((birth, index) => (
               <span
                 key={`${birth.colorId}-${birth.sex}-${index}`}
+                data-testid="birth-chip"
+                data-mount-name={birth.name}
                 className="flex items-center gap-2 px-2 py-1 rounded-xl bg-gain/10
                   border border-gain/25"
               >

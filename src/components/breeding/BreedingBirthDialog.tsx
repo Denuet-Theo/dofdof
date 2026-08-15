@@ -113,6 +113,41 @@ const BreedingBirthDialog = ({
   onUndo,
 }: Props) => {
   const [recorded, setRecorded] = useState<Recorded[]>([]);
+
+  /**
+   * La fournée **figée à l'ouverture**, et pourquoi elle doit l'être.
+   *
+   * `couples` vient de `policyCouples`, qui se recalcule dès que l'écurie
+   * change. Or chaque clic écrit désormais une naissance et stérilise ses deux
+   * parents : l'écurie change donc à **chaque** saisie, la politique repropose
+   * une autre fournée, et la liste se réordonne sous les doigts.
+   *
+   * Les naissances déjà saisies se repèrent par leur indice dans cette liste.
+   * Un réordonnancement les rattache donc à d'autres couples : le panneau
+   * « Indigo × Indigo-Pourpre » affichait un poulain nommé `G1 IN M DO-IN`,
+   * venu d'un croisement Doré × Indigo saisi juste avant, et se croyait complet
+   * — donc plus aucun sexe cliquable dessus. Pire, un clic suivant aurait lu
+   * `couples[coupleIndex]` dans la **nouvelle** liste et stérilisé deux montures
+   * qui n'étaient pas celles du panneau.
+   *
+   * D'où l'instantané : la fenêtre montre la fournée telle qu'elle était quand
+   * on l'a ouverte, et la saisie porte du début à la fin sur ces couples-là.
+   * C'est aussi le bon modèle mental — « voici les 17 accouplements, saisis
+   * leurs 17 résultats » — et la liste se rafraîchit à la réouverture.
+   *
+   * Le motif d'état dérivé des props est celui que React documente et que
+   * `ItemPriceInput` utilise déjà : on compare, on corrige pendant le rendu.
+   */
+  const [batch, setBatch] = useState<Couple[] | null>(null);
+  if (isOpen && batch === null) setBatch(couples);
+  if (!isOpen && batch !== null) {
+    setBatch(null);
+    // Rien à conserver : tout est en base, et la fournée suivante n'a aucune
+    // raison de porter les naissances de celle-ci.
+    setRecorded([]);
+  }
+  const session = batch ?? couples;
+
   /**
    * Le croisement dont l'écriture est en vol, s'il y en a une.
    *
@@ -216,7 +251,7 @@ const BreedingBirthDialog = ({
         ? TO_BUY
         : ((side.mountId ? byId.get(side.mountId)?.name : null) ?? ANONYMOUS_NAME);
 
-    couples.forEach((couple, index) => {
+    session.forEach((couple, index) => {
       const male = mateOf(couple.male);
       const female = mateOf(couple.female);
       const key = `${mateSignature(male)}//${mateSignature(female)}`;
@@ -252,7 +287,7 @@ const BreedingBirthDialog = ({
     });
 
     return [...byKind.values()];
-  }, [couples, mateOf, byId, colors, generations]);
+  }, [session, mateOf, byId, colors, generations]);
 
   /** Le nom à inscrire en jeu si telle couleur, de tel sexe, naît de tel couple. */
   const nameFor = (male: Mate, female: Mate, bornColorId: string, sex: Sex) =>
@@ -299,8 +334,8 @@ const BreedingBirthDialog = ({
     setRefused(null);
     const result = await onRecord([
       {
-        male: couples[coupleIndex].male,
-        female: couples[coupleIndex].female,
+        male: session[coupleIndex].male,
+        female: session[coupleIndex].female,
         colorId,
         sex,
       },
@@ -360,7 +395,7 @@ const BreedingBirthDialog = ({
     setRecorded((current) => current.filter((entry) => entry !== last));
   };
 
-  const total = couples.length;
+  const total = session.length;
   const done = recorded.length;
 
   /** Ce qu'il faudra renommer en jeu, une ligne par nom et non par monture. */

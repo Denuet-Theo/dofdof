@@ -1236,9 +1236,20 @@ const Fill = ({
                   deux stériles, une survivante — c’est toi qui choisis laquelle
                 </span>
               </>
+            ) : cloneAdvice.length > 0 ? (
+              /* Les deux listes ne répondent pas à la même question, et un état
+                 vide écrit sans le savoir se contredisait à l'écran : « aucun
+                 clonage à faire » s'affichait au-dessus de deux appariements
+                 proposés. `toClone` est ce que la **politique** planifie ;
+                 `cloneAdvice` est ce que l'écurie **permet**, et il reste
+                 actionnable quand la première n'a rien retenu. */
+              <span className="text-[11px] text-dark-500">
+                La politique n’en planifie aucun. Les appariements ci-dessous sont ceux que
+                tes stériles permettent — à faire dans le jeu, sans rien à saisir ici.
+              </span>
             ) : (
               <span className="text-[11px] text-dark-500">
-                Aucun clonage à faire — deux stériles ne s’apparient qu’à génération
+                Aucun clonage possible — deux stériles ne s’apparient qu’à génération
                 affichée égale. Ce qui reste dépareillé est dans « Extraction ».
               </span>
             ))}

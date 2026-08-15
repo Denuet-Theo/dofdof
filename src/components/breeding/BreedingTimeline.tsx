@@ -65,7 +65,7 @@ import {
   couplesToRecord,
   type StablePlan,
 } from '@/lib/dofus/breeding/policy';
-import type { BirthEntry } from '@/lib/hooks/useBreeding';
+import type { BirthEntry, BirthRecord, RecordBirthsResult } from '@/lib/hooks/useBreeding';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 // Les montures que le plan se procure n'ont pas d'identité : la liste de sortie
 // leur en fabrique une, dans l'espace de noms que `search.ts` définit.
@@ -176,7 +176,9 @@ type Props = {
   colors?: BreedingColor[];
   generations?: Map<string, number>;
   /** Enregistre les naissances saisies. Sans lui, le parcours n'est que lecture. */
-  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
+  /** Défait une naissance déjà écrite — voir `undoBirth`. */
+  onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   /** Enregistre les clonages : deux stériles partent, une fertile entre. */
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
   /**
@@ -685,6 +687,7 @@ const Fill = ({
   colors,
   generations,
   onRecordBirths,
+  onUndoBirth,
   onRecordClonings,
   enclosTracks = [],
   onStartTrack,
@@ -717,7 +720,9 @@ const Fill = ({
   individuals?: Individual[];
   colors?: BreedingColor[];
   generations?: Map<string, number>;
-  onRecordBirths?: (entries: BirthEntry[]) => Promise<void>;
+  onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
+  /** Défait une naissance déjà écrite — voir `undoBirth`. */
+  onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<void>;
   /** Sortie d'enclos : niveaux relevés, tout le lot passé en fécondes. */
   onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
@@ -756,6 +761,14 @@ const Fill = ({
    */
   const [step, setStep] = useState<Step>('mate');
   const [open, setOpen] = useState<'mate' | 'clone' | 'exit' | null>(null);
+  /**
+   * Une naissance au moins a été écrite depuis l'ouverture de la fenêtre.
+   *
+   * Une `ref` et non un `state` : personne ne l'affiche, elle ne sert qu'à
+   * décider de l'étape suivante à la fermeture, et un rendu de plus par clic
+   * dans une fournée de quatorze n'apporterait rien.
+   */
+  const birthsWritten = useRef(false);
 
   /**
    * Les montures qui sont en enclos — celles qu'on en sortira.
@@ -1388,14 +1401,24 @@ const Fill = ({
       {colors && onRecordBirths && (
         <BreedingBirthDialog
           isOpen={open === 'mate'}
-          onClose={() => setOpen(null)}
           couples={toRecord}
           individuals={individuals}
           colors={colors}
           nameOf={nameOf}
+          /* Le passage à l'étape « clonage » ne suit plus l'enregistrement : il
+             y en a un par clic maintenant, et avancer à chaque naissance ferait
+             changer d'étape sous les doigts au milieu d'une fournée de quatorze.
+             Il suit la fermeture, et seulement si quelque chose a été écrit. */
           onRecord={async (entries) => {
-            await onRecordBirths(entries);
-            setStep('clone');
+            const result = await onRecordBirths(entries);
+            if (result.ok && result.born.length > 0) birthsWritten.current = true;
+            return result;
+          }}
+          onUndo={async (record) => (onUndoBirth ? onUndoBirth(record) : false)}
+          onClose={() => {
+            setOpen(null);
+            if (birthsWritten.current) setStep('clone');
+            birthsWritten.current = false;
           }}
         />
       )}
@@ -1822,6 +1845,7 @@ const BreedingTimeline = ({
   colors,
   generations,
   onRecordBirths,
+  onUndoBirth,
   onRecordClonings,
   onEnclosExit,
 }: Props) => {
@@ -2109,6 +2133,7 @@ const BreedingTimeline = ({
           colors={colors}
           generations={generations}
           onRecordBirths={onRecordBirths}
+          onUndoBirth={onUndoBirth}
           onRecordClonings={onRecordClonings}
           onEnclosExit={onEnclosExit}
           enclosTracks={plan.tracks

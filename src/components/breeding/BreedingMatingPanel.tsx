@@ -169,6 +169,22 @@ type Props = {
   births: PanelBirth[];
   onPick: (colorId: string, sex: Sex) => void;
   onUndoLast: () => void;
+  /**
+   * Une écriture de ce croisement est en vol.
+   *
+   * Les boutons se ferment le temps de l'aller-retour : un clic écrit désormais
+   * en base, et deux clics rapides écriraient deux naissances pour un seul
+   * accouplement restant.
+   */
+  busy?: boolean;
+  /**
+   * Le refus de la base sur le dernier clic, ou `null`.
+   *
+   * Affiché ici **en plus** de la bannière globale, parce que c'est ici qu'on
+   * recliquera : la bannière dit qu'une écriture est perdue, cette ligne dit
+   * laquelle des quatorze.
+   */
+  refusal?: string | null;
 };
 
 const BreedingMatingPanel = ({
@@ -189,6 +205,8 @@ const BreedingMatingPanel = ({
   births,
   onPick,
   onUndoLast,
+  busy = false,
+  refusal = null,
 }: Props) => {
   const targets = outcomes.filter((outcome) => outcome.kind === 'target');
   const others = outcomes.filter((outcome) => outcome.kind === 'other');
@@ -226,12 +244,14 @@ const BreedingMatingPanel = ({
             <button
               key={sex}
               type="button"
-              disabled={complete}
+              disabled={complete || busy}
               onClick={() => onPick(outcome.colorId, sex)}
               title={
-                complete
-                  ? 'Tous les accouplements de ce croisement ont déjà leur résultat.'
-                  : `Un ${SEX_LABEL[sex].toLowerCase()} ${born} est né — à nommer « ${nameFor(outcome.colorId, sex)} »`
+                busy
+                  ? 'Enregistrement en cours…'
+                  : complete
+                    ? 'Tous les accouplements de ce croisement ont déjà leur résultat.'
+                    : `Un ${SEX_LABEL[sex].toLowerCase()} ${born} est né — à nommer « ${nameFor(outcome.colorId, sex)} » — enregistré au clic`
               }
               className={`w-7 h-7 rounded-lg text-[12px] border transition-all cursor-pointer
                 bg-dark-800/80 border-dark-600/50 hover:border-kamas/50 hover:text-kamas
@@ -255,9 +275,20 @@ const BreedingMatingPanel = ({
         <span
           className={`text-[11px] tabular-nums ${complete ? 'text-gain' : 'text-dark-500'}`}
         >
-          {done}/{total} saisi{done > 1 ? 's' : ''}
+          {done}/{total} enregistré{done > 1 ? 's' : ''}
         </span>
+        {busy && <span className="text-[11px] text-dark-500">enregistrement…</span>}
       </div>
+
+      {/* Le refus, à sa place : sur le croisement qu'il faut recliquer. Il ne
+          s'efface qu'au clic suivant — voir `write-failures.ts` sur pourquoi
+          rien ne disparaît tout seul ici. */}
+      {refusal && (
+        <p className="px-2.5 py-2 rounded-xl bg-loss/15 border border-loss/40 text-[11px]
+          text-loss-light">
+          Pas enregistré — {refusal}
+        </p>
+      )}
 
       {/* Les deux montures et l'œuf, dans la disposition du jeu. En colonne sous
           640 px : deux fiches côte à côte y deviendraient illisibles. */}
@@ -350,8 +381,10 @@ const BreedingMatingPanel = ({
             <button
               type="button"
               onClick={onUndoLast}
+              disabled={busy}
+              title="Retire ce poulain de l’écurie et rend aux deux parents l’état qu’ils avaient avant le clic."
               className="ml-auto text-[10px] text-dark-500 hover:text-loss transition-colors
-                cursor-pointer"
+                cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               annuler le dernier
             </button>

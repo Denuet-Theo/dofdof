@@ -171,7 +171,25 @@ const readExtras = (raw: string): LineExtras => {
 const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const [text, setText] = useState('');
   const [level, setLevel] = useState(1);
-  const [status, setStatus] = useState<MountStatus>('feconde');
+  /**
+   * L'état par défaut du lot : **fertile**, comme dans l'assistant monture par
+   * monture.
+   *
+   * Il valait « féconde », sur l'idée qu'on recharge un parc déjà cyclé. Deux
+   * raisons d'en changer, et la seconde suffit.
+   *
+   * D'abord le défaut a le sens le plus prudent quand il est faux : une fertile
+   * annoncée féconde fait croire à la politique que son cycle est payé, elle ne
+   * lui réserve donc pas de place d'enclos, et l'accouplement échoue devant le
+   * jeu. L'inverse coûte une place de plus dans une fournée, qui se rattrape à la
+   * suivante.
+   *
+   * Ensuite et surtout, les deux saisies doivent répondre pareil. Importer cent
+   * montures et en ajouter une à la main sont le même geste à deux volumes, et
+   * deux défauts opposés font que la même monture n'entre pas dans le même état
+   * selon le chemin pris — un écart qu'on ne voit qu'en relisant l'écurie.
+   */
+  const [status, setStatus] = useState<MountStatus>('fertile');
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState<{ added: number; failures: string[] } | null>(null);
 

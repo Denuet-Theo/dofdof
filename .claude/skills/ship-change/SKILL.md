@@ -52,11 +52,10 @@ report of the same bug.
 3. **Verify.** `npx tsc --noEmit` and `npx eslint src`. Three `<img>` warnings in
    `ItemPriceInput`, `ItemCard` and `KamasDisplay` are pre-existing — anything
    beyond those is yours.
-4. **Run `npm run test:e2e`**, and extend it if you touched a write path — see
-   `AGENTS.md`. The suite lives in `e2e/`, mocks Supabase at the network layer,
-   and can refuse a chosen write; that is what makes it able to catch lost
-   writes at all. Prove any new spec fails on the bug it covers before trusting
-   it.
+4. **`npm run test:e2e`, green, before step 8 — every time.** ~25 s, no
+   exception for a one-line or doc-only change. If the change fixes a bug, it
+   also **adds the spec that fails without the fix**, proven red then green.
+   See `AGENTS.md`; the two rules there are blocking, not advisory.
 5. **Verify in the browser** for anything a user sees that the suite does not
    assert — layout, wording, a screenshot to read back. See the `browser-test`
    skill for driving it by hand. Read the screenshot; do not trust an exit code.
@@ -64,8 +63,16 @@ report of the same bug.
    optional and none of the steps above covers it.
 7. **Commit**, one commit per idea. Split before pushing if two ideas crept into
    one — `git reset --soft HEAD~1 && git reset` then stage in parts.
-8. **Push and open the PR.**
+8. **Push and open the PR** — with the suite's result in the body: how many
+   passed, how long, and for a bug fix, that the new spec was seen red without
+   the fix. A PR body that does not say it should be read as one where the
+   suite never ran.
 9. **Stop touching that branch.**
+
+If the suite is red or will not run, **stop and report it**. Do not open the PR
+"so it can be looked at", do not narrow the run with `--grep` until it passes,
+and do not skip or delete the failing spec. A suite that is allowed to be red
+once stops being a signal.
 
 ## Simulate before merging a policy change
 

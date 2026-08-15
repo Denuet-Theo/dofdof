@@ -242,12 +242,18 @@ const fuelRank = (info: GaugeInfo): FuelRank =>
     ? 'elixir'
     : (RANK_OF_CAP.get(info.capAmount) ?? 'elixir');
 
-/** Le vert va à la plus avancée : une féconde part sans repayer de cycle. */
-const STATUS_TONE: Record<MountStatus, string> = {
-  fertile: 'bg-kamas/15 border-kamas/40 text-kamas',
-  feconde: 'bg-gain/15 border-gain/40 text-gain',
-  sterile: 'bg-dark-700/60 border-dark-600/50 text-dark-300',
-};
+/**
+ * Le jaune dit « c'est celui-ci », pour les trois états sans distinction.
+ *
+ * Le bouton doit **d'abord** se lire comme choisi, et seulement ensuite dire
+ * lequel : le libellé le dit déjà, et on lit cette liste en diagonale sur
+ * cinquante lignes. Teinter chaque état de sa propre couleur revenait à faire
+ * porter deux messages à un seul repère — et la stérile y perdait le premier,
+ * son gris tombant à un cran du non-sélectionné (`dark-700/dark-600` contre
+ * `dark-800/dark-700`) : assez pour un écart de teinte, pas pour un état. Une
+ * écurie entière de stériles se lisait donc comme une écurie sans état du tout.
+ */
+const STATUS_TONE = 'bg-kamas/15 border-kamas/40 text-kamas';
 
 /** Les plus avancées d'abord : féconde, puis fertile, puis stérile. */
 const READINESS: Record<MountStatus, number> = { feconde: 2, fertile: 1, sterile: 0 };
@@ -728,7 +734,7 @@ const BreedingStocks = ({
                           className={`px-1.5 py-0.5 rounded-lg border text-[10px] transition-all
                             cursor-pointer ${
                               status === value
-                                ? STATUS_TONE[value]
+                                ? STATUS_TONE
                                 : 'bg-dark-800/60 border-dark-700/50 text-dark-500 hover:text-dark-300'
                             }`}
                         >

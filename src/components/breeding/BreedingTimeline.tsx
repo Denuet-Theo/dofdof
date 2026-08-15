@@ -70,6 +70,7 @@ import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 // Les montures que le plan se procure n'ont pas d'identité : la liste de sortie
 // leur en fabrique une, dans l'espace de noms que `search.ts` définit.
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
+import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { Couple, Individual, Sex } from '@/lib/dofus/breeding/stable';
 import type { CloneOption } from '@/lib/dofus/breeding/cloning';
@@ -994,51 +995,6 @@ const Fill = ({
       </span>
     );
 
-  const side = (label: string, colorId: string, ids: string[], key: string) => (
-    <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
-      {label} {ids.length === 0 ? <em className="not-italic text-dark-400">à procurer</em> : null}
-      {nameOf(colorId)}
-      {mountNames(ids).map(([name, count]) => nameChip(name, count, `${key}-${name}`))}
-    </span>
-  );
-
-  /**
-   * Une ligne de couple. Extraite parce qu'elle sert deux fois — les immédiats et
-   * la fournée — et qu'un copier-coller les aurait laissés diverger.
-   */
-  const couple = (line: StablePlan['couples'][number], key: string) => (
-    <div key={key} className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-        {line.count} ×
-      </span>
-      {side('♂', line.male.colorId, line.male.mountIds, `m-${key}`)}
-      <span className="text-dark-600">+</span>
-      {side('♀', line.female.colorId, line.female.mountIds, `f-${key}`)}
-      {line.targetGeneration !== null ? (
-        <span
-          className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-          title={`Une couleur nomme ce rang : le croisement peut produire une génération ${line.targetGeneration}.`}
-        >
-          GEN. {line.targetGeneration}
-        </span>
-      ) : (
-        /* Deux Ébène visent bien la génération 2, mais aucune recette ne s'écrit
-           `[ebene, ebene]` : il n'en sort qu'un Ébène de plus, et aucun géneton.
-           Le dire, parce que ça change ce qu'on fait de ses places d'enclos. */
-        <span
-          className="px-1.5 py-0.5 rounded-lg bg-dark-900/60 text-dark-400 text-[10px] font-semibold"
-          title="Aucune couleur ne nomme le rang visé : le croisement recopie une des deux couleurs et ne rend aucun géneton."
-        >
-          RECOPIE
-        </span>
-      )}
-    </div>
-  );
-
-  /** Les couples qui ne coûtent aucune place, ou ceux qui en coûtent. */
-  const couplesOf = (places: 0 | 1) =>
-    fill.couples.filter((line) => (places === 0 ? line.places === 0 : line.places > 0));
-
   /**
    * Ce qu'on met réellement en enclos : des **montures**, pas des couples.
    *
@@ -1058,55 +1014,142 @@ const Fill = ({
    * D'où un décompte par couleur et par sexe : c'est ce qu'on cherche dans
    * l'écurie du jeu, et les noms suivent pour désigner **lesquelles**.
    */
-  const loadRows = () => {
-    const rows = new Map<
-      string,
-      { colorId: string; sex: Sex; ids: string[]; buys: number; banked: string[] }
-    >();
-    const rowFor = (colorId: string, sex: Sex) => {
-      const key = `${colorId}|${sex}`;
-      const row = rows.get(key) ?? { colorId, sex, ids: [], buys: 0, banked: [] };
-      rows.set(key, row);
-      return row;
-    };
+  /**
+   * Une monture à charger, une par ligne — et non un décompte par couleur.
+   *
+   * La liste agrégeait tout : « 8 × ♂ Indigo dont 1 à procurer », suivi de trois
+   * pastilles de noms et d'un « × 3 ». Elle était juste et illisible devant le
+   * jeu, parce qu'on ne charge pas huit Indigo d'un geste — on ouvre un enclos,
+   * on y met dix montures, on le referme, et on recommence. Impossible de savoir
+   * où on en était au milieu.
+   */
+  type LoadUnit = {
+    colorId: string;
+    sex: Sex;
+    /** Le nom dicté, ou `null` : anonyme du coffre, ou monture à procurer. */
+    name: string | null;
+    /** Pas au coffre : à acheter ou capturer avant de charger. */
+    toBuy: boolean;
+    /** En enclos sans croiser : elle en ressort féconde, sans poulain. */
+    banked: boolean;
+  };
+
+  /** Un enclos et ce qu'on y met. Dix places, pas une de plus. */
+  type LoadPen = { units: LoadUnit[] };
+
+  /**
+   * La fournée découpée enclos par enclos.
+   *
+   * ## Un enclos ne marie personne
+   *
+   * On pourrait croire qu'il faut y ranger les deux parents d'un croisement
+   * ensemble. Non : l'enclos sert à payer le **cycle de fécondité**, et
+   * l'appariement se décide après, à la fenêtre d'accouplement — ce que
+   * l'en-tête de cet écran dit depuis toujours. Deux montures qui s'accoupleront
+   * peuvent donc avoir été fécondées dans deux enclos différents, à deux jours
+   * d'écart, sans que ça change quoi que ce soit.
+   *
+   * Le découpage est donc libre : on aligne les montures et on coupe tous les
+   * dix. La seule chose qui compte est qu'aucun enclos n'en porte onze.
+   *
+   * ## L'ordre, lui, n'est pas libre
+   *
+   * Les nommées passent devant, triées par nom : ce sont celles qu'on cherche
+   * une par une dans l'écurie du jeu, et les avoir groupées évite d'ouvrir la
+   * recherche dix fois pour dix enclos. Les anonymes suivent, par couleur —
+   * on les prend au tas, l'ordre n'y change rien.
+   */
+  const loadPens = (): LoadPen[] => {
+    const byId = new Map(individuals.map((mount) => [mount.id, mount]));
+    const units: LoadUnit[] = [];
 
     for (const line of fill.couples) {
-      for (const [sex, sideOf] of [
-        ['M', line.male],
-        ['F', line.female],
-      ] as const) {
-        // Le cycle est déjà payé : elle ne passe pas par l'enclos.
-        if (sideOf.cycled) continue;
-        const row = rowFor(sideOf.colorId, sex);
-        // Une ligne regroupe les couples de même signature, et une gen 1 achetée
-        // porte la même qu'une gen 1 du coffre — même couleur, pas d'ascendance,
-        // pas de cycle. Elle peut donc en mêler : ce qui n'est pas nommé est à
-        // procurer, et compter `count` entier ferait un total plus grand que les
-        // places engagées.
-        row.ids.push(...sideOf.mountIds);
-        row.buys += Math.max(0, line.count - sideOf.mountIds.length);
+      for (let index = 0; index < line.count; index += 1) {
+        for (const [sex, sideOf] of [
+          ['M', line.male],
+          ['F', line.female],
+        ] as const) {
+          // Le cycle est déjà payé : elle ne passe pas par l'enclos.
+          if (sideOf.cycled) continue;
+          // Une ligne mêle le coffre et l'achat : les identifiants d'abord, et
+          // ce qui dépasse est à procurer.
+          const id = sideOf.mountIds[index];
+          units.push({
+            colorId: sideOf.colorId,
+            sex,
+            name: id ? (byId.get(id)?.name ?? null) : null,
+            toBuy: id === undefined,
+            banked: false,
+          });
+        }
       }
     }
 
-    // Les fécondations sans croisement occupent une place chacune et vont dans le
-    // même enclos. Les compter ailleurs faisait dire « 38 montures » sous
-    // « 40/40 places », deux vrais chiffres qui ne parlent pas de la même chose.
+    // Les fécondations sans croisement occupent une place chacune, dans les
+    // mêmes enclos que le reste : les compter ailleurs faisait dire
+    // « 38 montures » sous « 40/40 places ».
     for (const entry of fill.cycles) {
       for (const id of entry.mountIds) {
-        const mount = individuals.find((candidate) => candidate.id === id);
-        rowFor(entry.colorId, mount?.sex ?? 'M').banked.push(id);
+        const mount = byId.get(id);
+        units.push({
+          colorId: entry.colorId,
+          sex: mount?.sex ?? 'M',
+          name: mount?.name ?? null,
+          toBuy: false,
+          banked: true,
+        });
       }
     }
 
-    return [...rows.values()].sort(
-      (a, b) => sizeOfRow(b) - sizeOfRow(a) || nameOf(a.colorId).localeCompare(nameOf(b.colorId))
+    units.sort(
+      (a, b) =>
+        Number(!a.name) - Number(!b.name) ||
+        (a.name ?? '').localeCompare(b.name ?? '') ||
+        nameOf(a.colorId).localeCompare(nameOf(b.colorId)) ||
+        a.sex.localeCompare(b.sex)
+    );
+
+    const pens: LoadPen[] = [];
+    for (let index = 0; index < units.length; index += ENCLOS_SLOTS) {
+      pens.push({ units: units.slice(index, index + ENCLOS_SLOTS) });
+    }
+    return pens;
+  };
+
+  /**
+   * Les anonymes d'un enclos, regroupées — et elles seules.
+   *
+   * Deux anonymes de même couleur et de même sexe sont interchangeables : rien
+   * ne permet de les distinguer en jeu, donc les lister séparément demanderait
+   * de choisir entre deux choses identiques. Une nommée, à l'inverse, se cherche
+   * par son nom et garde sa ligne.
+   */
+  const anonymousGroups = (units: LoadUnit[]) => {
+    const groups = new Map<string, { unit: LoadUnit; count: number }>();
+    for (const unit of units) {
+      const key = `${unit.colorId}|${unit.sex}|${unit.toBuy}|${unit.banked}`;
+      const group = groups.get(key) ?? { unit, count: 0 };
+      group.count += 1;
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort(
+      (a, b) => b.count - a.count || nameOf(a.unit.colorId).localeCompare(nameOf(b.unit.colorId))
     );
   };
 
-  /** Combien de montures une ligne de chargement engage, tous régimes confondus. */
-  const sizeOfRow = (row: { ids: string[]; buys: number; banked: string[] }) =>
-    row.ids.length + row.buys + row.banked.length;
-
+  /** Les nommées d'un enclos : une ligne par nom, comptée si elle se répète. */
+  const namedGroups = (units: LoadUnit[]) => {
+    const groups = new Map<string, { unit: LoadUnit; count: number }>();
+    for (const unit of units) {
+      const key = `${unit.name}|${unit.colorId}|${unit.sex}|${unit.banked}`;
+      const group = groups.get(key) ?? { unit, count: 0 };
+      group.count += 1;
+      groups.set(key, group);
+    }
+    return [...groups.values()].sort((a, b) =>
+      (a.unit.name ?? '').localeCompare(b.unit.name ?? '')
+    );
+  };
   /**
    * Le total du chargement, et **d'où** viennent les montures.
    *
@@ -1117,13 +1160,20 @@ const Fill = ({
    * qu'il comptait — et pour l'éleveur devant son parc, il n'y a qu'une question :
    * combien de montures entrent dans l'enclos, et où je les trouve.
    */
+  /**
+   * Les enclos de la fournée, calculés une fois pour le rendu **et** pour les
+   * totaux.
+   *
+   * Les deux se déduisaient de deux calculs séparés, et c'est exactement ce que
+   * l'en-tête de `loadRows` racontait déjà : trois compteurs vrais qui ne
+   * comptaient pas la même chose. Un seul découpage, une seule vérité.
+   */
+  const pens = loadPens();
   const loadTotals = (() => {
-    const rows = loadRows();
-    const owned = rows.reduce((total, row) => total + row.ids.length + row.banked.length, 0);
-    const buys = rows.reduce((total, row) => total + row.buys, 0);
-    return { mounts: owned + buys, owned, buys };
+    const units = pens.flatMap((pen) => pen.units);
+    const buys = units.filter((unit) => unit.toBuy).length;
+    return { mounts: units.length, owned: units.length - buys, buys };
   })();
-  const immediate = couplesOf(0).reduce((total, line) => total + line.count, 0);
 
   const nothing =
     fill.couples.length === 0 &&
@@ -1476,26 +1526,15 @@ const Fill = ({
               qu'elle est suivie — deux montures de même couleur n'ont pas la
               même ascendance, et c'est l'ascendance qui décide de ce que le
               croisement vise. */}
-          {couplesOf(0).length > 0 && (
-            <div className="space-y-0.5">
-              {/* Ce qui ne demande rien : les deux parents sont déjà féconds, donc
-                  l'accouplement est un clic. En tête parce que c'est ce qu'on fait
-                  en ouvrant le jeu, avant même de penser à l'enclos ou à l'hôtel de
-                  vente — le ruban range la piste « Écurie » en premier pour la même
-                  raison. */}
-              <div className="flex items-center gap-2 pt-0.5">
-                <span className="text-[11px] font-semibold text-emerald-300">
-                  D’abord, sans enclos
-                </span>
-                <span className="text-[10px] text-dark-500">
-                  {immediate} accouplement{immediate > 1 ? 's' : ''} d’un clic, avec ce que tu as
-                </span>
-              </div>
-              {couplesOf(0).map((line, index) => couple(line, `now-${index}`))}
-            </div>
-          )}
+          {/* « D'abord, sans enclos » a été retiré. Il listait les couples déjà
+              féconds — un clic chacun, aucune place d'enclos — juste au-dessus de
+              la fournée à charger, et les deux ne se recoupent pas : une monture
+              de l'une n'est jamais dans l'autre. Lues à la suite, elles se
+              prenaient l'une pour le détail de l'autre. Ces accouplements-là se
+              saisissent de toute façon à la fenêtre « Ce qui est né », qui les
+              propose tous. */}
 
-          {couplesOf(1).length > 0 && (
+          {pens.length > 0 && (
             <div className="space-y-0.5">
               <div className="flex items-center gap-2 pt-1 border-t border-info/15">
                 <span className="text-[11px] font-semibold text-dark-300">
@@ -1519,39 +1558,114 @@ const Fill = ({
                   fécondes exclues
                 </span>
               </div>
-              {loadRows().map((row) => (
-                <div
-                  key={`${row.colorId}-${row.sex}`}
-                  className="flex flex-wrap items-center gap-2 text-xs"
-                >
-                  <span className="text-dark-300 font-semibold tabular-nums w-8 shrink-0 text-right">
-                    {sizeOfRow(row)} ×
-                  </span>
-                  <span
-                    className={row.sex === 'M' ? 'text-info' : 'text-loss-light'}
-                    title={row.sex === 'M' ? 'Mâle' : 'Femelle'}
+              {/* Un bloc par enclos, et deux blocs dedans. On charge un enclos,
+                  on le referme, on passe au suivant : la liste suit ce geste-là
+                  plutôt que l'inventaire par couleur, où l'on perdait le fil au
+                  milieu de « 8 × Indigo ». Les nommées d'abord, parce qu'elles se
+                  cherchent une par une dans l'écurie du jeu ; les anonymes
+                  ensuite, parce qu'on les prend au tas. */}
+              {pens.map((pen, index) => {
+                const named = namedGroups(pen.units.filter((unit) => unit.name));
+                const anonymous = anonymousGroups(pen.units.filter((unit) => !unit.name));
+
+                return (
+                  <div
+                    key={index}
+                    data-testid="load-pen"
+                    className="mt-1.5 rounded-xl border border-dark-700/40 bg-dark-900/30 px-2.5 py-2
+                      space-y-1"
                   >
-                    {row.sex === 'M' ? '♂' : '♀'}
-                  </span>
-                  <span className="text-dark-200">{nameOf(row.colorId)}</span>
-                  {row.buys > 0 && (
-                    <em className="not-italic text-dark-400">
-                      dont {row.buys} à procurer — achat ou capture
-                    </em>
-                  )}
-                  {row.banked.length > 0 && (
-                    <em
-                      className="not-italic text-dark-400"
-                      title="En enclos sans croiser : elle en sort féconde et reste en écurie."
-                    >
-                      dont {row.banked.length} à féconder sans croiser
-                    </em>
-                  )}
-                  {mountNames([...row.ids, ...row.banked]).map(([name, count]) =>
-                    nameChip(name, count, `load-${row.colorId}-${row.sex}-${name}`)
-                  )}
-                </div>
-              ))}
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-[11px] font-semibold text-dark-200">
+                        Enclos {index + 1}
+                      </span>
+                      {/* Pas de compte de croisements ici : un enclos n'en porte
+                          aucun. Il paie des cycles de fécondité, et qui
+                          s'accouple avec qui se décide après. */}
+                      <span className="text-[10px] text-dark-500 tabular-nums">
+                        {pen.units.length}/{ENCLOS_SLOTS} places
+                      </span>
+                    </div>
+
+                    {named.length > 0 && (
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] uppercase tracking-wider text-dark-500">
+                          Nommées — à chercher par leur nom
+                        </p>
+                        {named.map(({ unit, count }) => (
+                          <div
+                            key={`${unit.name}-${unit.sex}-${unit.banked}`}
+                            data-testid="load-named"
+                            className="flex flex-wrap items-center gap-2 text-xs"
+                          >
+                            <span
+                              className={unit.sex === 'M' ? 'text-info' : 'text-loss-light'}
+                              title={unit.sex === 'M' ? 'Mâle' : 'Femelle'}
+                            >
+                              {unit.sex === 'M' ? '♂' : '♀'}
+                            </span>
+                            <span className="text-dark-200">{nameOf(unit.colorId)}</span>
+                            <CopyableText
+                              value={unit.name!}
+                              title={`Copier « ${unit.name} » — le nom à chercher dans l’écurie du jeu`}
+                            />
+                            {count > 1 && (
+                              <span className="text-[10px] text-dark-500">× {count}</span>
+                            )}
+                            {unit.banked && (
+                              <em
+                                className="not-italic text-[10px] text-dark-400"
+                                title="En enclos sans croiser : elle en sort féconde et reste en écurie."
+                              >
+                                à féconder sans croiser
+                              </em>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {anonymous.length > 0 && (
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] uppercase tracking-wider text-dark-500">
+                          Anonymes — à prendre au tas
+                        </p>
+                        {anonymous.map(({ unit, count }) => (
+                          <div
+                            key={`${unit.colorId}-${unit.sex}-${unit.toBuy}-${unit.banked}`}
+                            data-testid="load-anonymous"
+                            className="flex flex-wrap items-center gap-2 text-xs"
+                          >
+                            <span className="text-dark-300 font-semibold tabular-nums w-6 shrink-0 text-right">
+                              {count} ×
+                            </span>
+                            <span
+                              className={unit.sex === 'M' ? 'text-info' : 'text-loss-light'}
+                              title={unit.sex === 'M' ? 'Mâle' : 'Femelle'}
+                            >
+                              {unit.sex === 'M' ? '♂' : '♀'}
+                            </span>
+                            <span className="text-dark-200">{nameOf(unit.colorId)}</span>
+                            {unit.toBuy && (
+                              <em className="not-italic text-[10px] text-amber-400/80">
+                                à procurer — achat ou capture
+                              </em>
+                            )}
+                            {unit.banked && (
+                              <em
+                                className="not-italic text-[10px] text-dark-400"
+                                title="En enclos sans croiser : elle en sort féconde et reste en écurie."
+                              >
+                                à féconder sans croiser
+                              </em>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 

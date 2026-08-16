@@ -1151,7 +1151,9 @@ export const useBreeding = (
         levelOf.set(level, [...(levelOf.get(level) ?? []), entry.id]);
       }
 
-      if (levelById.size === 0 && promoted.length === 0) return 0;
+      // Rien à écrire n'est pas un échec : la liste ne portait que des stériles,
+      // et l'enclos peut quitter la fournée sans laisser de dette.
+      if (levelById.size === 0 && promoted.length === 0) return { written: 0, complete: true };
 
       // Ce qui quitte le compteur en sort pour de bon. `cycledOf` borne déjà les
       // fécondes au stock, mais le plancher se reprend ici : la base refuse un
@@ -1175,6 +1177,22 @@ export const useBreeding = (
 
       const supabase = createClient();
       const stamp = new Date().toISOString();
+
+      /**
+       * Est-ce que **tout** a atterri ?
+       *
+       * Chaque écriture ci-dessous signalait son échec dans la bannière puis
+       * laissait la fonction rendre le compte de ce qu'elle avait *tenté*.
+       * L'appelant lisait ce compte comme un succès et retirait l'enclos de la
+       * fournée : les montures restaient en enclos dans le jeu, absentes de
+       * l'écurie et absentes de la fournée — introuvables des deux côtés, ce qui
+       * est strictement pire que le défaut d'origine.
+       *
+       * On rend donc ce qui a été écrit **et** si quelque chose manque, parce
+       * que seul le second permet de décider s'il reste quelque chose à
+       * rattraper.
+       */
+      let complete = true;
 
       // Les promues d'abord : leurs identifiants viennent de la base, et l'état
       // local doit porter les mêmes pour qu'un accouplement puisse les désigner.
@@ -1205,6 +1223,7 @@ export const useBreeding = (
             `les ${promoted.length} montures comptées à inscrire à l’écurie`,
             promoteError
           );
+          complete = false;
         }
 
         inserted = (data ?? []).map((row) => ({
@@ -1219,19 +1238,11 @@ export const useBreeding = (
         }));
       }
 
-      setStable((current) => ({
-        ...current,
-        bulk: bulkExits.size > 0 ? nextBulk : current.bulk,
-        individuals: [
-          ...current.individuals.map((mount) =>
-            levelById.has(mount.id)
-              ? { ...mount, cycled: true, level: levelById.get(mount.id)! }
-              : mount
-          ),
-          ...inserted,
-        ],
-      }));
-
+      // Les mises à jour **avant** l'état local, et non l'inverse : une monture
+      // affichée féconde sur une écriture perdue redeviendrait fertile au
+      // rechargement suivant, sans que rien n'ait prévenu entre les deux. On ne
+      // reflète donc que ce que la base a pris.
+      const cycled = new Map<string, number>();
       for (const [level, ids] of levelOf) {
         const { error: saveError } = await supabase
           .from('user_breeding_individuals')
@@ -1239,9 +1250,13 @@ export const useBreeding = (
           .in('id', ids);
         if (saveError) {
           reportWriteFailure(`la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`, saveError);
+          complete = false;
+          continue;
         }
+        for (const id of ids) cycled.set(id, level);
       }
 
+      let bulkWritten = false;
       if (bulkExits.size > 0) {
         const { error: bulkError } = await supabase.from('user_breeding_mounts').upsert(
           [...bulkExits.keys()].map((colorId) => ({
@@ -1255,12 +1270,29 @@ export const useBreeding = (
           })),
           { onConflict: 'user_id,family,color_id' }
         );
-        if (bulkError) reportWriteFailure('le vrac sorti d’enclos', bulkError);
+        if (bulkError) {
+          reportWriteFailure('le vrac sorti d’enclos', bulkError);
+          complete = false;
+        } else bulkWritten = true;
       }
 
-      // Le compte rendu à l'écran couvre les deux, sinon la sortie annoncerait
-      // moins de montures que la liste n'en portait.
-      return levelById.size + promoted.length;
+      setStable((current) => ({
+        ...current,
+        bulk: bulkWritten ? nextBulk : current.bulk,
+        individuals: [
+          ...current.individuals.map((mount) =>
+            cycled.has(mount.id)
+              ? { ...mount, cycled: true, level: cycled.get(mount.id)! }
+              : mount
+          ),
+          ...inserted,
+        ],
+      }));
+
+      // Ce qui est **écrit**, et non ce qui a été tenté. Le compte couvre les
+      // deux familles — suivies et comptées — sinon la sortie annoncerait moins
+      // de montures que la liste n'en portait.
+      return { written: cycled.size + inserted.length, complete };
     },
     [family, stable.bulk, stable.individuals]
   );

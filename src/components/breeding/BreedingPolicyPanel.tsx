@@ -7,7 +7,9 @@ import CopyableText from '@/components/ui/CopyableText';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
 import BreedingCloneDialog from '@/components/breeding/BreedingCloneDialog';
 import BreedingCloneAdvice from '@/components/breeding/BreedingCloneAdvice';
-import BreedingEnclosExitDialog from '@/components/breeding/BreedingEnclosExitDialog';
+import BreedingEnclosExitDialog, {
+  type EnclosExitResult,
+} from '@/components/breeding/BreedingEnclosExitDialog';
 import BreedingExtraction from '@/components/breeding/BreedingExtraction';
 import { cloningsToRecord, couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
 import {
@@ -97,7 +99,7 @@ type Props = {
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
   /** Sortie d'enclos : niveaux relevés, lot passé en fécondes. */
-  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
+  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
 };
 
 /**
@@ -810,18 +812,21 @@ const BreedingPolicyPanel = ({
           colors={colors}
           nameOf={nameOf}
           onConfirm={async (entries) => {
-            const written = await onEnclosExit(entries);
-            // L'enclos ne quitte la fournée que si la sortie a été écrite : sinon
-            // il resterait à l'écran comme verrouillé — ce qui est la vérité —
-            // et l'éleveur pourrait recommencer. Un enclos retiré sur une
-            // écriture perdue serait, lui, définitivement introuvable.
-            if (written > 0 && typeof open === 'object' && open !== null) {
+            const result = await onEnclosExit(entries);
+            // L'enclos ne quitte la fournée que si **tout** a été écrit. Un
+            // compte positif ne suffit pas : une sortie dont l'insertion des
+            // comptées a été refusée en rend un, et retirer l'enclos là-dessus
+            // rendrait ces montures introuvables — encore en enclos dans le jeu,
+            // nulle part dans l'app. Tant qu'il manque une écriture l'enclos
+            // reste verrouillé à l'écran, ce qui est la vérité, et le geste se
+            // reprend.
+            if (result.complete && typeof open === 'object' && open !== null) {
               await batch.release(open.exit);
+              // Le cycle vient d'être payé : c'est exactement le moment où de
+              // nouveaux accouplements deviennent possibles.
+              setStep('mate');
             }
-            // Le cycle vient d'être payé : c'est exactement le moment où de
-            // nouveaux accouplements deviennent possibles.
-            if (written > 0) setStep('mate');
-            return written;
+            return result;
           }}
           onRelease={async () => {
             if (typeof open === 'object' && open !== null) await batch.release(open.exit);

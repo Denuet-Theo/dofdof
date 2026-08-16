@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, LogOut } from 'lucide-react';
+import { AlertTriangle, Check, LogOut } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
@@ -52,6 +52,18 @@ import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
  * à relever d'un cycle qui n'a pas eu lieu.
  */
 
+/**
+ * Ce qu'une sortie a réellement écrit.
+ *
+ * `written` seul ne suffisait pas : un compte positif accompagnait aussi bien
+ * une sortie complète qu'une sortie dont l'insertion des montures comptées avait
+ * été refusée, et l'appelant retirait l'enclos de la fournée dans les deux cas —
+ * les montures restaient alors en enclos dans le jeu, absentes de l'écurie
+ * **et** de la fournée. `complete` est la seule chose qui distingue « c'est
+ * fini » de « il reste à rattraper ».
+ */
+export type EnclosExitResult = { written: number; complete: boolean };
+
 type Props = {
   isOpen: boolean;
   onClose: () => void;
@@ -60,7 +72,7 @@ type Props = {
   colors: BreedingColor[];
   nameOf: (colorId: string) => string;
   /** Écrit les niveaux et passe tout le lot en fécondes. Rend le compte écrit. */
-  onConfirm: (entries: { id: string; level: number }[]) => Promise<number>;
+  onConfirm: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
   /**
    * Rend le lot **fertile** : l'enclos n'a pas tourné, il n'y a rien à écrire.
    *
@@ -93,7 +105,7 @@ const BreedingEnclosExitDialog = ({
   const [draft, setDraft] = useState<{
     key: string;
     levels: Record<string, number>;
-    done: number | null;
+    done: EnclosExitResult | null;
   }>({ key: signature, levels: {}, done: null });
   const [running, setRunning] = useState(false);
 
@@ -339,12 +351,24 @@ const BreedingEnclosExitDialog = ({
           })}
         </div>
 
-        {done !== null && (
-          <p className="flex items-center gap-1.5 text-[11px] text-gain">
-            <Check size={12} /> {done} monture{done > 1 ? 's' : ''} sortie{done > 1 ? 's' : ''},
-            féconde{done > 1 ? 's' : ''}.
-          </p>
-        )}
+        {done !== null &&
+          (done.complete ? (
+            <p className="flex items-center gap-1.5 text-[11px] text-gain">
+              <Check size={12} /> {done.written} monture{done.written > 1 ? 's' : ''} sortie
+              {done.written > 1 ? 's' : ''}, féconde{done.written > 1 ? 's' : ''}.
+            </p>
+          ) : (
+            /* Le compte de ce qui est passé, et pas un mot de succès : le reste
+               est encore en enclos dans le jeu, et l'enclos reste dans la
+               fournée pour qu'on puisse recliquer. */
+            <p className="flex items-center gap-1.5 text-[11px] text-loss-light">
+              <AlertTriangle size={12} />
+              {done.written > 0
+                ? `${done.written} monture${done.written > 1 ? 's' : ''} enregistrée${done.written > 1 ? 's' : ''} sur ${mounts.length} — le reste n’est pas passé.`
+                : 'Rien n’a été enregistré.'}{' '}
+              L’enclos reste dans la fournée : corrige ce que dit la bannière, puis reclique.
+            </p>
+          ))}
 
         {/* Collée en bas : quarante lignes de niveaux passent l'écran, et un
             bouton hors champ fait croire que la sortie est enregistrée. */}
@@ -358,12 +382,17 @@ const BreedingEnclosExitDialog = ({
             disabled={running || mounts.length === 0 || missing.length > 0}
             onClick={async () => {
               setRunning(true);
-              const written = await onConfirm(
+              const result = await onConfirm(
                 mounts.map((mount) => ({ id: mount.id, level: levelOf(mount) }))
               );
               setRunning(false);
-              setDraft({ key: signature, levels, done: written });
-              onClose();
+              setDraft({ key: signature, levels, done: result });
+              // Une sortie incomplète **ne referme pas** la fenêtre. Se fermer
+              // laisserait l'éleveur devant un écran qui a l'air d'avoir marché,
+              // la bannière d'échec reléguée ailleurs — c'est exactement la
+              // forme qui a coûté 22 montures. Tant qu'il manque une écriture,
+              // la liste reste sous les yeux et le bouton se reclique.
+              if (result.complete) onClose();
             }}
           >
             <LogOut size={13} />

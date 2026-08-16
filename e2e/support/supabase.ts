@@ -188,10 +188,20 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
       // pleine à chaque appel la ferait tourner sans fin.
       const offset = Number(url.searchParams.get('offset') ?? 0);
       const paged = offset > 0 ? [] : rows;
-      // `.single()` / `.maybeSingle()` attendent un objet, pas un tableau : ces
-      // tables-là sont lues ainsi, et rendre `[]` ferait échouer la lecture au
-      // lieu de dire « aucune ligne ».
-      const single = ['user_breeding_settings', 'breeding_projects', 'breeding_timeline',
+      /**
+       * `.single()` / `.maybeSingle()` attendent un objet, pas un tableau : ces
+       * tables-là sont lues ainsi, et rendre `[]` ferait échouer la lecture au
+       * lieu de dire « aucune ligne ».
+       *
+       * `breeding_projects` y était et n'y appartient pas : `useBreedingProject`
+       * lit `.order(…).limit(1)` puis prend `data?.[0]`. Rendre un objet faisait
+       * donc `undefined`, et le projet valait `null` dans **toute** la suite —
+       * aucune couleur visée, aucun `target_count`, et tout ce qui dépend du
+       * projet silencieusement hors test. La fixture porte pourtant le projet du
+       * 15/08, `azur_dore`. Un faux serveur qui se trompe de forme ne casse rien :
+       * il rend vert une fonctionnalité que personne n'exécute.
+       */
+      const single = ['user_breeding_settings', 'breeding_timeline',
         'user_breeding_availability', 'breeding_batch'];
       if (single.includes(table)) return json(rows.find(match) ?? null);
       return json(paged);

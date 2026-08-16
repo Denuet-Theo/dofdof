@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { Dna } from 'lucide-react';
 import BreedingMountName, { mountNameOf } from '@/components/breeding/BreedingMountName';
-import type { CloneOption } from '@/lib/dofus/breeding/cloning';
+import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 
 /**
@@ -25,20 +25,57 @@ import type { Individual } from '@/lib/dofus/breeding/stable';
  * qu'il venait d'être corrigé : l'appariement ne proposait que des pile-ou-face
  * quand des clonages certains dormaient dans l'écurie. Voir #163.
  *
- * `keepChance` à 100 % est le cas qui vaut d'être vu : les deux portent la même
- * ascendance, donc le tirage ne change rien et le clone est certain.
+ * ## Une ligne ne dit que le couple
+ *
+ * Elle a porté « porte G2 », « 100 % de la garder », « sexe certain ♂ », « mieux
+ * vaut extraire ». Toutes exactes, et toutes sans effet : le jeu tire la
+ * survivante et son sexe, l'éleveur constate. L'appariement qui rend ces chances
+ * les meilleures est justement celui que `cloneOptions` vient de choisir — les
+ * jumelles d'abord, le même sexe à valeur égale — donc les afficher, c'est
+ * commenter une décision déjà prise, sur toutes les lignes, au-dessus de la
+ * seule qu'on vienne y chercher : quelles deux montures aller chercher en jeu.
+ *
+ * Les chiffres n'ont pas disparu, ils ont changé de destinataire : `data-*` les
+ * porte, et les specs les lisent.
+ *
+ * ## Cet écran est devenu le seul recours des stériles
+ *
+ * L'onglet Extraction ne montre plus que ce qu'on extrait réellement — ni les
+ * « plutôt cloner », ni ce que le projet protège. Tout ce qu'il a cessé d'afficher
+ * atterrit donc **ici**, et deux choses en découlent, sans lesquelles le retrait
+ * là-bas serait une disparition :
+ *
+ * 1. la liste n'est plus tronquée (`cloneOptions` est appelé sans plafond) ;
+ * 2. `held` porte les protégées que **rien n'apparie** — elles ne sont dans aucune
+ *    paire, donc dans aucune ligne, et ce sont les plus précieuses de l'écurie.
+ *
+ * « Mieux vaut extraire » ne s'affiche jamais sur une monture qui sert le projet.
+ * C'est la phrase qui proposait de détruire l'Azur-Turquoise gen 10 du relevé
+ * #185 pour 170 000 kamas d'ambre, alors qu'un Doré à mille kamas en tire
+ * Azur-Doré à 13,95 %.
  */
 const BreedingCloneAdvice = ({
   clonings,
+  held = [],
   nameOf,
   individuals,
+  objectiveName,
 }: {
   clonings: CloneOption[];
+  /** Les stériles que le projet protège et qu'aucun clonage n'apparie encore. */
+  held?: SterileMount[];
   nameOf: (colorId: string) => string;
   individuals: Individual[];
+  /** Le nom de la couleur visée, pour dire *ce que* la monture sert. */
+  objectiveName?: string | null;
 }) => {
   const nameOfMount = useMemo(() => mountNameOf(individuals), [individuals]);
-  if (clonings.length === 0) return null;
+  if (clonings.length === 0 && held.length === 0) return null;
+
+  const serves = objectiveName ? `vise ${objectiveName}` : 'sert le projet';
+  const servesTitle = objectiveName
+    ? `Croisée avec un partenaire à portée, cette monture peut donner ${objectiveName} : le projet la protège, on ne l'extrait pas.`
+    : 'Cette monture peut donner la couleur visée : le projet la protège, on ne l’extrait pas.';
 
   return (
     <div className="space-y-1.5">
@@ -82,47 +119,65 @@ const BreedingCloneAdvice = ({
               {option.partner.sex === 'M' ? '♂' : '♀'} {nameOf(option.partner.colorId)}
               {option.partner.id && <BreedingMountName name={nameOfMount(option.partner.id)} />}
             </span>
-            <span
-              className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
-              title={`Cette monture porte une génération ${option.keep.carried} dans son ascendance : c'est elle qui décide de ce que ses croisements viseront.`}
-            >
-              porte G{option.keep.carried}
-            </span>
-            <span
-              className={`text-[10px] tabular-nums ${
-                option.keepChance === 1 ? 'text-gain' : 'text-dark-500'
-              }`}
-              title={
-                option.keepChance === 1
-                  ? 'Les deux portent la même ascendance : le tirage ne change rien, le clone est certain.'
-                  : 'Ascendances différentes : une chance sur deux de garder celle-ci.'
-              }
-            >
-              {(option.keepChance * 100).toFixed(0)} % de la garder
-            </span>
-            <span
-              className={`text-[10px] ${option.certainSex ? 'text-gain' : 'text-amber-400/70'}`}
-              title={
-                option.certainSex
-                  ? 'Les deux sont du même sexe : celui du clone est certain.'
-                  : 'Sexes différents : celui du clone suit le tirage.'
-              }
-            >
-              {option.certainSex
-                ? `sexe certain ${option.sex === 'M' ? '♂' : '♀'}`
-                : 'sexe au tirage'}
-            </span>
-            {option.gain <= 0 && (
-              <span
-                className="text-[10px] text-loss"
-                title="L'extraction en ambre rend plus que ce clonage n'est censé rapporter."
-              >
-                mieux vaut extraire
-              </span>
-            )}
+            {/* Rien d'autre que le couple, et une seule exception.
+                « Porte G2 », « 50 % de la garder », « sexe au tirage », « mieux
+                vaut extraire » : quatre mentions qui ne changeaient aucun geste.
+                L'éleveur ne choisit **ni** la survivante **ni** son sexe — le jeu
+                les tire — et l'appariement qui rend ces chances les meilleures est
+                déjà celui que `cloneOptions` a retenu. Les afficher revenait à
+                commenter une décision qui n'appartient à personne, sur douze
+                lignes qu'on lit pour une seule chose : quelles deux montures aller
+                chercher.
+
+                Les mesures restent en attributs : elles se vérifient en test, et
+                c'est là qu'elles servent.
+
+                « Vise <couleur> » n'y a pas échappé, et la capture a tranché :
+                sur l'écurie du 16/08, **13 lignes sur 15** le portaient. Une
+                mention que presque tout porte ne distingue rien, et le clonage se
+                fait de toute façon. Elle reste là où elle décide encore quelque
+                chose : sur les gardées, plus bas, dont la consigne est justement
+                de ne **pas** les extraire. */}
           </div>
         ))}
       </div>
+
+      {/* Les protégées que rien n'apparie. Sans cette liste elles ne seraient sur
+          aucun des deux écrans : l'extraction ne les prend pas — elles servent le
+          but — et il n'existe aucune paire pour les porter ici. Ce qu'elles
+          attendent n'est pas un geste mais une naissance. */}
+      {held.length > 0 && (
+        <div className="space-y-1 pt-1">
+          <p className="text-[11px] text-dark-500 px-1">
+            {held.length === 1 ? 'Gardée' : 'Gardées'} pour le projet, sans partenaire de clonage —
+            il faut une autre stérile de la même génération affichée. Ne pas
+            {held.length === 1 ? ' l’' : ' les '}extraire.
+          </p>
+          {held.map((mount) => (
+            <div
+              key={mount.id}
+              data-testid="clone-held"
+              data-generation={mount.generation}
+              className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
+                bg-kamas/10 border border-kamas/20"
+            >
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
+                {mount.sex === 'M' ? '♂' : '♀'} {nameOf(mount.colorId)}
+                {mount.id && <BreedingMountName name={nameOfMount(mount.id)} />}
+              </span>
+              <span
+                className="px-1.5 py-0.5 rounded-lg bg-kamas/15 text-kamas text-[10px] font-semibold"
+                title={`Cette monture porte une génération ${mount.carried} dans son ascendance : c'est elle qui décide de ce que ses croisements viseront.`}
+              >
+                porte G{mount.carried}
+              </span>
+              <span className="ml-auto text-[10px] text-kamas font-semibold" title={servesTitle}>
+                {serves}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

@@ -152,6 +152,103 @@ test.describe('clonage', () => {
     await expect(boutons.filter({ hasText: 'Perdrait la gén' })).toBeDisabled();
   });
 
+  test('sur tout le lot, jamais la génération basse n’est cliquable', async ({ page }) => {
+    /**
+     * L'invariant sur la fournée entière, et non sur la première paire.
+     *
+     * Le test précédent en vérifie une. Celle-là est la plus facile : c'est la
+     * quinzième qu'on clique sans regarder, après vingt allers-retours en jeu.
+     * On parcourt donc **tous** les arbitrages du lot, et pour chacun on relit
+     * les deux générations portées telles que les cartes les annoncent — puis on
+     * vérifie que le bouton du côté le plus bas est mort.
+     *
+     * Ce qu'on ne peut pas tester ici, et il vaut mieux le dire : forcer le clic
+     * sur le bouton désactivé. React décide d'appeler `onClick` d'après ses
+     * **props**, pas d'après le DOM, donc retirer l'attribut `disabled` dans la
+     * page ne réveille pas le gestionnaire — mesuré, le clic ne part pas. Le
+     * garde posé dans `recordClonings` n'est donc pas atteignable depuis cette
+     * fenêtre : il couvre les appelants suivants, pas celui-ci.
+     */
+    const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
+    await openBreeding(page);
+    await openCloning(page);
+
+    const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
+    let dépareillées = 0;
+
+    for (let pas = 0; pas < 15; pas += 1) {
+      const passer = page.getByTestId('clone-skip');
+      if ((await passer.count()) === 0) break;
+
+      const avertissement = page.getByTestId('clone-would-destroy');
+      if ((await avertissement.count()) > 0) {
+        dépareillées += 1;
+
+        // Ce que la carte annonce : « porte une gén. X face à une gén. Y ».
+        const texte = await avertissement.innerText();
+        const [portee, face] = [...texte.matchAll(/gén\.\s*(\d+)/g)].map((m) => Number(m[1]));
+        expect(portee).toBeLessThan(face);
+
+        // Un seul bouton vivant, et c'est celui qui garde la plus haute.
+        const perdant = page.getByRole('button', { name: /Perdrait la gén/ });
+        const gardant = page.getByRole('button', { name: 'Garder celle-ci' });
+        await expect(perdant).toHaveCount(1);
+        await expect(perdant).toBeDisabled();
+        await expect(perdant).toHaveText(`Perdrait la gén. ${face}`);
+        await expect(gardant).toHaveCount(1);
+        await expect(gardant).toBeEnabled();
+      }
+
+      await passer.click();
+      if ((await titre.count()) === 0) break;
+    }
+
+    // Sans une seule paire dépareillée, le test ne prouverait rien.
+    expect(dépareillées).toBeGreaterThan(0);
+    // Passer n'écrit rien : le lot entier a défilé sans toucher à l'écurie.
+    expect(supabase.writes.filter((write) => write.table === individus)).toHaveLength(0);
+  });
+
+  test('le garde ne bloque aucun clonage légitime, sur tout le lot', async ({ page }) => {
+    /**
+     * L'autre moitié de l'invariant, et elle compte autant.
+     *
+     * Un garde posé au point d'écriture peut refuser trop : il suffirait qu'il
+     * lise l'ascendance autrement que la fenêtre pour bloquer des clonages
+     * parfaitement bons, et l'éleveur se retrouverait devant un écran qui dit
+     * non à tout. On tranche donc **tout le lot** par le bouton que la fenêtre
+     * laisse cliquable, et pas un refus ne doit apparaître.
+     *
+     * Sur tout le lot et non sur un clic : la fournée se recalcule à chaque
+     * écriture — deux stériles en moins, les paires suivantes se reforment — et
+     * c'est au quinzième clic qu'un désaccord entre la fenêtre et le garde
+     * apparaîtrait, pas au premier.
+     */
+    const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
+    await openBreeding(page);
+    await openCloning(page);
+
+    const avant = supabase.rows(individus).length;
+    let tranches = 0;
+
+    for (let pas = 0; pas < 15; pas += 1) {
+      const garder = page.getByRole('button', { name: 'Garder celle-ci' });
+      if ((await garder.count()) === 0) break;
+      await garder.first().click();
+      await expect(page.getByText('Enregistrement…')).toHaveCount(0, { timeout: 20_000 });
+      tranches += 1;
+      // Le refus est vérifié à **chaque** tour, pas seulement à la fin : sinon
+      // un refus au troisième clic passerait pour un lot plus court.
+      await expect(page.getByTestId('clone-refusal')).toHaveCount(0);
+    }
+
+    expect(tranches).toBeGreaterThan(1);
+    // Un clone écrit par arbitrage tranché, deux stériles retirées à chaque fois.
+    expect(supabase.rows(individus)).toHaveLength(avant + tranches - 2 * tranches);
+  });
+
   test('« Passer » écarte un arbitrage sans rien écrire', async ({ page }) => {
     // Le lot est figé à l'ouverture, le jeu ne l'est pas : une paire proposée
     // peut ne plus exister. Sans sortie, l'écran restait planté dessus et le

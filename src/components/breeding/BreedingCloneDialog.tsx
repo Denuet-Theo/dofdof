@@ -74,7 +74,7 @@ const BreedingCloneDialog = ({
 }: Props) => {
   const [saving, setSaving] = useState(false);
   /**
-   * Les clonages **déjà écrits en base**, par identifiant de stérile gardée.
+   * Les clonages **déjà écrits en base**, par identifiant de clonage.
    *
    * Un clonage s'enregistre au clic, comme une naissance. Ce n'était pas le cas
    * — tout s'empilait dans un `Map` et partait au bouton final — et c'est la
@@ -85,7 +85,32 @@ const BreedingCloneDialog = ({
    * brouillon : c'est ce qui permet de retirer un clonage du lot restant sans
    * dépendre d'une position dans une liste qui se recalcule.
    */
-  const [done, setDone] = useState<Map<string, string>>(new Map());
+  const [done, setDone] = useState<Set<string>>(new Set());
+
+  /**
+   * Les montures gardées, **photographiées au clic**, dans l'ordre des choix.
+   *
+   * C'est la seule chose que cet écran doive rendre à l'éleveur : les noms à
+   * aller chercher dans l'écurie du jeu.
+   *
+   * ## Pourquoi une photo et pas un identifiant
+   *
+   * `recordClonings` **insère le clone** — une ligne neuve, un id neuf — puis
+   * **supprime les deux originales**. Au retour de l'écriture, l'identifiant
+   * gardé ne désigne donc plus rien, et tout `byId.get(...)` posé dessus rend
+   * `undefined`.
+   *
+   * Le récapitulatif de fin le faisait : il annonçait « les noms à chercher dans
+   * l'écurie du jeu » et affichait **« Anonyme » pour chacun**, faute de trouver
+   * la ligne. La seule information que cet écran existe pour rendre, il la
+   * perdait à l'instant précis où elle devenait utile.
+   *
+   * Séparé de `done`, et pas fondu dedans : `done` décide de ce qui sort du lot,
+   * `kept` de ce qui s'affiche. Les confondre ferait dépendre l'un de l'autre, et
+   * une photo manquante rendrait à la liste un clonage déjà écrit — donc une
+   * seconde écriture du même geste.
+   */
+  const [kept, setKept] = useState<Individual[]>([]);
   /** Le dernier refus de la base, affiché là où il faut recliquer. */
   const [refused, setRefused] = useState<string | null>(null);
 
@@ -123,7 +148,8 @@ const BreedingCloneDialog = ({
   if (isOpen && batch === null) setBatch(clonings);
   if (!isOpen && batch !== null) {
     setBatch(null);
-    setDone(new Map());
+    setDone(new Set());
+    setKept([]);
     setSkipped(new Set());
     setRefused(null);
   }
@@ -169,6 +195,12 @@ const BreedingCloneDialog = ({
    */
   const record = async (entry: CloningToRecord, keep: 'first' | 'second') => {
     if (saving) return;
+
+    // Photographiée **avant** l'écriture, qui détruit les deux originales et
+    // insère le clone sous un identifiant neuf : après elle, il n'y a plus rien
+    // à relire. Voir `kept`.
+    const keptMount = byId.get(keep === 'first' ? entry.first : entry.second) ?? null;
+
     setSaving(true);
     setRefused(null);
     const result = await onRecord([
@@ -182,8 +214,49 @@ const BreedingCloneDialog = ({
       setRefused(result.message);
       return;
     }
-    setDone((current) =>
-      new Map(current).set(entry.first, keep === 'first' ? entry.first : entry.second)
+    setDone((current) => new Set(current).add(entry.first));
+    if (keptMount) setKept((current) => [...current, keptMount]);
+  };
+
+  /**
+   * La monture du clonage **précédent**, celle qu'on vient de garder.
+   *
+   * Le clic faisait disparaître la seule information dont l'éleveur a besoin
+   * juste après l'avoir donnée : le nom à chercher dans l'écurie du jeu. Un
+   * récapitulatif existait, mais en **bout de lot** — donc onze clics trop tard
+   * sur une fournée de douze, et emporté dès qu'on refermait la fenêtre.
+   *
+   * `kept` est dans l'ordre des choix : la dernière photo est le dernier clic.
+   */
+  const previousKept = kept.length > 0 ? kept[kept.length - 1] : null;
+
+  /**
+   * Les deux stériles sont **indiscernables** : deux exemplaires de la même
+   * monture.
+   *
+   * Même couleur, même ascendance, même sexe, même nom — donc deux cartes
+   * rigoureusement identiques, côte à côte, avec deux boutons qui font
+   * exactement la même chose. C'est `cloneOptions` qui les apparie exprès, et
+   * pour la meilleure des raisons : le clone est le même des deux côtés, donc le
+   * tirage du jeu ne lance aucune pièce (`keepChance` vaut 1, le sexe est
+   * certain). Voir la première passe de `pairTwins`.
+   *
+   * Il n'y a donc rien à départager, et demander de choisir entre deux choses
+   * identiques est une question sans réponse — l'éleveur la relit deux fois avant
+   * de comprendre qu'elle n'en attend pas.
+   *
+   * On montre alors **une** carte et un « × 2 ». Le nom est le même, celui qu'on
+   * ira chercher ; la quantité est la seule chose que la seconde carte ajoutait.
+   */
+  const twinPair = (entry: CloningToRecord): boolean => {
+    const a = byId.get(entry.first);
+    const b = byId.get(entry.second);
+    if (!a || !b) return false;
+    return (
+      a.colorId === b.colorId &&
+      a.sex === b.sex &&
+      a.name === b.name &&
+      (a.parents ?? []).join('+') === (b.parents ?? []).join('+')
     );
   };
 
@@ -283,7 +356,14 @@ const BreedingCloneDialog = ({
           onClick={() => current && record(current, side === 'left' ? 'first' : 'second')}
           title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic."
         >
-          {saving ? 'Enregistrement…' : 'C’est celle-ci qui est sortie'}
+          {/* « Celle-ci » suppose un choix. Sur une paire indiscernable il n'y
+              en a pas, et poser la question ferait chercher une différence qui
+              n'existe pas. */}
+          {saving
+            ? 'Enregistrement…'
+            : current && twinPair(current)
+              ? 'Enregistrer le clonage'
+              : 'C’est celle-ci qui est sortie'}
         </Button>
       </div>
     );
@@ -301,6 +381,47 @@ const BreedingCloneDialog = ({
     >
       <div className="space-y-4">
 
+        {/* Le nom qu'on vient de garder, en haut et copiable.
+            C'est ce que le clic effaçait : la monture choisie quitte l'écran au
+            moment même où son nom devient utile, puisque c'est elle qu'il faut
+            aller chercher dans l'écurie du jeu.
+
+            En haut plutôt qu'en bas : c'est là que le regard revient après le
+            clic, le titre « Clonage 2 / 12 » y est déjà, et le récapitulatif de
+            fin — qui reste — arrive de toute façon trop tard pour ça. */}
+        {previousKept && (
+          <div
+            data-testid="clone-previous"
+            data-mount-id={previousKept.id}
+            className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+              bg-kamas/10 border border-kamas/25"
+          >
+            <span className="text-[11px] text-dark-400">Monture précédente, à garder :</span>
+            <span
+              className={`text-[11px] ${
+                previousKept.sex === 'M' ? 'text-info' : 'text-loss-light'
+              }`}
+              title={previousKept.sex === 'M' ? 'Mâle' : 'Femelle'}
+            >
+              {previousKept.sex === 'M' ? '♂' : '♀'}
+            </span>
+            <span className="text-[11px] text-dark-200">{nameOf(previousKept.colorId)}</span>
+            {previousKept.name === null ? (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"
+                title="Monture non renommée : prends-en une de ce sexe dans le tas, elles sont interchangeables."
+              >
+                {ANONYMOUS_NAME}
+              </span>
+            ) : (
+              <CopyableText
+                value={previousKept.name}
+                title={`Copier « ${previousKept.name} »`}
+              />
+            )}
+          </div>
+        )}
+
         {refused && (
           <p
             data-testid="clone-refusal"
@@ -313,13 +434,26 @@ const BreedingCloneDialog = ({
 
         {current ? (
           <>
-            <p className="text-[11px] text-dark-400">
-              Deux stériles entrent, une monture sort, et{' '}
-              <strong className="text-dark-200">c’est le jeu qui tire laquelle</strong> — dis
-              ici celle qui est sortie. Les deux portent la même génération, donc le tirage ne
-              te coûte aucune lignée : ce qui change est l’ascendance du clone, et avec elle ce
-              qu’il pourra viser.
-            </p>
+            {/* Deux phrases, parce qu'il y a deux situations. Demander « laquelle
+                est sortie » devant deux exemplaires de la même monture fait
+                chercher une différence qui n'existe pas — c'est la question
+                elle-même qu'il faut retirer, pas seulement la seconde carte. */}
+            {twinPair(current) ? (
+              <p className="text-[11px] text-dark-400">
+                Les deux stériles sont <strong className="text-dark-200">identiques</strong> —
+                même couleur, même ascendance, même sexe, même nom. Le clone est le même quel
+                que soit le côté que le jeu rend : rien à départager, il n’y a qu’à consigner
+                que c’est fait.
+              </p>
+            ) : (
+              <p className="text-[11px] text-dark-400">
+                Deux stériles entrent, une monture sort, et{' '}
+                <strong className="text-dark-200">c’est le jeu qui tire laquelle</strong> — dis
+                ici celle qui est sortie. Les deux portent la même génération, donc le tirage ne
+                te coûte aucune lignée : ce qui change est l’ascendance du clone, et avec elle ce
+                qu’il pourra viser.
+              </p>
+            )}
 
             <div
               className="flex items-stretch gap-3"
@@ -337,7 +471,25 @@ const BreedingCloneDialog = ({
                   gén. {current.generation}
                 </span>
               </div>
-              {card(current.second, 'right')}
+              {/* Deux exemplaires de la même monture : un « × 2 » au lieu d'une
+                  seconde carte à l'identique. Voir `twinPair`. Le bouton de la
+                  carte de gauche suffit — les deux faisaient déjà la même
+                  chose. */}
+              {twinPair(current) ? (
+                <div
+                  data-testid="clone-twin"
+                  className="flex-1 flex flex-col items-center justify-center gap-1 rounded-2xl
+                    border border-dashed border-dark-600/50 bg-dark-800/20"
+                  title="Les deux stériles sont identiques — même couleur, même ascendance, même sexe, même nom. Le clone est le même quel que soit le côté que le jeu rend : il n’y a rien à départager."
+                >
+                  <span className="text-3xl font-bold text-kamas tabular-nums">× 2</span>
+                  <span className="text-[11px] text-dark-400 px-3 text-center">
+                    deux fois la même — rien à départager
+                  </span>
+                </div>
+              ) : (
+                card(current.second, 'right')
+              )}
             </div>
 
             {/* La sortie. Discrète — ce n'est pas le geste courant — mais
@@ -369,22 +521,23 @@ const BreedingCloneDialog = ({
                 d'« Anonyme » de même couleur. Une liste de six « Anonyme » nus
                 ne dit pas lesquelles aller chercher. */}
             <div className="flex flex-wrap gap-2">
-              {[...done.values()].map((id, index) => {
-                const mount = byId.get(id);
-                const name = mount?.name ?? ANONYMOUS_NAME;
+              {/* Les photos prises au clic, et non des `byId.get(...)` sur des
+                  identifiants que l'écriture a détruits — c'est ce qui faisait
+                  afficher « Anonyme » à la place de chaque nom promis. Voir
+                  `kept`. */}
+              {kept.map((mount, index) => {
+                const name = mount.name ?? ANONYMOUS_NAME;
 
                 return (
-                  <span key={`${id}-${index}`} className="flex items-center gap-1.5">
-                    {mount && (
-                      <span
-                        className={`text-[11px] ${
-                          mount.sex === 'M' ? 'text-info' : 'text-loss-light'
-                        }`}
-                        title={mount.sex === 'M' ? 'Mâle' : 'Femelle'}
-                      >
-                        {mount.sex === 'M' ? '♂' : '♀'}
-                      </span>
-                    )}
+                  <span key={`${mount.id}-${index}`} className="flex items-center gap-1.5">
+                    <span
+                      className={`text-[11px] ${
+                        mount.sex === 'M' ? 'text-info' : 'text-loss-light'
+                      }`}
+                      title={mount.sex === 'M' ? 'Mâle' : 'Femelle'}
+                    >
+                      {mount.sex === 'M' ? '♂' : '♀'}
+                    </span>
                     {name === ANONYMOUS_NAME ? (
                       <span
                         className="text-[10px] px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-500"

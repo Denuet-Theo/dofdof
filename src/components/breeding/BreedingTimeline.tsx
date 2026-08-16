@@ -1298,7 +1298,7 @@ const Fill = ({
                   {toClone.length} clonage{toClone.length > 1 ? 's' : ''} à faire
                 </Button>
                 <span className="text-[11px] text-dark-500">
-                  deux stériles, une survivante — c’est toi qui choisis laquelle
+                  deux stériles, une survivante — c’est le jeu qui tire laquelle
                 </span>
               </>
             ) : cloneAdvice.length > 0 ? (

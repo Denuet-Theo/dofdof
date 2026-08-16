@@ -54,6 +54,14 @@ const BreedingCloneAdvice = ({
         {clonings.map((option) => (
           <div
             key={`${option.keep.id}-${option.partner.id}`}
+            data-testid="clone-advice"
+            /* Les deux générations portées, exposées pour être vérifiables.
+               C'est l'invariant du clonage — on n'apparie jamais deux
+               ascendances de générations différentes, sans quoi le tirage du jeu
+               en perd une une fois sur deux — et il ne se lit pas autrement à
+               l'écran : une monture anonyme n'a pas de nom pour le porter. */
+            data-keep-carried={option.keep.carried}
+            data-partner-carried={option.partner.carried}
             className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl
               bg-dark-800/40 text-xs"
           >

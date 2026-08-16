@@ -3,18 +3,30 @@ import { mockSupabase, type SupabaseMock } from './support/supabase';
 import { openBreeding } from './support/breeding';
 
 /**
- * Le clonage : deux stériles entrent, une seule sort, et c'est l'éleveur qui
- * choisit laquelle.
+ * Le clonage : deux stériles entrent, une seule sort, et **c'est le jeu qui tire
+ * laquelle**.
  *
- * Un choix ne vaut que si les deux termes se distinguent. Sur l'écurie réelle,
- * les paires proposées sont très souvent deux gen 1 **anonymes de même couleur
- * et sans ascendance** — le fond du parc, acheté par dizaines. Elles ne se
- * départagent pas, et elles ne se déroulent donc plus une par une : elles se
- * comptent en tête, avec le rappel de ne pas les oublier en jeu.
+ * Cette phrase est tout le sujet, et elle a été comprise à l'envers pendant
+ * longtemps. Tant qu'on croyait que l'éleveur choisissait la survivante, la
+ * protection contre la perte d'une lignée se posait sur l'écran — un bouton
+ * désactivé, puis un refus au point d'écriture. Aucun des deux n'empêchait quoi
+ * que ce soit : la paire dépareillée était toujours proposée, le clonage se
+ * faisait en jeu, et le seul effet du garde était d'interdire d'**enregistrer**
+ * un tirage défavorable, c'est-à-dire de faire mentir l'écurie le jour même où
+ * elle perdait une génération.
  *
- * Restent celles où il y a quelque chose à trancher. Là, tout ce qui distingue
- * les deux montures doit être à l'écran — le sexe compris, que cette fenêtre
- * était seule à taire.
+ * La règle est donc à l'appariement, et elle est sans exception : **on
+ * n'apparie jamais deux ascendances de générations portées différentes**. Une
+ * porteuse de gén. 3 face à une porteuse de gén. 1, c'est la gén. 3 perdue une
+ * fois sur deux, et rien ne la rattrape.
+ *
+ * Deux listes la portent, produites indépendamment — `cloneOptions` pour ce que
+ * l'écurie permet, `cloningsToRecord` pour ce que la recherche planifie — donc
+ * deux specs, une par liste.
+ *
+ * Le reste tient à la lisibilité : sur l'écurie réelle les paires sont souvent
+ * deux gen 1 anonymes de même couleur, et tout ce qui les distingue doit être à
+ * l'écran — le sexe compris, que cette fenêtre était seule à taire.
  */
 
 const individus = 'user_breeding_individuals';
@@ -126,104 +138,92 @@ test.describe('clonage', () => {
     }
   });
 
-  test('on ne peut pas garder la monture qui porte le moins', async ({ page }) => {
-    // Deux gen 1 appariables peuvent porter l'une un 1, l'autre un 2 : garder
-    // celle qui porte le 1 détruit le 2, définitivement.
+  test('aucune paire proposée à la saisie ne mêle deux générations portées', async ({
+    page,
+  }) => {
+    /**
+     * L'invariant du clonage, et il n'y en a pas d'autre qui compte.
+     *
+     * **Le jeu tire la survivante au hasard.** Apparier une porteuse de gén. 3
+     * avec une porteuse de gén. 1 perd donc la gén. 3 une fois sur deux, et
+     * aucun geste ne peut le rattraper une fois les deux montures engagées — ni
+     * un bouton désactivé, ni un refus à la saisie, qui n'empêcheraient que
+     * d'enregistrer ce que le jeu a déjà fait. La seule protection est de ne
+     * **jamais proposer** la paire.
+     *
+     * On parcourt donc tout le lot, pas la première paire : c'est la quinzième
+     * qu'on clique sans regarder.
+     */
     await mockSupabase(page);
     await openBreeding(page);
     await openCloning(page);
 
-    const avertissement = page.getByTestId('clone-would-destroy');
     const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
+    let paires = 0;
 
-    // On avance jusqu'à une paire dépareillée — elles existent sur cette écurie.
-    for (let pas = 0; pas < 12 && (await avertissement.count()) === 0; pas += 1) {
+    for (let pas = 0; pas < 20; pas += 1) {
+      const paire = page.getByTestId('clone-pair');
+      if ((await paire.count()) === 0) break;
+
+      const porte = (await paire.getAttribute('data-carried'))!.split(',').map(Number);
+      expect(porte).toHaveLength(2);
+      expect(porte[0]).toBe(porte[1]);
+      paires += 1;
+
       const passer = page.getByTestId('clone-skip');
       if ((await passer.count()) === 0) break;
-      await passer.click();
-      await expect(titre).toBeVisible();
-    }
-    expect(await avertissement.count()).toBe(1);
-
-    // Un seul des deux boutons reste cliquable : celui qui garde la plus haute.
-    const boutons = page.getByRole('button', { name: /Garder celle-ci|Perdrait la gén/ });
-    await expect(boutons).toHaveCount(2);
-    await expect(boutons.filter({ hasText: 'Garder celle-ci' })).toBeEnabled();
-    await expect(boutons.filter({ hasText: 'Perdrait la gén' })).toBeDisabled();
-  });
-
-  test('sur tout le lot, jamais la génération basse n’est cliquable', async ({ page }) => {
-    /**
-     * L'invariant sur la fournée entière, et non sur la première paire.
-     *
-     * Le test précédent en vérifie une. Celle-là est la plus facile : c'est la
-     * quinzième qu'on clique sans regarder, après vingt allers-retours en jeu.
-     * On parcourt donc **tous** les arbitrages du lot, et pour chacun on relit
-     * les deux générations portées telles que les cartes les annoncent — puis on
-     * vérifie que le bouton du côté le plus bas est mort.
-     *
-     * Ce qu'on ne peut pas tester ici, et il vaut mieux le dire : forcer le clic
-     * sur le bouton désactivé. React décide d'appeler `onClick` d'après ses
-     * **props**, pas d'après le DOM, donc retirer l'attribut `disabled` dans la
-     * page ne réveille pas le gestionnaire — mesuré, le clic ne part pas. Le
-     * garde posé dans `recordClonings` n'est donc pas atteignable depuis cette
-     * fenêtre : il couvre les appelants suivants, pas celui-ci.
-     */
-    const supabase = await mockSupabase(page);
-    nameEverySterile(supabase);
-    await openBreeding(page);
-    await openCloning(page);
-
-    const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
-    let dépareillées = 0;
-
-    for (let pas = 0; pas < 15; pas += 1) {
-      const passer = page.getByTestId('clone-skip');
-      if ((await passer.count()) === 0) break;
-
-      const avertissement = page.getByTestId('clone-would-destroy');
-      if ((await avertissement.count()) > 0) {
-        dépareillées += 1;
-
-        // Ce que la carte annonce : « porte une gén. X face à une gén. Y ».
-        const texte = await avertissement.innerText();
-        const [portee, face] = [...texte.matchAll(/gén\.\s*(\d+)/g)].map((m) => Number(m[1]));
-        expect(portee).toBeLessThan(face);
-
-        // Un seul bouton vivant, et c'est celui qui garde la plus haute.
-        const perdant = page.getByRole('button', { name: /Perdrait la gén/ });
-        const gardant = page.getByRole('button', { name: 'Garder celle-ci' });
-        await expect(perdant).toHaveCount(1);
-        await expect(perdant).toBeDisabled();
-        await expect(perdant).toHaveText(`Perdrait la gén. ${face}`);
-        await expect(gardant).toHaveCount(1);
-        await expect(gardant).toBeEnabled();
-      }
-
       await passer.click();
       if ((await titre.count()) === 0) break;
     }
 
-    // Sans une seule paire dépareillée, le test ne prouverait rien.
-    expect(dépareillées).toBeGreaterThan(0);
-    // Passer n'écrit rien : le lot entier a défilé sans toucher à l'écurie.
-    expect(supabase.writes.filter((write) => write.table === individus)).toHaveLength(0);
+    // Sans une seule paire, le test ne prouverait rien.
+    expect(paires).toBeGreaterThan(0);
   });
 
-  test('le garde ne bloque aucun clonage légitime, sur tout le lot', async ({ page }) => {
+  test('aucun appariement conseillé ne mêle deux générations portées', async ({ page }) => {
+    /**
+     * La seconde liste, et elle compte autant.
+     *
+     * `cloneOptions` (« Ce que valent tes stériles ») et `cloningsToRecord` (la
+     * fenêtre de saisie) sont produits **indépendamment** : la première décrit ce
+     * que l'écurie permet, la seconde ce que la recherche planifie. Corriger
+     * l'une sans l'autre laisse l'éleveur suivre un conseil qui lui coûte une
+     * lignée — et c'est cette liste-là qu'il lit, puisqu'elle s'affiche sans
+     * rien ouvrir.
+     */
+    await mockSupabase(page);
+    await openBreeding(page);
+    await page.getByRole('button', { name: 'Clonage' }).click();
+
+    const lignes = page.getByTestId('clone-advice');
+    await expect(lignes.first()).toBeVisible({ timeout: 30_000 });
+
+    const total = await lignes.count();
+    expect(total).toBeGreaterThan(0);
+
+    for (let index = 0; index < total; index += 1) {
+      const ligne = lignes.nth(index);
+      const garde = Number(await ligne.getAttribute('data-keep-carried'));
+      const partenaire = Number(await ligne.getAttribute('data-partner-carried'));
+      expect(garde).toBe(partenaire);
+    }
+  });
+
+  test('les deux côtés restent enregistrables, sur tout le lot', async ({ page }) => {
     /**
      * L'autre moitié de l'invariant, et elle compte autant.
      *
-     * Un garde posé au point d'écriture peut refuser trop : il suffirait qu'il
-     * lise l'ascendance autrement que la fenêtre pour bloquer des clonages
-     * parfaitement bons, et l'éleveur se retrouverait devant un écran qui dit
-     * non à tout. On tranche donc **tout le lot** par le bouton que la fenêtre
-     * laisse cliquable, et pas un refus ne doit apparaître.
+     * Le tirage est celui du jeu : l'éleveur doit pouvoir consigner **celui des
+     * deux côtés** qui est réellement sorti. Un écran qui refuse la moitié des
+     * résultats possibles ne protège rien — le clonage a déjà eu lieu — il
+     * empêche seulement l'écurie de dire ce qu'elle contient. C'est ce que
+     * faisaient le bouton désactivé puis le refus à l'écriture, tous deux
+     * retirés.
      *
-     * Sur tout le lot et non sur un clic : la fournée se recalcule à chaque
-     * écriture — deux stériles en moins, les paires suivantes se reforment — et
-     * c'est au quinzième clic qu'un désaccord entre la fenêtre et le garde
-     * apparaîtrait, pas au premier.
+     * On tranche donc tout le lot, en alternant les deux côtés, et pas un refus
+     * ne doit apparaître. Sur tout le lot et non sur un clic : la fournée se
+     * recalcule à chaque écriture — deux stériles en moins, les paires suivantes
+     * se reforment — donc un désaccord apparaîtrait tard, pas au premier clic.
      */
     const supabase = await mockSupabase(page);
     nameEverySterile(supabase);
@@ -234,9 +234,13 @@ test.describe('clonage', () => {
     let tranches = 0;
 
     for (let pas = 0; pas < 15; pas += 1) {
-      const garder = page.getByRole('button', { name: 'Garder celle-ci' });
+      const garder = page.getByRole('button', { name: 'C’est celle-ci qui est sortie' });
       if ((await garder.count()) === 0) break;
-      await garder.first().click();
+      // Les deux côtés à tour de rôle : le tirage du jeu ne privilégie ni l'un
+      // ni l'autre, et un écran qui n'accepterait qu'un côté passerait pour bon
+      // tant qu'on ne cliquerait que celui-là.
+      await expect(garder).toHaveCount(2);
+      await garder.nth(pas % 2).click();
       await expect(page.getByText('Enregistrement…')).toHaveCount(0, { timeout: 20_000 });
       tranches += 1;
       // Le refus est vérifié à **chaque** tour, pas seulement à la fin : sinon
@@ -290,7 +294,7 @@ test.describe('clonage', () => {
     const lignes = supabase.rows(individus).length;
 
     supabase.refuse({ table: individus, method: 'POST' });
-    await page.getByRole('button', { name: 'Garder celle-ci' }).first().click();
+    await page.getByRole('button', { name: 'C’est celle-ci qui est sortie' }).first().click();
 
     await expect(page.getByTestId('clone-refusal')).toBeVisible();
     await expect(page.locator('[role="alert"]').filter({ hasText: 'Pas enregistré' })).toBeVisible();

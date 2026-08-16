@@ -891,6 +891,22 @@ export const cloningsToRecord = (
             : null
         );
 
+      /**
+       * Les deux ne portent pas la même génération : **on ne propose pas**.
+       *
+       * C'est le jeu qui tire la survivante, pas l'éleveur. Apparier une
+       * porteuse de gén. 3 avec une porteuse de gén. 1 perd donc la gén. 3 une
+       * fois sur deux, et rien ne le rattrape une fois les deux montures
+       * engagées — ni un bouton désactivé, ni un refus à la saisie, qui
+       * n'empêcheraient que d'**enregistrer** ce que le jeu a déjà fait.
+       *
+       * Même filtre que dans `cloneOptions`, et pour la même raison, mais il
+       * faut les deux : celui-ci couvre ce que la **recherche** propose, l'autre
+       * ce que l'écurie permet. Les deux listes sont produites indépendamment et
+       * s'affichent côte à côte à l'onglet « Clonage ».
+       */
+      if (carriedOf(a) !== carriedOf(b)) return null;
+
       return {
         generation: generations.get(a.colorId) ?? 1,
         first: a.id,

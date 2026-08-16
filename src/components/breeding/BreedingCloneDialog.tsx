@@ -14,16 +14,23 @@ import type { CloningResult } from '@/lib/hooks/useBreeding';
 /**
  * Le clonage, un par un — le pendant de `BreedingBirthDialog`.
  *
- * ## Pourquoi il faut choisir
+ * ## On ne choisit pas : on constate
  *
- * Deux stériles entrent, **une** monture sort. Le jeu ne dit pas laquelle : c'est
- * l'éleveur qui décide de quelle monture le clone prend la place, et ce choix n'est
- * pas neutre — les deux ont la même génération affichée, sans quoi le clonage
- * serait refusé, mais pas la même **ascendance**. Or c'est l'ascendance qui décide
- * de ce que la monture pourra viser ensuite.
+ * Deux stériles entrent, **une** monture sort, et **c'est le jeu qui tire
+ * laquelle**. L'éleveur n'arbitre rien ici — il lit le résultat dans le jeu et
+ * le recopie, comme il recopie une naissance.
  *
- * D'où deux cartes côte à côte plutôt qu'une confirmation : on montre ce que chacune
- * porte, et le clic dit laquelle survit.
+ * Cet en-tête a longtemps dit l'inverse (« c'est l'éleveur qui décide »), et ça
+ * n'était pas une erreur de formulation : deux gardes en sont sortis — un bouton
+ * désactivé côté carte, puis un refus au point d'écriture — qui empêchaient tous
+ * deux d'**enregistrer** ce que le jeu venait de rendre, sans jamais empêcher le
+ * clonage lui-même. La protection est remontée à l'appariement, où elle a un
+ * sens : `cloneOptions` et `cloningsToRecord` n'apparient plus que des
+ * ascendances de même génération portée, si bien qu'aucune paire proposée ici ne
+ * peut coûter une génération, quel que soit le côté que le tirage rend.
+ *
+ * D'où deux cartes côte à côte plutôt qu'une confirmation : on montre ce que
+ * chacune porte, et le clic dit laquelle est **sortie**.
  *
  * ## Le nom, encore
  *
@@ -201,21 +208,21 @@ const BreedingCloneDialog = ({
     const mount = byId.get(mountId);
     if (!mount) return null;
 
-    /**
-     * Cette monture porte-t-elle **moins** que l'autre ?
-     *
-     * Le jeu apparie à génération affichée égale, mais c'est l'ascendance qui
-     * décide de ce qu'une monture permet ensuite : deux gen 1 côte à côte
-     * peuvent porter l'une un 1, l'autre un 2. Garder celle qui porte le 1
-     * détruit le 2 — définitivement, puisque le clonage consomme les deux.
-     *
-     * On ne propose donc pas ce choix-là. Ce n'est pas un arbitrage entre deux
-     * options : c'en est un entre une option et une perte sèche, et la carte le
-     * dit au lieu de laisser un clic de travers l'exécuter.
-     */
-    const carried = current ? current.carried[side === 'left' ? 0 : 1] : 0;
-    const other = current ? current.carried[side === 'left' ? 1 : 0] : 0;
-    const wouldDestroy = carried < other;
+    /* Le bouton « Perdrait la gén. N », désactivé, vivait ici. Il partait d'une
+       erreur sur la mécanique du jeu : on croyait que l'éleveur choisissait la
+       survivante. Il ne choisit pas — **le jeu tire au hasard**, et cet écran ne
+       fait que consigner ce qui est sorti.
+
+       Un garde ici n'empêchait donc rien : la paire dépareillée continuait
+       d'être proposée, le clonage se faisait en jeu, et le seul effet du bouton
+       mort était d'interdire d'enregistrer le résultat quand le tirage était
+       défavorable — c'est-à-dire de faire mentir l'écurie sur son propre
+       contenu, précisément le jour où elle venait de perdre une lignée.
+
+       La règle est remontée là où elle protège quelque chose : `cloneOptions` et
+       `cloningsToRecord` n'apparient plus que des ascendances de **même
+       génération portée**. Aucune paire qui arrive ici ne peut donc coûter une
+       génération, quel que soit le côté que le jeu rend. */
     const icon = iconOf(mount.colorId);
     const parents = mount.parents
       ? `${nameOf(mount.parents[0])} × ${nameOf(mount.parents[1])}`
@@ -268,27 +275,15 @@ const BreedingCloneDialog = ({
             {ANONYMOUS_NAME}
           </span>
         )}
-        {wouldDestroy && (
-          <span
-            data-testid="clone-would-destroy"
-            className="text-[10px] text-amber-400/90 text-center"
-          >
-            porte une gén. {carried} face à une gén. {other} — la garder détruirait la plus haute
-          </span>
-        )}
         <Button
           size="sm"
           variant="secondary"
           className="mt-1 w-full"
-          disabled={saving || wouldDestroy}
+          disabled={saving}
           onClick={() => current && record(current, side === 'left' ? 'first' : 'second')}
-          title={
-            wouldDestroy
-              ? `Indisponible : l’autre porte une génération ${other}, celle-ci une ${carried}. Le clonage consomme les deux — garder celle-ci perdrait la plus haute pour de bon.`
-              : 'Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic.'
-          }
+          title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic."
         >
-          {saving ? 'Enregistrement…' : wouldDestroy ? 'Perdrait la gén. ' + other : 'Garder celle-ci'}
+          {saving ? 'Enregistrement…' : 'C’est celle-ci qui est sortie'}
         </Button>
       </div>
     );
@@ -319,13 +314,22 @@ const BreedingCloneDialog = ({
         {current ? (
           <>
             <p className="text-[11px] text-dark-400">
-              Deux stériles entrent, une monture sort.{' '}
-              <strong className="text-dark-200">Laquelle gardes-tu ?</strong> Elles ont la
-              même génération — le jeu l’exige — mais pas la même ascendance, et c’est
-              l’ascendance qui décide de ce que le clone pourra viser.
+              Deux stériles entrent, une monture sort, et{' '}
+              <strong className="text-dark-200">c’est le jeu qui tire laquelle</strong> — dis
+              ici celle qui est sortie. Les deux portent la même génération, donc le tirage ne
+              te coûte aucune lignée : ce qui change est l’ascendance du clone, et avec elle ce
+              qu’il pourra viser.
             </p>
 
-            <div className="flex items-stretch gap-3">
+            <div
+              className="flex items-stretch gap-3"
+              data-testid="clone-pair"
+              /* Ce que chaque côté porte, exposé pour être vérifiable : les deux
+                 doivent être égaux, sans quoi le tirage du jeu coûterait une
+                 génération une fois sur deux. L'écran ne le dit pas autrement —
+                 une anonyme n'a pas de nom pour le porter. */
+              data-carried={current.carried.join(',')}
+            >
               {card(current.first, 'left')}
               <div className="flex flex-col items-center justify-center gap-1 px-2">
                 <Dna size={18} className="text-kamas" />

@@ -14,6 +14,7 @@ import { planWaves } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingBatch } from '@/lib/hooks/useBreedingBatch';
+import { pennedUnits, withoutPenned } from '@/lib/dofus/breeding/batch';
 import { formatHours } from '@/lib/utils/date';
 import { toNumber } from '@/lib/supabase/types';
 
@@ -174,6 +175,31 @@ const BreedingPage = () => {
     });
   }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
+  /**
+   * L'écurie **dont on dispose** : la vraie, moins ce qui est en enclos.
+   *
+   * Une monture verrouillée dans un enclos est indisponible au sens le plus
+   * concret : le jeu ne la laissera ni s'accoupler, ni se faire cloner, ni se
+   * faire sacrifier tant que son cycle tourne. L'écurie enregistrée, elle, la
+   * décrit toujours comme fertile et non féconde — et c'est juste, puisqu'elle
+   * ne deviendra féconde qu'à la sortie d'enclos, seul moment où l'on connaît
+   * son niveau.
+   *
+   * La politique la comptait donc deux fois : une fois dans l'enclos où elle
+   * est, une fois dans les gestes proposés à côté. Un éleveur qui verrouillait
+   * cinq enclos se voyait proposer d'accoupler dans la foulée les cinquante
+   * montures qu'il venait d'y enfermer, et les cherchait dans un coffre où
+   * elles n'étaient plus.
+   *
+   * Le retrait se fait **ici et une seule fois**, en amont des quatre
+   * arbitrages, plutôt qu'à chacun. Les filtrer un par un aurait marché quatre
+   * fois et raté le cinquième — c'est exactement la forme de bug que
+   * `AGENTS.md` décrit. Ce qui descend vers l'affichage — « Mes stocks », les
+   * noms des montures — garde l'écurie entière : ces montures sont toujours à
+   * vous, c'est seulement qu'on n'en dispose pas ce matin.
+   */
+  const available = useMemo(() => withoutPenned(stable, batch.pens), [stable, batch.pens]);
+
   /* La répartition du parc qui tient l'équilibre — le curseur de financement et
      les parts par couleur — vivait ici. Elle n'existait que sous l'objectif
      « gen 10 à l'équilibre », qui ne peut plus être sélectionné : la garder
@@ -196,11 +222,11 @@ const BreedingPage = () => {
   const drift = useMemo(() => {
     const colors = tree?.colors ?? [];
     if (colors.length === 0) return [];
-    return driftSignals(stable, {
+    return driftSignals(available, {
       colors,
       generations: new Map(colors.map((color) => [color.id, color.generation])),
     });
-  }, [tree, stable]);
+  }, [tree, available]);
 
 
 
@@ -236,9 +262,28 @@ const BreedingPage = () => {
       return item ? (toNumber(itemPrices.get(item.id)?.price)) : 0;
     });
 
-    const capacity = Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS;
+    /**
+     * Les places **libres**, et non celles du parc.
+     *
+     * Le jumeau du retrait des montures, et il fallait les deux. Sans lui, la
+     * politique voyait bien une écurie amputée de ce qui est en enclos, mais
+     * toujours cinquante places libres — donc elle planifiait aussitôt une
+     * seconde fournée de cinquante montures dans un parc qui n'en a plus une
+     * seule de libre. Un enclos occupé l'est pour tout le monde.
+     *
+     * À zéro, `search.ts` ne charge rien : ses deux gardes sont
+     * `state.places < capacity`, qui est faux d'entrée. C'est le comportement
+     * juste — parc plein, rien à charger — et non un cas dégradé.
+     */
+    const free = Math.max(
+      0,
+      Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS - pennedUnits(batch.pens).length
+    );
+    const capacity = free;
     return {
-      stable,
+      // Ce dont on dispose, pas ce qu'on possède : les montures en enclos sont
+      // dans le jeu, pas au coffre. Voir `available`.
+      stable: available,
       colors,
       market: {
         // Le prix de vente, pas la valeur : `liquidationValue` prend le plus haut
@@ -263,7 +308,7 @@ const BreedingPage = () => {
   }, [
     tree,
     rows,
-    stable,
+    available,
     itemPrices,
     genetonValuation,
     sacrificePrice,
@@ -271,6 +316,8 @@ const BreedingPage = () => {
     settings.enclos_count,
     settings.kamas_available,
     selectedColorId,
+    // Les enclos verrouillés décident des places libres : voir `free`.
+    batch.pens,
   ]);
 
   const policyFill = useMemo(
@@ -325,8 +372,8 @@ const BreedingPage = () => {
   }, [tree, rows, sacrificePrice]);
 
   const clonings = useMemo(
-    () => (cloneContext ? cloneOptions(stable, cloneContext) : []),
-    [cloneContext, stable]
+    () => (cloneContext ? cloneOptions(available, cloneContext) : []),
+    [cloneContext, available]
   );
 
   /**
@@ -339,8 +386,8 @@ const BreedingPage = () => {
    * son ambre. Voir `extraction.ts`.
    */
   const extraction = useMemo(
-    () => (cloneContext ? extractionOrder(stable, cloneContext) : []),
-    [cloneContext, stable]
+    () => (cloneContext ? extractionOrder(available, cloneContext) : []),
+    [cloneContext, available]
   );
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;

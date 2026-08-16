@@ -10,7 +10,12 @@ import BreedingCloneAdvice from '@/components/breeding/BreedingCloneAdvice';
 import BreedingEnclosExitDialog from '@/components/breeding/BreedingEnclosExitDialog';
 import BreedingExtraction from '@/components/breeding/BreedingExtraction';
 import { cloningsToRecord, couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
-import { nextPenIndex, type BatchPen, type BatchUnit } from '@/lib/dofus/breeding/batch';
+import {
+  nextPenIndex,
+  pennedUnits,
+  type BatchPen,
+  type BatchUnit,
+} from '@/lib/dofus/breeding/batch';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { formatCountdown } from '@/lib/dofus/breeding/timeline';
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
@@ -272,6 +277,12 @@ const BreedingPolicyPanel = ({
     .filter((entry) => entry.pen.lockedAt !== null);
 
   const loadTotal = pens.reduce((total, pen) => total + pen.units.length, 0);
+  /**
+   * Les montures **physiquement en enclos**, celles que la page a retirées de
+   * l'entrée de la politique. Comptées sur l'instantané en base et non sur
+   * `pens`, qui vaut la proposition tant qu'aucun verrou n'a été posé.
+   */
+  const penned = pennedUnits(batch.pens).length;
 
   /** Les nommées d'un enclos : une ligne par nom, comptée si elle se répète. */
   const namedGroups = (units: BatchUnit[]) => {
@@ -335,12 +346,32 @@ const BreedingPolicyPanel = ({
         <span className="text-sm font-semibold text-dark-200">Ce que fait la politique</span>
         <span className="text-xs text-dark-500">un geste à la fois, dans l&apos;ordre du jeu</span>
         {fill && (
-          <span className="ml-auto text-[11px] text-dark-500 tabular-nums">
+          <span
+            data-testid="policy-summary"
+            className="ml-auto text-[11px] text-dark-500 tabular-nums"
+          >
             {fill.raw.crossings.length} accouplement{fill.raw.crossings.length > 1 ? 's' : ''} ·{' '}
             {fill.places}/{fill.capacity} places
           </span>
         )}
       </div>
+
+      {/* Ce que la politique **ne voit pas**, dit en toutes lettres.
+          Les montures verrouillées sont retirées de tous les arbitrages — le jeu
+          ne les laisse ni s'accoupler ni se faire cloner tant que leur cycle
+          tourne — mais « Mes stocks » continue de les compter, à juste titre :
+          elles sont toujours à vous. Sans cette ligne, les deux décomptes se
+          contredisent en silence, et un écran qui se contredit sans le dire est
+          exactement ce qu'on vient de corriger ailleurs. */}
+      {penned > 0 && (
+        <p data-testid="penned-notice" className="text-[11px] text-dark-500">
+          <strong className="text-dark-300 tabular-nums">{penned}</strong>
+          {penned > 1 ? ' montures en enclos, mises' : ' monture en enclos, mise'} de côté : le
+          jeu ne {penned > 1 ? 'les' : 'la'} laissera ni s&apos;accoupler, ni se faire cloner, ni
+          se faire sacrifier tant que le cycle tourne.{' '}
+          {penned > 1 ? 'Elles reviennent' : 'Elle revient'} à la sortie d&apos;enclos.
+        </p>
+      )}
 
       {/* Les quatre gestes. Un onglet vide reste cliquable et le dit : la liste
           des stériles a de la valeur même quand la politique ne propose rien. */}

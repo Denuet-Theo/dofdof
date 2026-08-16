@@ -1,4 +1,5 @@
-import type { Sex } from '@/lib/dofus/breeding/stable';
+import { cycledOf, type Sex, type Stable } from '@/lib/dofus/breeding/stable';
+import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 
 /**
  * La fournée en cours : ce qui est **dans les enclos**, et non ce que la
@@ -141,4 +142,87 @@ export const unitsOf = (pens: BatchPen[]): BatchUnit[] => {
   const byId = new Map<string, BatchUnit>();
   for (const pen of pens) for (const unit of pen.units) byId.set(unit.id, unit);
   return [...byId.values()];
+};
+
+/**
+ * Les montures **physiquement en enclos** : celles des enclos refermés.
+ *
+ * Un enclos non verrouillé n'est qu'une proposition — ses montures sont encore
+ * au coffre, donc disponibles. Seul le verrou dit « celles-ci sont dans le jeu,
+ * en train de payer leur cycle ».
+ */
+export const pennedUnits = (pens: BatchPen[]): BatchUnit[] => unitsOf(lockedPens(pens));
+
+/**
+ * L'écurie **sans** ce qui est en enclos.
+ *
+ * ## Pourquoi la politique doit la voir ainsi
+ *
+ * Une monture en enclos est indisponible, au sens le plus concret : le jeu ne
+ * la laissera ni s'accoupler, ni se faire cloner, ni se faire sacrifier tant que
+ * son cycle tourne. Or l'écurie enregistrée la décrit toujours comme fertile et
+ * non féconde — c'est la vérité de la base, et elle le restera jusqu'à la sortie
+ * d'enclos, qui est le seul moment où l'on connaît son niveau.
+ *
+ * Sans ce retrait, la politique la comptait donc deux fois : une fois dans
+ * l'enclos où elle est, une fois dans les gestes qu'elle proposait à côté. Un
+ * éleveur qui verrouillait cinq enclos se voyait proposer d'accoupler dans la
+ * foulée les cinquante montures qu'il venait d'y enfermer — et les cherchait
+ * dans un coffre où elles n'étaient plus.
+ *
+ * ## Ce que ça ne fait pas
+ *
+ * L'écurie **affichée** n'est pas touchée : ces montures sont toujours à vous,
+ * et « Mes stocks » doit continuer de les compter. Seule l'entrée des
+ * arbitrages est amputée — c'est la différence entre « ce que je possède » et
+ * « ce dont je dispose maintenant ».
+ *
+ * Les montures que le plan se **procure** n'y changent rien : elles ne sont dans
+ * aucune écurie avant leur sortie d'enclos, donc il n'y a rien à en retirer.
+ */
+export const withoutPenned = (stable: Stable, pens: BatchPen[]): Stable => {
+  const penned = pennedUnits(pens);
+  if (penned.length === 0) return stable;
+
+  const trackedOut = new Set<string>();
+  /** Le vrac retiré, par couleur et par sexe : il n'a pas de ligne à soi. */
+  const bulkOut = new Map<string, { males: number; females: number }>();
+
+  for (const unit of penned) {
+    const counted = parseCountedMountId(unit.id);
+    if (counted === null) {
+      trackedOut.add(unit.id);
+      continue;
+    }
+    // Une monture à procurer n'était nulle part : rien à retirer d'un compteur
+    // qui ne l'a jamais portée.
+    if (counted.acquired) continue;
+    const out = bulkOut.get(counted.colorId) ?? { males: 0, females: 0 };
+    if (counted.sex === 'M') out.males += 1;
+    else out.females += 1;
+    bulkOut.set(counted.colorId, out);
+  }
+
+  const bulk = new Map([...stable.bulk].map(([id, counts]) => [id, { ...counts }]));
+  for (const [colorId, out] of bulkOut) {
+    const current = bulk.get(colorId);
+    if (!current) continue;
+    const banked = cycledOf(current);
+    const males = Math.max(0, current.males - out.males);
+    const females = Math.max(0, current.females - out.females);
+    bulk.set(colorId, {
+      males,
+      females,
+      // Une féconde ne passe pas par l'enclos : ce qui en sort n'était pas
+      // compté là. Le nombre de fécondes ne baisse donc pas, il se reborne
+      // seulement au nouvel effectif — même règle que `recordEnclosExit`.
+      cycledMales: Math.min(males, banked.males),
+      cycledFemales: Math.min(females, banked.females),
+    });
+  }
+
+  return {
+    bulk,
+    individuals: stable.individuals.filter((mount) => !trackedOut.has(mount.id)),
+  };
 };

@@ -10,6 +10,28 @@ import { isSterile, type Individual, type Sex, type Stable } from './stable';
  * conserve la couleur, le genre, le nom et la généalogie de l'originale ; seules
  * les jauges repartent à zéro.
  *
+ * ## La règle qui prime sur tout le reste : on ne perd jamais une génération
+ *
+ * Le tirage est celui du **jeu**, pas de l'éleveur. Apparier une monture qui
+ * porte une gén. 3 avec une qui porte une gén. 1, c'est donc perdre la gén. 3
+ * une fois sur deux — et il n'y a aucun geste pour l'en empêcher une fois les
+ * deux montures engagées.
+ *
+ * On n'apparie donc **que des ascendances de même génération portée**. Ce qui
+ * reste dépareillé n'est pas proposé du tout : il va à l'extraction, où il ne
+ * vaut que son ambre, ce qui est très inférieur — mais un pile ou face sur une
+ * lignée n'est pas un arbitrage, c'est une perte à moitié du temps, et
+ * l'espérance ne console pas d'une gén. 4 disparue.
+ *
+ * Cette règle a coûté deux détours avant d'être posée au bon endroit. Elle a
+ * d'abord été un **bouton désactivé** dans la fenêtre de saisie, puis un **refus
+ * au point d'écriture**. Les deux supposaient que l'éleveur choisit la
+ * survivante. Il ne choisit pas : il **constate**. Un garde à la saisie
+ * l'empêchait donc d'enregistrer ce que le jeu venait de lui rendre, c'est-à-dire
+ * de faire mentir l'écurie sur son propre contenu — pendant que la paire, elle,
+ * continuait d'être proposée. Les deux sont retirés, et la règle vit ici, à
+ * l'appariement, seul endroit où elle protège quelque chose.
+ *
  * Trois conséquences, et c'est la troisième qui décide.
  *
  * ## 1. Une stérile ne vaut rien jusqu'à ce qu'on la clone
@@ -198,11 +220,25 @@ export const cloneOptions = (
   context: CloneContext,
   limit = 10
 ): CloneOption[] => {
-  const byGeneration = new Map<number, SterileMount[]>();
+  /**
+   * Deux clés, et il faut les deux.
+   *
+   * La **génération affichée** est la contrainte du jeu : il refuse d'apparier
+   * au-delà. La **génération portée** est la nôtre : le tirage étant celui du
+   * jeu, apparier une porteuse de gén. 3 à une porteuse de gén. 1 perd la gén. 3
+   * une fois sur deux, et rien ne peut le rattraper une fois les deux montures
+   * engagées. Voir l'en-tête.
+   *
+   * Ce qui n'a pas de partenaire à génération portée égale n'est donc pas
+   * proposé. Ce n'est pas un oubli : c'est le refus d'un pile ou face sur une
+   * lignée.
+   */
+  const byGeneration = new Map<string, SterileMount[]>();
   for (const mount of sterileMounts(stable, context)) {
-    const group = byGeneration.get(mount.generation) ?? [];
+    const key = `${mount.generation}|${mount.carried}`;
+    const group = byGeneration.get(key) ?? [];
     group.push(mount);
-    byGeneration.set(mount.generation, group);
+    byGeneration.set(key, group);
   }
 
   const options: CloneOption[] = [];

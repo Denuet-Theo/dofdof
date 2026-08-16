@@ -1672,59 +1672,20 @@ export const useBreeding = (
       if (entries.length === 0) return { ok: true as const };
       const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
 
-      /**
-       * **On ne perd jamais une génération dans un clonage.** Vérifié ici, au
-       * point d'écriture, et pas seulement sur le bouton.
-       *
-       * Le jeu apparie à génération **affichée** égale, mais c'est l'ascendance
-       * qui décide de ce qu'une monture permet ensuite : deux gen 1 côte à côte
-       * peuvent porter l'une un 1, l'autre un 2. Le clonage consomme les deux,
-       * donc garder celle qui porte le 1 détruit le 2 — définitivement, et sans
-       * contrepartie.
-       *
-       * La fenêtre désactive déjà ce bouton-là, et ça ne suffit pas. Un garde
-       * d'interface protège l'écran qui le porte, pas l'invariant : il tombe sur
-       * un rendu en retard, sur un double-clic pendant que le lot se recalcule,
-       * et il ne dit rien du prochain appelant de `recordClonings`. Or ce qu'on
-       * défend ici est irréversible — deux montures détruites, la lignée avec.
-       * C'est exactement la forme que `AGENTS.md` décrit : quand un mécanisme
-       * peut rendre la classe irreprésentable, il vaut mieux que trente points
-       * d'appel corrects qu'un trente-et-unième ne suivra pas.
-       *
-       * Le refus est **total** : aucune entrée du lot n'est écrite. Écrire les
-       * bonnes et taire la mauvaise laisserait l'éleveur devant un compte juste
-       * et une lignée manquante, ce qui est précisément le mode d'échec que
-       * `write-failures` existe pour empêcher.
-       */
-      const carriedOf = (mount: Individual) =>
-        carriedGeneration(
-          colorIndex.generations.get(mount.colorId) ?? 1,
-          mount.parents
-            ? [
-                colorIndex.generations.get(mount.parents[0]) ?? 1,
-                colorIndex.generations.get(mount.parents[1]) ?? 1,
-              ]
-            : null
-        );
+      /* Un refus d'écriture vivait ici : il rejetait le lot quand la monture
+         gardée portait moins que celle qui part. Il était faux, et il faut dire
+         pourquoi plutôt que de le retirer en silence.
 
-      for (const entry of entries) {
-        const keep = byId.get(entry.keep);
-        const drop = byId.get(entry.drop);
-        // Une monture inconnue n'est pas jugée ici : l'insertion s'en chargera,
-        // et refuser sur une lecture locale en retard serait un faux positif.
-        if (!keep || !drop) continue;
+         Il supposait que l'éleveur **choisit** la survivante. Le jeu la tire au
+         hasard. Ce que cette fonction reçoit n'est donc pas une décision qu'on
+         peut refuser, c'est un **constat** — et refuser de l'écrire n'annulait
+         aucun clonage : les deux montures étaient déjà consommées en jeu.
+         L'unique effet était d'empêcher l'écurie de dire ce qu'elle contenait,
+         exactement le jour où elle venait de perdre une lignée.
 
-        const kept = carriedOf(keep);
-        const lost = carriedOf(drop);
-        if (kept >= lost) continue;
-
-        const message =
-          `Clonage refusé : la monture gardée porte une génération ${kept}, celle qui part ` +
-          `une ${lost}. Le clonage consomme les deux, donc ce geste détruirait la génération ` +
-          `${lost} pour de bon. Garde l’autre.`;
-        console.error('[breeding] clonage destructeur refusé:', { entry, kept, lost });
-        return { ok: false as const, message };
-      }
+         La règle est remontée à l'appariement, seul endroit où elle protège :
+         `cloneOptions` et `cloningsToRecord` n'apparient plus que des
+         ascendances de même génération portée. Voir `cloning.ts`. */
 
       const kept = entries
         .map((entry) => byId.get(entry.keep))
@@ -1806,7 +1767,7 @@ export const useBreeding = (
 
       return { ok: true as const };
     },
-    [family, stable.individuals, load, colorIndex]
+    [family, stable.individuals, load]
   );
 
   const removeIndividual = useCallback(

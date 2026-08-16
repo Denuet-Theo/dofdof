@@ -1639,6 +1639,61 @@ export const useBreeding = (
     async (entries: { keep: string; drop: string }[]): Promise<CloningResult> => {
       if (entries.length === 0) return { ok: true as const };
       const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+
+      /**
+       * **On ne perd jamais une génération dans un clonage.** Vérifié ici, au
+       * point d'écriture, et pas seulement sur le bouton.
+       *
+       * Le jeu apparie à génération **affichée** égale, mais c'est l'ascendance
+       * qui décide de ce qu'une monture permet ensuite : deux gen 1 côte à côte
+       * peuvent porter l'une un 1, l'autre un 2. Le clonage consomme les deux,
+       * donc garder celle qui porte le 1 détruit le 2 — définitivement, et sans
+       * contrepartie.
+       *
+       * La fenêtre désactive déjà ce bouton-là, et ça ne suffit pas. Un garde
+       * d'interface protège l'écran qui le porte, pas l'invariant : il tombe sur
+       * un rendu en retard, sur un double-clic pendant que le lot se recalcule,
+       * et il ne dit rien du prochain appelant de `recordClonings`. Or ce qu'on
+       * défend ici est irréversible — deux montures détruites, la lignée avec.
+       * C'est exactement la forme que `AGENTS.md` décrit : quand un mécanisme
+       * peut rendre la classe irreprésentable, il vaut mieux que trente points
+       * d'appel corrects qu'un trente-et-unième ne suivra pas.
+       *
+       * Le refus est **total** : aucune entrée du lot n'est écrite. Écrire les
+       * bonnes et taire la mauvaise laisserait l'éleveur devant un compte juste
+       * et une lignée manquante, ce qui est précisément le mode d'échec que
+       * `write-failures` existe pour empêcher.
+       */
+      const carriedOf = (mount: Individual) =>
+        carriedGeneration(
+          colorIndex.generations.get(mount.colorId) ?? 1,
+          mount.parents
+            ? [
+                colorIndex.generations.get(mount.parents[0]) ?? 1,
+                colorIndex.generations.get(mount.parents[1]) ?? 1,
+              ]
+            : null
+        );
+
+      for (const entry of entries) {
+        const keep = byId.get(entry.keep);
+        const drop = byId.get(entry.drop);
+        // Une monture inconnue n'est pas jugée ici : l'insertion s'en chargera,
+        // et refuser sur une lecture locale en retard serait un faux positif.
+        if (!keep || !drop) continue;
+
+        const kept = carriedOf(keep);
+        const lost = carriedOf(drop);
+        if (kept >= lost) continue;
+
+        const message =
+          `Clonage refusé : la monture gardée porte une génération ${kept}, celle qui part ` +
+          `une ${lost}. Le clonage consomme les deux, donc ce geste détruirait la génération ` +
+          `${lost} pour de bon. Garde l’autre.`;
+        console.error('[breeding] clonage destructeur refusé:', { entry, kept, lost });
+        return { ok: false as const, message };
+      }
+
       const kept = entries
         .map((entry) => byId.get(entry.keep))
         .filter((mount): mount is Individual => mount !== undefined);
@@ -1719,7 +1774,7 @@ export const useBreeding = (
 
       return { ok: true as const };
     },
-    [family, stable.individuals, load]
+    [family, stable.individuals, load, colorIndex]
   );
 
   const removeIndividual = useCallback(

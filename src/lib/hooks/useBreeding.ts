@@ -1513,6 +1513,23 @@ export const useBreeding = (
       //    quand même, fort, parce que « visible plus tard » n'est pas
       //    « visible ».
       let partial = false;
+
+      /*
+       * Ici se referme la boucle des anonymes stériles, et ce n'est **pas**
+       * corrigé : un parent anonyme consommé devient une anonyme stérile, que
+       * l'écurie propose ensuite de retirer. Chaque fournée en refabrique.
+       *
+       * Le geste juste serait de le supprimer plutôt que de le stériliser — il
+       * ne peut plus rien, et sans nom il n'y a rien à préserver. Ce qui manque
+       * est l'annulation : `ConsumedParent` ne porte que `{ id, fertile, cycled }`,
+       * donc `undoBirth` remet un état par `update`, et un `update` sur une ligne
+       * supprimée ne trouve rien **sans erreur**. Annuler une naissance perdrait
+       * le parent, en silence, sur le chemin d'écriture qui a déjà coûté 22
+       * montures.
+       *
+       * Le faire proprement demande d'élargir `ConsumedParent` à la monture
+       * entière et de réinsérer à l'annulation. C'est un changement à part.
+       */
       if (steriles.size > 0) {
         const { error: sterileError } = await supabase
           .from('user_breeding_individuals')
@@ -1770,6 +1787,52 @@ export const useBreeding = (
     [family, stable.individuals, load]
   );
 
+  /**
+   * Retire un lot de montures en **une** écriture.
+   *
+   * Boucler sur `removeIndividual` marcherait, et c'est précisément ce qu'il ne
+   * faut pas faire ici : soixante-dix suppressions, c'est soixante-dix allers
+   * -retours dont chacun peut être refusé séparément, donc un état final que
+   * personne ne peut décrire — ni « fait », ni « pas fait ». Un `.in()` échoue
+   * ou passe en bloc.
+   *
+   * Même forme que le retrait unitaire pour le reste : on enlève de l'écran
+   * d'abord, on remet tout si la base refuse, et le refus se dit. Une
+   * suppression refusée qui laisse l'écran vide est une monture ressuscitée au
+   * rechargement suivant, sans que rien n'ait prévenu.
+   */
+  const removeIndividuals = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const gone = new Set(ids);
+      const removed = stable.individuals.filter((mount) => gone.has(mount.id));
+      if (removed.length === 0) return;
+
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.filter((mount) => !gone.has(mount.id)),
+      }));
+
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from('user_breeding_individuals')
+        .delete()
+        .in('id', ids);
+
+      if (saveError) {
+        reportWriteFailure(
+          `le retrait de ${removed.length} monture${removed.length > 1 ? 's' : ''} de l’écurie`,
+          saveError
+        );
+        setStable((current) => ({
+          ...current,
+          individuals: [...current.individuals, ...removed],
+        }));
+      }
+    },
+    [stable.individuals]
+  );
+
   const removeIndividual = useCallback(
     async (id: string) => {
       // Ce qu'on retire de l'écran, gardé de côté : une suppression refusée
@@ -1917,6 +1980,7 @@ export const useBreeding = (
     updateIndividual,
     recordEnclosExit,
     removeIndividual,
+    removeIndividuals,
     recordBirths,
     undoBirth,
     recordClonings,

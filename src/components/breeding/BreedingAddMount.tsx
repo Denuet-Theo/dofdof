@@ -421,21 +421,37 @@ const BreedingAddMount = ({ isOpen, onClose, colors, onAdd }: Props) => {
             <div className="space-y-1.5">
               <span className="text-xs text-dark-400 block">État</span>
               <div className="flex flex-wrap gap-2">
-                {(['fertile', 'feconde', 'sterile'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setStatus(value)}
-                    title={STATUS_HINT[value]}
-                    className={`px-3 py-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
-                      status === value
-                        ? 'bg-kamas/15 border-kamas/40 text-kamas'
-                        : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
-                    }`}
-                  >
-                    {MOUNT_STATUS_LABEL[value]}
-                  </button>
-                ))}
+                {(['fertile', 'feconde', 'sterile'] as const).map((value) => {
+                  /* Sans ascendance, il n'y a pas de nom — et une anonyme
+                     stérile ne peut rien : le jeu n'extrait pas les gen 1, et le
+                     clonage ne prend pas ce qu'on ne sait pas désigner devant
+                     son écurie. Même règle qu'à l'import et qu'à « Mes stocks »,
+                     parce que ce sont trois portes sur la même table. */
+                  const impossible = value === 'sterile' && !parentPair;
+
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={impossible}
+                      onClick={() => !impossible && setStatus(value)}
+                      title={
+                        impossible
+                          ? 'Une monture sans ascendance ne peut pas être stérile : c’est une gen 1, que le jeu n’extrait pas et que le clonage ne sait pas désigner. Donne-lui ses deux parents, ou choisis un autre état.'
+                          : STATUS_HINT[value]
+                      }
+                      className={`px-3 py-1.5 rounded-xl border text-xs transition-all ${
+                        impossible ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+                      } ${
+                        status === value
+                          ? 'bg-kamas/15 border-kamas/40 text-kamas'
+                          : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+                      }`}
+                    >
+                      {MOUNT_STATUS_LABEL[value]}
+                    </button>
+                  );
+                })}
               </div>
               <p className="text-[10px] text-dark-600">{STATUS_HINT[status]}</p>
             </div>

@@ -94,6 +94,7 @@ const BreedingPage = () => {
     updateIndividual,
     recordEnclosExit,
     removeIndividual,
+    removeIndividuals,
     recordBirths,
     undoBirth,
     recordClonings,
@@ -507,6 +508,9 @@ const BreedingPage = () => {
         onAddIndividual={addIndividual}
         onUpdateIndividual={updateIndividual}
         onRemoveIndividual={removeIndividual}
+        // Le purge des anonymes stériles part en une écriture : soixante-dix
+        // suppressions séparées laisseraient un état que personne ne peut dire.
+        onRemoveIndividuals={removeIndividuals}
         onSaveItem={saveItemStock}
         onSaveSettings={saveSettings}
         // Les prix de couleurs et la quantité visée, relogés ici depuis « Couleur

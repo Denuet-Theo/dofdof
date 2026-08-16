@@ -53,8 +53,10 @@ import type { AddResult } from '@/lib/hooks/useBreeding';
  * D'où `EB M anon`, avec un `×12` facultatif : le code de couleur, le sexe, et
  * la déclaration explicite qu'il n'y a pas d'ascendance. Réservé aux **gen 1**,
  * parce qu'au-delà une monture est née chez soi et porte forcément des parents,
- * et aux états **féconde et stérile**, parce que la fertile a déjà sa porte au
- * compteur de vrac et que l'importer en individu la compterait deux fois.
+ * et au seul état **féconde** : la fertile a déjà sa porte au compteur de vrac
+ * et l'importer en individu la compterait deux fois, et la stérile n'existe pas
+ * — sans ascendance elle ne s'extrait ni ne se clone, elle ne fait que gonfler
+ * le compte. Voir `ANONYMOUS_STATUSES`.
  *
  * ## Pourquoi une prévisualisation, et pas un simple bouton
  *
@@ -225,20 +227,35 @@ const readExtras = (raw: string): LineExtras => {
 };
 
 /**
- * Les états dans lesquels une gen 1 sans ascendance mérite sa propre ligne.
+ * Le seul état dans lequel une gen 1 sans ascendance mérite sa propre ligne.
  *
  * Une gen 1 **fertile** sans ascendance est exactement ce que le vrac
  * représente — c'est son compteur, dans « Mon écurie », et l'importer en
- * individu la compterait deux fois. Les deux autres n'ont pas cette porte :
+ * individu la compterait deux fois. La **féconde** n'a pas cette porte :
  * `onSaveBulk` n'écrit que `males` et `females`, si bien qu'aucun écran ne sait
- * dire « féconde » au vrac, et la table `user_breeding_mounts` ne sait pas dire
- * « stérile » du tout — voir l'en-tête de `roster.ts` sur ce trou-là.
+ * le dire au vrac. Le suivi individuel est donc la seule façon de l'enregistrer,
+ * et c'est la seule raison pour laquelle on l'ouvre à une génération qui,
+ * autrement, n'a rien à y faire.
  *
- * D'où la règle : le suivi individuel est la seule façon d'enregistrer ces
- * deux-là, et c'est la seule raison pour laquelle on l'ouvre à une génération
- * qui, autrement, n'a rien à y faire.
+ * ## La stérile en sortait, et n'aurait jamais dû y entrer
+ *
+ * Elle y était pour la même raison — `user_breeding_mounts` ne sait pas dire
+ * « stérile » non plus. Mais l'argument s'arrête là où celui de la féconde
+ * continue : une féconde anonyme **sert**, elle entre dans une fournée. Une
+ * stérile anonyme ne peut rien. Sans nom il n'y a pas d'ascendance, donc c'est
+ * une gen 1 : le jeu ne l'extrait pas, et le clonage ne prend pas ce qu'on ne
+ * sait pas désigner devant son écurie.
+ *
+ * Ce n'est donc pas une monture qu'on aurait oublié de nommer, c'est un reste —
+ * et il gonfle le seul chiffre que l'éleveur compare au jeu. L'écurie en a porté
+ * **cinquante-sept d'un coup**, 255 contre 198 au recensement du 16/08.
+ *
+ * Une ligne `EB M anon stérile` est donc refusée, et le dit. La refuser plutôt
+ * que la convertir en féconde est délibéré : l'import recopie ce que le jeu
+ * affiche, et corriger une lecture en silence est exactement ce qui fait
+ * diverger les deux écuries.
  */
-const ANONYMOUS_STATUSES: MountStatus[] = ['feconde', 'sterile'];
+const ANONYMOUS_STATUSES: MountStatus[] = ['feconde'];
 
 const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const [text, setText] = useState('');
@@ -372,10 +389,16 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
               ok: false,
               line,
               raw,
+              // Deux refus, deux raisons — et les confondre laisserait croire
+              // qu'une anonyme stérile a une porte ailleurs. Elle n'en a aucune.
               problem:
-                'Une gen 1 fertile sans ascendance, c’est du vrac : compte-la au compteur de ' +
-                '« Mon écurie ». Seules les fécondes et les stériles, que le vrac ne sait pas ' +
-                'dire, s’importent une par une.',
+                lineStatus === 'sterile'
+                  ? 'Une anonyme ne peut pas être stérile : sans ascendance c’est une gen 1, ' +
+                    'que le jeu n’extrait pas et que le clonage ne sait pas désigner. Elle ne ' +
+                    'sert à rien et fausse le compte de l’écurie — ne l’importe pas.'
+                  : 'Une gen 1 fertile sans ascendance, c’est du vrac : compte-la au compteur ' +
+                    'de « Mon écurie ». Seule la féconde, que le vrac ne sait pas dire, ' +
+                    's’importe une par une.',
             };
           }
 

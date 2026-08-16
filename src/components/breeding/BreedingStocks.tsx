@@ -104,6 +104,8 @@ type Props = {
     patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
   ) => Promise<void>;
   onRemoveIndividual: (id: string) => Promise<void>;
+  /** Retire un lot en une écriture — le purge des anonymes stériles s'en sert. */
+  onRemoveIndividuals?: (ids: string[]) => Promise<void>;
   onSaveItem: (itemId: number, quantity: number) => Promise<void>;
   onSaveSettings: (next: Settings) => Promise<boolean>;
   /**
@@ -273,6 +275,7 @@ const BreedingStocks = ({
   onAddIndividual,
   onUpdateIndividual,
   onRemoveIndividual,
+  onRemoveIndividuals,
   onSaveItem,
   onSaveSettings,
   rows,
@@ -382,6 +385,30 @@ const BreedingStocks = ({
   const roster = useMemo(
     () => rosterOf({ bulk, individuals }, generationOfColor),
     [bulk, individuals, generationOfColor]
+  );
+
+  /**
+   * Les anonymes stériles, un état que le jeu ne rend pas.
+   *
+   * Une monture est anonyme parce qu'elle n'a **pas d'ascendance** à porter :
+   * achetée ou capturée, donc gen 1. Or une gen 1 fertile sans ascendance
+   * appartient au compteur de vrac, pas aux montures suivies — il ne reste donc,
+   * parmi les anonymes individuelles, que la **féconde**. La stérile, elle, ne
+   * peut rien : le jeu n'extrait pas les gen 1, et le clonage ne prend pas les
+   * anonymes, qui ne se désignent pas dans l'écurie du jeu.
+   *
+   * Ce ne sont pas des montures, ce sont des restes. L'écurie en a déjà porté
+   * cinquante-sept d'un coup — les « fantômes gen 1 » du recensement du 16/08,
+   * qui affichaient 255 là où le jeu en comptait 198. Un écart de cette taille
+   * sur le seul chiffre que l'éleveur compare au jeu ne se rattrape pas au
+   * jugé.
+   *
+   * On les compte, et on les retire d'un geste. Pas en silence : c'est une
+   * suppression, elle s'annonce avec son nombre.
+   */
+  const phantoms = useMemo(
+    () => individuals.filter((mount) => mount.name === null && !mount.fertile),
+    [individuals]
   );
 
   const owned = useMemo(() => {
@@ -667,6 +694,35 @@ const BreedingStocks = ({
               stérile est hors jeu — il ne lui reste que le clonage.
             </p>
 
+            {/* Les restes, comptés et retirables d'un geste. Voir `phantoms` :
+                une anonyme stérile n'est pas une monture qu'on aurait oublié de
+                nommer, c'est un état que le jeu ne rend pas. */}
+            {phantoms.length > 0 && onRemoveIndividuals && (
+              <div
+                data-testid="phantom-notice"
+                className="flex flex-wrap items-center gap-2 mb-2 px-3 py-2 rounded-xl
+                  bg-loss/10 border border-loss/30"
+              >
+                <span className="text-[11px] text-dark-300">
+                  <strong className="text-loss-light">{phantoms.length}</strong> anonyme
+                  {phantoms.length > 1 ? 's' : ''} stérile{phantoms.length > 1 ? 's' : ''}
+                  {' — '}un état que le jeu ne rend pas. Sans nom il n&apos;y a pas d&apos;ascendance,
+                  donc c&apos;est une gen 1 : elle ne s&apos;extrait pas, et le clonage ne
+                  prend pas ce qu&apos;on ne sait pas désigner en jeu.
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ml-auto"
+                  onClick={() => onRemoveIndividuals(phantoms.map((mount) => mount.id))}
+                  title="Suppression définitive, en une écriture. Le compte de l’écurie baisse d’autant — c’est le but : il ne compte plus ce que le jeu n’a pas."
+                >
+                  <Trash2 size={13} />
+                  Retirer {phantoms.length === 1 ? 'la' : 'les'} {phantoms.length}
+                </Button>
+              </div>
+            )}
+
             {/* Les mêmes facettes que dans le jeu, aux mêmes intitulés et dans le
                 même ordre : c'est ce qui permet de poser les deux écrans côte à
                 côte et de voir **où** un écart se loge. Voir `roster.ts`. */}
@@ -688,6 +744,10 @@ const BreedingStocks = ({
                 return (
                   <div
                     key={mount.id}
+                    data-testid="stock-mount"
+                    /* Sans nom, pas d'ascendance — donc les états possibles ne
+                       sont pas les mêmes, et ça se vérifie. Voir `phantoms`. */
+                    data-anonymous={mount.name === null}
                     className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
                       bg-dark-800/40 hover:bg-dark-800/60 transition-colors"
                   >
@@ -730,22 +790,38 @@ const BreedingStocks = ({
                         décocher ne pouvait pas dire qu'une monture porte, or
                         c'est exactement ce qui interdit de la cloner. */}
                     <span className="flex items-center gap-1">
-                      {(['fertile', 'feconde', 'sterile'] as const).map((value) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => onUpdateIndividual(mount.id, statusFlags(value))}
-                          title={STATUS_HINT[value]}
-                          className={`px-1.5 py-0.5 rounded-lg border text-[10px] transition-all
-                            cursor-pointer ${
-                              status === value
-                                ? STATUS_TONE
-                                : 'bg-dark-800/60 border-dark-700/50 text-dark-500 hover:text-dark-300'
-                            }`}
-                        >
-                          {MOUNT_STATUS_LABEL[value]}
-                        </button>
-                      ))}
+                      {(['fertile', 'feconde', 'sterile'] as const).map((value) => {
+                        /* Une anonyme ne peut pas être stérile, et le bouton le
+                           dit plutôt que de laisser fabriquer l'état qu'on vient
+                           de purger. Sans nom il n'y a pas d'ascendance, donc
+                           c'est une gen 1 : ni extractible, ni clonable, et
+                           l'écurie du jeu n'en porte pas. Voir `phantoms`. */
+                        const impossible = value === 'sterile' && mount.name === null;
+
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            disabled={impossible}
+                            onClick={() =>
+                              !impossible && onUpdateIndividual(mount.id, statusFlags(value))
+                            }
+                            title={
+                              impossible
+                                ? 'Une anonyme ne peut pas être stérile : sans ascendance c’est une gen 1, que le jeu n’extrait pas et que le clonage ne sait pas désigner. Nomme-la, ou retire-la.'
+                                : STATUS_HINT[value]
+                            }
+                            className={`px-1.5 py-0.5 rounded-lg border text-[10px] transition-all
+                              ${impossible ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${
+                                status === value
+                                  ? STATUS_TONE
+                                  : 'bg-dark-800/60 border-dark-700/50 text-dark-500 hover:text-dark-300'
+                              }`}
+                          >
+                            {MOUNT_STATUS_LABEL[value]}
+                          </button>
+                        );
+                      })}
                     </span>
 
                     {/* Le nom porté en jeu, et le nom attendu quand ils

@@ -35,6 +35,21 @@ import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
  * lignes sur quarante est supportable, ressaisir quarante lignes ne l'est pas —
  * et un raccourci pour poser le même niveau à tout le lot, parce qu'une fournée
  * chargée ensemble en ressort le plus souvent à la même hauteur.
+ *
+ * ## Deux sorties, parce qu'un enclos ne tourne pas toujours
+ *
+ * La fenêtre n'offrait qu'une issue : **féconde**. Or on ne referme pas toujours
+ * un enclos pour le faire tourner. On se trompe d'enclos, on verrouille avant
+ * d'avoir fini de le remplir, on décide finalement de vendre les montures qu'on
+ * s'apprêtait à croiser — et dans ces cas-là il n'y a pas de cycle payé. Passer
+ * le lot en fécondes serait alors un mensonge coûteux : la politique
+ * s'accouplerait sans repasser par l'enclos, sur des montures qui doivent encore
+ * leur cycle, et le jeu refuserait le croisement devant l'éleveur.
+ *
+ * D'où la seconde issue, **fertile** : le lot ressort exactement comme il est
+ * entré, rien n'est écrit sur les montures, et l'enclos disparaît simplement de
+ * la fournée. C'est l'annulation, et elle ne demande aucun niveau — il n'y a rien
+ * à relever d'un cycle qui n'a pas eu lieu.
  */
 
 type Props = {
@@ -46,6 +61,14 @@ type Props = {
   nameOf: (colorId: string) => string;
   /** Écrit les niveaux et passe tout le lot en fécondes. Rend le compte écrit. */
   onConfirm: (entries: { id: string; level: number }[]) => Promise<number>;
+  /**
+   * Rend le lot **fertile** : l'enclos n'a pas tourné, il n'y a rien à écrire.
+   *
+   * Absent, la fenêtre n'offre que la sortie en fécondes — l'ancien
+   * comportement, qui reste juste partout où l'appelant ne sait pas défaire un
+   * chargement.
+   */
+  onRelease?: () => Promise<void>;
 };
 
 const BreedingEnclosExitDialog = ({
@@ -55,6 +78,7 @@ const BreedingEnclosExitDialog = ({
   colors,
   nameOf,
   onConfirm,
+  onRelease,
 }: Props) => {
   /**
    * Le brouillon de saisie, rattaché au lot qu'il décrit.
@@ -171,11 +195,20 @@ const BreedingEnclosExitDialog = ({
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
       <div className="space-y-4">
         <p className="text-[11px] text-dark-500">
-          Elles en sortent <strong className="text-gain">fécondes</strong> : leur cycle est
-          payé, elles s&apos;accoupleront sans repasser par l&apos;enclos. Le niveau, lui, a
-          monté pendant le cycle et rien d&apos;autre ne le dira — c&apos;est lui qui décide du
-          taux de réussite des croisements à venir.
+          L&apos;enclos a tourné : elles en sortent{' '}
+          <strong className="text-gain">fécondes</strong>, leur cycle est payé, elles
+          s&apos;accoupleront sans y repasser. Le niveau, lui, a monté pendant le cycle et rien
+          d&apos;autre ne le dira — c&apos;est lui qui décide du taux de réussite des croisements
+          à venir.
         </p>
+        {onRelease && (
+          <p className="text-[11px] text-dark-500">
+            L&apos;enclos <strong>n&apos;a pas</strong> tourné — mauvais enclos, verrouillé trop
+            tôt, fournée abandonnée ? Ressors-les{' '}
+            <strong className="text-dark-200">fertiles</strong> : rien n&apos;est écrit sur les
+            montures, elles redeviennent disponibles telles quelles.
+          </p>
+        )}
 
         {mounts.length > 1 && (
           <div className="flex flex-wrap items-center gap-2">
@@ -321,6 +354,7 @@ const BreedingEnclosExitDialog = ({
         >
           <Button
             size="sm"
+            data-testid="exit-cycled"
             disabled={running || mounts.length === 0 || missing.length > 0}
             onClick={async () => {
               setRunning(true);
@@ -335,8 +369,30 @@ const BreedingEnclosExitDialog = ({
             <LogOut size={13} />
             {running
               ? 'Enregistrement…'
-              : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''}`}
+              : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''} — fécondes`}
           </Button>
+
+          {/* L'annulation. En teinte secondaire et non en danger : ce n'est pas
+              une destruction — rien n'est écrit sur les montures — c'est
+              seulement l'aveu que cet enclos n'a pas tourné. Elle n'attend aucun
+              niveau, il n'y a rien à relever d'un cycle qui n'a pas eu lieu. */}
+          {onRelease && (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="exit-fertile"
+              disabled={running || mounts.length === 0}
+              onClick={async () => {
+                setRunning(true);
+                await onRelease();
+                setRunning(false);
+                onClose();
+              }}
+            >
+              Les remettre fertiles — l&apos;enclos n&apos;a pas tourné
+            </Button>
+          )}
+
           {missing.length > 0 && (
             <span className="text-[11px] text-loss-light">
               {missing.length} monture{missing.length > 1 ? 's' : ''} sans niveau — pose le niveau

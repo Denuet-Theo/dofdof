@@ -470,6 +470,23 @@ export type BreedingTimeline = {
 };
 
 /**
+ * La fournée en cours (migration 20260816120000) : ce qui est **dans les
+ * enclos**, et non ce que la politique proposerait maintenant.
+ *
+ * `pens` est du `jsonb` libre, comme `plan` l'est pour la timeline : la forme
+ * appartient à l'écran, et `lib/dofus/breeding/batch.ts` la valide à la lecture.
+ * Rien ici ne la garantit, et c'est assumé — le client lit la fournée entière ou
+ * rien.
+ */
+export type BreedingBatch = {
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  pens: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
  * Le vrac de l'écurie (migrations 20260804210000 puis 20260805120000) : les
  * générations 1 et 2, comptées **par sexe**. Ligne absente = zéro.
  *
@@ -644,6 +661,21 @@ export interface Database {
             string,
             { started_at: string; paused_at: string | null; paused_seconds: number }
           >;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      breeding_batch: {
+        Row: BreedingBatch;
+        Insert: {
+          user_id?: string;
+          family: BreedingBatch['family'];
+          pens: unknown;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          pens?: unknown;
           updated_at?: string;
         };
         Relationships: [];

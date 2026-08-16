@@ -82,24 +82,66 @@ let sequence = 0;
 const newId = () => `e2e00000-0000-0000-0000-${String(++sequence).padStart(12, '0')}`;
 
 /**
- * Les identifiants visés par un filtre PostgREST — `?id=eq.x` ou `?id=in.(a,b)`.
+ * Les colonnes qui ne sont pas des filtres de ligne.
  *
- * Les appliquer pour de vrai n'est pas un luxe : sans ça, une monture
- * stérilisée resterait fertile côté serveur, la relecture la reproposerait, et
- * le test verrait une fournée qui ne se vide jamais.
+ * PostgREST mêle dans la query les filtres (`id=eq.x`) et les options
+ * (`select`, `on_conflict`, `order`, la pagination). Les traiter comme des
+ * filtres ne rendrait jamais aucune ligne.
  */
-const targetedIds = (query: URLSearchParams): string[] => {
-  const filter = query.get('id');
-  if (!filter) return [];
-  if (filter.startsWith('in.')) {
-    return filter
-      .slice(3)
-      .replace(/^\(|\)$/g, '')
-      .split(',')
-      .map((value) => value.replace(/"/g, ''))
-      .filter(Boolean);
+const NOT_A_FILTER = new Set(['select', 'on_conflict', 'order', 'offset', 'limit', 'columns']);
+
+/**
+ * Le filtre PostgREST d'une requête, appliqué pour de vrai — `?id=eq.x`,
+ * `?id=in.(a,b)`, `?family=eq.muldo`.
+ *
+ * Il ne portait que sur `id`, et c'était un piège en attente. Toute écriture
+ * ciblée autrement — `.delete().eq('family', …)`, un `update` sur une clé
+ * composite — ne filtrait alors **rien** : le `DELETE` gardait toutes les
+ * lignes, le test passait au vert sur une suppression qui n'avait rien
+ * supprimé. Un faux serveur qui ignore un filtre ment exactement là où on lui
+ * demande de vérifier.
+ *
+ * Les appliquer n'est pas un luxe : sans ça, une monture stérilisée resterait
+ * fertile côté serveur, la relecture la reproposerait, et le test verrait une
+ * fournée qui ne se vide jamais.
+ */
+const matcher = (query: URLSearchParams, strict: boolean): ((row: Row) => boolean) => {
+  const tests: ((row: Row) => boolean)[] = [];
+
+  for (const [column, filter] of query.entries()) {
+    if (NOT_A_FILTER.has(column)) continue;
+
+    if (filter.startsWith('in.')) {
+      const values = filter
+        .slice(3)
+        .replace(/^\(|\)$/g, '')
+        .split(',')
+        .map((value) => value.replace(/"/g, ''))
+        .filter(Boolean);
+      tests.push((row) => values.includes(String(row[column])));
+      continue;
+    }
+    if (filter.startsWith('eq.')) {
+      const value = filter.slice(3);
+      tests.push((row) => String(row[column]) === value);
+      continue;
+    }
+    /**
+     * Un opérateur qu'on ne sait pas jouer.
+     *
+     * En **écriture**, c'est une erreur franche : le silence se traduirait par
+     * « toutes les lignes » ou « aucune », et les deux donnent un vert qui ne
+     * vaut rien sur un `PATCH` ou un `DELETE`. En lecture, on laisse passer —
+     * la fixture ne porte qu'une famille, une requête trop large y rend de toute
+     * façon les mêmes lignes, et c'est ce que ce faux serveur fait déjà pour les
+     * listes.
+     */
+    if (strict) throw new Error(`Filtre PostgREST non simulé : ${column}=${filter}`);
   }
-  return [filter.replace(/^eq\./, '')];
+
+  // Aucun filtre : la requête porte sur toute la table, ce que PostgREST fait
+  // aussi. Les `.delete()` sans filtre n'existent pas dans l'app.
+  return (row) => tests.every((test) => test(row));
 };
 
 export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
@@ -138,6 +180,7 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
     const method = route.request().method() as 'GET' | 'POST' | 'PATCH' | 'DELETE';
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    const match = matcher(url.searchParams, method !== 'GET');
 
     if (method === 'GET') {
       const rows = tables[table] ?? [];
@@ -145,12 +188,12 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
       // pleine à chaque appel la ferait tourner sans fin.
       const offset = Number(url.searchParams.get('offset') ?? 0);
       const paged = offset > 0 ? [] : rows;
-      // `.single()` attend un objet, pas un tableau : ces trois tables-là sont
-      // lues ainsi, et rendre `[]` ferait échouer la lecture au lieu de dire
-      // « aucune ligne ».
+      // `.single()` / `.maybeSingle()` attendent un objet, pas un tableau : ces
+      // tables-là sont lues ainsi, et rendre `[]` ferait échouer la lecture au
+      // lieu de dire « aucune ligne ».
       const single = ['user_breeding_settings', 'breeding_projects', 'breeding_timeline',
-        'user_breeding_availability'];
-      if (single.includes(table)) return json(rows[0] ?? null);
+        'user_breeding_availability', 'breeding_batch'];
+      if (single.includes(table)) return json(rows.find(match) ?? null);
       return json(paged);
     }
 
@@ -174,10 +217,26 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }));
-      // Upsert : une ligne qui existe déjà est remplacée, sinon elle s'ajoute.
+
+      /**
+       * La clé sur laquelle un `upsert` écrase.
+       *
+       * `id` ne vaut que pour les tables qui en ont une. Les autres — la
+       * fournée, le vrac, les réglages — sont sur une clé composite que
+       * `on_conflict` annonce, et les traiter par `id` ajoutait une ligne à
+       * chaque écriture au lieu de remplacer la précédente : la relecture
+       * rendait alors la **première**, donc l'état d'avant.
+       */
+      const conflict = url.searchParams.get('on_conflict')?.split(',') ?? ['id'];
+      // `user_id` vient du défaut SQL `auth.uid()`, il n'est pas dans le corps :
+      // les colonnes absentes des deux côtés ne départagent rien.
+      const keys = conflict.filter((column) => inserted.some((row) => column in row));
+      const sameRow = (a: Row, b: Row) =>
+        (keys.length > 0 ? keys : ['id']).every((column) => a[column] === b[column]);
+
       for (const row of inserted) {
-        const at = rows.findIndex((existing) => existing.id === row.id);
-        if (at >= 0) rows[at] = row;
+        const at = rows.findIndex((existing) => sameRow(existing, row));
+        if (at >= 0) rows[at] = { ...rows[at], ...row };
         else rows.push(row);
       }
       return json(inserted, 201);
@@ -185,14 +244,12 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
 
     if (method === 'PATCH') {
       const patch = route.request().postDataJSON() as Row;
-      const ids = targetedIds(url.searchParams);
-      for (const row of rows) if (ids.includes(row.id as string)) Object.assign(row, patch);
+      for (const row of rows) if (match(row)) Object.assign(row, patch);
       return json([]);
     }
 
     if (method === 'DELETE') {
-      const ids = targetedIds(url.searchParams);
-      tables[table] = rows.filter((row) => !ids.includes(row.id as string));
+      tables[table] = rows.filter((row) => !match(row));
       return json([]);
     }
 

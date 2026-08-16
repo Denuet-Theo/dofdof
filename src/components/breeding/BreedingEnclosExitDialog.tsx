@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, LogOut } from 'lucide-react';
+import { AlertTriangle, Check, LogOut } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
@@ -35,7 +35,34 @@ import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
  * lignes sur quarante est supportable, ressaisir quarante lignes ne l'est pas —
  * et un raccourci pour poser le même niveau à tout le lot, parce qu'une fournée
  * chargée ensemble en ressort le plus souvent à la même hauteur.
+ *
+ * ## Deux sorties, parce qu'un enclos ne tourne pas toujours
+ *
+ * La fenêtre n'offrait qu'une issue : **féconde**. Or on ne referme pas toujours
+ * un enclos pour le faire tourner. On se trompe d'enclos, on verrouille avant
+ * d'avoir fini de le remplir, on décide finalement de vendre les montures qu'on
+ * s'apprêtait à croiser — et dans ces cas-là il n'y a pas de cycle payé. Passer
+ * le lot en fécondes serait alors un mensonge coûteux : la politique
+ * s'accouplerait sans repasser par l'enclos, sur des montures qui doivent encore
+ * leur cycle, et le jeu refuserait le croisement devant l'éleveur.
+ *
+ * D'où la seconde issue, **fertile** : le lot ressort exactement comme il est
+ * entré, rien n'est écrit sur les montures, et l'enclos disparaît simplement de
+ * la fournée. C'est l'annulation, et elle ne demande aucun niveau — il n'y a rien
+ * à relever d'un cycle qui n'a pas eu lieu.
  */
+
+/**
+ * Ce qu'une sortie a réellement écrit.
+ *
+ * `written` seul ne suffisait pas : un compte positif accompagnait aussi bien
+ * une sortie complète qu'une sortie dont l'insertion des montures comptées avait
+ * été refusée, et l'appelant retirait l'enclos de la fournée dans les deux cas —
+ * les montures restaient alors en enclos dans le jeu, absentes de l'écurie
+ * **et** de la fournée. `complete` est la seule chose qui distingue « c'est
+ * fini » de « il reste à rattraper ».
+ */
+export type EnclosExitResult = { written: number; complete: boolean };
 
 type Props = {
   isOpen: boolean;
@@ -45,7 +72,15 @@ type Props = {
   colors: BreedingColor[];
   nameOf: (colorId: string) => string;
   /** Écrit les niveaux et passe tout le lot en fécondes. Rend le compte écrit. */
-  onConfirm: (entries: { id: string; level: number }[]) => Promise<number>;
+  onConfirm: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
+  /**
+   * Rend le lot **fertile** : l'enclos n'a pas tourné, il n'y a rien à écrire.
+   *
+   * Absent, la fenêtre n'offre que la sortie en fécondes — l'ancien
+   * comportement, qui reste juste partout où l'appelant ne sait pas défaire un
+   * chargement.
+   */
+  onRelease?: () => Promise<void>;
 };
 
 const BreedingEnclosExitDialog = ({
@@ -55,6 +90,7 @@ const BreedingEnclosExitDialog = ({
   colors,
   nameOf,
   onConfirm,
+  onRelease,
 }: Props) => {
   /**
    * Le brouillon de saisie, rattaché au lot qu'il décrit.
@@ -69,7 +105,7 @@ const BreedingEnclosExitDialog = ({
   const [draft, setDraft] = useState<{
     key: string;
     levels: Record<string, number>;
-    done: number | null;
+    done: EnclosExitResult | null;
   }>({ key: signature, levels: {}, done: null });
   const [running, setRunning] = useState(false);
 
@@ -171,11 +207,20 @@ const BreedingEnclosExitDialog = ({
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
       <div className="space-y-4">
         <p className="text-[11px] text-dark-500">
-          Elles en sortent <strong className="text-gain">fécondes</strong> : leur cycle est
-          payé, elles s&apos;accoupleront sans repasser par l&apos;enclos. Le niveau, lui, a
-          monté pendant le cycle et rien d&apos;autre ne le dira — c&apos;est lui qui décide du
-          taux de réussite des croisements à venir.
+          L&apos;enclos a tourné : elles en sortent{' '}
+          <strong className="text-gain">fécondes</strong>, leur cycle est payé, elles
+          s&apos;accoupleront sans y repasser. Le niveau, lui, a monté pendant le cycle et rien
+          d&apos;autre ne le dira — c&apos;est lui qui décide du taux de réussite des croisements
+          à venir.
         </p>
+        {onRelease && (
+          <p className="text-[11px] text-dark-500">
+            L&apos;enclos <strong>n&apos;a pas</strong> tourné — mauvais enclos, verrouillé trop
+            tôt, fournée abandonnée ? Ressors-les{' '}
+            <strong className="text-dark-200">fertiles</strong> : rien n&apos;est écrit sur les
+            montures, elles redeviennent disponibles telles quelles.
+          </p>
+        )}
 
         {mounts.length > 1 && (
           <div className="flex flex-wrap items-center gap-2">
@@ -306,12 +351,24 @@ const BreedingEnclosExitDialog = ({
           })}
         </div>
 
-        {done !== null && (
-          <p className="flex items-center gap-1.5 text-[11px] text-gain">
-            <Check size={12} /> {done} monture{done > 1 ? 's' : ''} sortie{done > 1 ? 's' : ''},
-            féconde{done > 1 ? 's' : ''}.
-          </p>
-        )}
+        {done !== null &&
+          (done.complete ? (
+            <p className="flex items-center gap-1.5 text-[11px] text-gain">
+              <Check size={12} /> {done.written} monture{done.written > 1 ? 's' : ''} sortie
+              {done.written > 1 ? 's' : ''}, féconde{done.written > 1 ? 's' : ''}.
+            </p>
+          ) : (
+            /* Le compte de ce qui est passé, et pas un mot de succès : le reste
+               est encore en enclos dans le jeu, et l'enclos reste dans la
+               fournée pour qu'on puisse recliquer. */
+            <p className="flex items-center gap-1.5 text-[11px] text-loss-light">
+              <AlertTriangle size={12} />
+              {done.written > 0
+                ? `${done.written} monture${done.written > 1 ? 's' : ''} enregistrée${done.written > 1 ? 's' : ''} sur ${mounts.length} — le reste n’est pas passé.`
+                : 'Rien n’a été enregistré.'}{' '}
+              L’enclos reste dans la fournée : corrige ce que dit la bannière, puis reclique.
+            </p>
+          ))}
 
         {/* Collée en bas : quarante lignes de niveaux passent l'écran, et un
             bouton hors champ fait croire que la sortie est enregistrée. */}
@@ -321,22 +378,50 @@ const BreedingEnclosExitDialog = ({
         >
           <Button
             size="sm"
+            data-testid="exit-cycled"
             disabled={running || mounts.length === 0 || missing.length > 0}
             onClick={async () => {
               setRunning(true);
-              const written = await onConfirm(
+              const result = await onConfirm(
                 mounts.map((mount) => ({ id: mount.id, level: levelOf(mount) }))
               );
               setRunning(false);
-              setDraft({ key: signature, levels, done: written });
-              onClose();
+              setDraft({ key: signature, levels, done: result });
+              // Une sortie incomplète **ne referme pas** la fenêtre. Se fermer
+              // laisserait l'éleveur devant un écran qui a l'air d'avoir marché,
+              // la bannière d'échec reléguée ailleurs — c'est exactement la
+              // forme qui a coûté 22 montures. Tant qu'il manque une écriture,
+              // la liste reste sous les yeux et le bouton se reclique.
+              if (result.complete) onClose();
             }}
           >
             <LogOut size={13} />
             {running
               ? 'Enregistrement…'
-              : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''}`}
+              : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''} — fécondes`}
           </Button>
+
+          {/* L'annulation. En teinte secondaire et non en danger : ce n'est pas
+              une destruction — rien n'est écrit sur les montures — c'est
+              seulement l'aveu que cet enclos n'a pas tourné. Elle n'attend aucun
+              niveau, il n'y a rien à relever d'un cycle qui n'a pas eu lieu. */}
+          {onRelease && (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="exit-fertile"
+              disabled={running || mounts.length === 0}
+              onClick={async () => {
+                setRunning(true);
+                await onRelease();
+                setRunning(false);
+                onClose();
+              }}
+            >
+              Les remettre fertiles — l&apos;enclos n&apos;a pas tourné
+            </Button>
+          )}
+
           {missing.length > 0 && (
             <span className="text-[11px] text-loss-light">
               {missing.length} monture{missing.length > 1 ? 's' : ''} sans niveau — pose le niveau

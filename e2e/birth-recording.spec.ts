@@ -95,34 +95,59 @@ test.describe('saisie de naissance', () => {
     expect(supabase.rows(individus)).toHaveLength(avant + 1);
   });
 
-  test('plusieurs saisies restent chacune sur leur croisement', async ({ page }) => {
-    // La régression de #195 : chaque écriture change l'écurie, la politique
-    // repropose une autre fournée, et les naissances déjà saisies suivaient les
-    // indices de l'ancienne liste. Un seul clic ne le montre pas.
+  test('un seul croisement à l’écran, jamais la pile', async ({ page }) => {
+    // La fenêtre empilait tous les croisements de la fournée : sept panneaux
+    // hauts d'un écran chacun, donc plusieurs mètres de défilement. On saisit
+    // en allers-retours avec le jeu, et on revenait les yeux sur une fenêtre qui
+    // avait bougé — pour cliquer sur le panneau d'à-côté, qui s'affiche pareil.
     await mockSupabase(page);
     await openBreeding(page);
     await openBirthDialog(page);
 
-    const combien = await panels(page).count();
+    await expect(panels(page)).toHaveCount(1);
+    await expect(page.getByText(/Croisement 1 \/ \d+/)).toBeVisible();
+    // Le premier croisement n'a pas de précédent : le bouton est là, inerte.
+    await expect(page.getByTestId('prev-cross')).toBeDisabled();
+  });
+
+  test('plusieurs saisies restent chacune sur leur croisement', async ({ page }) => {
+    // La régression de #195 : chaque écriture change l'écurie, la politique
+    // repropose une autre fournée, et les naissances déjà saisies suivaient les
+    // indices de l'ancienne liste. Un seul clic ne le montre pas.
+    //
+    // Avec une carte à la fois, la propriété est la même mais se vérifie en
+    // **revenant** : on saisit trois croisements d'affilée, puis on remonte les
+    // trois — chacun doit retrouver sa naissance, pas celle du voisin.
+    await mockSupabase(page);
+    await openBreeding(page);
+    await openBirthDialog(page);
+
+    const combien = Number(
+      (await page.getByText(/Croisement \d+ \/ \d+/).innerText()).match(/\/ (\d+)/)![1]
+    );
     expect(combien).toBeGreaterThan(2);
 
     const attendus: string[][] = [];
     for (const index of [0, 1, 2]) {
-      const panel = panels(page).nth(index);
+      const panel = panels(page).first();
       await recordBirthOn(panel);
       attendus[index] = await bornOn(panel);
 
-      // La fournée ne bouge pas sous les doigts pendant la saisie.
-      await expect(panels(page)).toHaveCount(combien);
-
-      // Et aucun panneau déjà saisi n'a récupéré la naissance d'un autre.
-      for (const [deja, noms] of attendus.entries()) {
-        expect(await bornOn(panels(page).nth(deja))).toEqual(noms);
-      }
+      // La fournée ne bouge pas sous les doigts pendant la saisie : ni son
+      // effectif, ni le rang de la carte affichée.
+      await expect(page.getByText(`Croisement ${index + 1} / ${combien}`)).toBeVisible();
+      if (index < 2) await page.getByTestId('next-cross').click();
     }
 
-    // Chaque naissance porte le nom de **ses** parents : les trois panneaux
-    // choisis sont des croisements distincts, donc les suffixes le sont aussi.
+    // On remonte : aucun croisement n'a récupéré la naissance d'un autre.
+    for (const index of [1, 0]) {
+      await page.getByTestId('prev-cross').click();
+      await expect(page.getByText(`Croisement ${index + 1} / ${combien}`)).toBeVisible();
+      expect(await bornOn(panels(page).first())).toEqual(attendus[index]);
+    }
+
+    // Chaque naissance porte le nom de **ses** parents : les trois croisements
+    // sont distincts, donc les suffixes le sont aussi.
     const suffixes = attendus.flat().map((nom) => nom.split(' ').pop());
     expect(new Set(suffixes).size).toBe(suffixes.length);
   });

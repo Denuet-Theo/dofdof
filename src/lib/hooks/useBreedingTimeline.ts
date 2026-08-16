@@ -1,14 +1,8 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  useTransition,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { TICK_MS, useWallClock } from '@/lib/hooks/useWallClock';
 import { reportWriteFailure } from '@/lib/errors/write-failures';
 import { toNumber, type BreedingTimeline } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
@@ -99,64 +93,19 @@ const clockOf = (row: BreedingTimeline): TimelineClock => ({
   pausedSeconds: toNumber(row.paused_seconds),
 });
 
-/**
- * Le pas de l'horloge.
- *
- * Une seconde : les comptes à rebours s'affichent à la minute, mais le curseur
- * « maintenant » glisse sur douze heures de ruban et un pas plus long le ferait
- * sauter visiblement. Le rendu ne coûte rien — quelques dizaines de barres
- * positionnées en pourcentage.
- */
-const TICK_MS = 1000;
-
-/**
- * L'heure courante, partagée par tous les abonnés.
- *
- * Un seul intervalle pour l'application entière, et il ne tourne que tant que
- * quelqu'un regarde. La valeur est mémorisée dans une cellule plutôt que relue à
- * chaque appel : `useSyncExternalStore` exige un instantané **stable** entre deux
- * notifications, et un `Date.now()` direct ferait boucler le rendu.
- *
- * Il bat aussi pendant les pauses, et c'est voulu : « arrêtée depuis 2 j 4 h »
- * est un compteur qui, lui, continue de courir.
- */
-const createWallClock = (period: number) => {
-  let value = Date.now();
-  const listeners = new Set<() => void>();
-  let timer: ReturnType<typeof setInterval> | null = null;
-
-  return {
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      value = Date.now();
-
-      timer ??= setInterval(() => {
-        value = Date.now();
-        for (const notify of listeners) notify();
-      }, period);
-
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size === 0 && timer !== null) {
-          clearInterval(timer);
-          timer = null;
-        }
-      };
-    },
-    snapshot: () => value,
-  };
-};
-
-const WALL_CLOCK = createWallClock(TICK_MS);
-
-/** Le serveur ne date rien : il n'a pas d'heure à laquelle l'éleveur regarde. */
-const noServerClock = () => null;
-
 export const useBreedingTimeline = (family: FamilyId): BreedingTimelineState => {
   const [row, setRow] = useState<BreedingTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, startLoading] = useTransition();
-  const now = useSyncExternalStore(WALL_CLOCK.subscribe, WALL_CLOCK.snapshot, noServerClock);
+  /**
+   * Le pas est la seconde : les comptes à rebours s'affichent à la minute, mais
+   * le curseur « maintenant » glisse sur douze heures de ruban et un pas plus
+   * long le ferait sauter visiblement.
+   *
+   * Il bat aussi pendant les pauses, et c'est voulu : « arrêtée depuis 2 j 4 h »
+   * est un compteur qui, lui, continue de courir.
+   */
+  const now = useWallClock(TICK_MS);
 
   useEffect(() => {
     const supabase = createClient();

@@ -3,8 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Egg, Info } from 'lucide-react';
 import BreedingStocks from '@/components/breeding/BreedingStocks';
-import BreedingTimeline from '@/components/breeding/BreedingTimeline';
-import AvailabilityPicker from '@/components/breeding/AvailabilityPicker';
+import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
@@ -14,8 +13,8 @@ import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBre
 import { planWaves } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
-import { useBreedingTimeline } from '@/lib/hooks/useBreedingTimeline';
-import { useAvailability } from '@/lib/hooks/useAvailability';
+import { useBreedingBatch } from '@/lib/hooks/useBreedingBatch';
+import { pennedUnits, withoutPenned } from '@/lib/dofus/breeding/batch';
 import { formatHours } from '@/lib/utils/date';
 import { toNumber } from '@/lib/supabase/types';
 
@@ -39,11 +38,31 @@ const BreedingPage = () => {
   const [draftCount, setDraftCount] = useState(1);
 
   const project = useBreedingProject(family);
-  const timeline = useBreedingTimeline(family);
-  // Les créneaux où l'on peut agir. Le plan ne s'en sert pas encore — il faut
-  // d'abord que l'ordonnanceur sache viser une durée — mais le choix du jour se
-  // pose dès maintenant, parce que c'est le geste du matin.
-  const availability = useAvailability();
+  /**
+   * La fournée réellement en enclos.
+   *
+   * Distincte du plan de la politique, et c'est tout l'objet : le plan dit ce
+   * qu'il **faudrait** charger, la fournée dit ce qui **est** chargé. Les deux se
+   * confondaient, si bien qu'un enclos rempli le matin se recalculait tout seul
+   * dans la journée. Voir `batch.ts`.
+   */
+  const batch = useBreedingBatch(family);
+
+  /* « Ma journée » — le préréglage de disponibilité — a été retiré de l'écran.
+     Il posait une question à laquelle rien ne répondait : l'ordonnanceur ne sait
+     pas encore viser une durée, donc le créneau choisi n'entrait dans aucun
+     calcul. Un réglage sans effet en tête d'écran se lit comme une consigne, et
+     il passait devant les gestes qui, eux, en ont un. `useAvailability` et
+     `AvailabilityPicker` restent en place pour le jour où le plan saura s'en
+     servir.
+
+     La timeline est masquée pour la même raison, à l'envers : elle décrivait un
+     parc simulé — le plan du modèle est joué sur une graine — et son horloge
+     n'avait aucun lien avec les enclos réellement chargés. Deux comptes à
+     rebours contradictoires devant le même enclos. Le verrou de la fournée porte
+     désormais l'heure de chargement, qui est la seule vraie. `BreedingTimeline`
+     et `useBreedingTimeline` sont conservés : c'est le ruban qu'on veut
+     reposer proprement, pas le supprimer. */
 
   // Le plan sélectionné fait foi : c'est la quantité retenue en le choisissant,
   // et le classement doit se relire dans les mêmes termes. Dérivé plutôt que
@@ -156,6 +175,31 @@ const BreedingPage = () => {
     });
   }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
 
+  /**
+   * L'écurie **dont on dispose** : la vraie, moins ce qui est en enclos.
+   *
+   * Une monture verrouillée dans un enclos est indisponible au sens le plus
+   * concret : le jeu ne la laissera ni s'accoupler, ni se faire cloner, ni se
+   * faire sacrifier tant que son cycle tourne. L'écurie enregistrée, elle, la
+   * décrit toujours comme fertile et non féconde — et c'est juste, puisqu'elle
+   * ne deviendra féconde qu'à la sortie d'enclos, seul moment où l'on connaît
+   * son niveau.
+   *
+   * La politique la comptait donc deux fois : une fois dans l'enclos où elle
+   * est, une fois dans les gestes proposés à côté. Un éleveur qui verrouillait
+   * cinq enclos se voyait proposer d'accoupler dans la foulée les cinquante
+   * montures qu'il venait d'y enfermer, et les cherchait dans un coffre où
+   * elles n'étaient plus.
+   *
+   * Le retrait se fait **ici et une seule fois**, en amont des quatre
+   * arbitrages, plutôt qu'à chacun. Les filtrer un par un aurait marché quatre
+   * fois et raté le cinquième — c'est exactement la forme de bug que
+   * `AGENTS.md` décrit. Ce qui descend vers l'affichage — « Mes stocks », les
+   * noms des montures — garde l'écurie entière : ces montures sont toujours à
+   * vous, c'est seulement qu'on n'en dispose pas ce matin.
+   */
+  const available = useMemo(() => withoutPenned(stable, batch.pens), [stable, batch.pens]);
+
   /* La répartition du parc qui tient l'équilibre — le curseur de financement et
      les parts par couleur — vivait ici. Elle n'existait que sous l'objectif
      « gen 10 à l'équilibre », qui ne peut plus être sélectionné : la garder
@@ -178,11 +222,11 @@ const BreedingPage = () => {
   const drift = useMemo(() => {
     const colors = tree?.colors ?? [];
     if (colors.length === 0) return [];
-    return driftSignals(stable, {
+    return driftSignals(available, {
       colors,
       generations: new Map(colors.map((color) => [color.id, color.generation])),
     });
-  }, [tree, stable]);
+  }, [tree, available]);
 
 
 
@@ -218,9 +262,28 @@ const BreedingPage = () => {
       return item ? (toNumber(itemPrices.get(item.id)?.price)) : 0;
     });
 
-    const capacity = Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS;
+    /**
+     * Les places **libres**, et non celles du parc.
+     *
+     * Le jumeau du retrait des montures, et il fallait les deux. Sans lui, la
+     * politique voyait bien une écurie amputée de ce qui est en enclos, mais
+     * toujours cinquante places libres — donc elle planifiait aussitôt une
+     * seconde fournée de cinquante montures dans un parc qui n'en a plus une
+     * seule de libre. Un enclos occupé l'est pour tout le monde.
+     *
+     * À zéro, `search.ts` ne charge rien : ses deux gardes sont
+     * `state.places < capacity`, qui est faux d'entrée. C'est le comportement
+     * juste — parc plein, rien à charger — et non un cas dégradé.
+     */
+    const free = Math.max(
+      0,
+      Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS - pennedUnits(batch.pens).length
+    );
+    const capacity = free;
     return {
-      stable,
+      // Ce dont on dispose, pas ce qu'on possède : les montures en enclos sont
+      // dans le jeu, pas au coffre. Voir `available`.
+      stable: available,
       colors,
       market: {
         // Le prix de vente, pas la valeur : `liquidationValue` prend le plus haut
@@ -245,7 +308,7 @@ const BreedingPage = () => {
   }, [
     tree,
     rows,
-    stable,
+    available,
     itemPrices,
     genetonValuation,
     sacrificePrice,
@@ -253,6 +316,8 @@ const BreedingPage = () => {
     settings.enclos_count,
     settings.kamas_available,
     selectedColorId,
+    // Les enclos verrouillés décident des places libres : voir `free`.
+    batch.pens,
   ]);
 
   const policyFill = useMemo(
@@ -307,8 +372,8 @@ const BreedingPage = () => {
   }, [tree, rows, sacrificePrice]);
 
   const clonings = useMemo(
-    () => (cloneContext ? cloneOptions(stable, cloneContext) : []),
-    [cloneContext, stable]
+    () => (cloneContext ? cloneOptions(available, cloneContext) : []),
+    [cloneContext, available]
   );
 
   /**
@@ -321,8 +386,8 @@ const BreedingPage = () => {
    * son ambre. Voir `extraction.ts`.
    */
   const extraction = useMemo(
-    () => (cloneContext ? extractionOrder(stable, cloneContext) : []),
-    [cloneContext, stable]
+    () => (cloneContext ? extractionOrder(available, cloneContext) : []),
+    [cloneContext, available]
   );
 
   const priced = rows.filter((row) => row.estimate.priceLevel0 !== null).length;
@@ -358,32 +423,16 @@ const BreedingPage = () => {
         ))}
       </div>
 
-      {/* La timeline vient avant tout le reste, et pour une raison d'usage : le
-          reste de l'écran répond à « quoi faire », elle seule répond à « quand ».
-          On ouvre cette page entre deux allers-retours en jeu, et la question
-          qu'on s'y pose neuf fois sur dix est « est-ce que j'ai quelque chose à
-          faire maintenant ». La faire descendre sous les réglages et les stocks
-          obligerait à défiler pour lire un compte à rebours. */}
-      {/* Le préréglage du jour, juste avant le planning : c'est ce qui décide de
-          quand on pourra agir, donc ça se lit avant les consignes. */}
-      {availability.restored && (
-        <AvailabilityPicker
-          presets={availability.state.presets}
-          active={availability.active}
-          onChoose={availability.choose}
-          onSave={availability.savePreset}
-          onRemove={availability.removePreset}
-        />
-      )}
-
-      {/* La fournée réelle voyage avec le planning : le plan du modèle est joué
-          sur une graine, donc il sait quand recharger et pas avec quoi. Sans
-          elle, « Charger l'enclos ×10 » est la seule consigne que l'écran donne
-          — et elle n'en est pas une. */}
-      <BreedingTimeline
-        timeline={timeline}
-        enclosCount={settings.enclos_count}
+      {/* Les gestes du jour, en tête d'écran : c'est pour eux qu'on ouvre cette
+          page entre deux allers-retours en jeu. Un onglet à la fois — accoupler,
+          cloner, charger, extraire — parce que chacun se fait dans le jeu, une
+          monture à la fois, et que quatre consignes simultanées font perdre les
+          quatre. Voir `BreedingPolicyPanel`. */}
+      <BreedingPolicyPanel
         fill={policyFill}
+        // Ce qui est réellement en enclos, par opposition à ce que la politique
+        // proposerait maintenant : c'est la distinction que le verrou introduit.
+        batch={batch}
         // La liste complète, pas la tranche que `fill` porte : voir #165.
         couples={policyCouples}
         // Ce que valent les stériles, à l'étape où on les clone : voir #163.

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
@@ -71,6 +71,20 @@ import type { BirthEntry, BirthRecord, RecordBirthsResult } from '@/lib/hooks/us
  * Le prix à payer, assumé : « annuler le dernier » doit défaire une écriture
  * réelle — voir `undoBirth`, qui supprime le poulain et rend aux deux parents
  * l'état exact qu'ils avaient avant le clic.
+ *
+ * ## Un croisement à l'écran, jamais deux
+ *
+ * La fenêtre empilait tous les croisements de la fournée. Sept panneaux hauts
+ * chacun d'un écran, donc plusieurs mètres de défilement — et la saisie se fait
+ * en allers-retours avec le jeu, où l'on revient les yeux sur une fenêtre qui a
+ * bougé. On perdait la ligne où l'on en était, on cliquait sur le panneau
+ * d'à-côté, et rien à l'écran ne le disait : deux croisements différents
+ * n'affichent pas les mêmes issues, mais ils s'affichent pareil.
+ *
+ * Un seul panneau à la fois, donc, avec son rang — « croisement 3 / 7 » — et de
+ * quoi aller au précédent. Le geste réel est de toute façon séquentiel : on
+ * accouple un couple dans le jeu, on lit ce qui est né, on le saisit, on passe
+ * au suivant.
  */
 
 type Props = {
@@ -139,9 +153,15 @@ const BreedingBirthDialog = ({
    * `ItemPriceInput` utilise déjà : on compare, on corrige pendant le rendu.
    */
   const [batch, setBatch] = useState<Couple[] | null>(null);
-  if (isOpen && batch === null) setBatch(couples);
+  /** Le croisement affiché : un seul à la fois, voir l'en-tête du module. */
+  const [at, setAt] = useState(0);
+  if (isOpen && batch === null) {
+    setBatch(couples);
+    setAt(0);
+  }
   if (!isOpen && batch !== null) {
     setBatch(null);
+    setAt(0);
     // Rien à conserver : tout est en base, et la fournée suivante n'a aucune
     // raison de porter les naissances de celle-ci.
     setRecorded([]);
@@ -415,13 +435,36 @@ const BreedingBirthDialog = ({
   const total = session.length;
   const done = recorded.length;
 
-  /** Ce qu'il faudra renommer en jeu, une ligne par nom et non par monture. */
+  /**
+   * Le croisement affiché, borné à la liste.
+   *
+   * Borné et non mémorisé : la fournée est figée à l'ouverture, mais `groups`
+   * peut rétrécir si un `undo` vide le dernier croisement d'un regroupement, et
+   * un index resté au-delà rendrait une carte vide.
+   */
+  const index = Math.min(at, Math.max(0, groups.length - 1));
+  const group = groups[index];
+  const groupDone = group ? recordedFor(group.indices).length : 0;
+  const groupTotal = group ? group.indices.length : 0;
+
+  /**
+   * Ce qu'il faudra renommer en jeu, pour **ce croisement-là**.
+   *
+   * Le récapitulatif portait toute la fournée. Sous une carte unique, il
+   * rallongeait la fenêtre de tout ce qui n'est plus à l'écran — et les noms
+   * d'un croisement qu'on a fini ne servent plus : ils ont été recopiés au
+   * moment où ils sont apparus.
+   */
   const namesToWrite = useMemo(() => {
+    if (!group) return [];
     const counts = new Map<string, number>();
-    for (const entry of recorded)
+    for (const entry of recorded) {
+      if (!group.indices.includes(entry.coupleIndex)) continue;
       counts.set(entry.mountName, (counts.get(entry.mountName) ?? 0) + 1);
+    }
     return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [recorded]);
+    // `recordedFor` n'est pas mémorisé : on dépend de la liste, pas de la fonction.
+  }, [recorded, group]);
 
   return (
     <Modal
@@ -447,9 +490,66 @@ const BreedingBirthDialog = ({
           fermant. Ce qui s&apos;affiche en « né » est dans l&apos;écurie.
         </p>
 
-        {groups.map((group, groupIndex) => (
+        {/* La navigation, au-dessus de la carte : c'est elle qui dit où l'on en
+            est dans la fournée, et on la lit avant de cliquer une issue. Les
+            croisements se parcourent librement — un couple accouplé dans le jeu
+            n'est pas forcément le suivant de la liste. */}
+        {groups.length > 1 && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              data-testid="prev-cross"
+              disabled={index === 0}
+              onClick={() => setAt(index - 1)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px]
+                border border-dark-600/50 bg-dark-800/80 text-dark-300 transition-all
+                cursor-pointer hover:border-kamas/40 disabled:opacity-30
+                disabled:cursor-not-allowed"
+            >
+              <ChevronLeft size={13} />
+              Précédent
+            </button>
+
+            <span className="text-[11px] text-dark-300 tabular-nums">
+              Croisement <strong className="text-dark-100">{index + 1}</strong> / {groups.length}
+            </span>
+
+            {/* Le rang de la carte se double d'un état : une carte complète n'a
+                plus rien à recevoir, et c'est ce qui dit qu'on peut avancer. */}
+            {groupTotal > 0 && (
+              <span
+                className={`text-[10px] tabular-nums ${
+                  groupDone >= groupTotal ? 'text-gain' : 'text-dark-500'
+                }`}
+              >
+                {groupDone}/{groupTotal} saisi{groupDone > 1 ? 's' : ''}
+              </span>
+            )}
+
+            <button
+              type="button"
+              data-testid="next-cross"
+              disabled={index >= groups.length - 1}
+              onClick={() => setAt(index + 1)}
+              className={`ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl
+                text-[11px] border transition-all cursor-pointer disabled:opacity-30
+                disabled:cursor-not-allowed ${
+                  // Appelle le regard une fois la carte finie : c'est le geste
+                  // qui suit, et le seul qui reste.
+                  groupDone >= groupTotal && index < groups.length - 1
+                    ? 'bg-kamas/15 text-kamas border-kamas/40'
+                    : 'bg-dark-800/80 border-dark-600/50 text-dark-300 hover:border-kamas/40'
+                }`}
+            >
+              Suivant
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
+
+        {group && (
           <BreedingMatingPanel
-            key={groupIndex}
+            key={index}
             male={group.male}
             female={group.female}
             maleNames={group.maleNames}
@@ -469,19 +569,19 @@ const BreedingBirthDialog = ({
               sex: entry.sex,
               name: entry.mountName,
             }))}
-            onPick={(colorId, sex) => add(group, groupIndex, colorId, sex)}
-            onUndoLast={() => undoLast(group, groupIndex)}
-            busy={pending === groupIndex}
+            onPick={(colorId, sex) => add(group, index, colorId, sex)}
+            onUndoLast={() => undoLast(group, index)}
+            busy={pending === index}
             /* Le refus s'affiche sur le panneau qui l'a reçu, en plus de la
                bannière : celle-ci dit qu'il y a un problème, celui-là dit sur
                quel croisement recliquer. */
-            refusal={refused?.groupIndex === groupIndex ? refused.message : null}
+            refusal={refused?.groupIndex === index ? refused.message : null}
           />
-        ))}
+        )}
 
-        {/* Le récapitulatif, quand la fournée porte plusieurs croisements : c'est
-            la liste qu'on garde sous les yeux pendant qu'on renomme, et elle
-            compte les doublons au lieu de les répéter. */}
+        {/* Ce qu'il reste à recopier dans le jeu pour **ce** croisement : la
+            liste qu'on garde sous les yeux pendant qu'on renomme, doublons
+            comptés au lieu d'être répétés. */}
         {namesToWrite.length > 0 && (
           <div className="space-y-1 pt-1 border-t border-dark-700/40">
             <p className="text-[11px] text-dark-400">À renommer dans le jeu :</p>
@@ -497,9 +597,10 @@ const BreedingBirthDialog = ({
         )}
 
         {/* La barre ne porte plus de bouton d'enregistrement — il n'y a plus rien
-            à enregistrer — mais elle reste collée en bas : sur quatorze couples la
-            fenêtre fait plusieurs écrans, et l'avancement est ce qu'on veut voir
-            sans remonter. */}
+            à enregistrer. Elle garde l'avancement de la **fournée entière**, que
+            la carte unique ne montre plus : celle-ci ne connaît que son propre
+            croisement, et « 3/17 » est la seule ligne qui dise s'il reste du
+            travail après elle. */}
         <div
           className="sticky bottom-0 -mx-1 px-1 py-3 flex flex-wrap items-center gap-3
             bg-dark-900/95 backdrop-blur-sm border-t border-dark-700/60"

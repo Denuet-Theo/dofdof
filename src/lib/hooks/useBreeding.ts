@@ -1151,7 +1151,9 @@ export const useBreeding = (
         levelOf.set(level, [...(levelOf.get(level) ?? []), entry.id]);
       }
 
-      if (levelById.size === 0 && promoted.length === 0) return 0;
+      // Rien à écrire n'est pas un échec : la liste ne portait que des stériles,
+      // et l'enclos peut quitter la fournée sans laisser de dette.
+      if (levelById.size === 0 && promoted.length === 0) return { written: 0, complete: true };
 
       // Ce qui quitte le compteur en sort pour de bon. `cycledOf` borne déjà les
       // fécondes au stock, mais le plancher se reprend ici : la base refuse un
@@ -1175,6 +1177,22 @@ export const useBreeding = (
 
       const supabase = createClient();
       const stamp = new Date().toISOString();
+
+      /**
+       * Est-ce que **tout** a atterri ?
+       *
+       * Chaque écriture ci-dessous signalait son échec dans la bannière puis
+       * laissait la fonction rendre le compte de ce qu'elle avait *tenté*.
+       * L'appelant lisait ce compte comme un succès et retirait l'enclos de la
+       * fournée : les montures restaient en enclos dans le jeu, absentes de
+       * l'écurie et absentes de la fournée — introuvables des deux côtés, ce qui
+       * est strictement pire que le défaut d'origine.
+       *
+       * On rend donc ce qui a été écrit **et** si quelque chose manque, parce
+       * que seul le second permet de décider s'il reste quelque chose à
+       * rattraper.
+       */
+      let complete = true;
 
       // Les promues d'abord : leurs identifiants viennent de la base, et l'état
       // local doit porter les mêmes pour qu'un accouplement puisse les désigner.
@@ -1205,6 +1223,7 @@ export const useBreeding = (
             `les ${promoted.length} montures comptées à inscrire à l’écurie`,
             promoteError
           );
+          complete = false;
         }
 
         inserted = (data ?? []).map((row) => ({
@@ -1219,19 +1238,11 @@ export const useBreeding = (
         }));
       }
 
-      setStable((current) => ({
-        ...current,
-        bulk: bulkExits.size > 0 ? nextBulk : current.bulk,
-        individuals: [
-          ...current.individuals.map((mount) =>
-            levelById.has(mount.id)
-              ? { ...mount, cycled: true, level: levelById.get(mount.id)! }
-              : mount
-          ),
-          ...inserted,
-        ],
-      }));
-
+      // Les mises à jour **avant** l'état local, et non l'inverse : une monture
+      // affichée féconde sur une écriture perdue redeviendrait fertile au
+      // rechargement suivant, sans que rien n'ait prévenu entre les deux. On ne
+      // reflète donc que ce que la base a pris.
+      const cycled = new Map<string, number>();
       for (const [level, ids] of levelOf) {
         const { error: saveError } = await supabase
           .from('user_breeding_individuals')
@@ -1239,9 +1250,13 @@ export const useBreeding = (
           .in('id', ids);
         if (saveError) {
           reportWriteFailure(`la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`, saveError);
+          complete = false;
+          continue;
         }
+        for (const id of ids) cycled.set(id, level);
       }
 
+      let bulkWritten = false;
       if (bulkExits.size > 0) {
         const { error: bulkError } = await supabase.from('user_breeding_mounts').upsert(
           [...bulkExits.keys()].map((colorId) => ({
@@ -1255,12 +1270,29 @@ export const useBreeding = (
           })),
           { onConflict: 'user_id,family,color_id' }
         );
-        if (bulkError) reportWriteFailure('le vrac sorti d’enclos', bulkError);
+        if (bulkError) {
+          reportWriteFailure('le vrac sorti d’enclos', bulkError);
+          complete = false;
+        } else bulkWritten = true;
       }
 
-      // Le compte rendu à l'écran couvre les deux, sinon la sortie annoncerait
-      // moins de montures que la liste n'en portait.
-      return levelById.size + promoted.length;
+      setStable((current) => ({
+        ...current,
+        bulk: bulkWritten ? nextBulk : current.bulk,
+        individuals: [
+          ...current.individuals.map((mount) =>
+            cycled.has(mount.id)
+              ? { ...mount, cycled: true, level: cycled.get(mount.id)! }
+              : mount
+          ),
+          ...inserted,
+        ],
+      }));
+
+      // Ce qui est **écrit**, et non ce qui a été tenté. Le compte couvre les
+      // deux familles — suivies et comptées — sinon la sortie annoncerait moins
+      // de montures que la liste n'en portait.
+      return { written: cycled.size + inserted.length, complete };
     },
     [family, stable.bulk, stable.individuals]
   );
@@ -1639,6 +1671,61 @@ export const useBreeding = (
     async (entries: { keep: string; drop: string }[]): Promise<CloningResult> => {
       if (entries.length === 0) return { ok: true as const };
       const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+
+      /**
+       * **On ne perd jamais une génération dans un clonage.** Vérifié ici, au
+       * point d'écriture, et pas seulement sur le bouton.
+       *
+       * Le jeu apparie à génération **affichée** égale, mais c'est l'ascendance
+       * qui décide de ce qu'une monture permet ensuite : deux gen 1 côte à côte
+       * peuvent porter l'une un 1, l'autre un 2. Le clonage consomme les deux,
+       * donc garder celle qui porte le 1 détruit le 2 — définitivement, et sans
+       * contrepartie.
+       *
+       * La fenêtre désactive déjà ce bouton-là, et ça ne suffit pas. Un garde
+       * d'interface protège l'écran qui le porte, pas l'invariant : il tombe sur
+       * un rendu en retard, sur un double-clic pendant que le lot se recalcule,
+       * et il ne dit rien du prochain appelant de `recordClonings`. Or ce qu'on
+       * défend ici est irréversible — deux montures détruites, la lignée avec.
+       * C'est exactement la forme que `AGENTS.md` décrit : quand un mécanisme
+       * peut rendre la classe irreprésentable, il vaut mieux que trente points
+       * d'appel corrects qu'un trente-et-unième ne suivra pas.
+       *
+       * Le refus est **total** : aucune entrée du lot n'est écrite. Écrire les
+       * bonnes et taire la mauvaise laisserait l'éleveur devant un compte juste
+       * et une lignée manquante, ce qui est précisément le mode d'échec que
+       * `write-failures` existe pour empêcher.
+       */
+      const carriedOf = (mount: Individual) =>
+        carriedGeneration(
+          colorIndex.generations.get(mount.colorId) ?? 1,
+          mount.parents
+            ? [
+                colorIndex.generations.get(mount.parents[0]) ?? 1,
+                colorIndex.generations.get(mount.parents[1]) ?? 1,
+              ]
+            : null
+        );
+
+      for (const entry of entries) {
+        const keep = byId.get(entry.keep);
+        const drop = byId.get(entry.drop);
+        // Une monture inconnue n'est pas jugée ici : l'insertion s'en chargera,
+        // et refuser sur une lecture locale en retard serait un faux positif.
+        if (!keep || !drop) continue;
+
+        const kept = carriedOf(keep);
+        const lost = carriedOf(drop);
+        if (kept >= lost) continue;
+
+        const message =
+          `Clonage refusé : la monture gardée porte une génération ${kept}, celle qui part ` +
+          `une ${lost}. Le clonage consomme les deux, donc ce geste détruirait la génération ` +
+          `${lost} pour de bon. Garde l’autre.`;
+        console.error('[breeding] clonage destructeur refusé:', { entry, kept, lost });
+        return { ok: false as const, message };
+      }
+
       const kept = entries
         .map((entry) => byId.get(entry.keep))
         .filter((mount): mount is Individual => mount !== undefined);
@@ -1719,7 +1806,7 @@ export const useBreeding = (
 
       return { ok: true as const };
     },
-    [family, stable.individuals, load]
+    [family, stable.individuals, load, colorIndex]
   );
 
   const removeIndividual = useCallback(

@@ -59,7 +59,9 @@ import CopyableText from '@/components/ui/CopyableText';
 import { chime, unlock } from '@/lib/dofus/breeding/alarm';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
 import BreedingCloneDialog from '@/components/breeding/BreedingCloneDialog';
-import BreedingEnclosExitDialog from '@/components/breeding/BreedingEnclosExitDialog';
+import BreedingEnclosExitDialog, {
+  type EnclosExitResult,
+} from '@/components/breeding/BreedingEnclosExitDialog';
 import {
   cloningsToRecord,
   couplesToRecord,
@@ -188,7 +190,7 @@ type Props = {
    * Sans lui, le chargement ne laissait aucune trace en base — et rien ne disait
    * à la politique que le cycle était payé.
    */
-  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
+  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
   nameOf: (colorId: string) => string;
   /**
    * Les montures suivies, pour retrouver leur **nom en jeu**.
@@ -726,7 +728,7 @@ const Fill = ({
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
   /** Sortie d'enclos : niveaux relevés, tout le lot passé en fécondes. */
-  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<number>;
+  onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
   /** Les enclos du plan, leur état, et ce qui les bloque. */
   enclosTracks?: {
     id: string;
@@ -1480,14 +1482,18 @@ const Fill = ({
           colors={colors}
           nameOf={nameOf}
           onConfirm={async (entries) => {
-            const written = await onEnclosExit(entries);
+            const result = await onEnclosExit(entries);
             // Une fournée qui sort de l'enclos en ressort **féconde** : c'est
             // exactement le moment où de nouveaux accouplements deviennent
             // possibles. Rester sur « charger » — l'étape qui vient de se vider —
             // était le second verrou de #167 : plus rien n'y était actionnable, et
             // la seule façon d'en sortir était de recharger la page.
-            if (written > 0) setStep('mate');
-            return written;
+            //
+            // Mais seulement si tout a été écrit : sur une sortie incomplète il
+            // reste des montures à réessayer ici même, et changer d'étape les
+            // ferait disparaître de l'écran.
+            if (result.complete) setStep('mate');
+            return result;
           }}
         />
       )}

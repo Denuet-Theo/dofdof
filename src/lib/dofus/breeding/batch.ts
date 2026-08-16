@@ -1,5 +1,5 @@
-import { cycledOf, type Sex, type Stable } from '@/lib/dofus/breeding/stable';
-import { parseCountedMountId } from '@/lib/dofus/breeding/search';
+import { cycledOf, type Sex, type Stable } from './stable';
+import { parseCountedMountId } from './search';
 
 /**
  * La fournée en cours : ce qui est **dans les enclos**, et non ce que la

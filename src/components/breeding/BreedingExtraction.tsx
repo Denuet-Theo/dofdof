@@ -24,9 +24,15 @@ import type { Individual } from '@/lib/dofus/breeding/stable';
  * monture dans son rôle — la génération que son **ascendance** porte, pas sa
  * couleur. Une gen 1 à parent gen 9 est en bas de liste et c'est voulu.
  *
- * Les gen 1 restent affichées avec « ne s'extrait pas » : elles ne rendent rien,
- * et les taire les laisserait en écurie sans qu'on sache pourquoi elles ne sont
- * dans aucune liste.
+ * ## Les gen 1 n'y sont plus
+ *
+ * Elles y étaient, marquées « ne s'extrait pas ». Le jeu ne les extrait pas, et
+ * le tri étant croissant sur la valeur de reproduction, elles occupaient tout le
+ * haut de la liste : des dizaines de lignes sans effet devant les
+ * quelques-unes qui rapportent. `extractionOrder` les écarte désormais.
+ *
+ * Elles ne disparaissent pas de l'app pour autant : une gen 1 stérile s'apparie,
+ * et l'onglet Clonage la propose. C'est là qu'elle a quelque chose à faire.
  */
 const BreedingExtraction = ({
   candidates,
@@ -49,14 +55,14 @@ const BreedingExtraction = ({
    * des montures qu'on ne détruira pas. Ce qui se décide ici, c'est de vider ce
    * qui ne sert plus, et le chiffre utile est ce que ça rapporte.
    */
-  const clearable = candidates.filter((mount) => !mount.keepForBreeding && mount.units > 0);
+  const clearable = candidates.filter((mount) => !mount.keepForBreeding);
   const total = clearable.reduce((sum, mount) => sum + mount.amber, 0);
 
   if (candidates.length === 0) {
     return (
       <p className="text-[11px] text-dark-500 px-1">
-        Aucune stérile en écurie — rien à extraire. Elles apparaîtront ici dès qu&apos;un
-        accouplement en aura produit.
+        Rien à extraire — aucune stérile de génération 2 ou plus en écurie. Les gen 1 ne
+        s&apos;extraient pas : elles ne servent qu&apos;au clonage, à l&apos;onglet Clonage.
       </p>
     );
   }
@@ -66,10 +72,12 @@ const BreedingExtraction = ({
       <div className="flex flex-wrap items-center gap-2">
         <Gem size={13} className="text-kamas" />
         <span className="text-[11px] font-semibold text-dark-200">
-          {candidates.length} stérile{candidates.length > 1 ? 's' : ''} en écurie
+          {candidates.length} stérile{candidates.length > 1 ? 's' : ''} extractible
+          {candidates.length > 1 ? 's' : ''}
         </span>
         <span className="text-[11px] text-dark-500">
-          de la moins intéressante à reproduire à la plus — extraire dans cet ordre
+          de la moins intéressante à reproduire à la plus — extraire dans cet ordre. Les gen 1
+          n&apos;y sont pas : le jeu ne les extrait pas.
         </span>
         {clearable.length > 0 && (
           <span className="ml-auto text-[11px] text-dark-400 tabular-nums">
@@ -85,6 +93,13 @@ const BreedingExtraction = ({
         {candidates.map((mount) => (
           <div
             key={mount.id}
+            data-testid="extraction-row"
+            /* La génération affichée et ce qu'elle rend, exposées pour être
+               vérifiables : aucune ligne d'ici ne doit être une gen 1, que le
+               jeu n'extrait pas. L'écran ne l'écrit pas autrement — une monture
+               anonyme n'a pas de nom pour porter sa génération. */
+            data-generation={mount.generation}
+            data-units={mount.units}
             className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
               ${mount.keepForBreeding ? 'bg-dark-800/20' : 'bg-dark-800/40'}`}
           >
@@ -110,20 +125,14 @@ const BreedingExtraction = ({
               vaut {Math.round(mount.value).toLocaleString('fr-FR')} en reproduction
             </span>
 
+            {/* Plus de cas « ne s'extrait pas » : les gen 1 ne sont plus dans
+                cette liste, `extractionOrder` les écarte. Une ligne d'ici rend
+                donc toujours quelque chose. */}
             <span className="ml-auto shrink-0 text-[10px] tabular-nums">
-              {mount.units === 0 ? (
-                <span
-                  className="text-dark-600"
-                  title="Une monture de génération 1 ne s'extrait pas : elle ne rend aucune ressource."
-                >
-                  ne s&apos;extrait pas
-                </span>
-              ) : (
-                <span className={mount.keepForBreeding ? 'text-dark-500' : 'text-gain'}>
-                  {mount.units} {resourceName} ·{' '}
-                  {Math.round(mount.amber).toLocaleString('fr-FR')} kamas
-                </span>
-              )}
+              <span className={mount.keepForBreeding ? 'text-dark-500' : 'text-gain'}>
+                {mount.units} {resourceName} ·{' '}
+                {Math.round(mount.amber).toLocaleString('fr-FR')} kamas
+              </span>
             </span>
 
             {/* Les deux motifs se distinguent, parce qu'ils ne se corrigent pas

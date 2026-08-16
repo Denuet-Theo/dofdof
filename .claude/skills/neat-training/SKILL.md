@@ -258,6 +258,26 @@ inert and mount level bought success rate for free. `bench` and `replay` exit
 rather than fall back to defaults, and anything new should do the same —
 measuring against an economy other than the file's is worse than not measuring.
 
+## The missing term: market depth
+
+`Economy::value_of` and the census price **every** mount at its full market
+price, however many of them are held — and a stérile counts as much as a
+féconde. Market depth is not modelled at all, and it is the costliest thing
+missing from the simulator.
+
+So **any policy whose gain comes from accumulating copies of an expensive colour
+is over-scored, and the score will not show it.** On 2026-08-14 the summit
+duplication loop (PR #188) measured +43.18 M and 200 wins out of 200 — finishing
+with **162 gen 10**. The maintainer, who plays the game, settled it in one
+sentence: « non le marché n'absorbe pas ça ». The rule was right, the measurement
+was right, the number was wrong. It ships disabled (`Summit::Hold`).
+
+Before proposing to switch on a policy that produces in volume, look at how many
+copies it ends up holding and **tell the maintainer** — he is the oracle on what
+the HDV absorbs, not the bench. A `bin/bench` that explodes on an accumulating
+policy is a signal to check, not a win. Reopening the question would mean
+pricing the resale of the n-th copy.
+
 ## When something looks wrong
 
 | symptom | cause |

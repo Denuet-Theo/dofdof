@@ -53,9 +53,27 @@ Rules:
 
 ## 3. Start the dev server with the bypass on
 
+`.claude/settings.local.json` already grants this:
+
+```
+"Bash(DOFDOF_TEST_BYPASS_AUTH=1 npm run dev*)"
+```
+
+It is a **prefix** rule: it only matches when the command *starts* with exactly
+that string. So run it bare, with `run_in_background: true`:
+
 ```bash
-cd "C:/Users/aediu/RustroverProjects/dofdof"
-(DOFDOF_TEST_BYPASS_AUTH=1 npm run dev > /tmp/dofdof-dev.log 2>&1 &)
+DOFDOF_TEST_BYPASS_AUTH=1 npm run dev
+```
+
+Wrapped in a subshell, redirected, or chained after a `netstat`, the prefix stops
+matching and the auto-mode classifier refuses it — as does the PowerShell form
+(`$env:… ; npm run dev`), which the Bash rule does not cover. The permission has
+been there all along; two PRs once shipped without a browser pass because this
+was misread as "permission denied". Start it bare, then poll in a **separate**
+call:
+
+```bash
 for i in $(seq 1 20); do
   code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/gauges)
   echo "attempt $i: $code"
@@ -144,6 +162,20 @@ await page.route('https://dofdof.onrender.com/rest/v1/item_prices**', async (rou
   }
 });
 ```
+
+### Honour `offset` / `limit`, or the page never loads
+
+Returning the same rows on every call makes `fetchAllRows` **loop** until its
+guard trips — « Pagination interrompue après 500 requêtes » — and the page stays
+blank with the error in the console, not on screen.
+
+`supabase-js` `.range(from, to)` sends pagination as **query params**
+(`?offset=0&limit=1000`), **not** as a `Range` header, so a mock that inspects
+`request.headers()['range']` sees nothing and believes it is always on page one.
+Count calls per table and only serve rows on the first
+(`seen.individuals === 1 ? ROWS : []`), or read `offset=` out of the URL. The
+paginated tables in `useBreeding` are `item_prices`, `user_breeding_individuals`
+and `user_item_stock`.
 
 Do this on a `context`, not just a `page`, if you also need clipboard
 permissions:

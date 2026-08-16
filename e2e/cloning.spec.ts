@@ -42,21 +42,6 @@ const openCloning = async (page: Page) => {
 };
 
 test.describe('clonage', () => {
-  test('les paires anonymes sont comptées, pas déroulées', async ({ page }) => {
-    // Elles n'ont ni nom, ni ascendance, ni rien qui les sépare : « laquelle
-    // gardes-tu » n'a pas de réponse. Vingt écrans demandaient de choisir entre
-    // une chose et elle-même.
-    await mockSupabase(page);
-    await openBreeding(page);
-    await openCloning(page);
-
-    const note = page.getByTestId('clone-anonymous-note');
-    await expect(note).toBeVisible();
-    await expect(note).toContainText(/\d+ clonages? entre anonymes/);
-    // Le rappel, qui est tout ce qu'on lui demande de dire.
-    await expect(note).toContainText('oublie');
-  });
-
   test('chaque monture à départager porte son sexe', async ({ page }) => {
     const supabase = await mockSupabase(page);
     nameEverySterile(supabase);
@@ -98,7 +83,7 @@ test.describe('clonage', () => {
       await page.getByTestId(cible).first().click({ position: { x: 5, y: 5 } });
     }
     await expect(titre).toHaveText(avant);
-    await expect(page.getByRole('button', { name: 'Garder celle-ci' })).toHaveCount(2);
+    await expect(page.getByTestId('clone-card')).toHaveCount(2);
   });
 
   test('le nom se copie sans trancher le clonage', async ({ page, context }) => {
@@ -122,32 +107,49 @@ test.describe('clonage', () => {
     await expect(titre).toHaveText(avant);
   });
 
-  test('« Fait » retire un clonage anonyme du lot, et l’écrit', async ({ page }) => {
-    // C'est la moitié qui compte : les sortir de l'arbitrage ne doit pas les
-    // sortir de la base. Sans ça l'écurie garderait des stériles que le jeu n'a
-    // plus, et le compte repartirait de travers — 203 contre 225.
-    const supabase = await mockSupabase(page);
+  test('aucune paire sans ascendance des deux côtés n’est proposée', async ({ page }) => {
+    // Un clonage entre deux stériles sans ascendance rend une gen 1 nue :
+    // exactement ce qui s'achète au filet pour trois fois rien. Le calcul y
+    // voyait un gain, l'éleveur y voyait vingt allers-retours en jeu.
+    await mockSupabase(page);
     await openBreeding(page);
     await openCloning(page);
 
-    const note = page.getByTestId('clone-anonymous-note');
-    const compte = async () =>
-      Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1]);
+    // Le compteur d'anonymes a disparu avec elles.
+    await expect(page.getByTestId('clone-anonymous-note')).toHaveCount(0);
 
-    const avant = await compte();
-    expect(avant).toBeGreaterThan(1);
-    const lignes = supabase.rows(individus).length;
+    // Et chaque paire encore proposée porte au moins un nom — c'est-à-dire au
+    // moins une ascendance, puisque l'un ne va pas sans l'autre.
+    const cartes = page.getByTestId('clone-card');
+    if ((await cartes.count()) > 0) {
+      expect(await cartes.getByTestId('copyable').count()).toBeGreaterThan(0);
+    }
+  });
 
-    await note.getByRole('button', { name: /^Fait/ }).click();
+  test('on ne peut pas garder la monture qui porte le moins', async ({ page }) => {
+    // Deux gen 1 appariables peuvent porter l'une un 1, l'autre un 2 : garder
+    // celle qui porte le 1 détruit le 2, définitivement.
+    await mockSupabase(page);
+    await openBreeding(page);
+    await openCloning(page);
 
-    // Un clonage consomme deux stériles et rend une fertile : le solde est −1.
-    await expect.poll(() => supabase.rows(individus).length).toBe(lignes - 1);
-    await expect.poll(compte).toBe(avant - 1);
+    const avertissement = page.getByTestId('clone-would-destroy');
+    const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
 
-    // Et il n'y revient pas : le lot restant est ce qui reste à faire en jeu.
-    await note.getByRole('button', { name: /^Fait/ }).click();
-    await expect.poll(compte).toBe(avant - 2);
-    await expect.poll(() => supabase.rows(individus).length).toBe(lignes - 2);
+    // On avance jusqu'à une paire dépareillée — elles existent sur cette écurie.
+    for (let pas = 0; pas < 12 && (await avertissement.count()) === 0; pas += 1) {
+      const passer = page.getByTestId('clone-skip');
+      if ((await passer.count()) === 0) break;
+      await passer.click();
+      await expect(titre).toBeVisible();
+    }
+    expect(await avertissement.count()).toBe(1);
+
+    // Un seul des deux boutons reste cliquable : celui qui garde la plus haute.
+    const boutons = page.getByRole('button', { name: /Garder celle-ci|Perdrait la gén/ });
+    await expect(boutons).toHaveCount(2);
+    await expect(boutons.filter({ hasText: 'Garder celle-ci' })).toBeEnabled();
+    await expect(boutons.filter({ hasText: 'Perdrait la gén' })).toBeDisabled();
   });
 
   test('« Passer » écarte un arbitrage sans rien écrire', async ({ page }) => {
@@ -182,19 +184,21 @@ test.describe('clonage', () => {
     // La règle de toute la maison : ce que l'écran retire du lot est ce que la
     // base a pris. Un refus laisse le clonage à faire, et le dit.
     const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
     await openBreeding(page);
     await openCloning(page);
 
-    const note = page.getByTestId('clone-anonymous-note');
-    const avant = Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1]);
+    const titre = page.getByRole('heading', { name: /^Clonage \d+ \/ \d+$/ });
+    const avant = await titre.innerText();
     const lignes = supabase.rows(individus).length;
 
     supabase.refuse({ table: individus, method: 'POST' });
-    await note.getByRole('button', { name: /^Fait/ }).click();
+    await page.getByRole('button', { name: 'Garder celle-ci' }).first().click();
 
     await expect(page.getByTestId('clone-refusal')).toBeVisible();
     await expect(page.locator('[role="alert"]').filter({ hasText: 'Pas enregistré' })).toBeVisible();
     expect(supabase.rows(individus)).toHaveLength(lignes);
-    expect(Number((await note.innerText()).match(/(\d+) clonages? entre anonymes/)![1])).toBe(avant);
+    // Et le clonage est toujours celui qu'on avait sous les yeux.
+    await expect(titre).toHaveText(avant);
   });
 });

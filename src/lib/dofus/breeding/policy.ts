@@ -47,6 +47,7 @@ import {
 import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
+import { carriedGeneration } from './naming';
 import type { BreedingColor } from './costs';
 import { consumeCouples, copyStable } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
@@ -826,8 +827,48 @@ export type CloningToRecord = {
   generation: number;
   first: string;
   second: string;
+  /**
+   * La génération que chaque côté **porte**, dans l'ordre `[first, second]`.
+   *
+   * Le jeu apparie à génération **affichée** égale, mais c'est l'ascendance qui
+   * décide de ce qu'une monture permet ensuite. Deux gen 1 appariables peuvent
+   * donc porter l'une un 1, l'autre un 2 — et garder la mauvaise détruit le 2.
+   * La fenêtre a besoin des deux chiffres pour l'interdire.
+   */
+  carried: [number, number];
 };
 
+/**
+ * Les clonages du plan, tels qu'on les propose à l'éleveur.
+ *
+ * ## Ce qu'on retire au passage : les paires sans ascendance
+ *
+ * Un clonage entre deux stériles **sans ascendance** rend une gen 1 nue —
+ * exactement ce qui s'achète au filet ou à l'hôtel de vente pour trois fois
+ * rien. Le calcul y voyait un gain, parce qu'une gen 1 stérile ne rend aucun
+ * ambre et ne vaut donc rien à l'extraction ; ce qu'il ne voit pas, c'est ce que
+ * le geste coûte à l'éleveur — un aller-retour en jeu par clonage, devant deux
+ * cartes rigoureusement identiques. Vingt propositions par fournée, pour un
+ * résultat qu'un clic à l'hôtel de vente donne aussi.
+ *
+ * ## Pourquoi ici, et pas dans la recherche
+ *
+ * Le filtre a d'abord été posé dans `search.ts`, à l'endroit où l'action de
+ * clonage se tire. C'était le bon endroit sur le papier, et c'est faux en
+ * pratique : `check-search.mjs` est passé de **80/80 à 44/80**. Le portage
+ * rejoue la recherche Rust coup pour coup, et l'en-tête de `search.ts` le dit —
+ * « un `rng()` de plus ou de moins, même sur une branche qui ne sert à rien,
+ * décale la suite ». Surtout, le champion a été **entraîné contre la recherche
+ * Rust** : la changer d'un seul côté ferait tourner en production une politique
+ * pour laquelle il n'a pas été entraîné.
+ *
+ * Le filtre vit donc à la frontière entre le plan et l'écran. La conséquence,
+ * assumée : le plan a compté ces clonages dans sa valeur, et l'éleveur ne les
+ * fera pas — ce qui revient exactement à les passer un par un, ce que la fenêtre
+ * permet déjà. Retirer la proposition du calcul lui-même demande de changer
+ * `search.rs` à l'identique et de réentraîner le champion ; c'est une autre
+ * paire de manches, et elle a son propre outillage (`neat-training`).
+ */
 export const cloningsToRecord = (
   plan: StablePlan,
   generations: Map<string, number>
@@ -837,10 +878,24 @@ export const cloningsToRecord = (
       const a = plan.mounts[first];
       const b = plan.mounts[second];
       if (!a || !b) return null;
+
+      // Ni l'une ni l'autre ne porte d'ascendance : le clone n'en portera pas
+      // davantage, et il ne rachète donc aucune lignée.
+      if (!a.parents && !b.parents) return null;
+
+      const carriedOf = (mount: Individual) =>
+        carriedGeneration(
+          generations.get(mount.colorId) ?? 1,
+          mount.parents
+            ? [generations.get(mount.parents[0]) ?? 1, generations.get(mount.parents[1]) ?? 1]
+            : null
+        );
+
       return {
         generation: generations.get(a.colorId) ?? 1,
         first: a.id,
         second: b.id,
+        carried: [carriedOf(a), carriedOf(b)] as [number, number],
       };
     })
     .filter((entry): entry is CloningToRecord => entry !== null);

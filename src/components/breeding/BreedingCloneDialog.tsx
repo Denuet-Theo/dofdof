@@ -132,34 +132,18 @@ const BreedingCloneDialog = ({
   }, [colors]);
 
   /**
-   * Les clonages où il y a réellement quelque chose à trancher.
+   * Tout ce qui arrive ici se tranche.
    *
-   * Un clonage entre **deux anonymes** n'en est pas un : elles ont la même
-   * couleur, la même génération, aucune ascendance et aucun nom. Rien ne les
-   * distingue à l'écran parce que rien ne les distingue en jeu, et « laquelle
-   * gardes-tu » n'a alors pas de réponse — les deux mènent au même clone. Les
-   * faire défiler une par une, c'est vingt écrans qui demandent de choisir
-   * entre une chose et elle-même.
+   * La fenêtre portait un compteur pour les paires **sans ascendance des deux
+   * côtés** : rien ne les distinguait, donc « laquelle gardes-tu » n'avait pas
+   * de réponse, et elles se soldaient en bloc. Elles ne sont plus proposées du
+   * tout — voir `cloningsToRecord`, qui les écarte à la source parce que leur
+   * clone est une gen 1 nue, c'est-à-dire ce qui s'achète pour trois fois rien.
    *
-   * Elles ne disparaissent pas pour autant : elles se font en jeu comme les
-   * autres, et deux stériles y partent bien pour une fertile. Elles se comptent
-   * donc en tête, dans une ligne qui dit combien il y en a, et se tranchent
-   * toutes seules — le premier des deux identifiants, puisque le choix est vide.
+   * Il ne reste donc que des clonages où au moins un côté porte une lignée, et
+   * l'écran n'a plus qu'un mode.
    */
-  const undecidable = (entry: CloningToRecord) =>
-    !byId.get(entry.first)?.name && !byId.get(entry.second)?.name;
-
-  const anonymous = useMemo(
-    () => lot.filter(undecidable),
-    // `byId` suffit : `undecidable` n'en dépend que par lui.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lot, byId]
-  );
-  const decisions = useMemo(
-    () => lot.filter((entry) => !undecidable(entry)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lot, byId]
-  );
+  const decisions = lot;
 
   const skip = (entry: CloningToRecord) =>
     setSkipped((current) => new Set(current).add(entry.first));
@@ -168,7 +152,6 @@ const BreedingCloneDialog = ({
   const pending = (entry: CloningToRecord) =>
     !done.has(entry.first) && !skipped.has(entry.first);
   const remaining = decisions.filter(pending);
-  const remainingAnonymous = anonymous.filter(pending);
   const current = remaining[0] ?? null;
 
   /**
@@ -217,6 +200,22 @@ const BreedingCloneDialog = ({
   const card = (mountId: string, side: 'left' | 'right') => {
     const mount = byId.get(mountId);
     if (!mount) return null;
+
+    /**
+     * Cette monture porte-t-elle **moins** que l'autre ?
+     *
+     * Le jeu apparie à génération affichée égale, mais c'est l'ascendance qui
+     * décide de ce qu'une monture permet ensuite : deux gen 1 côte à côte
+     * peuvent porter l'une un 1, l'autre un 2. Garder celle qui porte le 1
+     * détruit le 2 — définitivement, puisque le clonage consomme les deux.
+     *
+     * On ne propose donc pas ce choix-là. Ce n'est pas un arbitrage entre deux
+     * options : c'en est un entre une option et une perte sèche, et la carte le
+     * dit au lieu de laisser un clic de travers l'exécuter.
+     */
+    const carried = current ? current.carried[side === 'left' ? 0 : 1] : 0;
+    const other = current ? current.carried[side === 'left' ? 1 : 0] : 0;
+    const wouldDestroy = carried < other;
     const icon = iconOf(mount.colorId);
     const parents = mount.parents
       ? `${nameOf(mount.parents[0])} × ${nameOf(mount.parents[1])}`
@@ -269,15 +268,27 @@ const BreedingCloneDialog = ({
             {ANONYMOUS_NAME}
           </span>
         )}
+        {wouldDestroy && (
+          <span
+            data-testid="clone-would-destroy"
+            className="text-[10px] text-amber-400/90 text-center"
+          >
+            porte une gén. {carried} face à une gén. {other} — la garder détruirait la plus haute
+          </span>
+        )}
         <Button
           size="sm"
           variant="secondary"
           className="mt-1 w-full"
-          disabled={saving}
+          disabled={saving || wouldDestroy}
           onClick={() => current && record(current, side === 'left' ? 'first' : 'second')}
-          title="Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic."
+          title={
+            wouldDestroy
+              ? `Indisponible : l’autre porte une génération ${other}, celle-ci une ${carried}. Le clonage consomme les deux — garder celle-ci perdrait la plus haute pour de bon.`
+              : 'Le clone prend sa place, son nom et son ascendance. L’autre stérile disparaît. Enregistré au clic.'
+          }
         >
-          {saving ? 'Enregistrement…' : 'Garder celle-ci'}
+          {saving ? 'Enregistrement…' : wouldDestroy ? 'Perdrait la gén. ' + other : 'Garder celle-ci'}
         </Button>
       </div>
     );
@@ -289,59 +300,11 @@ const BreedingCloneDialog = ({
       onClose={onClose}
       title={
         decisions.length === 0
-          ? `Clonages — ${remainingAnonymous.length} à faire`
+          ? `Clonages — aucun à faire`
           : `Clonage ${decisions.length - remaining.length + (current ? 1 : 0)} / ${decisions.length}`
       }
     >
       <div className="space-y-4">
-        {/* Les clonages sans arbitrage, comptés en tête plutôt que déroulés un
-            par un. Ils restent à faire **en jeu** : c'est tout ce que cette
-            ligne a à dire, et c'est pour ça qu'elle existe. */}
-        {remainingAnonymous.length > 0 && (
-          <div
-            data-testid="clone-anonymous-note"
-            className="flex flex-wrap items-start gap-2 px-3 py-2 rounded-xl bg-dark-800/60
-              border border-dark-600/50 text-[11px] text-dark-300"
-          >
-            <Dna size={13} className="text-dark-500 mt-0.5 shrink-0" />
-            <span className="flex-1 min-w-48">
-              <strong className="text-dark-100">
-                {remainingAnonymous.length} clonage{remainingAnonymous.length > 1 ? 's' : ''} entre
-                anonymes
-              </strong>{' '}
-              — rien à départager : elles ont la même couleur, la même génération et aucune
-              ascendance, donc les deux mènent au même clone. Prends-en deux au hasard dans le
-              tas. <strong className="text-dark-100">Ne les oublie pas.</strong>
-            </span>
-            {/* Un bouton par clonage fait, et non un seul qui les solderait tous.
-                C'est le compteur qu'on regarde entre deux allers-retours en jeu :
-                « il m'en reste combien ». Un bouton « tout est fait » se cliquerait
-                avant de les avoir faits, et il n'y aurait plus rien pour le dire. */}
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={saving}
-              onClick={() => record(remainingAnonymous[0], 'first')}
-              title="Retire un clonage du lot : deux stériles partent, une fertile entre. Enregistré au clic."
-            >
-              <Check size={12} />
-              {saving ? 'Enregistrement…' : 'Fait — il en reste ' + (remainingAnonymous.length - 1)}
-            </Button>
-            {/* Même sortie que sur l'arbitrage : le tas peut être vide en jeu
-                alors que le compteur en annonce encore. */}
-            <button
-              type="button"
-              data-testid="clone-skip-anonymous"
-              disabled={saving}
-              onClick={() => skip(remainingAnonymous[0])}
-              title="Rien n’est enregistré : ce clonage sort du lot pour cette fois."
-              className="text-[11px] text-dark-500 hover:text-dark-200 transition-colors
-                cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Passer
-            </button>
-          </div>
-        )}
 
         {refused && (
           <p
@@ -455,13 +418,13 @@ const BreedingCloneDialog = ({
           </span>
           <Button
             size="sm"
-            variant={current || remainingAnonymous.length > 0 ? 'secondary' : 'primary'}
+            variant={current ? 'secondary' : 'primary'}
             className="ml-auto"
             disabled={saving}
             onClick={onClose}
           >
             <Check size={13} />
-            {current || remainingAnonymous.length > 0 ? 'Fermer — rien ne se perd' : 'Fermer'}
+            {current ? 'Fermer — rien ne se perd' : 'Fermer'}
           </Button>
         </div>
       </div>

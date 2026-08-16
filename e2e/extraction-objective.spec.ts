@@ -32,6 +32,16 @@ import { openBreeding } from './support/breeding';
 
 const GEN10 = 'G10 AZTU F AZ-PO';
 
+/**
+ * Une gen 2 de lignée **Doré**, protégée par la première version de la règle.
+ *
+ * Elle ne rend au projet qu'un Doré — gen 1, mille kamas, l'écurie en tient des
+ * dizaines — pendant qu'un Azur-Pourpre fécond apportait l'Azur. Dix-neuf des
+ * vingt protégées l'étaient par ce seul partenaire, et sanctuariser une monture
+ * qu'un achat remplace vide l'écran de son objet.
+ */
+const GEN2_DORE = 'G2 DOOR F DO-OR';
+
 const openExtraction = async (page: Page) => {
   const tab = page.getByTestId('step-extract');
   await expect(tab).toBeVisible({ timeout: 30_000 });
@@ -58,6 +68,24 @@ test.describe('extraction et projet', () => {
     const rows = page.getByTestId('extraction-row');
     for (let index = 0; index < (await rows.count()); index += 1) {
       expect(Number(await rows.nth(index).getAttribute('data-generation'))).toBeLessThan(10);
+    }
+  });
+
+  test('une gen 2 qui n’apporte que du Doré, elle, reste extractible', async ({ page }) => {
+    // Le pendant du test précédent, et il borne la règle. « Peut nommer la
+    // couleur visée » protégeait les deux moitiés du croisement ; seule celle
+    // qu'on ne rachète pas mérite de l'être. Le seuil est `cible − 1`, donc
+    // gen 9 pour Azur-Doré.
+    await mockSupabase(page);
+    await openBreeding(page);
+    await openExtraction(page);
+
+    await expect(page.getByTestId('pane-extract')).toContainText(GEN2_DORE);
+
+    // Et rien de ce qui reste ici ne porte la moitié rare.
+    const rows = page.getByTestId('extraction-row');
+    for (let index = 0; index < (await rows.count()); index += 1) {
+      expect(Number(await rows.nth(index).getAttribute('data-carried'))).toBeLessThan(9);
     }
   });
 

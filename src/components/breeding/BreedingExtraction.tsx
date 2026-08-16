@@ -109,6 +109,9 @@ const BreedingExtraction = ({
                jeu n'extrait pas. L'écran ne l'écrit pas autrement — une monture
                anonyme n'a pas de nom pour porter sa génération. */
             data-generation={mount.generation}
+            /* La génération **portée**, qui est celle sur laquelle le projet
+               protège : rien de ce qui atteint `cible − 1` ne doit être ici. */
+            data-carried={mount.carried}
             data-units={mount.units}
             data-amber={Math.round(mount.amber)}
             className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs

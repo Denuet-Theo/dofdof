@@ -79,6 +79,13 @@ import type { Stable } from './stable';
  * que son prix de rang, net des génétons, tombait sous cette somme. Voir
  * `cloning.ts`, § « le projet ».
  *
+ * Ce retrait-là est **étroit**, et c'est voulu : seule sort la monture qui
+ * apporte la moitié qu'on ne rachète pas, celle qui porte `cible − 1` ou plus.
+ * Une gen 2 dont toute la contribution est un Doré à mille kamas reste ici, et
+ * s'extrait comme n'importe quelle autre. Sans ce seuil la règle protégeait
+ * 20 stériles sur 20 de l'écurie du 15/08 — voir `cloning.ts`, § « la moitié
+ * rare ».
+ *
  * **Rien de ce qui sort d'ici ne disparaît de l'app**, et c'est la condition qui
  * rend ces retraits acceptables : les appariables sont dans l'onglet Clonage, qui
  * les liste toutes, et les protégées que rien n'apparie sont dans

@@ -134,6 +134,37 @@ import { isSterile, type Individual, type Sex, type Stable } from './stable';
  * les seules couleurs qu'on se procure sans les élever (voir la même borne dans
  * `costs.ts`). Exiger le Doré en écurie ferait dépendre la survie d'une gen 10
  * d'un achat qu'on n'a pas encore fait.
+ *
+ * ## Protégée doit vouloir dire irremplaçable : la moitié rare, et elle seule
+ *
+ * « Peut nommer la couleur visée » protégeait les deux camps, et c'était trop
+ * large de moitié. Azur-Doré se compose d'**Azur** et de **Doré**, un croisement
+ * le nomme dès qu'un parent apporte l'une et l'autre l'autre — mais les deux
+ * moitiés n'ont aucun rapport en rareté :
+ *
+ * - **Azur** est gen 9. L'écurie en tient une, elle ne se rachète nulle part.
+ * - **Doré** est gen 1, à mille kamas à l'hôtel de vente, et l'écurie en tient
+ *   des dizaines.
+ *
+ * Mesuré sur l'écurie du 15/08 : **20 stériles protégées, dont 19 par le même
+ * partenaire** — un Azur-Pourpre fécond qui apportait l'Azur pendant qu'elles
+ * n'apportaient que le Doré. Une protection que tout porte ne trie plus rien, et
+ * elle sanctuarisait des gen 2 qu'un achat remplace.
+ *
+ * Le seuil est donc `carried >= cible − 1` : ce qui porte la génération juste
+ * sous la couleur visée, c'est-à-dire la moitié qu'on ne rachète pas. Pour
+ * Azur-Doré, gen 10, c'est **gen 9 et au-dessus** — l'Azur-Turquoise, et rien
+ * d'autre.
+ *
+ * Il se lit sur la **cible** et non sur un 9 en dur, pour la même raison que les
+ * bornes de `costs.ts` se lisent sur la recette : un projet qui viserait une
+ * gen 4 protégerait ses porteuses de gen 3, et la phrase resterait la même — la
+ * moitié qu'on ne peut pas racheter.
+ *
+ * Ce que ça change, mesuré sur la même écurie : **rien en volume**. Trois lignes
+ * à extraire et 153 000 kamas dans les deux régimes — protéger une monture ne
+ * fait que déplacer laquelle de ses sœurs de rang finit dépareillée. Ce sont les
+ * montures qu'on détruit qui changent, pas leur nombre.
  */
 
 /** Une monture stérile, réduite à ce que l'arbitrage a besoin d'en savoir. */
@@ -153,11 +184,16 @@ export type SterileMount = Mate & {
   /** Ce qu'il faudrait payer pour la remplacer dans son rôle. */
   value: number;
   /**
-   * Son clone, croisé avec un partenaire à portée, peut **nommer la couleur
-   * visée** par le projet.
+   * Elle apporte au projet la **moitié qu'on ne rachète pas**, et son clone peut
+   * nommer la couleur visée.
    *
-   * `false` partout tant qu'aucun projet n'est choisi. Voir l'en-tête : ce
-   * drapeau prime sur `value`, qui est un prix de rang et ne sait rien du but.
+   * Les deux conditions comptent. « Peut nommer la couleur visée » seul protégeait
+   * aussi bien la gen 2 qui apporte un Doré à mille kamas que la gen 10 qui
+   * apporte l'Azur — 20 montures sur 20 sur l'écurie du 15/08. D'où le seuil sur
+   * la génération portée, `cible − 1`. Voir l'en-tête.
+   *
+   * `false` partout tant qu'aucun projet n'est choisi. Ce drapeau prime sur
+   * `value`, qui est un prix de rang et ne sait rien du but.
    */
   servesObjective: boolean;
 };
@@ -267,7 +303,16 @@ export const sterileMounts = (stable: Stable, context: CloneContext): SterileMou
   // ses deux signatures avant de mettre en cache — donc l'ordre des deux montures
   // n'a pas à être celui d'un vrai couple.
   const mates = reachableMates(stable, objective);
+
+  /**
+   * La moitié qu'on ne rachète pas : ce qui porte la génération juste sous la
+   * couleur visée. Voir l'en-tête — sans ce seuil, une gen 2 qui n'apporte qu'un
+   * Doré à mille kamas était protégée comme la gen 10 qui apporte l'Azur.
+   */
+  const scarceFrom = (context.generations.get(objective.colorId) ?? 1) - 1;
+
   for (const mount of mounts) {
+    if (mount.carried < scarceFrom) continue;
     mount.servesObjective = mates.some((mate) =>
       pairOutlook(mount, mate, objective.colors, context.generations)?.targetColors.some(
         (color) => color.colorId === objective.colorId

@@ -11,7 +11,7 @@ import BreedingEnclosExitDialog, {
   type EnclosExitResult,
 } from '@/components/breeding/BreedingEnclosExitDialog';
 import BreedingExtraction from '@/components/breeding/BreedingExtraction';
-import { cloningsToRecord, couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
+import { couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
 import {
   nextPenIndex,
   pennedUnits,
@@ -23,7 +23,7 @@ import { formatCountdown } from '@/lib/dofus/breeding/timeline';
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
-import type { CloneOption } from '@/lib/dofus/breeding/cloning';
+import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
 import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
 import { MINUTE_MS, useWallClock } from '@/lib/hooks/useWallClock';
 import type { Couple, Individual } from '@/lib/dofus/breeding/stable';
@@ -87,14 +87,17 @@ type Props = {
   couples?: Couple[];
   /** Ce que valent les stériles de l'écurie, à l'onglet « Clonage ». */
   cloneAdvice?: CloneOption[];
-  /** Toutes les stériles, appariables ou non, à l'onglet « Extraction ». */
+  /** Les stériles que le projet protège et qu'aucun clonage n'apparie encore. */
+  cloneHeld?: SterileMount[];
+  /** La couleur visée par le projet, pour nommer ce qu'une monture protégée sert. */
+  objectiveName?: string | null;
+  /** Ce qui s'extrait, et rien d'autre, à l'onglet « Extraction ». */
   extraction?: ExtractionCandidate[];
   /** Ambre, neurone ou corne : ce que l'extraction rend dans cette famille. */
   sacrificeName?: string;
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
   colors?: BreedingColor[];
-  generations?: Map<string, number>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
@@ -126,12 +129,13 @@ const BreedingPolicyPanel = ({
   batch,
   couples,
   cloneAdvice = [],
+  cloneHeld = [],
+  objectiveName = null,
   extraction = [],
   sacrificeName = 'ambre',
   nameOf,
   individuals = [],
   colors,
-  generations,
   onRecordBirths,
   onUndoBirth,
   onRecordClonings,
@@ -161,9 +165,35 @@ const BreedingPolicyPanel = ({
     () => couples ?? (fill ? couplesToRecord(fill) : []),
     [couples, fill]
   );
+  /**
+   * Les clonages à saisir — **la même liste que celle qui est affichée**.
+   *
+   * Elles étaient deux, produites indépendamment : `cloneOptions` pour ce que
+   * l'écurie permet, `cloningsToRecord` pour ce que la recherche planifie. Les
+   * deux s'affichaient au même onglet, sous le même compte, et ne disaient pas la
+   * même chose — « 12 clonages à faire » ouvrait une fenêtre dont le premier
+   * couple n'était pas le premier de la liste juste au-dessus, ni le deuxième, ni
+   * aucun. L'éleveur lit une liste et en exécute une autre.
+   *
+   * C'est `cloneOptions` qui reste, parce que c'est elle qui porte les règles :
+   * les jumelles d'abord, le sexe certain à valeur égale, le projet avant les
+   * kamas, et aucune anonyme. Le plan, lui, apparie ce que la recherche a tiré —
+   * il ignore les trois. Ce que la politique planifie continue d'exister dans le
+   * plan ; ce qui a disparu, c'est un second écran qui le contredisait.
+   */
   const toClone = useMemo(
-    () => (fill && generations ? cloningsToRecord(fill, generations) : []),
-    [fill, generations]
+    () =>
+      cloneAdvice
+        // Les deux identifiants existent toujours ici : `sterileMounts` ne lit
+        // que des individus, et le vrac n'a pas de stériles à suivre.
+        .filter((option) => option.keep.id !== null && option.partner.id !== null)
+        .map((option) => ({
+          generation: option.keep.generation,
+          first: option.keep.id!,
+          second: option.partner.id!,
+          carried: [option.keep.carried, option.partner.carried] as [number, number],
+        })),
+    [cloneAdvice]
   );
 
   /**
@@ -477,13 +507,12 @@ const BreedingPolicyPanel = ({
                 Deux stériles, une survivante — c&apos;est toi qui choisis laquelle.
               </p>
             </>
-          ) : cloneAdvice.length > 0 ? (
-            /* Les deux listes ne répondent pas à la même question : `toClone` est
-               ce que la **politique** planifie, `cloneAdvice` ce que l'écurie
-               **permet**. La seconde reste actionnable quand la première est vide. */
+          ) : cloneHeld.length > 0 ? (
+            /* Rien à apparier, mais quelque chose à ne pas détruire : la liste des
+               gardées suffit à justifier l'onglet. */
             <p className="text-[11px] text-dark-500">
-              La politique n&apos;en planifie aucun. Les appariements ci-dessous sont ceux que
-              tes stériles permettent — à faire dans le jeu, sans rien à saisir ici.
+              Aucune paire à faire pour l&apos;instant — mais l&apos;écurie porte des stériles
+              que le projet protège, plus bas.
             </p>
           ) : (
             <p className="text-[11px] text-dark-500">
@@ -494,6 +523,8 @@ const BreedingPolicyPanel = ({
 
           <BreedingCloneAdvice
             clonings={cloneAdvice}
+            held={cloneHeld}
+            objectiveName={objectiveName}
             nameOf={nameOf}
             individuals={individuals}
           />

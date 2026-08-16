@@ -33,6 +33,18 @@ import type { Individual } from '@/lib/dofus/breeding/stable';
  *
  * Elles ne disparaissent pas de l'app pour autant : une gen 1 stérile s'apparie,
  * et l'onglet Clonage la propose. C'est là qu'elle a quelque chose à faire.
+ *
+ * ## Une seule population, donc un seul total
+ *
+ * Le même retrait a fini par emporter les « plutôt cloner ». L'écran portait
+ * **42 lignes pour 4 extractions**, en-tête « 4 à extraire · 408 000 kamas »
+ * devant une liste dont la somme visible faisait 1 700 000. Rien ne disait
+ * lesquelles des 42 faisaient les 408 000, et le lecteur n'avait aucun moyen de
+ * recouper le chiffre qu'on lui donnait.
+ *
+ * `extractionOrder` ne rend donc plus que ce qui s'extrait, et `keepForBreeding`
+ * n'existe plus : le total ne **peut** plus être autre chose que la somme des
+ * lignes affichées.
  */
 const BreedingExtraction = ({
   candidates,
@@ -48,21 +60,15 @@ const BreedingExtraction = ({
 }) => {
   const nameOfMount = useMemo(() => mountNameOf(individuals), [individuals]);
 
-  /**
-   * Ce que rend le haut de la liste — celles qu'aucun clonage ne rattrape.
-   *
-   * Le total de **toutes** les stériles n'aurait pas de sens : il additionnerait
-   * des montures qu'on ne détruira pas. Ce qui se décide ici, c'est de vider ce
-   * qui ne sert plus, et le chiffre utile est ce que ça rapporte.
-   */
-  const clearable = candidates.filter((mount) => !mount.keepForBreeding);
-  const total = clearable.reduce((sum, mount) => sum + mount.amber, 0);
+  /** Ce que la liste rapporte, en entier : elle ne porte plus que des extractions. */
+  const total = candidates.reduce((sum, mount) => sum + mount.amber, 0);
 
   if (candidates.length === 0) {
     return (
       <p className="text-[11px] text-dark-500 px-1">
-        Rien à extraire — aucune stérile de génération 2 ou plus en écurie. Les gen 1 ne
-        s&apos;extraient pas : elles ne servent qu&apos;au clonage, à l&apos;onglet Clonage.
+        Rien à extraire — tout ce que l&apos;écurie porte de stérile vaut mieux cloné, sert le
+        projet, ou est une gen 1 que le jeu n&apos;extrait pas. Tout ça se règle à
+        l&apos;onglet Clonage.
       </p>
     );
   }
@@ -72,21 +78,25 @@ const BreedingExtraction = ({
       <div className="flex flex-wrap items-center gap-2">
         <Gem size={13} className="text-kamas" />
         <span className="text-[11px] font-semibold text-dark-200">
-          {candidates.length} stérile{candidates.length > 1 ? 's' : ''} extractible
-          {candidates.length > 1 ? 's' : ''}
+          {candidates.length} stérile{candidates.length > 1 ? 's' : ''} à extraire
         </span>
         <span className="text-[11px] text-dark-500">
-          de la moins intéressante à reproduire à la plus — extraire dans cet ordre. Les gen 1
-          n&apos;y sont pas : le jeu ne les extrait pas.
+          de la moins intéressante à reproduire à la plus — extraire dans cet ordre. N&apos;y sont
+          pas : les gen 1, que le jeu n&apos;extrait pas, et tout ce qui vaut mieux cloné ou sert
+          le projet.
         </span>
-        {clearable.length > 0 && (
-          <span className="ml-auto text-[11px] text-dark-400 tabular-nums">
-            {clearable.length} à extraire ·{' '}
-            <strong className="text-kamas">
-              {Math.round(total).toLocaleString('fr-FR')} kamas
-            </strong>
-          </span>
-        )}
+        {/* Le total est exposé en clair : c'est la somme des lignes affichées, et
+            c'est exactement ce que la version précédente ne tenait pas — 408 000
+            annoncés devant une liste qui en faisait 1 700 000. Un chiffre que le
+            lecteur ne peut pas recouper à l'œil doit pouvoir l'être par la suite. */}
+        <span
+          data-testid="extraction-total"
+          data-total={Math.round(total)}
+          className="ml-auto text-[11px] text-dark-400 tabular-nums"
+        >
+          <strong className="text-kamas">{Math.round(total).toLocaleString('fr-FR')} kamas</strong>{' '}
+          en tout
+        </span>
       </div>
 
       <div className="space-y-1">
@@ -100,8 +110,9 @@ const BreedingExtraction = ({
                anonyme n'a pas de nom pour porter sa génération. */
             data-generation={mount.generation}
             data-units={mount.units}
-            className={`flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
-              ${mount.keepForBreeding ? 'bg-dark-800/20' : 'bg-dark-800/40'}`}
+            data-amber={Math.round(mount.amber)}
+            className="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl text-xs
+              bg-dark-800/40"
           >
             <span className="inline-flex flex-wrap items-center gap-1.5 text-dark-200">
               {mount.sex === 'M' ? '♂' : '♀'} {nameOf(mount.colorId)}
@@ -128,34 +139,24 @@ const BreedingExtraction = ({
             {/* Plus de cas « ne s'extrait pas » : les gen 1 ne sont plus dans
                 cette liste, `extractionOrder` les écarte. Une ligne d'ici rend
                 donc toujours quelque chose. */}
-            <span className="ml-auto shrink-0 text-[10px] tabular-nums">
-              <span className={mount.keepForBreeding ? 'text-dark-500' : 'text-gain'}>
-                {mount.units} {resourceName} ·{' '}
-                {Math.round(mount.amber).toLocaleString('fr-FR')} kamas
-              </span>
+            <span className="ml-auto shrink-0 text-[10px] tabular-nums text-gain">
+              {mount.units} {resourceName} ·{' '}
+              {Math.round(mount.amber).toLocaleString('fr-FR')} kamas
             </span>
 
-            {/* Les deux motifs se distinguent, parce qu'ils ne se corrigent pas
-                pareil. « Plutôt cloner » attend un geste — l'onglet Clonage la
-                propose déjà. « Dépareillée » attend une monture qui n'existe pas
-                encore : à ce rang il n'y a personne d'autre, et tant qu'une
-                naissance n'en produit pas, l'ambre est tout ce qui reste. */}
-            {mount.keepForBreeding ? (
+            {/* Le motif, quand il y en a un à donner. « Dépareillée » attend une
+                monture qui n'existe pas encore : à ce rang il n'y a personne
+                d'autre, et tant qu'une naissance n'en produit pas, l'ambre est
+                tout ce qui reste. Une appariable qui est quand même ici n'a pas
+                besoin d'explication — son ambre bat sa valeur, c'est écrit sur la
+                ligne. */}
+            {!mount.pairable && (
               <span
-                className="shrink-0 text-[10px] text-amber-400/70"
-                title="Une autre stérile du même rang lui reste disponible, et ce qu'elle vaut en reproduction dépasse son ambre : le clonage la sauve."
+                className="shrink-0 text-[10px] text-dark-500"
+                title="Aucune autre stérile de sa génération affichée ne peut l'apparier : le clonage lui est fermé, il ne lui reste que l'extraction."
               >
-                plutôt cloner
+                dépareillée
               </span>
-            ) : (
-              !mount.pairable && (
-                <span
-                  className="shrink-0 text-[10px] text-dark-500"
-                  title="Aucune autre stérile de sa génération affichée ne peut l'apparier : le clonage lui est fermé, il ne lui reste que l'extraction."
-                >
-                  dépareillée
-                </span>
-              )
             )}
           </div>
         ))}

@@ -146,19 +146,27 @@ test.describe('montures en enclos', () => {
     // comptée deux fois. « Fertile » est le cas qui le montre le mieux — il
     // n'écrit rien sur les montures, donc l'écurie retrouve exactement son état
     // d'avant.
+    //
+    // La sonde est l'**accouplement**, et ce n'est plus un détail : un enclos ne
+    // reçoit que des fertiles, donc mettre de côté ne change rien à ce qui se
+    // clone. Le compteur du clonage y répondait pourtant, parce qu'il portait le
+    // plan de la politique et non les stériles de l'écurie — les deux listes que
+    // l'onglet Clonage confondait. Il n'y répond plus, et c'est la correction, pas
+    // une régression : ce qui bouge quand on enferme une fertile, c'est ce qu'on
+    // peut accoupler.
     await mockSupabase(page);
     await openBreeding(page);
     await openLoadTab(page);
 
-    const before = await tabCount(page, 'clone');
+    const before = await tabCount(page, 'mate');
     await lockAll(page, 1);
-    expect(await tabCount(page, 'clone')).not.toBe(before);
+    expect(await tabCount(page, 'mate')).not.toBe(before);
 
     await page.getByTestId('locked-pen').first().getByTestId('exit-pen').click();
     await page.getByTestId('exit-fertile').click();
     await expect(page.getByTestId('locked-pen')).toHaveCount(0);
 
     await expect(page.getByTestId('penned-notice')).toHaveCount(0);
-    expect(await tabCount(page, 'clone')).toBe(before);
+    expect(await tabCount(page, 'mate')).toBe(before);
   });
 });

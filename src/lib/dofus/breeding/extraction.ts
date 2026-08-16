@@ -1,4 +1,9 @@
-import { cloneOptions, sterileMounts, type CloneContext, type SterileMount } from './cloning';
+import {
+  pairedSterileIds,
+  sterileMounts,
+  type CloneContext,
+  type SterileMount,
+} from './cloning';
 import type { Stable } from './stable';
 
 /**
@@ -52,6 +57,32 @@ import type { Stable } from './stable';
  *
  * `units` est donc toujours strictement positif ici, et l'écran n'a plus de cas
  * « rend zéro » à afficher.
+ *
+ * ## Ni les « plutôt cloner », ni ce que le projet protège
+ *
+ * Le même raisonnement est allé deux crans plus loin, et pour la même raison : une
+ * ligne qu'on n'extraira pas n'a rien à faire sur la liste de ce qu'on extrait.
+ *
+ * Sur l'écurie du 16/08, la liste portait **42 lignes pour 4 extractions**. Les 38
+ * autres disaient « plutôt cloner » — leur valeur de reproduction dépasse leur
+ * ambre — et l'en-tête annonçait « 4 à extraire · 408 000 kamas » devant une liste
+ * dont la somme visible faisait **1 700 000**. Deux populations sur le même écran,
+ * un total qui n'en couvre qu'une, et rien pour dire laquelle.
+ *
+ * Elles sortent donc, et `keepForBreeding` avec : le drapeau n'existe plus, donc
+ * aucun écran ne peut plus afficher une ligne « à ne pas extraire » dans la liste
+ * d'extraction, et le total ne peut plus qu'être la somme de ce qui est affiché.
+ *
+ * Sortent aussi celles que le **projet** protège. Une Azur-Turquoise gen 10
+ * croisée avec un Doré à mille kamas nomme Azur-Doré — la couleur visée — à
+ * 13,95 %, et l'écran proposait de la détruire pour 170 000 kamas d'ambre parce
+ * que son prix de rang, net des génétons, tombait sous cette somme. Voir
+ * `cloning.ts`, § « le projet ».
+ *
+ * **Rien de ce qui sort d'ici ne disparaît de l'app**, et c'est la condition qui
+ * rend ces retraits acceptables : les appariables sont dans l'onglet Clonage, qui
+ * les liste toutes, et les protégées que rien n'apparie sont dans
+ * `unpairedObjectiveSteriles`, qui existe pour elles.
  */
 
 /** Une stérile, ce qu'elle vaut encore, et ce que son extraction rendrait. */
@@ -67,77 +98,43 @@ export type ExtractionCandidate = SterileMount & {
   amber: number;
   /**
    * Un clonage peut encore la ramener dans l'écurie : une autre stérile de
-   * **même génération affichée** lui reste disponible. Voir `pairable` ci-dessous.
+   * **même génération affichée** lui reste disponible.
+   *
+   * Toujours `false` en pratique sur une liste où l'appariable ne rentre que si
+   * son ambre bat sa valeur de reproduction — mais c'est ce qui distingue les deux
+   * motifs de rester ici, et ils ne se corrigent pas pareil.
    */
   pairable: boolean;
-  /**
-   * `true` quand mieux vaut la garder pour un clonage que l'extraire.
-   *
-   * Les deux conditions comptent, et la première est celle qu'une version
-   * précédente oubliait : il faut qu'un clonage soit **possible**. Comparer la
-   * valeur de reproduction à l'ambre sans ça marquait toute l'écurie « plutôt
-   * cloner » — le prix de remplacement dépasse presque toujours quelques milliers
-   * de kamas d'ambre — y compris les stériles que rien ne peut apparier, qui sont
-   * précisément celles que cet onglet existe pour montrer.
-   *
-   * Une stérile dépareillée ne retourne jamais à la reproduction, quelle que soit
-   * sa valeur : il ne lui reste que l'ambre.
-   */
-  keepForBreeding: boolean;
 };
 
 /**
- * Les stériles qu'un clonage peut encore ramener dans l'écurie : celles que
- * `cloneOptions` apparie.
+ * Les stériles **à extraire**, de la moins intéressante à reproduire à la plus —
+ * donc dans l'ordre où les extraire.
  *
- * **On le lui demande** plutôt que de refaire le calcul, et c'est le résultat
- * d'une mesure. Le jeu n'appariant qu'à génération affichée égale, un effectif
- * impair laisse forcément une monture dehors, et `cloneOptions` documente
- * laquelle : la moins précieuse du rang. Rejouer cette règle ici paraissait sûr —
- * elle tient en trois lignes — et elle est fausse : les deux passes de
- * **jumelles** consomment d'abord les montures à ascendance identique, si bien
- * que la dépareillée est la moins précieuse de ce qui **reste**, pas du rang. Sur
- * 200 écuries tirées au hasard, 94 désaccords, dans les deux sens.
- *
- * Or les deux écrans parlent du même geste, et il est irréversible : « dépareillée,
- * il ne lui reste que l'ambre » sur une monture que l'onglet Clonage propose
- * d'apparier est exactement l'erreur qu'on ne peut pas rattraper.
- *
- * `limit` est levé : son plafond de 10 sert à ne pas noyer un écran de conseils,
- * alors qu'ici la question est « existe-t-il un clonage pour elle », posée sur
- * toute l'écurie.
- */
-const pairedIds = (stable: Stable, context: CloneContext): Set<string> => {
-  const ids = new Set<string>();
-  for (const option of cloneOptions(stable, context, Number.POSITIVE_INFINITY)) {
-    if (option.keep.id) ids.add(option.keep.id);
-    if (option.partner.id) ids.add(option.partner.id);
-  }
-  return ids;
-};
-
-/**
- * Les stériles **extractibles** de l'écurie, de la moins intéressante à
- * reproduire à la plus — donc dans l'ordre où les extraire.
- *
- * Les gen 1 en sont exclues : le jeu ne les extrait pas, et les lister en tête
- * d'un écran trié par valeur croissante enterrait tout ce qui rapporte. Voir
- * l'en-tête du module.
+ * Trois populations n'y sont pas, et l'en-tête du module dit pourquoi : les gen 1,
+ * que le jeu n'extrait pas ; celles qu'un clonage vaut mieux que leur ambre ; et
+ * celles que le projet protège. Toutes se retrouvent à l'onglet Clonage.
  */
 export const extractionOrder = (
   stable: Stable,
   context: CloneContext
 ): ExtractionCandidate[] => {
-  const paired = pairedIds(stable, context);
+  const paired = pairedSterileIds(stable, context);
 
   return sterileMounts(stable, context)
-    .filter((mount) => mount.generation > 1)
+    .filter((mount) => mount.generation > 1 && !mount.servesObjective)
     .map((mount) => {
       const units = mount.generation;
       const amber = units * context.sacrificeUnitValue;
       const pairable = mount.id !== null && paired.has(mount.id);
-      return { ...mount, units, amber, pairable, keepForBreeding: pairable && mount.value > amber };
+      return { ...mount, units, amber, pairable };
     })
+    // Ce qu'un clonage rattrape sort de la liste. Les deux conditions comptent :
+    // comparer la valeur de reproduction à l'ambre sans exiger qu'un clonage soit
+    // **possible** viderait l'écran de son objet même — le prix de remplacement
+    // dépasse presque toujours quelques milliers de kamas d'ambre, y compris pour
+    // les dépareillées, qui sont précisément celles qu'on vient chercher ici.
+    .filter((candidate) => !(candidate.pairable && candidate.value > candidate.amber))
     .sort(
       (a, b) =>
         a.value - b.value ||

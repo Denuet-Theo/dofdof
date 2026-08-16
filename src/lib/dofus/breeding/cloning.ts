@@ -1,5 +1,12 @@
+import type { BreedingColor } from './costs';
 import { carriedGeneration } from './naming';
-import { mateSignature, type Mate } from './pairing';
+import {
+  BULK_MATE_LEVEL,
+  mateGroups,
+  mateSignature,
+  pairOutlook,
+  type Mate,
+} from './pairing';
 import { isSterile, type Individual, type Sex, type Stable } from './stable';
 
 /**
@@ -93,16 +100,74 @@ import { isSterile, type Individual, type Sex, type Stable } from './stable';
  * l'ascendance. C'est strictement meilleur, et c'est le remède direct au
  * déséquilibre qui bloque les fournées : huit mâles et deux femelles ne font que
  * deux couples.
+ *
+ * ## Ce que le prix d'un rang ne sait pas dire : le projet
+ *
+ * Tout ce qui précède valorise une stérile par `cheapestAt(carried)`, le prix de
+ * la couleur la moins chère de son rang. C'est un prix de **rang**, et il ignore
+ * la seule chose qui décide vraiment du sort d'une monture : ce que l'éleveur
+ * cherche à obtenir.
+ *
+ * Le relevé du 14/08 le montre sur la monture qui a coûté le plus cher à
+ * comprendre — une **Azur-Turquoise gen 10, généalogie Azur (gen 9) + Pourpre**,
+ * celle de l'en-tête de `pairing.ts`. Croisée avec un simple Doré gen 1 à mille
+ * kamas, elle nomme **Azur-Doré**, la couleur visée. Le modèle le sait déjà :
+ * `pairTargetColors` la rend à 13,95 %.
+ *
+ * Le prix de rang, lui, disait autre chose. `cheapestAt` lit `estimate.cost`,
+ * qui est un coût de production **net des génétons** (`costs.ts`) — et les
+ * génétons explosent avec la génération, 250 pour un parent gen 9. Le coût net
+ * n'est donc pas croissant en génération : sur l'écurie du 16/08, la gen 10
+ * valait **22 594** contre 63 502 pour une gen 2. L'écran d'extraction, qui trie
+ * par valeur croissante, plaçait donc les deux gen 10 **en tête** — les moins
+ * intéressantes à reproduire de toute l'écurie — et leur ambre (170 000 kamas)
+ * dépassant leur « valeur », il proposait de les détruire.
+ *
+ * D'où `objective`. Une stérile dont le clone, croisé avec un partenaire à
+ * portée, peut **nommer la couleur visée** est protégée : elle ne va jamais à
+ * l'extraction, et son clonage passe devant tous les autres quel que soit son
+ * gain en kamas. Ce n'est pas un arbitrage de prix — le projet n'est pas une
+ * ligne de compte, et une gen 10 détruite ne se rachète nulle part.
+ *
+ * « À portée » se lit largement, parce que le partenaire manquant coûte mille
+ * kamas : l'écurie féconde, **plus toutes les feuilles du catalogue**, qui sont
+ * les seules couleurs qu'on se procure sans les élever (voir la même borne dans
+ * `costs.ts`). Exiger le Doré en écurie ferait dépendre la survie d'une gen 10
+ * d'un achat qu'on n'a pas encore fait.
  */
 
 /** Une monture stérile, réduite à ce que l'arbitrage a besoin d'en savoir. */
 export type SterileMount = Mate & {
+  /**
+   * Le nom porté en jeu, ou `null` pour une anonyme.
+   *
+   * C'est le seul repère que l'écurie du jeu donne, donc la seule chose qui
+   * permette d'exécuter une consigne portant sur une monture précise. Voir
+   * `cloneOptions` : les anonymes n'y entrent pas.
+   */
+  name: string | null;
   /** La génération affichée, celle que le jeu compare pour autoriser le clonage. */
   generation: number;
   /** La génération que son ascendance porte : ce qu'elle permet réellement. */
   carried: number;
   /** Ce qu'il faudrait payer pour la remplacer dans son rôle. */
   value: number;
+  /**
+   * Son clone, croisé avec un partenaire à portée, peut **nommer la couleur
+   * visée** par le projet.
+   *
+   * `false` partout tant qu'aucun projet n'est choisi. Voir l'en-tête : ce
+   * drapeau prime sur `value`, qui est un prix de rang et ne sait rien du but.
+   */
+  servesObjective: boolean;
+};
+
+/** Le projet en cours, tel que l'arbitrage a besoin de le lire. */
+export type Objective = {
+  /** La couleur visée. */
+  colorId: string;
+  /** Le catalogue de la famille : `pairOutlook` en a besoin pour lire les lignées. */
+  colors: BreedingColor[];
 };
 
 export type CloneContext = {
@@ -112,15 +177,63 @@ export type CloneContext = {
   /**
    * La couleur la moins chère d'une génération donnée — le prix de remplacement
    * du **rôle**, puisque n'importe quelle monture de cette génération le tient.
+   *
+   * Un prix de rang, et rien de plus : il ne sait pas ce que le projet vise, et
+   * il n'est même pas croissant en génération. Voir l'en-tête, § « le projet ».
    */
   cheapestAt: (generation: number) => number;
   /** Ce que l'extraction rend par unité, pour chiffrer ce qu'on renonce à sacrifier. */
   sacrificeUnitValue: number;
+  /**
+   * Le projet en cours, ou `null`. Absent, rien ne change : aucune stérile n'est
+   * protégée et l'arbitrage reste celui des kamas seuls — c'est le régime dans
+   * lequel tourne la simulation, qui n'a pas d'éleveur devant l'écran.
+   */
+  objective?: Objective | null;
+  /**
+   * Apparier aussi les montures **anonymes**, que l'éleveur ne peut pas désigner
+   * en jeu.
+   *
+   * `false` par défaut, et c'est le sens qui protège : un écran ne doit jamais
+   * proposer un geste inexécutable, et l'oubli d'un futur appelant tombe du bon
+   * côté. Le seul régime qui l'active est la **simulation**, où toutes les
+   * montures naissent sans nom (`simulate.ts` les crée à `name: null`) : les y
+   * écarter ne rendrait pas la politique plus prudente, ça lui interdirait le
+   * clonage tout court, et on mesurerait une économie qui n'existe pas.
+   */
+  allowAnonymous?: boolean;
 };
 
+/**
+ * Les partenaires qu'un clone peut trouver : l'écurie féconde, plus les feuilles
+ * du catalogue.
+ *
+ * Les feuilles comptent parce qu'elles s'achètent — c'est la borne que `costs.ts`
+ * pose déjà pour l'achat et la capture, « une couleur sans recette est une feuille
+ * de l'arbre, et c'est la seule chose qu'on se procure sans l'élever ». Un Doré
+ * gen 1 coûte mille kamas, et faire dépendre la survie d'une gen 10 de sa présence
+ * en écurie serait la détruire pour un achat qu'on n'a pas encore fait.
+ *
+ * Les autres stériles n'y sont pas : un clonage consomme deux montures et n'en
+ * rend qu'une, donc deux stériles clonées ensemble ne peuvent pas ensuite se
+ * croiser l'une avec l'autre.
+ */
+const reachableMates = (stable: Stable, objective: Objective): Mate[] => [
+  ...[...mateGroups(stable).values()].map((group) => group.sample),
+  ...objective.colors
+    .filter((color) => color.recipes.length === 0)
+    .map((color) => ({
+      id: null,
+      colorId: color.id,
+      sex: 'M' as Sex,
+      level: BULK_MATE_LEVEL,
+      parents: null,
+    })),
+];
+
 /** Les stériles suivies individuellement, valorisées par ce qu'elles permettent. */
-export const sterileMounts = (stable: Stable, context: CloneContext): SterileMount[] =>
-  stable.individuals
+export const sterileMounts = (stable: Stable, context: CloneContext): SterileMount[] => {
+  const mounts = stable.individuals
     .filter((mount: Individual) => isSterile(mount))
     .map((mount) => {
       const generation = context.generations.get(mount.colorId) ?? 1;
@@ -136,14 +249,34 @@ export const sterileMounts = (stable: Stable, context: CloneContext): SterileMou
       return {
         id: mount.id,
         colorId: mount.colorId,
+        name: mount.name,
         sex: mount.sex,
         level: mount.level,
         parents: mount.parents,
         generation,
         carried,
         value: context.cheapestAt(carried),
+        servesObjective: false,
       };
     });
+
+  const objective = context.objective;
+  if (!objective) return mounts;
+
+  // Le sexe n'entre pas dans ce qu'un croisement peut nommer — `pairShape` range
+  // ses deux signatures avant de mettre en cache — donc l'ordre des deux montures
+  // n'a pas à être celui d'un vrai couple.
+  const mates = reachableMates(stable, objective);
+  for (const mount of mounts) {
+    mount.servesObjective = mates.some((mate) =>
+      pairOutlook(mount, mate, objective.colors, context.generations)?.targetColors.some(
+        (color) => color.colorId === objective.colorId
+      )
+    );
+  }
+
+  return mounts;
+};
 
 /** Un appairage de clonage proposé, et ce qu'on en attend. */
 export type CloneOption = {
@@ -165,6 +298,11 @@ export type CloneOption = {
   certainSex: boolean;
   /** Le sexe obtenu, ou `null` s'il dépend du tirage. */
   sex: Sex | null;
+  /**
+   * L'une des deux au moins sert le projet. Ces clonages passent devant tous les
+   * autres, et `gain` cesse d'avoir son mot à dire — voir l'en-tête.
+   */
+  servesObjective: boolean;
 };
 
 /**
@@ -200,8 +338,13 @@ const optionFor = (
     gain: expectedValue - sacrificed,
     certainSex,
     sex: certainSex ? keep.sex : null,
+    servesObjective: keep.servesObjective || partner.servesObjective,
   };
 };
+
+/** Ce qui sert le projet passe devant, avant toute comparaison de kamas. */
+const objectiveFirst = (a: { servesObjective: boolean }, b: { servesObjective: boolean }) =>
+  Number(b.servesObjective) - Number(a.servesObjective);
 
 /**
  * Les clonages à faire, du plus rentable au moins.
@@ -235,6 +378,27 @@ export const cloneOptions = (
    */
   const byGeneration = new Map<string, SterileMount[]>();
   for (const mount of sterileMounts(stable, context)) {
+    /**
+     * **Aucune anonyme, jamais.**
+     *
+     * Une consigne de clonage désigne deux montures précises, et le nom est le
+     * seul repère que l'écurie du jeu donne — une anonyme ne se cherche pas, elle
+     * se compte dans un tas. « Clone cet Orchidée-là » devant quarante Orchidée
+     * identiques n'est pas une consigne.
+     *
+     * Et il n'y a rien à y perdre : une monture est anonyme parce qu'elle n'a pas
+     * d'ascendance à porter (voir `naming.ts`), donc son clone n'en portera pas
+     * davantage. C'est une gen 1 nue, ce qui s'achète au filet pour mille kamas.
+     * `cloningsToRecord` écartait déjà les paires anonymes **des deux côtés** ; la
+     * règle est simplement devenue celle qu'elle aurait toujours dû être, et elle
+     * vit ici, dans la seule liste que les deux écrans lisent.
+     *
+     * La simulation lève la règle — voir `allowAnonymous` : elle n'a pas
+     * d'éleveur à qui donner une consigne, et ses montures naissent toutes sans
+     * nom.
+     */
+    if (mount.name === null && !context.allowAnonymous) continue;
+
     const key = `${mount.generation}|${mount.carried}`;
     const group = byGeneration.get(key) ?? [];
     group.push(mount);
@@ -244,7 +408,12 @@ export const cloneOptions = (
   const options: CloneOption[] = [];
 
   for (const group of byGeneration.values()) {
-    const sorted = [...group].sort((a, b) => b.value - a.value || a.id!.localeCompare(b.id!));
+    // Ce qui sert le projet se range en tête, donc jamais du côté que
+    // `pool.pop()` laisse sur le carreau quand l'effectif est impair. Une gen 10
+    // dépareillée n'a plus que l'ambre, et c'est exactement ce qu'on refuse.
+    const sorted = [...group].sort(
+      (a, b) => objectiveFirst(a, b) || b.value - a.value || a.id!.localeCompare(b.id!)
+    );
 
     /**
      * D'abord les **jumelles** : deux stériles dont le clone est le même, quel
@@ -318,5 +487,66 @@ export const cloneOptions = (
     }
   }
 
-  return options.sort((a, b) => b.gain - a.gain).slice(0, limit);
+  return options.sort((a, b) => objectiveFirst(a, b) || b.gain - a.gain).slice(0, limit);
+};
+
+/**
+ * Les stériles qu'un clonage apparie, quel que soit le rang où elles tombent.
+ *
+ * `limit` est levé : le plafond de `cloneOptions` sert à ne pas noyer un écran de
+ * conseils, alors que la question posée ici est « existe-t-il un clonage pour
+ * elle », et elle se pose sur toute l'écurie.
+ *
+ * **On le demande à `cloneOptions`** plutôt que de refaire le calcul, et c'est le
+ * résultat d'une mesure. Le jeu n'appariant qu'à génération affichée égale, un
+ * effectif impair laisse forcément une monture dehors, et `cloneOptions` documente
+ * laquelle : la moins précieuse du rang. Rejouer cette règle ailleurs paraissait
+ * sûr — elle tient en trois lignes — et elle est fausse : les deux passes de
+ * **jumelles** consomment d'abord les montures à ascendance identique, si bien que
+ * la dépareillée est la moins précieuse de ce qui **reste**, pas du rang. Sur 200
+ * écuries tirées au hasard, 94 désaccords, dans les deux sens.
+ *
+ * Or les écrans qui la lisent parlent du même geste, et il est irréversible :
+ * « dépareillée, il ne lui reste que l'ambre » sur une monture que l'onglet
+ * Clonage propose d'apparier est exactement l'erreur qu'on ne peut pas rattraper.
+ */
+export const pairedSterileIds = (stable: Stable, context: CloneContext): Set<string> => {
+  const ids = new Set<string>();
+  for (const option of cloneOptions(stable, context, Number.POSITIVE_INFINITY)) {
+    if (option.keep.id) ids.add(option.keep.id);
+    if (option.partner.id) ids.add(option.partner.id);
+  }
+  return ids;
+};
+
+/**
+ * Les stériles que le projet protège et qu'**aucun clonage ne peut apparier**.
+ *
+ * Elles n'ont leur place sur aucune des deux listes : l'extraction ne les prend
+ * pas — elles servent le but — et le clonage ne les propose pas, faute d'une
+ * seconde stérile à leur génération affichée. Sans cette liste elles
+ * disparaîtraient des deux écrans, ce qui est précisément la panne que l'onglet
+ * Extraction avait été écrit pour éviter.
+ *
+ * Ce qu'elles attendent n'est pas un geste mais une monture : une autre stérile
+ * de leur rang, qu'une naissance produira. En attendant, la seule consigne utile
+ * est « ne la détruis pas », et elle doit être écrite quelque part.
+ *
+ * Les anonymes n'y sont pas, pour la même raison qu'ailleurs et une de plus :
+ * elles ne se désignent pas en jeu, et elles ne risquent rien — sans ascendance,
+ * elles sont gen 1, et l'extraction ne prend pas les gen 1. Les lister
+ * noierait les deux ou trois montures qui comptent sous les quarante Doré du tas.
+ */
+export const unpairedObjectiveSteriles = (
+  stable: Stable,
+  context: CloneContext
+): SterileMount[] => {
+  if (!context.objective) return [];
+  const paired = pairedSterileIds(stable, context);
+  return sterileMounts(stable, context).filter(
+    (mount) =>
+      mount.servesObjective &&
+      mount.name !== null &&
+      !(mount.id !== null && paired.has(mount.id))
+  );
 };

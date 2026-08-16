@@ -7,7 +7,7 @@ import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
-import { cloneOptions } from '@/lib/dofus/breeding/cloning';
+import { cloneOptions, unpairedObjectiveSteriles } from '@/lib/dofus/breeding/cloning';
 import { extractionOrder } from '@/lib/dofus/breeding/extraction';
 import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
@@ -368,11 +368,30 @@ const BreedingPage = () => {
       costOf: (colorId: string) => byId.get(colorId)?.estimate.cost ?? 0,
       cheapestAt: (generation: number) => cheapest.get(generation) ?? 0,
       sacrificeUnitValue: sacrificePrice,
+      // Le projet entre dans l'arbitrage. Sans lui, une stérile ne valait que son
+      // prix de rang — net des génétons, donc pas même croissant en génération —
+      // et l'écran proposait de détruire une gen 10 qui nomme la couleur visée.
+      // Voir `cloning.ts`, § « le projet ».
+      objective: selectedColorId ? { colorId: selectedColorId, colors: tree.colors } : null,
     };
-  }, [tree, rows, sacrificePrice]);
+  }, [tree, rows, sacrificePrice, selectedColorId]);
 
+  /**
+   * Tous les appariements, et non les dix meilleurs.
+   *
+   * Le plafond servait à ne pas noyer un écran de conseils. Il est devenu
+   * intenable le jour où l'extraction a cessé d'afficher ce qu'elle n'extrait
+   * pas : une stérile écartée là-bas parce qu'un clonage vaut mieux, mais coupée
+   * ici par le plafond, ne serait plus nulle part.
+   */
   const clonings = useMemo(
-    () => (cloneContext ? cloneOptions(available, cloneContext) : []),
+    () => (cloneContext ? cloneOptions(available, cloneContext, Number.POSITIVE_INFINITY) : []),
+    [cloneContext, available]
+  );
+
+  /** Les protégées du projet que rien n'apparie : le seul écran qui puisse les dire. */
+  const heldForObjective = useMemo(
+    () => (cloneContext ? unpairedObjectiveSteriles(available, cloneContext) : []),
     [cloneContext, available]
   );
 
@@ -437,7 +456,12 @@ const BreedingPage = () => {
         couples={policyCouples}
         // Ce que valent les stériles, à l'étape où on les clone : voir #163.
         cloneAdvice={clonings}
-        // Toutes les stériles, appariables ou non : l'onglet « Extraction ».
+        // Celles que le projet protège et que rien n'apparie : elles ne sont sur
+        // aucun autre écran.
+        cloneHeld={heldForObjective}
+        // La couleur visée, pour que le badge dise ce que la monture sert.
+        objectiveName={selectedColorId ? nameOf(selectedColorId) : null}
+        // Ce qui s'extrait, et rien d'autre : l'onglet « Extraction ».
         extraction={extraction}
         // Ambre, neurone ou corne — la ressource dépend de la famille.
         sacrificeName={tree?.sacrificeItem.name ?? 'ambre'}
@@ -448,9 +472,6 @@ const BreedingPage = () => {
         // Le parcours guidé a besoin du catalogue : la fenêtre d'accouplement
         // propose les issues possibles, pas seulement des noms.
         colors={tree?.colors ?? []}
-        generations={
-          new Map((tree?.colors ?? []).map((color) => [color.id, color.generation]))
-        }
         onRecordBirths={recordBirths}
         onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}

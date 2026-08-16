@@ -230,6 +230,12 @@ const recycle = (stable: Stable, context: SimulationContext, random: () => numbe
       costOf: context.costOf,
       cheapestAt: context.cheapestAt,
       sacrificeUnitValue: context.sacrificeUnitValue,
+      // Les montures simulées naissent toutes sans nom (`name: null`, plus bas).
+      // La règle « aucune anonyme » vise une consigne que l'éleveur doit pouvoir
+      // exécuter devant son écurie ; ici il n'y a ni éleveur ni écurie, et
+      // l'appliquer reviendrait à interdire le clonage à la politique — donc à
+      // mesurer une économie qui n'est pas celle qu'on joue.
+      allowAnonymous: true,
     },
     50
   );

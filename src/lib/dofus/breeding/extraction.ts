@@ -34,18 +34,34 @@ import type { Stable } from './stable';
  * montures aussi inutiles à la reproduction, celle qui rapporte le plus se
  * sacrifie d'abord.
  *
- * ## Ce qu'une gen 1 rend : rien
+ * ## Les gen 1 n'y sont pas
  *
- * `units` vaut la génération **affichée**, et zéro en génération 1 — elles ne
- * s'extraient pas du tout, c'est la règle du jeu que `costs.ts` applique déjà.
- * Elles restent listées quand même, en tête puisqu'elles sont les moins
- * précieuses, avec `units` à zéro : les taire les laisserait indéfiniment en
- * écurie sans que rien ne dise pourquoi elles n'apparaissent nulle part.
+ * Le jeu ne les extrait pas. C'est la règle que `costs.ts` applique déjà, et
+ * `sacrificeValue` avec lui : `units` valait zéro pour elles. Elles étaient
+ * pourtant listées, « ne s'extrait pas » en bout de ligne, au motif que les
+ * taire les laisserait en écurie sans que rien ne dise pourquoi.
+ *
+ * Le motif ne tenait pas, et il coûtait cher. Elles ne sont invisibles nulle
+ * part : une gen 1 stérile s'apparie comme les autres, et l'onglet Clonage la
+ * propose — c'est même le rang le plus fourni en clonages à ascendance
+ * certaine. Surtout, le tri étant **croissant** sur la valeur de reproduction,
+ * elles se rangeaient toutes **en tête** : sur une écurie réelle, des dizaines
+ * de lignes qui ne rendent rien poussaient hors de l'écran les quelques-unes qui
+ * rapportent. Un écran d'extraction dont le haut de liste est inextractible ne
+ * répond plus à la seule question qu'on lui pose — par où commencer à vider.
+ *
+ * `units` est donc toujours strictement positif ici, et l'écran n'a plus de cas
+ * « rend zéro » à afficher.
  */
 
 /** Une stérile, ce qu'elle vaut encore, et ce que son extraction rendrait. */
 export type ExtractionCandidate = SterileMount & {
-  /** Unités de ressource rendues : sa génération affichée, et zéro en gen 1. */
+  /**
+   * Unités de ressource rendues : sa génération affichée, toujours ≥ 2.
+   *
+   * Les gen 1 ne sont pas dans cette liste — le jeu ne les extrait pas. Voir
+   * l'en-tête du module.
+   */
   units: number;
   /** Ce que l'extraction rapporte, en kamas. Zéro tant que la ressource n'est pas tarifée. */
   amber: number;
@@ -101,8 +117,12 @@ const pairedIds = (stable: Stable, context: CloneContext): Set<string> => {
 };
 
 /**
- * Toutes les stériles de l'écurie, de la moins intéressante à reproduire à la
- * plus intéressante — donc dans l'ordre où les extraire.
+ * Les stériles **extractibles** de l'écurie, de la moins intéressante à
+ * reproduire à la plus — donc dans l'ordre où les extraire.
+ *
+ * Les gen 1 en sont exclues : le jeu ne les extrait pas, et les lister en tête
+ * d'un écran trié par valeur croissante enterrait tout ce qui rapporte. Voir
+ * l'en-tête du module.
  */
 export const extractionOrder = (
   stable: Stable,
@@ -111,8 +131,9 @@ export const extractionOrder = (
   const paired = pairedIds(stable, context);
 
   return sterileMounts(stable, context)
+    .filter((mount) => mount.generation > 1)
     .map((mount) => {
-      const units = mount.generation > 1 ? mount.generation : 0;
+      const units = mount.generation;
       const amber = units * context.sacrificeUnitValue;
       const pairable = mount.id !== null && paired.has(mount.id);
       return { ...mount, units, amber, pairable, keepForBreeding: pairable && mount.value > amber };

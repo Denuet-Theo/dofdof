@@ -30,7 +30,6 @@ import {
   matingOutcomes,
   pairAncestryGeneration,
   pairTargetGeneration,
-  topGenerationOf,
   type Mate,
 } from './pairing';
 import type { BreedingColor } from './costs';
@@ -413,8 +412,11 @@ export const pairDelta = (
   level: number,
   optimakinaFrom: number
 ): PairDelta | null => {
-  const top = topGenerationOf(colors);
-  const targetGeneration = pairTargetGeneration(male, female, generations, top);
+  // La cible est ce qu'une recombinaison sait nommer, et non le maximum de
+  // l'ascendance plus un : voir `crossingShares`. `null` veut dire « aucune ne
+  // nomme rien », donc le poulain reprend une couleur de la généalogie — il n'y a
+  // pas de delta d'accouplement à encoder.
+  const targetGeneration = pairTargetGeneration(male, female, colors, generations);
   if (targetGeneration === null) return null;
 
   const withOptimakina = targetGeneration >= optimakinaFrom;

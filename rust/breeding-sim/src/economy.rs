@@ -1218,8 +1218,13 @@ fn apply(
             }
             check(male)?;
             check(female)?;
+            // Sans cible nommée, l'Optimakina n'achète rien : elle relève le taux
+            // d'une génération que le couple ne sait pas atteindre. On ne facture
+            // donc rien, plutôt que le prix d'un rang inventé.
             let target = pair_target_generation(catalog, &resolve(male), &resolve(female));
-            debit += economy.optimakina[usize::from(target).min(10)];
+            debit += target.map_or(0, |generation| {
+                economy.optimakina[usize::from(generation).min(10)]
+            });
         }
     }
     if *kamas + credit < debit {

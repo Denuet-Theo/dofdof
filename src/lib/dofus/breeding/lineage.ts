@@ -88,14 +88,22 @@
  * | 2 (Ébène-Orchidée) | composée | #49, #59 |
  * | 3 (Amande) | **simple** | #59, fenêtre 3 |
  * | 4 (Doré-Amande) | composée | fenêtre 3 |
- * | 5, 6, 7, 8 | **inconnues** | — |
+ * | 5 (Turquoise) | **simple** | relevé du 17/08 |
+ * | 6, 8 | composées | paires, et rien ne les contredit |
+ * | 7 (Prune, Émeraude) | **inconnue** | — |
  * | 9 (Azur) | **composée** | fenêtres 1 et 3 |
  * | 10 (Azur-Turquoise) | composée | fenêtres 1–3 |
  *
- * Le relevé qui trancherait demande une **gen 5 ou une gen 7** dans l'une des six
- * cases. Le moins cher n'est pas de les acheter : une gen 6 porte une gen 5 dans
- * sa généalogie, une gen 8 porte une gen 7. Deux fenêtres d'accouplement de plus
- * — ouvrir la fenêtre ne consomme rien — épinglent la règle sur tout l'arbre.
+ * La gen 5 est tombée le 17/08, sur un Turquoise-Doré gen 6 dont la généalogie
+ * porte Turquoise (gen 5) et Doré (gen 1) : deux grands-parents, même position, et
+ * le jeu les affiche **exactement égaux** — 11,72 % chacun. La règle survit à son
+ * premier appui direct, et « impaire ≥ 5 ⇒ composée », qui aurait expliqué la
+ * gen 9 sans exception, est réfutée à 13,1 points.
+ *
+ * Il ne reste donc qu'une inconnue : une **gen 7** — Prune ou Émeraude — dans
+ * l'une des six cases. Le moins cher n'est pas de l'acheter : une gen 8 en porte
+ * une dans sa généalogie, et ouvrir la fenêtre ne consomme rien. Une fenêtre de
+ * plus épingle la règle sur tout l'arbre.
  *
  * ## Ce que ceci ne décrit pas
  *
@@ -141,11 +149,12 @@ export const COMPOSITE_FACTOR = 2 / 9;
 /**
  * Une couleur composée voit son poids divisé par 4,5.
  *
- * La génération décide, et elle seule — voir l'en-tête pour les trois rapports
- * relevés qui l'imposent, et pour ce que cette règle a encore d'inachevé. Le
- * `|| 9` est un ajustement en attente d'un relevé de gen 5 ou 7 ; il est écrit
- * comme tel plutôt que noyé dans une expression, pour qu'on le retrouve le jour
- * où ce relevé arrive.
+ * La génération décide, et elle seule — voir l'en-tête pour les rapports relevés
+ * qui l'imposent, et pour ce que cette règle a encore d'inachevé. Le `|| 9` est un
+ * ajustement en attente d'un relevé de **gen 7** ; il est écrit comme tel plutôt
+ * que noyé dans une expression, pour qu'on le retrouve le jour où ce relevé
+ * arrive. La gen 5 est tombée le 17/08 et elle est **simple**, ce qui laisse ce
+ * `|| 9` seul contre l'arbre.
  */
 export const isComposite = (generation: number) => generation % 2 === 0 || generation === 9;
 

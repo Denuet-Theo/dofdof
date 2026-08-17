@@ -371,9 +371,11 @@ impl PairDelta {
         level: u16,
         optimakina_from: u8,
     ) -> Option<Self> {
-        // La cible sort déjà plafonnée : la borner une seconde fois ici n'avait
-        // plus d'effet, et laissait croire qu'elle pouvait dépasser le sommet.
-        let target_generation = pair_target_generation(catalog, male, female);
+        // La cible est ce qu'une recombinaison sait nommer, et non le maximum de
+        // l'ascendance plus un : voir `crossing_shares`. `None` veut dire
+        // « aucune ne nomme rien », donc le poulain reprend une couleur de la
+        // généalogie — il n'y a pas de delta d'accouplement à encoder.
+        let target_generation = pair_target_generation(catalog, male, female)?;
         let with_optimakina = target_generation >= optimakina_from;
         let optimakina_cost = if with_optimakina {
             economy.optimakina[usize::from(target_generation).min(10)]

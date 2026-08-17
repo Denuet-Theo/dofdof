@@ -192,11 +192,18 @@ pub fn pair_ancestry_generation(catalog: &Catalog, male: &Mate, female: &Mate) -
     top
 }
 
-/// La génération que vise un couple : le maximum de toute son ascendance plus
-/// un, **plafonné à la famille**.
+/// La génération que vise un couple : **la plus haute qu'une de ses
+/// recombinaisons sache nommer**.
+///
+/// `None` quand aucune n'en nomme aucune — le régime de recopie, celui des deux
+/// Indigo de #68, où le poulain reprend forcément une couleur de la généalogie.
+///
+/// Ce n'est pas le maximum de l'ascendance plus un, et c'était l'erreur : voir
+/// l'en-tête du module pour les deux relevés du 17/08 qui la corrigent, et pour
+/// pourquoi le plafond de la famille disparaît avec elle.
 #[inline]
-pub fn pair_target_generation(catalog: &Catalog, male: &Mate, female: &Mate) -> u8 {
-    (pair_ancestry_generation(catalog, male, female) + 1).min(catalog.top_generation())
+pub fn pair_target_generation(catalog: &Catalog, male: &Mate, female: &Mate) -> Option<u8> {
+    crossing_shares(catalog, male, female).2
 }
 
 /// La génération qu'un couple viserait si seuls comptaient ses deux parents —
@@ -211,29 +218,33 @@ pub fn recipe_target_generation(catalog: &Catalog, male: &Mate, female: &Mate) -
     .min(catalog.top_generation())
 }
 
-/// Les deux moitiés d'un croisement, posées en une seule passe.
+/// Les deux moitiés d'un croisement, et la génération qu'il vise.
 ///
-/// Port de `crossingShares`. Trois gestes, et l'ordre compte : la porte de
-/// parité compare au milliardième, et les sommes flottantes ne commutent pas.
+/// Port de `crossingShares`. Quatre gestes, et l'ordre des **additions** compte :
+/// la porte de parité compare au milliardième, et les sommes flottantes ne
+/// commutent pas. Le geste 3 n'additionne rien, il lit.
 ///
 /// 1. Les **couleurs de lignée** des deux montures, chacune avec sa part — donc
 ///    une masse de 1 par lignée, 2 en tout.
 /// 2. Les **recombinaisons croisées**, une teinte de chaque côté, chacune du
 ///    produit des deux parts.
-/// 3. On **sépare par génération** : à la cible d'un côté, le reste de l'autre.
+/// 3. La **cible** : la génération la plus haute que ces recombinaisons savent
+///    nommer. `None` quand aucune ne nomme rien.
+/// 4. On **sépare par génération** : à la cible d'un côté, le reste de l'autre.
 ///
 /// Les deux tas sortent en poids bruts. C'est l'appelant qui les remet à
 /// l'échelle, la cible sur le taux et l'échec sur son complément.
 ///
-/// Le geste 1 est celui que le plafond a rendu nécessaire : sous le plafond
-/// aucune couleur de lignée ne peut être à la génération visée, la cible valant
-/// le maximum de l'ascendance plus un. Au plafond, la mère gen 10 y est.
+/// Le geste 1 est celui que la cible plafonnée a rendu nécessaire : quand le
+/// croisement monte pour de bon, aucune couleur de lignée ne peut être à la
+/// génération visée. Quand il ne monte pas, la couleur propre d'une monture y
+/// est — la mère gen 10 des trois fenêtres du 14/08, le père Doré-Indigo gen 2 de
+/// celle du 17/08.
 fn crossing_shares(
     catalog: &Catalog,
     male: &Mate,
     female: &Mate,
-    target_generation: u8,
-) -> (Vec<(ColorId, f64)>, Vec<(ColorId, f64)>) {
+) -> (Vec<(ColorId, f64)>, Vec<(ColorId, f64)>, Option<u8>) {
     let mut target: Vec<(ColorId, f64)> = Vec::new();
     let mut failure: Vec<(ColorId, f64)> = Vec::new();
 
@@ -251,11 +262,31 @@ fn crossing_shares(
         lineage_distribution(catalog, male.color, male.parents),
         lineage_distribution(catalog, female.color, female.parents),
     ];
+
+    // Geste 3, en premier parce que les deux tas en dépendent. Aucune addition
+    // ici : la parité au milliardième tient à l'ordre des sommes, pas à celui
+    // des comparaisons.
+    let mut target_generation: Option<u8> = None;
+    for &(color_a, _) in &lineages[0] {
+        for &(color_b, _) in &lineages[1] {
+            let Some(color) = catalog.names_anywhere(color_a, color_b) else {
+                continue;
+            };
+            let generation = catalog.generation(color);
+            if target_generation.is_none_or(|top| generation > top) {
+                target_generation = Some(generation);
+            }
+        }
+    }
+
+    // Sans cible, la comparaison est fausse pour tout le monde et tout part dans
+    // `failure`. C'est la recopie, et elle tombe d'elle-même.
+    let at_target = |color: ColorId| Some(catalog.generation(color)) == target_generation;
+
     for distribution in &lineages {
         for &(color, share) in distribution {
-            let at_target = catalog.generation(color) == target_generation;
             add(
-                if at_target {
+                if at_target(color) {
                     &mut target
                 } else {
                     &mut failure
@@ -271,9 +302,8 @@ fn crossing_shares(
             let Some(color) = catalog.names_anywhere(color_a, color_b) else {
                 continue;
             };
-            let at_target = catalog.generation(color) == target_generation;
             add(
-                if at_target {
+                if at_target(color) {
                     &mut target
                 } else {
                     &mut failure
@@ -284,7 +314,7 @@ fn crossing_shares(
         }
     }
 
-    (target, failure)
+    (target, failure, target_generation)
 }
 
 /// Les couleurs que le croisement peut rendre à la génération visée.
@@ -296,13 +326,8 @@ fn crossing_shares(
 ///
 /// S'y ajoutent, **au plafond seulement**, les couleurs de lignée déjà à la
 /// génération visée : voir `crossing_shares`.
-pub fn pair_target_colors(
-    catalog: &Catalog,
-    male: &Mate,
-    female: &Mate,
-    target_generation: u8,
-) -> Vec<TargetColor> {
-    let (target, _) = crossing_shares(catalog, male, female, target_generation);
+pub fn pair_target_colors(catalog: &Catalog, male: &Mate, female: &Mate) -> Vec<TargetColor> {
+    let (target, _, _) = crossing_shares(catalog, male, female);
     let mut weights: Vec<TargetColor> = target
         .into_iter()
         .map(|(color, weight)| TargetColor { color, weight })
@@ -329,15 +354,33 @@ pub fn pair_target_colors(
 /// gen 2, mais « Indigo et Indigo » n'est pas une couleur. On répond normalement,
 /// avec `target_colors` vide — c'est le croisement d'une purification.
 pub fn pair_outlook(catalog: &Catalog, male: &Mate, female: &Mate) -> PairOutlook {
-    let target_generation = pair_target_generation(catalog, male, female);
+    let (target, _, named) = crossing_shares(catalog, male, female);
     let by_recipe = recipe_target_generation(catalog, male, female);
+    let ancestry_generation = pair_ancestry_generation(catalog, male, female);
+
+    // Sans recombinaison qui nomme quoi que ce soit, la cible **est** ce que le
+    // couple porte : le poulain ne peut pas dépasser sa généalogie, il en reprend
+    // une couleur. On y posait `ascendance + 1`, une génération que personne ne
+    // nomme — de quoi faire croire à une montée là où il n'y en a aucune.
+    let target_generation = named.unwrap_or(ancestry_generation);
+
+    let mut target_colors: Vec<TargetColor> = target
+        .into_iter()
+        .map(|(color, weight)| TargetColor { color, weight })
+        .collect();
+    target_colors.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| catalog.slug(a.color).cmp(catalog.slug(b.color)))
+    });
 
     PairOutlook {
         target_generation,
-        ancestry_generation: pair_ancestry_generation(catalog, male, female),
+        ancestry_generation,
         leap: i16::from(target_generation) - i16::from(by_recipe),
         success_rate: target_generation_rate(male.level, female.level),
-        target_colors: pair_target_colors(catalog, male, female, target_generation),
+        target_colors,
     }
 }
 
@@ -398,7 +441,7 @@ pub fn mating_outcomes_at(
     // L'échec, posé par la même passe que la cible. Son diviseur est « ce qui
     // reste » et non `2 + w` : au plafond, une couleur de lignée part vers la
     // cible et sa lignée ne pèse plus 1. Sous le plafond les deux coïncident.
-    let (_, failure) = crossing_shares(catalog, male, female, outlook.target_generation);
+    let (_, failure, _) = crossing_shares(catalog, male, female);
     let total: f64 = failure.iter().map(|(_, weight)| weight).sum();
 
     // Les deux régimes dégénérés, et ce sont les deux bords du même partage :
@@ -525,21 +568,35 @@ mod tests {
         );
     }
 
-    /// Le régime « recopie » de #68 : deux Indigo capturés visent la gen 2, mais
-    /// « Indigo et Indigo » n'est pas une couleur. La fenêtre affiche Indigo
-    /// 100 %.
+    /// Le régime « recopie » de #68 : « Indigo et Indigo » n'est pas une couleur,
+    /// donc rien à viser. La fenêtre affiche Indigo 100 %, et **aucune ligne
+    /// « Génération cible »** — c'est le relevé, et il ne dit donc rien d'une
+    /// génération visée.
+    ///
+    /// On affirmait ici `target_generation == 2`, la gen 2 que la formule
+    /// annonçait. Rien ne l'observait : la cible est ce qu'une recombinaison sait
+    /// nommer, et ici aucune ne nomme rien. Elle vaut donc ce que le couple porte
+    /// — la gen 1 — soit exactement « le poulain ne dépassera pas sa généalogie ».
     #[test]
     fn deux_indigo_captures_se_recopient_a_cent_pour_cent() {
         let catalog = muldo();
         let indigo = mate(&catalog, "indigo", 67, None);
 
         let outlook = pair_outlook(&catalog, &indigo, &indigo);
-        assert_eq!(outlook.target_generation, 2);
+        assert_eq!(
+            pair_target_generation(&catalog, &indigo, &indigo),
+            None,
+            "aucune recombinaison ne nomme quoi que ce soit"
+        );
+        assert_eq!(
+            outlook.target_generation, outlook.ancestry_generation,
+            "faute de cible nommée, le couple ne dépasse pas ce qu'il porte"
+        );
         assert!(
             outlook.target_colors.is_empty(),
             "aucune gen 2 ne se compose d'Indigo et d'Indigo"
         );
-        assert!(!outlook.climbs(), "une cible que personne ne nomme");
+        assert!(!outlook.climbs(), "rien à nommer, donc rien à gagner");
 
         let outcomes = mating_outcomes(&catalog, &indigo, &indigo);
         assert_eq!(outcomes.len(), 1);

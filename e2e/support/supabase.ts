@@ -218,7 +218,9 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
 
     if (method === 'POST') {
       const sent = route.request().postDataJSON();
-      const inserted = (Array.isArray(sent) ? sent : [sent]).map((row: Row) => ({
+      // `Row` explicite, et non l'inférence : les colonnes se lisent ensuite par
+      // nom calculé — `existing[column]` — ce qu'un littéral fermé refuse.
+      const inserted: Row[] = (Array.isArray(sent) ? sent : [sent]).map((row: Row) => ({
         level: 1,
         fertile: true,
         cycled: false,

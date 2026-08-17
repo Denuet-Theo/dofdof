@@ -65,18 +65,17 @@ import type { Individual, Sex, Stable } from './stable';
  * manqué. Le graphe de recettes la range parmi les feuilles sauvages ; c'est la
  * monture la plus précieuse de l'écurie.
  *
- * ## La loi du sommet : la cible plafonne, elle ne se refuse pas
+ * ## La cible est ce qu'on sait nommer
  *
- * On refusait le couple dès que le maximum de l'ascendance atteignait le
+ * Deux erreurs successives sur la même ligne de code, et la seconde ne s'est vue
+ * qu'une fois la première corrigée.
+ *
+ * **On refusait le couple** dès que le maximum de l'ascendance atteignait le
  * plafond de la famille : la cible aurait valu 11, la gen 11 n'existe pas, donc
- * `pairOutlook` rendait `null`. Sur le catalogue muldo cela concernait
- * **9 250 couples sur 13 800, soit 67 %** — tout ce qu'on fait d'une gen 10 une
- * fois qu'on l'a était invisible au modèle.
- *
- * C'était faux, et d'une façon que le jeu ne dit jamais : un accouplement
- * **produit toujours un bébé**. Relevé du 14/08 (issue #185), trois fenêtres
- * ouvertes sur une même mère Azur-Turquoise gen 10 niveau 46, généalogie Azur
- * (gen 9) + Pourpre (gen 1) :
+ * `pairOutlook` rendait `null` — 9 250 couples sur 13 800 du catalogue muldo. Le
+ * relevé du 14/08 (issue #185) l'a réfuté : trois fenêtres sur une mère
+ * Azur-Turquoise gen 10 niveau 46, généalogie Azur (gen 9) + Pourpre (gen 1),
+ * toutes trois avec une ligne « Génération cible » pleine de gen 10.
  *
  * | ♂ | niv. | Génération cible | somme | taux prédit |
  * | --- | --- | --- | --- | --- |
@@ -84,35 +83,64 @@ import type { Individual, Sex, Stable } from './stable';
  * | Doré g1 [Doré, Pourpre] | 44 | Azur-Doré 11,86 · Azur-Turquoise 27,19 · Azur-Pourpre 4,45 | 43,50 % | 43,50 % |
  * | Doré-Amande g4 [Doré, Amande] | 61 | Azur-Doré 7,74 · Azur-Turquoise 30,57 · Azur-Amande 7,74 | 46,05 % | 46,05 % |
  *
- * La ligne « Génération cible » **existe** et porte des couleurs gen 10. Le jeu
- * plafonne donc : `cible = min(max(ascendance) + 1, plafond de la famille)`. Et
- * le taux reste celui de `targetGenerationRate`, à 0,000 près trois fois sur
- * trois : le plafond ne change rien à la probabilité.
+ * **On a alors plafonné** : `cible = min(max(ascendance) + 1, plafond)`. Ça
+ * reproduisait les trois fenêtres, et c'était encore une formule là où il fallait
+ * une lecture. Relevé du 17/08, deux fenêtres aux deux bouts de l'arbre :
+ *
+ * | couple | ascendance + 1 | ce que le jeu affiche | somme du bloc |
+ * | --- | --- | --- | --- |
+ * | Doré-Indigo g2 [Doré, Indigo] × Ébène g1 capturée | gen 3 | **gen 2** | 43,80 % |
+ * | Turquoise-Doré g6 [Turquoise g5, Doré g1] × Ébène g1 capturée | gen 7 | **gen 6** | 37,05 % |
+ *
+ * Dans les deux cas la case la plus haute est la couleur **propre** d'une monture,
+ * et elle ne compose avec rien : une gen 3 demande deux gen 2, une gen 7 demande
+ * deux gen 6, et le couple n'en porte qu'une. La formule visait donc une
+ * génération que personne ne nomme, trouvait la cible vide, et déclarait le
+ * croisement en **recopie** — « rien à gagner ». Sur l'écurie du 17/08,
+ * **3 566 couples sur 6 630** étaient dans ce cas.
+ *
+ * La loi est : **la cible est la plus haute génération qu'une recombinaison du
+ * couple sache nommer.** `null` quand aucune ne nomme rien, et c'est la seule
+ * porte vers la recopie. Voir `crossingShares`.
+ *
+ * Le **plafond disparaît** avec la formule, et c'est le signe qu'on tient la bonne
+ * loi : une recombinaison de deux couleurs du catalogue nomme une couleur du
+ * catalogue, donc elle ne peut pas dépasser le sommet. Il n'y a plus à borner ce
+ * qui ne peut pas déborder.
  *
  * ### Ce n'est pas un cas particulier, c'est la même loi
  *
- * Deux choses seulement s'ensuivent, et aucune n'est une clause spéciale :
+ * Deux choses s'ensuivent, et aucune n'est une clause spéciale :
  *
  * 1. **Les couleurs de lignée à la génération visée rejoignent le bloc cible**,
- *    avec leur poids de lignée. C'est ce qui met Azur-Turquoise — la couleur de
- *    la mère — à 27,19 % en réussite et à **0 %** en échec.
- * 2. **L'échec se normalise sur ce qui reste**, et non plus sur `2 + w`. Quand
- *    aucune couleur de lignée n'est à la cible — tout ce qui est sous le
- *    plafond — chaque lignée pèse toujours 1 et on retrouve exactement `2 + w`.
+ *    avec leur poids de lignée. C'est ce qui met Azur-Turquoise — la couleur de la
+ *    mère — à 27,19 % en réussite et à **0 %** en échec, et Doré-Indigo à 6,84 %
+ *    dans la fenêtre du 17/08.
+ * 2. **L'échec se normalise sur ce qui reste**, et non sur `2 + w`. Quand aucune
+ *    couleur de lignée n'est à la cible — c'est-à-dire quand le croisement monte
+ *    pour de bon — chaque lignée pèse 1 et on retrouve exactement `2 + w`.
  *
- * `pairTargetColors` et `crossingFailureShares` sont donc les deux moitiés d'un
- * même calcul, et le plafond ne fait que les faire se recouvrir : voir
- * `crossingShares`, qui pose les poids une fois et les sépare par génération.
- * Reproduit les 23 lignes des trois fenêtres à **0,005 point**, et les relevés
- * #49, #59 et #68 **au centième**, sans une clause de plus.
+ * `pairTargetColors` et `crossingFailureShares` sont les deux moitiés d'un même
+ * calcul : voir `crossingShares`, qui lit la cible, pose les poids une fois et les
+ * sépare par génération. **Six relevés reproduits, écart maximal 0,005 point** —
+ * les trois du 14/08, les deux du 17/08, la recopie de #68 — plus #49 et #59 au
+ * centième, sans une clause de plus.
  *
- * ### Zéro géneton au plafond
+ * ### Zéro géneton quand la cible ne dépasse pas l'ascendance
  *
- * Les trois fenêtres n'en annoncent aucun, et `genetonsForCrossing` le dit déjà :
- * un enfant gen 10 ne **dépasse** pas une ascendance qui en contient déjà une. Il
- * faut seulement lui passer l'ascendance **réelle** — voir
- * `pairAncestryGeneration` — et non `cible − 1`, qui la sous-estime d'un cran dès
- * que le plafond mord.
+ * Les cinq fenêtres du 14/08 et du 17/08 n'en annoncent aucun, et
+ * `genetonsForCrossing` le dit déjà : un enfant ne **dépasse** pas une ascendance
+ * qui porte déjà sa génération. Il faut seulement lui passer l'ascendance
+ * **réelle** — voir `pairAncestryGeneration` — et non `cible − 1`, qui la
+ * sous-estime dès que le croisement ne monte pas.
+ *
+ * ### Ce que ça ne change pas : l'admissibilité
+ *
+ * `climbs` reste ce sur quoi la politique décide, et il reste faux ici : une gen 6
+ * qui rend une gen 6 ne monte pas. Ce que la correction rend, c'est la **valeur**
+ * de ces croisements — les 37 ou 44 % de la cible cessent d'être versés à
+ * l'ascendance — et la possibilité de les représenter. Les exploiter est un autre
+ * sujet : voir la duplication du sommet, mesurée et éteinte par défaut.
  *
  * ## Ce que ce module ne fait pas
  *
@@ -195,27 +223,27 @@ export const pairAncestryGeneration = (
 };
 
 /**
- * La génération que vise un couple : le maximum de toute son ascendance plus un,
- * **plafonné à la famille**.
+ * La génération que vise un couple : **la plus haute qu'une de ses
+ * recombinaisons sache nommer**.
  *
- * Le plafond n'est pas un garde-fou défensif, c'est ce que le jeu affiche — voir
- * l'en-tête. Deux montures dont l'ascendance porte déjà une gen 10 visent bien
- * la gen 10, et la fenêtre la leur donne à 43,50 %.
+ * `null` quand aucune n'en nomme aucune — le régime de recopie, celui des deux
+ * Indigo de #68, où le poulain reprend forcément une couleur de la généalogie.
+ *
+ * Ce n'est pas le maximum de l'ascendance plus un, et c'était l'erreur : voir
+ * `crossingShares` pour les deux relevés du 17/08 qui la corrigent, et pour
+ * pourquoi le plafond de la famille disparaît avec elle.
  */
 export const pairTargetGeneration = (
   male: Mate,
   female: Mate,
-  generations: Map<string, number>,
-  topGeneration: number
-): number | null => {
-  const ancestry = pairAncestryGeneration(male, female, generations);
-  return ancestry === null ? null : Math.min(ancestry + 1, topGeneration);
-};
+  colors: BreedingColor[],
+  generations: Map<string, number>
+): number | null => crossingShares([male, female], colors, generations).targetGeneration;
 
 /**
  * La génération qu'un couple viserait si seuls comptaient ses deux parents —
- * c'est-à-dire ce que le graphe de recettes sait voir. Plafonnée de même : une
- * recette ne peut pas non plus annoncer une génération qui n'existe pas.
+ * c'est-à-dire ce que le graphe de recettes sait voir. Plafonnée à la famille :
+ * une recette ne peut pas annoncer une génération qui n'existe pas.
  */
 export const recipeTargetGeneration = (
   male: Mate,
@@ -234,16 +262,23 @@ export const recipeTargetGeneration = (
  *
  * `0` sur un croisement ordinaire — les deux lectures coïncident dès que
  * l'ascendance ne dépasse pas les parents, ce qui est le cas de toutes les
- * recettes des arbres. `1` ou plus sur un raccourci, et `0` au plafond, où les
- * deux lectures se rejoignent par le haut : il n'y a plus rien à gagner.
+ * recettes des arbres. `1` ou plus sur un **raccourci**, où une case d'ascendance
+ * ouvre une génération que les deux couleurs seules n'atteindraient pas.
+ *
+ * Et **négatif** depuis le relevé du 17/08 : la recette peut promettre plus que
+ * le couple ne sait nommer. Un Turquoise-Doré gen 6 apparié à un gen 1 donnerait
+ * une gen 7 selon la recette, mais aucune de ses recombinaisons ne nomme une
+ * gen 7 — il vise la gen 6, et le leap vaut −1. C'est le cas le plus fréquent des
+ * trois, et celui que le modèle prenait pour une recopie.
  */
 export const generationLeap = (
   male: Mate,
   female: Mate,
+  colors: BreedingColor[],
   generations: Map<string, number>,
   topGeneration: number
 ): number | null => {
-  const target = pairTargetGeneration(male, female, generations, topGeneration);
+  const target = pairTargetGeneration(male, female, colors, generations);
   const byRecipe = recipeTargetGeneration(male, female, generations, topGeneration);
   return target === null || byRecipe === null ? null : target - byRecipe;
 };
@@ -314,65 +349,125 @@ const compositionIndexAnywhere = (colors: BreedingColor[]) => {
 export type CrossingParent = Pick<Mate, 'colorId' | 'parents'>;
 
 /**
- * Les deux moitiés d'un croisement, posées en une seule passe.
+ * Les deux moitiés d'un croisement, et la génération qu'il vise.
  *
- * C'est **la** loi de la fenêtre d'accouplement, et elle tient en trois gestes :
+ * C'est **la** loi de la fenêtre d'accouplement, et elle tient en quatre gestes :
  *
  * 1. Les **couleurs de lignée** des deux montures, chacune avec sa part — donc
  *    une masse de 1 par lignée, 2 en tout.
  * 2. Les **recombinaisons croisées** — une teinte prise à gauche, l'autre à
  *    droite — chacune du produit des deux parts.
- * 3. On **sépare par génération** : ce qui est à la cible d'un côté, le reste de
+ * 3. La **cible** : la génération la plus haute que ces recombinaisons savent
+ *    nommer. `null` quand aucune ne nomme rien.
+ * 4. On **sépare par génération** : ce qui est à la cible d'un côté, le reste de
  *    l'autre.
  *
  * Les deux tas sortent en poids bruts, non normalisés ; c'est l'appelant qui les
  * remet à l'échelle, la cible sur le taux et l'échec sur son complément.
  *
+ * ## La cible est ce qu'on sait nommer, pas ce qu'on porte plus un
+ *
+ * On la calculait — `min(max(ascendance) + 1, plafond de la famille)` — et c'est
+ * faux. Relevé du 17/08, deux fenêtres aux deux bouts de l'arbre :
+ *
+ * | couple | ascendance + 1 | ce que le jeu affiche |
+ * | --- | --- | --- |
+ * | Doré-Indigo g2 [Doré, Indigo] × Ébène g1 capturée | gen 3 | **gen 2** |
+ * | Turquoise-Doré g6 [Turquoise g5, Doré g1] × Ébène g1 capturée | gen 7 | **gen 6** |
+ *
+ * Dans les deux cas la case la plus haute est la couleur **propre** d'une
+ * monture, et elle ne compose avec rien : une gen 3 demande deux gen 2, une gen 7
+ * demande deux gen 6, et il n'y en a qu'une. Le mieux atteignable est donc une
+ * génération **en dessous** de ce que le calcul annonçait — et c'est celle que la
+ * fenêtre affiche, bloc cible sommant exactement au taux.
+ *
+ * Ce que ça coûtait : le modèle visait une génération que personne ne nomme,
+ * trouvait la cible vide, et déclarait le croisement en **recopie** — « rien à
+ * gagner ». Sur l'écurie du 17/08, **3 566 couples sur 6 630** étaient dans ce
+ * cas, à qui le jeu propose une cible pleine à 37 ou 44 %.
+ *
+ * Le **plafond de la famille disparaît** comme cas particulier, et c'est le signe
+ * que la loi est la bonne : une recombinaison de deux couleurs du catalogue nomme
+ * une couleur du catalogue, donc elle ne peut pas dépasser le sommet. Il n'y a
+ * plus à borner ce qui ne peut pas déborder.
+ *
  * ## Pourquoi une seule passe, et pas deux lois
  *
- * On les écrivait séparément — les recombinaisons pour la cible, tout le reste
- * pour l'échec — et cette séparation cachait une hypothèse qu'on n'avait jamais
- * eu à examiner : **aucune couleur de lignée ne peut être à la génération
- * visée**, la cible valant le maximum de l'ascendance plus un. Le plafond la
- * rend fausse. Une mère gen 10 est elle-même à la génération visée, et le jeu la
- * range bien dans « Génération cible » — 27,19 % en réussite, 0 % en échec.
+ * On écrivait les deux moitiés séparément — les recombinaisons pour la cible,
+ * tout le reste pour l'échec — et cette séparation cachait une hypothèse qu'on
+ * n'avait jamais eu à examiner : **aucune couleur de lignée ne peut être à la
+ * génération visée**. Elle est fausse dès que la cible ne dépasse pas
+ * l'ascendance. Une mère gen 10 est elle-même à la génération visée, et le jeu la
+ * range bien dans « Génération cible » — 27,19 % en réussite, 0 % en échec ; le
+ * père Doré-Indigo gen 2 du relevé du 17/08 de même, à 6,84 %.
  *
- * L'étape 3 est donc la loi entière, et les deux anciennes en sont le cas non
- * plafonné : sous le plafond aucune couleur de lignée ne tombe dans `target`,
- * `failure` reçoit les 2 lignées plus les recombinaisons, et sa normalisation
- * retrouve exactement le `2 + w` mesuré sur #68.
+ * Le geste 4 est donc la loi entière, et les deux anciennes en sont le cas où la
+ * cible dépasse l'ascendance : aucune couleur de lignée ne tombe alors dans
+ * `target`, `failure` reçoit les 2 lignées plus les recombinaisons, et sa
+ * normalisation retrouve exactement le `2 + w` mesuré sur #68.
+ *
+ * L'ordre des additions est celui d'avant — lignées, puis produit croisé dans le
+ * même parcours — et il n'est pas cosmétique : la garde de parité compare au
+ * milliardième, et une somme flottante ne commute pas. La cible se lit dans une
+ * passe préalable, qui n'additionne rien.
  */
 const crossingShares = (
   parents: readonly [CrossingParent, CrossingParent],
   colors: BreedingColor[],
-  generations: Map<string, number>,
-  targetGeneration: number
-): { target: Map<string, number>; failure: Map<string, number> } => {
+  generations: Map<string, number>
+): {
+  target: Map<string, number>;
+  failure: Map<string, number>;
+  /** La génération visée, ou `null` quand aucune recombinaison ne nomme rien. */
+  targetGeneration: number | null;
+} => {
+  const lineages = parents.map((parent) =>
+    lineageDistribution(parent.colorId, parent.parents, generations)
+  );
+  const index = compositionIndexAnywhere(colors);
+  const names = (colorA: string, colorB: string) =>
+    index.get([colorA, colorB].sort().join('+'));
+
+  // Geste 3, en premier parce que les deux tas en dépendent : la plus haute
+  // génération qu'une recombinaison sait nommer.
+  let targetGeneration: number | null = null;
+  for (const colorA of lineages[0].keys()) {
+    for (const colorB of lineages[1].keys()) {
+      const colorId = names(colorA, colorB);
+      if (!colorId) continue;
+      const generation = generations.get(colorId);
+      if (generation !== undefined && (targetGeneration === null || generation > targetGeneration)) {
+        targetGeneration = generation;
+      }
+    }
+  }
+
   const target = new Map<string, number>();
   const failure = new Map<string, number>();
   const add = (weights: Map<string, number>, colorId: string, weight: number) =>
     weights.set(colorId, (weights.get(colorId) ?? 0) + weight);
-  /** Le tas où va une couleur : sa génération, et rien d'autre. */
+  /**
+   * Le tas où va une couleur : sa génération, et rien d'autre.
+   *
+   * Sans cible — `null` — la comparaison est fausse pour tout le monde et tout
+   * part dans `failure`. C'est la recopie, et elle tombe d'elle-même.
+   */
   const heap = (colorId: string) =>
     generations.get(colorId) === targetGeneration ? target : failure;
 
-  const lineages = parents.map((parent) =>
-    lineageDistribution(parent.colorId, parent.parents, generations)
-  );
   for (const distribution of lineages) {
     for (const [colorId, share] of distribution) add(heap(colorId), colorId, share);
   }
 
-  const index = compositionIndexAnywhere(colors);
   for (const [colorA, shareA] of lineages[0]) {
     for (const [colorB, shareB] of lineages[1]) {
-      const colorId = index.get([colorA, colorB].sort().join('+'));
+      const colorId = names(colorA, colorB);
       if (!colorId) continue;
       add(heap(colorId), colorId, shareA * shareB);
     }
   }
 
-  return { target, failure };
+  return { target, failure, targetGeneration };
 };
 
 /**
@@ -385,26 +480,32 @@ const crossingShares = (
  * génération 4 est `{Doré, Amande}`, soit exactement la couleur annoncée par la
  * fenêtre d'accouplement.
  *
- * S'y ajoutent, **au plafond seulement**, les couleurs de lignée qui sont déjà à
- * la génération visée : voir `crossingShares`. Sous le plafond il n'y en a
- * jamais, et cette fonction rend alors exactement ce qu'elle rendait avant.
+ * S'y ajoutent les couleurs de lignée déjà à la génération visée, ce qui n'arrive
+ * que lorsque la cible ne dépasse pas l'ascendance : voir `crossingShares`.
+ * Ailleurs il n'y en a jamais, et cette fonction rend alors exactement ce qu'elle
+ * rendait avant.
  *
  * La liste est ordonnée et non réduite à une réponse unique : plusieurs paires
  * peuvent nommer une couleur de la bonne génération, et les trois fenêtres du
  * 14/08 en montrent jusqu'à trois d'un coup.
  */
+/**
+ * Le tas de la cible, ordonné : la plus probable devant, l'identifiant pour
+ * départager. Le tri est ici plutôt qu'à deux endroits parce que `pairShape`
+ * garde le résultat de `crossingShares` — il ne peut pas rappeler
+ * `pairTargetColors` sans refaire le produit croisé, qui est la partie coûteuse.
+ */
+const sortedTargets = (target: Map<string, number>): TargetColor[] =>
+  [...target]
+    .map(([colorId, weight]) => ({ colorId, weight }))
+    .sort((a, b) => b.weight - a.weight || a.colorId.localeCompare(b.colorId));
+
 export const pairTargetColors = (
   male: Mate,
   female: Mate,
   colors: BreedingColor[],
-  generations: Map<string, number>,
-  targetGeneration: number
-): TargetColor[] => {
-  const { target } = crossingShares([male, female], colors, generations, targetGeneration);
-  return [...target]
-    .map(([colorId, weight]) => ({ colorId, weight }))
-    .sort((a, b) => b.weight - a.weight || a.colorId.localeCompare(b.colorId));
-};
+  generations: Map<string, number>
+): TargetColor[] => sortedTargets(crossingShares([male, female], colors, generations).target);
 
 /** Ce qu'un couple donné promet, une fois son ascendance lue. */
 export type PairOutlook = {
@@ -510,18 +611,27 @@ const pairShape = (
 
   const top = topGenerationOf(colors);
   const ancestryGeneration = pairAncestryGeneration(male, female, generations);
-  const targetGeneration = pairTargetGeneration(male, female, generations, top);
   const byRecipe = recipeTargetGeneration(male, female, generations, top);
 
   // Le seul refus qui reste : une couleur de l'ascendance manque au catalogue,
   // donc la cible serait bâtie sur une généalogie à moitié lue. Le refus sur le
   // plafond, lui, a disparu — c'est l'objet de #185, voir l'en-tête.
-  if (ancestryGeneration === null || targetGeneration === null || byRecipe === null) {
+  if (ancestryGeneration === null || byRecipe === null) {
     byPair.set(key, null);
     return null;
   }
 
-  const targetColors = pairTargetColors(male, female, colors, generations, targetGeneration);
+  const { target, targetGeneration: named } = crossingShares([male, female], colors, generations);
+  const targetColors = sortedTargets(target);
+
+  /**
+   * Sans recombinaison qui nomme quoi que ce soit, la cible **est** ce que le
+   * couple porte : le poulain ne peut pas dépasser sa généalogie, il en reprend
+   * une couleur. On y posait `ascendance + 1`, une génération que personne ne
+   * nomme — de quoi faire croire à une montée là où il n'y en a aucune, et c'est
+   * cette valeur inventée qui a fondé la panne que #185 corrige.
+   */
+  const targetGeneration = named ?? ancestryGeneration;
 
   const shape: PairShape = {
     targetGeneration,
@@ -533,15 +643,16 @@ const pairShape = (
     //
     // Deux cas rendent zéro, et c'est la même raison — l'enfant ne dépasse rien :
     //
-    // - la génération visée n'est nommée par aucune paire, donc le bébé naît
-    //   forcément en dessous. Relevé sur deux Indigo capturés (issue #68), où la
-    //   fenêtre annonce « Indigo 100 %, 0 géneton » ;
-    // - la cible est **plafonnée**, donc elle ne dépasse plus l'ascendance. Les
-    //   trois fenêtres du 14/08 l'affichent : une cible pleine, et zéro géneton.
+    // - aucune recombinaison ne nomme quoi que ce soit, donc le bébé reprend une
+    //   couleur de la généalogie. Relevé sur deux Indigo capturés (issue #68), où
+    //   la fenêtre annonce « Indigo 100 %, 0 géneton » ;
+    // - la cible ne **dépasse pas** l'ascendance : la fenêtre est pleine, les
+    //   couleurs changent, la génération non. Les trois fenêtres du 14/08
+    //   l'affichent au sommet, et les deux du 17/08 en pleine échelle — cible
+    //   pleine, zéro géneton dans les cinq.
     //
     // D'où l'ascendance réelle passée ici, et non `targetGeneration - 1` : les
-    // deux ne coïncident que sous le plafond, et c'est justement là que le second
-    // cas ne se produit jamais.
+    // deux ne coïncident que quand le croisement monte pour de bon.
     genetons:
       targetColors.length === 0
         ? 0
@@ -697,10 +808,9 @@ export type MatingOutcome = {
 export const crossingFailureShares = (
   parents: readonly [CrossingParent, CrossingParent],
   colors: BreedingColor[],
-  generations: Map<string, number>,
-  targetGeneration: number
+  generations: Map<string, number>
 ): Map<string, number> => {
-  const { failure } = crossingShares(parents, colors, generations, targetGeneration);
+  const { failure } = crossingShares(parents, colors, generations);
 
   const total = [...failure.values()].reduce((sum, weight) => sum + weight, 0);
   // Tout est à la cible : l'échec n'a aucune issue, et il n'y a rien à partager.
@@ -786,12 +896,7 @@ export const matingOutcomes = (
   // Le complément de la réussite, réparti par la loi de l'échec. Les parts
   // sortent normalisées à 1 : les remettre à l'échelle de `failureMass` est tout
   // ce qui sépare la loi conditionnelle de la fenêtre du jeu.
-  const failures = crossingFailureShares(
-    [male, female],
-    colors,
-    generations,
-    outlook.targetGeneration
-  );
+  const failures = crossingFailureShares([male, female], colors, generations);
 
   // Les deux régimes dégénérés, et ce sont les deux bords du même partage :
   //

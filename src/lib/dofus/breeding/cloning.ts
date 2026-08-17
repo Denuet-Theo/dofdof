@@ -595,3 +595,90 @@ export const unpairedObjectiveSteriles = (
       !(mount.id !== null && paired.has(mount.id))
   );
 };
+
+/**
+ * Le préfixe des montures **projetées** : celles qu'un clonage rendra, et qui
+ * n'ont pas encore de ligne en base.
+ *
+ * Un identifiant fabriqué qui ressemble à un uuid est exactement le piège de
+ * #165 — Postgres refuse `dore#M0` sur une colonne `uuid`, et un `.in()` sur une
+ * ligne qui n'existe pas ne rend **aucune erreur**. Celui-ci ne ressemble à rien
+ * de ce que la base porte, et `isProjected` permet de le reconnaître partout où
+ * il pourrait déborder vers une écriture.
+ */
+const PROJECTED_PREFIX = 'clone-a-venir:';
+
+/** `true` pour une monture que `afterClonings` a projetée, donc sans ligne en base. */
+export const isProjected = (id: string | null | undefined): boolean =>
+  typeof id === 'string' && id.startsWith(PROJECTED_PREFIX);
+
+/**
+ * L'écurie **telle qu'elle sera** une fois les clonages proposés exécutés.
+ *
+ * ## Le défaut que ça ferme
+ *
+ * L'écran donne quatre consignes du jour, dont « clone ces vingt paires » et
+ * « accouple ces couples-là ». La seconde était calculée sur une écurie que la
+ * première allait démolir : vingt clonages retirent quarante stériles et
+ * rendent vingt fertiles, et le plan est une optimisation sur l'écurie
+ * **entière**. La recherche réaffectait donc ses fécondes, et des couples
+ * gratuits qu'elle avait laissés de côté apparaissaient — après coup.
+ *
+ * Vu le 17/08 : 18 naissances saisies, puis 24 clonages, puis un
+ * rafraîchissement qui proposait 4 accouplements de plus. Ils étaient réels —
+ * quatre paires de fécondes que la base n'avait jamais vues s'accoupler — mais
+ * l'éleveur avait fermé le jeu. Mesuré sur son écurie : **3 accouplements avant
+ * les clonages, 7 après**, à fécondes identiques. Les clonages n'avaient rien
+ * rendu possible ; ils avaient fait changer d'avis la politique.
+ *
+ * On planifie donc sur l'écurie d'après, qui est celle où l'éleveur exécutera.
+ *
+ * ## La survivante retenue est `keep`
+ *
+ * Le jeu tire au hasard laquelle des deux ressort — `keepChance` vaut 1/2 dès
+ * que les ascendances diffèrent. Mais `keep` est celle que l'écran **nomme** et
+ * celle sur laquelle `expectedValue` est chiffrée : projeter autre chose ferait
+ * planifier l'app sur une écurie qu'elle ne conseille à personne. Et l'enjeu est
+ * borné — un clone ressort fertile et **non fécond**, donc il ne peut entrer
+ * dans aucun couple à zéro place ; il ne pèse que par le plan, pas par les
+ * gestes qu'on saisit.
+ */
+export const afterClonings = (stable: Stable, clonings: CloneOption[]): Stable => {
+  if (clonings.length === 0) return stable;
+
+  const gone = new Set<string>();
+  const survivors: Individual[] = [];
+  const byId = new Map(stable.individuals.map((mount) => [mount.id, mount]));
+
+  for (const option of clonings) {
+    const keep = option.keep.id;
+    const partner = option.partner.id;
+    // Une stérile est toujours une monture suivie — le vrac ne porte que des
+    // fertiles — donc les deux identifiants existent. On le relit quand même :
+    // sans les deux lignes, il n'y a pas de clonage à projeter.
+    if (keep === null || partner === null) continue;
+    const original = byId.get(keep);
+    if (!original) continue;
+
+    gone.add(keep);
+    gone.add(partner);
+    survivors.push({
+      ...original,
+      id: `${PROJECTED_PREFIX}${keep}`,
+      // Le clone a retrouvé sa reproduction, et son cycle est à payer : c'est
+      // exactement ce que `recordClonings` écrit en base.
+      fertile: true,
+      cycled: false,
+    });
+  }
+
+  if (gone.size === 0) return stable;
+
+  return {
+    bulk: stable.bulk,
+    individuals: [
+      ...stable.individuals.filter((mount) => !gone.has(mount.id)),
+      ...survivors,
+    ],
+  };
+};

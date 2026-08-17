@@ -424,9 +424,18 @@ const BreedingPage = () => {
           <Egg size={24} className="text-kamas" />
           <h1 className="text-2xl font-bold text-dark-100">Élevage</h1>
         </div>
+        {/* La phrase d'avant promettait « pour chaque couleur, le moins cher entre
+            acheter, capturer et élever — puis ce que la revente rapporte ». Elle
+            décrivait le classement de `ColorRow`, débranché par #178, et n'a plus
+            été tenue pendant deux semaines : un sous-titre qui décrit une fonction
+            absente ne se lit pas comme une phrase périmée mais comme une fonction
+            en panne, et il a fait chercher un bug qui n'existait pas.
+            L'onglet HDV en rend la moitié, mais le mal était ailleurs — elle
+            décrivait un onglet sur cinq et taisait le ruban, qui est ce qu'on voit
+            d'abord. Celle-ci nomme les trois choses que l'écran optimise, dans
+            l'ordre où les onglets les présentent. Voir #184. */}
         <p className="text-sm text-dark-400">
-          Pour chaque couleur, le moins cher entre acheter, capturer et élever — puis ce que
-          la revente rapporte.
+          Optimise ton élevage : meilleurs croisements, meilleures fournées et meilleurs prix.
         </p>
       </div>
 

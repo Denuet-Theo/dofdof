@@ -171,6 +171,21 @@ const named: { why: string; male: SerialisedMate; female: SerialisedMate }[] = [
     male: { color: 'dore_amande', level: 61, parents: ['dore', 'amande'] },
     female: { color: 'azur_turquoise', level: 46, parents: ['azur', 'pourpre'] },
   },
+  // Les deux relevés du 17/08, qui corrigent la cible elle-même : elle vaut ce
+  // qu'une recombinaison sait nommer, et non le maximum de l'ascendance plus un.
+  // Ils sont ici parce qu'ils sont les seuls cas où les deux lectures divergent
+  // **et** où le jeu a tranché — un tirage aléatoire en produit, mais sans
+  // relevé pour dire lequel a raison.
+  {
+    why: 'cible nommée #185, en bas : Doré-Indigo gen 2 [Doré, Indigo] × Ébène gen 1 capturée — vise la gen 2, pas la gen 3',
+    male: { color: 'dore_indigo', level: 46, parents: ['dore', 'indigo'] },
+    female: { color: 'ebene', level: 46, parents: null },
+  },
+  {
+    why: 'cible nommée #185, en haut : Turquoise-Doré gen 6 [Turquoise gen 5, Doré gen 1] × Ébène gen 1 capturée — vise la gen 6, pas la gen 7',
+    male: { color: 'turquoise_dore', level: 1, parents: ['turquoise', 'dore'] },
+    female: { color: 'ebene', level: 46, parents: null },
+  },
 ];
 
 /**
@@ -203,7 +218,7 @@ type ParityCase = {
 const cases: ParityCase[] = [];
 let recopies = 0;
 let shortcuts = 0;
-let capped = 0;
+let flat = 0;
 let multiTarget = 0;
 
 const record = (male: SerialisedMate, female: SerialisedMate, why: string | null) => {
@@ -214,7 +229,11 @@ const record = (male: SerialisedMate, female: SerialisedMate, why: string | null
   if (outlook.targetColors.length === 0) recopies += 1;
   if (outlook.targetColors.length > 1) multiTarget += 1;
   if (outlook.leap > 0) shortcuts += 1;
-  if (outlook.targetGeneration <= outlook.ancestryGeneration) capped += 1;
+  // Les croisements qui ne montent pas : la cible ne dépasse pas ce que le couple
+  // porte. On les appelait « plafonnées », du temps où seul le sommet de la
+  // famille produisait ce cas ; ils sont bien plus nombreux que ça, et c'est tout
+  // l'objet du relevé du 17/08.
+  if (outlook.targetGeneration <= outlook.ancestryGeneration) flat += 1;
 
   // Les listes sont encodées en tuples plutôt qu'en objets nommés : à 5 000 cas
   // la répétition des clés pesait plus lourd que les données, et une fixture
@@ -271,5 +290,5 @@ writeFileSync(
 
 console.log(`${cases.length} cas écrits dans ${output}`);
 console.log(
-  `couverture : ${recopies} recopies, ${shortcuts} raccourcis, ${multiTarget} cibles multiples, ${capped} cibles plafonnées`
+  `couverture : ${recopies} recopies, ${shortcuts} raccourcis, ${multiTarget} cibles multiples, ${flat} sans montée`
 );

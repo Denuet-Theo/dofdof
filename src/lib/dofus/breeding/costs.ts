@@ -747,12 +747,19 @@ export const computeBreedingCosts = (
    * lignée d'un parent par sa recette ; il ne peut pas coller à l'individu. Le
    * suivi individuel de l'écurie, lui, le peut — voir `lineageDistribution`.
    */
-  const offTargetValue = (recipe: BreedingRecipe, targetGeneration: number): number => {
+  /**
+   * La génération visée n'est plus un paramètre : `crossingFailureShares` la lit
+   * elle-même sur ce que les recombinaisons savent nommer. Pour une recette
+   * `[A, B]` qui produit une couleur de génération `G`, les deux coïncidaient
+   * toujours — `A × B` nomme cette couleur, et rien dans les six cases ne nomme
+   * plus haut, les parents de A et de B étant de génération strictement moindre.
+   * Le paramètre ne pouvait donc que se tromper, jamais informer.
+   */
+  const offTargetValue = (recipe: BreedingRecipe): number => {
     const shares = crossingFailureShares(
       [ancestryOf(recipe[0]), ancestryOf(recipe[1])],
       colors,
-      generations,
-      targetGeneration
+      generations
     );
 
     let value = 0;
@@ -852,7 +859,7 @@ export const computeBreedingCosts = (
         // Son argument tient — le texte d'aide invoquait « des couleurs basses
         // dont on ne fera rien », ce que #59 a démenti. Ces bébés-là portent
         // l'ascendance et sont les montures les plus utiles de l'écurie.
-        const failureValue = offTargetValue(recipe, color.generation);
+        const failureValue = offTargetValue(recipe);
 
         const parents =
           parentLevel === 'auto'

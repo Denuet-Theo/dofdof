@@ -94,21 +94,46 @@ const literalAfter = (source, from) => {
   return null;
 };
 
-/** Les clés affectées au premier niveau d'un littéral. */
+/**
+ * Les clés affectées au premier niveau d'un littéral.
+ *
+ * Découpé sur les **virgules de premier niveau** et non sur les retours à la
+ * ligne. La première version lisait ligne par ligne et n'acceptait une clé qu'en
+ * tête : `onSaveSettings({ ...settings, success_mode: next })` sur une seule ligne
+ * lui échappait donc entièrement, et la garde annonçait « écrit par personne » sur
+ * un champ correctement écrit. Une garde qui dépend du formatage ne garde rien.
+ *
+ * Une clé suit forcément le `{` ouvrant ou une virgule ; c'est ce qui la distingue
+ * du `:` d'un ternaire, qui suit un `?`.
+ */
 const keysOf = (literal) => {
   const keys = new Set();
+  const pieces = [];
   let depth = 0;
-  for (const line of literal.split('\n')) {
-    const trimmed = line.trim();
-    // Une clé de premier niveau seulement : à l'intérieur d'un objet imbriqué,
-    // `stock: { … }` porte des clés qui ne sont pas des réglages.
-    if (depth === 0) {
-      const match = trimmed.match(/^([a-z_][a-z0-9_]*)\s*:/i);
-      if (match) keys.add(match[1]);
+  let current = '';
+  for (const character of literal) {
+    if (character === '{' || character === '[' || character === '(') depth += 1;
+    if (character === '}' || character === ']' || character === ')') depth -= 1;
+    if (character === ',' && depth === 0) {
+      pieces.push(current);
+      current = '';
+      continue;
     }
-    for (const character of line) {
-      if (character === '{' || character === '[' || character === '(') depth += 1;
-      if (character === '}' || character === ']' || character === ')') depth -= 1;
+    current += character;
+  }
+  pieces.push(current);
+
+  for (const piece of pieces) {
+    // La ligne peut porter un commentaire avant la clé ; on ne garde que la
+    // dernière ligne non vide du morceau, qui est celle qui affecte.
+    const lines = piece.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (line.startsWith('//') || line.startsWith('*') || line.startsWith('/*')) continue;
+      const match = line.match(/^([a-z_][a-z0-9_]*)\s*:/i);
+      if (match) {
+        keys.add(match[1]);
+        break;
+      }
     }
   }
   return keys;

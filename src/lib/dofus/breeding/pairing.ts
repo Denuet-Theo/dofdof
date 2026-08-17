@@ -357,6 +357,20 @@ const compositionIndexAnywhere = (colors: BreedingColor[]) => {
 export type CrossingParent = Pick<Mate, 'colorId' | 'parents'>;
 
 /**
+ * « Quelle couleur nomment ces deux teintes », toutes générations confondues.
+ *
+ * L'index est celui que la loi du croisement utilise déjà, cache compris — voir
+ * `compositionIndexAnywhere`. Exposé parce que `success.ts` pose exactement la
+ * même question pour rediriger un croisement, et qu'un second index construit à
+ * côté finirait par ne plus dire la même chose que celui-ci.
+ */
+export const composedColorOf = (colors: BreedingColor[]) => {
+  const index = compositionIndexAnywhere(colors);
+  return (colorA: string, colorB: string): string | null =>
+    index.get([colorA, colorB].sort().join('+')) ?? null;
+};
+
+/**
  * Les deux moitiés d'un croisement, et la génération qu'il vise.
  *
  * C'est **la** loi de la fenêtre d'accouplement, et elle tient en quatre gestes :

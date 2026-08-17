@@ -256,6 +256,10 @@ export const DEFAULT_SETTINGS: BreedingSettings = {
   // 0 = pas de contrainte. Refuser tous les plans à qui n'a pas renseigné son
   // budget serait la pire lecture possible d'un champ vide.
   kamas_available: 0,
+  // Le succès de collection est ignoré par défaut, et ce n'est pas de la
+  // prudence : les deux autres modes coûtent, l'un et l'autre, des montures que
+  // l'échelle réclamait. Voir `success.ts`, qui porte les deux mesures.
+  success_mode: 'ignore',
   // Le prix des filets compte par défaut : c'est vrai de qui les achète, et
   // celui qui récolte ses matériaux décoche la case.
   count_net_cost: true,
@@ -303,6 +307,7 @@ const numericSettings = (row: UserBreedingSettings): BreedingSettings => {
     enclos_count: Number(merged.enclos_count),
     kamas_available: Number(merged.kamas_available),
     count_net_cost: merged.count_net_cost,
+    success_mode: merged.success_mode,
     // Seul champ qui a le droit d'être absent : `null` veut dire « le moins cher,
     // sans regarder la vitesse », et `Number(null)` vaudrait zéro, c'est-à-dire
     // « plafond nul ». Les deux ne disent pas la même chose.

@@ -316,6 +316,17 @@ const BreedingPage = () => {
       // gonfler une gen 10 pour l'atteindre fausserait leur marché — et les coûts
       // affichés avec, puisque le prix sert aussi à chiffrer.
       target: selectedColorId,
+      /**
+       * Le succès de collection, et il ne voyage que s'il est demandé.
+       *
+       * `undefined` sur le mode par défaut : la passe ne s'applique alors pas du
+       * tout, ce qui garde la fournée sur exactement la physique que les gardes de
+       * parité et la simulation mesurent. Voir `applySuccess`.
+       */
+      success:
+        settings.success_mode === 'ignore'
+          ? undefined
+          : { mode: settings.success_mode, hatched },
     };
   }, [
     tree,
@@ -328,6 +339,10 @@ const BreedingPage = () => {
     settings.enclos_count,
     settings.kamas_available,
     selectedColorId,
+    // Le mode et la collection : les deux changent la fournée quand le mode n'est
+    // pas « ignoré », donc les deux doivent la faire recalculer.
+    settings.success_mode,
+    hatched,
     // Les enclos verrouillés décident des places libres : voir `free`.
     batch.pens,
   ]);
@@ -522,8 +537,11 @@ const BreedingPage = () => {
         // donc c'est bien `stable` et non `stable.individuals`.
         rows={rows}
         stable={stable}
-        // La collection, pour l'onglet « Succès » : ce qu'il reste à faire naître.
+        // La collection et les réglages, pour l'onglet « Succès » : ce qu'il reste
+        // à faire naître, et le seul contrôle de `success_mode`.
         hatched={hatched}
+        settings={settings}
+        onSaveSettings={saveSettings}
         onRecordBirths={recordBirths}
         onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}

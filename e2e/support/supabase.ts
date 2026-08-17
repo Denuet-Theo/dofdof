@@ -229,23 +229,52 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
       }));
 
       /**
-       * La clé sur laquelle un `upsert` écrase.
+       * `insert` ou `upsert` — et c'est l'en-tête qui le dit, pas nous.
        *
-       * `id` ne vaut que pour les tables qui en ont une. Les autres — la
-       * fournée, le vrac, les réglages — sont sur une clé composite que
-       * `on_conflict` annonce, et les traiter par `id` ajoutait une ligne à
-       * chaque écriture au lieu de remplacer la précédente : la relecture
-       * rendait alors la **première**, donc l'état d'avant.
+       * `supabase-js` distingue les deux par `Prefer: resolution=merge-duplicates`,
+       * que PostgREST lit pour choisir entre un `INSERT` sec et un
+       * `ON CONFLICT DO UPDATE`. C'est donc le seul discriminant fidèle, et le
+       * seul qui n'ait pas besoin de savoir quelles tables portent une ligne par
+       * éleveur.
+       *
+       * On le déduisait de la présence d'un `id`, ce qui marchait pour les tables
+       * à clé composite — la fournée, le vrac, les prix, qui annoncent leur
+       * `on_conflict` — mais pas pour celles à **une ligne par éleveur** : les
+       * réglages, la disponibilité, les filtres de ferme. Leur clé est le
+       * `user_id` seul, posé par le défaut SQL `auth.uid()`, donc l'app n'annonce
+       * rien et n'envoie pas d'`id`. L'`id` fabriqué ci-dessus ne matchait alors
+       * aucune ligne existante, et chaque enregistrement en empilait une de plus.
+       *
+       * Le symptôme était le pire possible pour un faux serveur : la requête
+       * partait avec le bon corps, un test pouvait le lire et le trouver juste, et
+       * l'état final restait celui d'avant. Toute assertion sur ce que la base
+       * porte **après** l'écriture passait donc au vert sur une écriture perdue.
        */
-      const conflict = url.searchParams.get('on_conflict')?.split(',') ?? ['id'];
-      // `user_id` vient du défaut SQL `auth.uid()`, il n'est pas dans le corps :
-      // les colonnes absentes des deux côtés ne départagent rien.
-      const keys = conflict.filter((column) => inserted.some((row) => column in row));
-      const sameRow = (a: Row, b: Row) =>
-        (keys.length > 0 ? keys : ['id']).every((column) => a[column] === b[column]);
+      const merging = (route.request().headers().prefer ?? '').includes('merge-duplicates');
+      const announced = url.searchParams.get('on_conflict')?.split(',');
+      /**
+       * Les colonnes lues sur le corps **envoyé**, et non sur `inserted`.
+       *
+       * `inserted` porte un `id` fabriqué, donc `'id' in row` y est toujours vrai
+       * et le repli sur la ligne unique ne se déclencherait jamais. C'est ce que
+       * l'app envoie qui dit sur quoi PostgREST peut résoudre le conflit.
+       *
+       * `user_id` vient du défaut SQL `auth.uid()`, il n'est pas dans le corps :
+       * les colonnes absentes des deux côtés ne départagent rien.
+       */
+      const sentRows = (Array.isArray(sent) ? sent : [sent]) as Row[];
+      const keys = (announced ?? ['id']).filter((column) =>
+        sentRows.some((row) => column in row)
+      );
 
       for (const row of inserted) {
-        const at = rows.findIndex((existing) => sameRow(existing, row));
+        const at = !merging
+          ? -1
+          : keys.length > 0
+            ? rows.findIndex((existing) => keys.every((column) => existing[column] === row[column]))
+            : // Aucune clé lisible : la table est à une ligne par éleveur, et le
+              // faux serveur n'en tient qu'un. C'est celle-là qu'on écrase.
+              rows.length - 1;
         if (at >= 0) rows[at] = { ...rows[at], ...row };
         else rows.push(row);
       }

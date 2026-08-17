@@ -61,11 +61,26 @@ test.describe('montures en enclos', () => {
     await lockAll(page, enclos);
 
     // Les cinquante montures enfermées ne sont plus dans ce que la politique
-    // arbitre : les deux compteurs bougent. Sans le retrait ils ne bougent pas
-    // d'un chiffre, l'écurie enregistrée n'ayant pas changé.
+    // arbitre : les compteurs bougent. Sans le retrait ils ne bougent pas d'un
+    // chiffre, l'écurie enregistrée n'ayant pas changé.
     const after = { mate: await tabCount(page, 'mate'), clone: await tabCount(page, 'clone') };
     expect(after).not.toEqual(before);
-    expect(after.mate).toBeLessThan(before.mate);
+
+    /* Le **sens** de la variation, lui, n'est pas une propriété, et l'affirmer
+       ici était un porte-à-faux.
+
+       « Accoupler » ne comptait pas des montures mais des couples à zéro place,
+       et verrouillé, le parc n'a plus une place libre : la politique ne peut
+       plus charger quoi que ce soit, donc tout ce qui lui reste à proposer est
+       précisément l'appariement des fécondes déjà payées. La liste **grossit**
+       de ce que le chargement lui prenait. Mesuré sur cette fixture : 20 → 19
+       avant que la liste ne se calcule sur l'écurie d'après les clonages,
+       18 → 21 depuis. Les deux sont justes ; seul le premier ressemblait à une
+       règle.
+
+       Ce que le retrait garantit est ailleurs, et c'est testé par les trois
+       specs qui suivent : le parc est annoncé plein, l'écart est dit au nombre
+       près, et « Mes stocks » ne rétrécit pas. */
   });
 
   test('le parc plein n’est plus annoncé comme libre', async ({ page }) => {

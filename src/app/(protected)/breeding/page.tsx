@@ -7,7 +7,12 @@ import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
-import { cloneOptions, unpairedObjectiveSteriles } from '@/lib/dofus/breeding/cloning';
+import {
+  afterClonings,
+  cloneOptions,
+  isProjected,
+  unpairedObjectiveSteriles,
+} from '@/lib/dofus/breeding/cloning';
 import { extractionOrder } from '@/lib/dofus/breeding/extraction';
 import {
   useBreeding,
@@ -333,23 +338,6 @@ const BreedingPage = () => {
   );
 
   /**
-   * **Tous** les accouplements réalisables maintenant, et non la première tranche.
-   *
-   * Le plan n'en publie qu'une partie — les couples à zéro place — et saisir cette
-   * partie en découvre une autre au rafraîchissement suivant, puis encore une.
-   * Voir `couplesToRecordAll` : la boucle est là-bas, parce qu'elle a besoin de
-   * l'entrée de la politique et non de son résultat.
-   *
-   * Une passe coûte une vingtaine de millisecondes sur une écurie de cent
-   * montures, et il en faut trois à cinq. C'est le prix d'une liste qui ne repousse
-   * pas.
-   */
-  const policyCouples = useMemo(
-    () => (policyInput ? couplesToRecordAll(policyInput) : []),
-    [policyInput]
-  );
-
-  /**
    * Les clonages à faire, et ce qu'ils rendent.
    *
    * Une stérile ne vaut plus rien tant qu'on ne la clone pas : il ne lui reste
@@ -394,6 +382,46 @@ const BreedingPage = () => {
   const clonings = useMemo(
     () => (cloneContext ? cloneOptions(available, cloneContext, Number.POSITIVE_INFINITY) : []),
     [cloneContext, available]
+  );
+
+  /**
+   * **Tous** les accouplements réalisables maintenant, et non la première tranche.
+   *
+   * Le plan n'en publie qu'une partie — les couples à zéro place — et saisir cette
+   * partie en découvre une autre au rafraîchissement suivant, puis encore une.
+   * Voir `couplesToRecordAll` : la boucle est là-bas, parce qu'elle a besoin de
+   * l'entrée de la politique et non de son résultat.
+   *
+   * Une passe coûte une vingtaine de millisecondes sur une écurie de cent
+   * montures, et il en faut trois à cinq. C'est le prix d'une liste qui ne repousse
+   * pas.
+   *
+   * ## Et l'écurie d'entrée est celle **d'après les clonages**
+   *
+   * La boucle ne garantissait le point fixe qu'à écurie constante. Or l'onglet
+   * d'à côté demande vingt clonages, qui retirent quarante stériles et rendent
+   * vingt fertiles : la politique réaffecte alors ses fécondes et publie des
+   * couples gratuits qu'elle avait laissés de côté. L'éleveur, lui, lit ça comme
+   * une liste qui repousse — le défaut de #165, revenu par une autre porte.
+   * Mesuré sur l'écurie du 17/08 : 3 accouplements avant les clonages, 7 après,
+   * à fécondes identiques. Voir `afterClonings`.
+   *
+   * `policyFill` reste sur l'écurie **réelle**, et c'est délibéré : une fournée
+   * se fige en base au premier verrou (`batch.ts`), et y projeter une monture
+   * qui n'a pas encore de ligne mettrait dans `pens` un identifiant que la
+   * sortie d'enclos ne saurait pas relire — elle l'écarterait en silence. Un
+   * clone ne peut pas déborder ici, lui : il ressort non fécond, donc jamais
+   * dans un couple à zéro place. Le filtre ci-dessous est le second verrou.
+   */
+  const policyCouples = useMemo(
+    () =>
+      policyInput
+        ? couplesToRecordAll({
+            ...policyInput,
+            stable: afterClonings(policyInput.stable, clonings),
+          }).filter((couple) => !isProjected(couple.male.mountId) && !isProjected(couple.female.mountId))
+        : [],
+    [policyInput, clonings]
   );
 
   /** Les protégées du projet que rien n'apparie : le seul écran qui puisse les dire. */

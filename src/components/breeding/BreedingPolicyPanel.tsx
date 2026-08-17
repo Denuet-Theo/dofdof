@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Dna, Egg, Gem, Heart, Lock, LockOpen, LogOut, Check } from 'lucide-react';
+import { Dna, Egg, Gem, Heart, Lock, LockOpen, LogOut, Check, Store } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
@@ -11,6 +11,8 @@ import BreedingEnclosExitDialog, {
   type EnclosExitResult,
 } from '@/components/breeding/BreedingEnclosExitDialog';
 import BreedingExtraction from '@/components/breeding/BreedingExtraction';
+import BreedingHdv from '@/components/breeding/BreedingHdv';
+import { sellSheet, type HdvContext } from '@/lib/dofus/breeding/hdv';
 import { couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
 import {
   nextPenIndex,
@@ -25,6 +27,8 @@ import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
 import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
+import type { Stable } from '@/lib/dofus/breeding/stable';
+import type { BreedingRow } from '@/lib/hooks/useBreeding';
 import { MINUTE_MS, useWallClock } from '@/lib/hooks/useWallClock';
 import type { Couple, Individual } from '@/lib/dofus/breeding/stable';
 import type {
@@ -69,13 +73,17 @@ import type { BreedingBatchState } from '@/lib/hooks/useBreedingBatch';
  * enclos obligeait à retrouver soi-même où l'on en était au milieu.
  */
 
-type Step = 'mate' | 'clone' | 'load' | 'extract';
+type Step = 'mate' | 'clone' | 'load' | 'extract' | 'hdv';
 
 const STEPS: { id: Step; label: string; icon: typeof Heart }[] = [
   { id: 'mate', label: 'Accouplement', icon: Heart },
   { id: 'clone', label: 'Clonage', icon: Dna },
   { id: 'load', label: 'Fournée', icon: Egg },
   { id: 'extract', label: 'Extraction', icon: Gem },
+  // Le dernier geste de la journée, et le seul qui se fasse hors de l'écurie :
+  // ce qu'on met en vente et ce qu'on accepte de payer. Après l'extraction parce
+  // qu'on y arrive avec ce qu'on vient d'en tirer.
+  { id: 'hdv', label: 'HDV', icon: Store },
 ];
 
 type Props = {
@@ -98,6 +106,10 @@ type Props = {
   nameOf: (colorId: string) => string;
   individuals?: Individual[];
   colors?: BreedingColor[];
+  /** Les coûts de revient par couleur, pour l'onglet « HDV ». */
+  rows?: BreedingRow[];
+  /** L'écurie entière — le vrac compte, et les partenaires d'un raccourci aussi. */
+  stable?: Stable;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
@@ -136,11 +148,33 @@ const BreedingPolicyPanel = ({
   nameOf,
   individuals = [],
   colors,
+  rows,
+  stable,
   onRecordBirths,
   onUndoBirth,
   onRecordClonings,
   onEnclosExit,
 }: Props) => {
+  /**
+   * Le contexte de prix et la feuille de vente de l'onglet HDV.
+   *
+   * Ici plutôt que dans `BreedingHdv` parce que le **badge** de l'onglet en a
+   * besoin : il annonce combien de montures ne doivent pas partir au prix de leur
+   * couleur, et c'est la même liste. `null` tant que les prix ou l'écurie
+   * manquent.
+   */
+  const hdv = useMemo(() => {
+    if (!rows || !stable || !colors) return null;
+    const estimates = new Map(rows.map((row) => [row.colorId, row.estimate]));
+    const context: HdvContext = {
+      colors,
+      generations: new Map(colors.map((color) => [color.id, color.generation])),
+      costOf: (id) => estimates.get(id)?.cost ?? null,
+      strategyOf: (id) => estimates.get(id)?.strategy ?? null,
+    };
+    return { context, sheet: sellSheet(stable, context) };
+  }, [rows, stable, colors]);
+
   const [step, setStep] = useState<Step>('mate');
   /** La fenêtre ouverte : saisie de naissances, de clonages, ou sortie d'un enclos. */
   const [open, setOpen] = useState<'mate' | 'clone' | { exit: number } | null>(null);
@@ -416,7 +450,12 @@ const BreedingPolicyPanel = ({
                 ? toClone.length
                 : id === 'load'
                   ? loadTotal
-                  : extraction.length;
+                  : id === 'extract'
+                    ? extraction.length
+                    // L'HDV compte ce qui demande une décision : les montures dont
+                    // l'ascendance vaut plus que leur couleur. Les lignes de
+                    // couleur, elles, ne sont pas une liste de gestes à faire.
+                    : (hdv?.sheet.named.length ?? 0);
           const active = step === id;
           return (
             <button
@@ -790,7 +829,27 @@ const BreedingPolicyPanel = ({
           de laisser trois onglets vides qu'on prendrait pour un défaut
           d'affichage. L'extraction s'en passe : une écurie sans fertile est
           justement celle qui a le plus de stériles à vider. */}
-      {nothing && step !== 'extract' && (
+      {step === 'hdv' && (
+        <div data-testid="pane-hdv">
+          {hdv && stable && colors ? (
+            <BreedingHdv
+              sheet={hdv.sheet}
+              context={hdv.context}
+              stable={stable}
+              colors={colors}
+              nameOf={nameOf}
+            />
+          ) : (
+            <p className="text-[11px] text-dark-500">
+              Les prix de couleurs ne sont pas encore chargés.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* L'HDV s'en passe comme l'extraction : une écurie sans fertile a
+          justement le plus de choses à vendre. */}
+      {nothing && step !== 'extract' && step !== 'hdv' && (
         <p className="text-[11px] text-dark-500">
           La politique ne propose rien sur cette écurie : soit elle n&apos;a plus de monture
           fertile, soit les prix ne sont pas saisis et tout lui paraît sans valeur.

@@ -577,6 +577,20 @@ export type UserFarmFilters = {
 };
 
 /**
+ * Une couleur déjà née au moins une fois, pour le succès de collection
+ * (migration 20260817160000).
+ *
+ * Ni date ni compte : le succès demande « au moins une fois », donc l'existence
+ * de la ligne dit tout. Un `first_at` serait joli et ne répondrait à aucune
+ * question qu'on se pose.
+ */
+export type BreedingHatched = {
+  user_id: string;
+  family: 'dragodinde' | 'muldo' | 'volkorne';
+  color_id: string;
+};
+
+/**
  * Une ligne de `user_breeding_availability` (migration 20260812160000).
  *
  * `availability` est laissé en `unknown` comme les filtres de farm : rien de ce
@@ -592,6 +606,23 @@ export type UserBreedingAvailability = {
 export interface Database {
   public: {
     Tables: {
+      /**
+       * La collection du succès : une ligne par couleur déjà née (migration
+       * 20260817160000). L'existence de la ligne est toute l'information.
+       */
+      user_breeding_hatched: {
+        Row: BreedingHatched;
+        Insert: {
+          user_id?: string;
+          family: BreedingHatched['family'];
+          color_id: string;
+        };
+        Update: {
+          family?: BreedingHatched['family'];
+          color_id?: string;
+        };
+        Relationships: [];
+      };
       user_breeding_availability: {
         Row: UserBreedingAvailability;
         Insert: {

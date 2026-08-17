@@ -82,6 +82,7 @@ const BreedingPage = () => {
     tree,
     rows,
     settings,
+    hatched,
     genetonValuation,
     sacrificePrice,
     supplies,
@@ -493,6 +494,8 @@ const BreedingPage = () => {
         // donc c'est bien `stable` et non `stable.individuals`.
         rows={rows}
         stable={stable}
+        // La collection, pour l'onglet « Succès » : ce qu'il reste à faire naître.
+        hatched={hatched}
         onRecordBirths={recordBirths}
         onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}

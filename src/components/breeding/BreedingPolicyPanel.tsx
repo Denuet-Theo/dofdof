@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Dna, Egg, Gem, Heart, Lock, LockOpen, LogOut, Check, Store } from 'lucide-react';
+import { Dna, Egg, Gem, Heart, Lock, LockOpen, LogOut, Check, Store, Trophy } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
@@ -12,6 +12,7 @@ import BreedingEnclosExitDialog, {
 } from '@/components/breeding/BreedingEnclosExitDialog';
 import BreedingExtraction from '@/components/breeding/BreedingExtraction';
 import BreedingHdv from '@/components/breeding/BreedingHdv';
+import BreedingSuccess from '@/components/breeding/BreedingSuccess';
 import { sellSheet, type HdvContext } from '@/lib/dofus/breeding/hdv';
 import { couplesToRecord, type StablePlan } from '@/lib/dofus/breeding/policy';
 import {
@@ -73,7 +74,7 @@ import type { BreedingBatchState } from '@/lib/hooks/useBreedingBatch';
  * enclos obligeait à retrouver soi-même où l'on en était au milieu.
  */
 
-type Step = 'mate' | 'clone' | 'load' | 'extract' | 'hdv';
+type Step = 'mate' | 'clone' | 'load' | 'extract' | 'hdv' | 'success';
 
 const STEPS: { id: Step; label: string; icon: typeof Heart }[] = [
   { id: 'mate', label: 'Accouplement', icon: Heart },
@@ -84,6 +85,10 @@ const STEPS: { id: Step; label: string; icon: typeof Heart }[] = [
   // ce qu'on met en vente et ce qu'on accepte de payer. Après l'extraction parce
   // qu'on y arrive avec ce qu'on vient d'en tirer.
   { id: 'hdv', label: 'HDV', icon: Store },
+  // Le succès de collection, en dernier : c'est le seul onglet qui ne dise rien
+  // du geste à faire maintenant. Il arbitre ce que la politique poursuit, pas
+  // comment on charge l'enclos.
+  { id: 'success', label: 'Succès', icon: Trophy },
 ];
 
 type Props = {
@@ -110,6 +115,8 @@ type Props = {
   rows?: BreedingRow[];
   /** L'écurie entière — le vrac compte, et les partenaires d'un raccourci aussi. */
   stable?: Stable;
+  /** Les couleurs déjà nées, pour l'onglet « Succès ». */
+  hatched?: ReadonlySet<string>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
@@ -150,6 +157,7 @@ const BreedingPolicyPanel = ({
   colors,
   rows,
   stable,
+  hatched,
   onRecordBirths,
   onUndoBirth,
   onRecordClonings,
@@ -455,7 +463,14 @@ const BreedingPolicyPanel = ({
                     // L'HDV compte ce qui demande une décision : les montures dont
                     // l'ascendance vaut plus que leur couleur. Les lignes de
                     // couleur, elles, ne sont pas une liste de gestes à faire.
-                    : (hdv?.sheet.named.length ?? 0);
+                    : id === 'hdv'
+                      ? (hdv?.sheet.named.length ?? 0)
+                      // Le succès compte ce qui reste à faire naître, et non ce
+                      // qui est acquis : c'est le travail devant, comme les
+                      // quatre premiers onglets.
+                      : (colors && hatched
+                          ? colors.filter((color) => !hatched.has(color.id)).length
+                          : 0);
           const active = step === id;
           return (
             <button
@@ -847,9 +862,20 @@ const BreedingPolicyPanel = ({
         </div>
       )}
 
-      {/* L'HDV s'en passe comme l'extraction : une écurie sans fertile a
-          justement le plus de choses à vendre. */}
-      {nothing && step !== 'extract' && step !== 'hdv' && (
+      {step === 'success' && (
+        <div data-testid="pane-success">
+          {colors && hatched ? (
+            <BreedingSuccess colors={colors} hatched={hatched} nameOf={nameOf} />
+          ) : (
+            <p className="text-[11px] text-dark-500">La collection n’est pas encore chargée.</p>
+          )}
+        </div>
+      )}
+
+      {/* L'HDV et le succès s'en passent comme l'extraction : une écurie sans
+          fertile a justement le plus de choses à vendre, et le succès arbitre ce
+          qu'on poursuit plutôt que ce qu'on charge. */}
+      {nothing && step !== 'extract' && step !== 'hdv' && step !== 'success' && (
         <p className="text-[11px] text-dark-500">
           La politique ne propose rien sur cette écurie : soit elle n&apos;a plus de monture
           fertile, soit les prix ne sont pas saisis et tout lui paraît sans valeur.

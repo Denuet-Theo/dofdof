@@ -414,6 +414,13 @@ export const useBreeding = (
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [stable, setStable] = useState<Stable>(emptyStable);
   const [itemStock, setItemStock] = useState<Map<number, number>>(new Map());
+  /**
+   * Les couleurs déjà nées au moins une fois — le succès de collection.
+   *
+   * Un `Set` et non un compte : le succès demande « au moins une fois », donc
+   * l'appartenance est toute l'information. Voir `success.ts`.
+   */
+  const [hatched, setHatched] = useState<ReadonlySet<string>>(new Set<string>());
   // Même patron que la page Farm : la transition porte l'état de chargement,
   // ce qui évite un `setState` synchrone dans l'effet.
   const [loading, startLoading] = useTransition();
@@ -434,6 +441,7 @@ export const useBreeding = (
           mountRows,
           individualRows,
           stockRows,
+          hatchedRows,
           fuelResponse,
         ] = await Promise.all([
             supabase.from('breeding_color_prices').select('*').eq('family', family),
@@ -466,6 +474,9 @@ export const useBreeding = (
                 .order('item_id', { ascending: true })
                 .range(from, to)
             ),
+            // La collection : une ligne par couleur déjà née, donc au plus 120 par
+            // famille. Une page suffit, et `fetchAllRows` serait du zèle.
+            supabase.from('user_breeding_hatched').select('color_id').eq('family', family),
             // Les 120 carburants d'enclos tiennent en une page du miroir local :
             // c'est ce qui chiffre le cycle de fécondité et la montée en niveau.
             fetch(`/api/dofusdb/items?typeId=${FUEL_TYPE_ID}&limit=200`).then((response) =>
@@ -510,6 +521,9 @@ export const useBreeding = (
         }
         setPrices(nextPrices);
 
+        setHatched(
+          new Set((hatchedRows.data ?? []).map((row) => (row as { color_id: string }).color_id))
+        );
         setItemPrices(new Map(priceRows.map((row) => [row.item_id, row])));
         setFuelItems((fuelResponse as DofusDBResponse<DofusDBItem>).data ?? []);
 
@@ -1586,6 +1600,45 @@ export const useBreeding = (
       //    « visible ».
       let partial = false;
 
+      /**
+       * La collection, et c'est le **seul** chemin qui la remplit.
+       *
+       * Ni déduction depuis l'écurie, ni saisie manuelle : l'éleveur achète aussi
+       * des montures qui portent une généalogie, donc « parents renseignés » ne
+       * prouve pas qu'il l'a fait naître. Une naissance saisie ici, oui.
+       *
+       * Conséquence assumée : le compteur part de zéro et ignore tout ce qui a été
+       * élevé avant que cette table existe. Rien de faux n'y entre, ce qui est le
+       * compromis retenu — voir `success.ts`.
+       *
+       * `ignoreDuplicates` parce que le succès demande « au moins une fois » :
+       * réenregistrer une couleur déjà collectionnée doit être un geste vide, pas
+       * un conflit. Et l'échec ne perd rien de récupérable — la monture est en
+       * base, seul le compteur du succès retarde — donc il se signale sans faire
+       * échouer la saisie.
+       */
+      const bornColors = [...new Set(added.map((mount) => mount.colorId))];
+      const fresh = bornColors.filter((colorId) => !hatched.has(colorId));
+      if (fresh.length > 0) {
+        const { error: hatchedError } = await supabase
+          .from('user_breeding_hatched')
+          .upsert(
+            fresh.map((colorId) => ({ family, color_id: colorId })),
+            { onConflict: 'user_id,family,color_id', ignoreDuplicates: true }
+          );
+        if (hatchedError) {
+          partial = true;
+          reportWriteFailure(
+            fresh.length > 1
+              ? `les ${fresh.length} couleurs à ajouter au succès — les poulains, eux, sont enregistrés`
+              : 'la couleur à ajouter au succès — le poulain, lui, est enregistré',
+            hatchedError
+          );
+        } else {
+          setHatched((current) => new Set([...current, ...fresh]));
+        }
+      }
+
       /*
        * Ici se referme la boucle des anonymes stériles, et ce n'est **pas**
        * corrigé : un parent anonyme consommé devient une anonyme stérile, que
@@ -1669,7 +1722,10 @@ export const useBreeding = (
         })),
       };
     },
-    [family, tree, stable, load, nameForBirth]
+    // `hatched` sert à ne pas réécrire une couleur déjà collectionnée. Le lire
+    // ici n'est qu'une économie de requête : l'`upsert` est de toute façon
+    // idempotent, donc une lecture périmée ne peut rien casser.
+    [family, tree, stable, load, nameForBirth, hatched]
   );
 
   /**
@@ -2037,6 +2093,7 @@ export const useBreeding = (
     rows,
     prices,
     settings,
+    hatched,
     genetonValuation,
     supplies,
     fuelItems,

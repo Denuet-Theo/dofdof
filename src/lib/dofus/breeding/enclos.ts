@@ -61,6 +61,35 @@ export const MAX_TRANSFER_PER_HOUR = MAX_TRANSFER_PER_SECOND * 3600;
 export const MIN_TRANSFER_PER_HOUR = transferRatePerSecond(1) * 3600;
 
 /**
+ * Les quatre bandes qu'un éleveur peut tenir, du plus lent au plus rapide.
+ *
+ * Ce sont les plafonds des carburants, et ils tombent exactement sur les paliers
+ * de `TRANSFER_TIERS` : la bande n'est donc pas un réglage libre mais le choix
+ * d'un rang de carburant, et `transferRatePerSecond` en donne le débit — 1, 2, 3
+ * puis 4 points par seconde.
+ *
+ * Ordre croissant, et c'est ce qui les rend affichables telles quelles : la
+ * position dans le tableau **est** le numéro de bande dont parlent les éleveurs.
+ * La contrainte `check` de `gauge_cap` porte sur ces quatre valeurs.
+ */
+export const GAUGE_BANDS = [40_000, 70_000, 90_000, GAUGE_MAX] as const;
+
+/**
+ * La bande tenue faute de choix : la **2**, plafond 70 000.
+ *
+ * Ce n'est pas un milieu prudent, c'est un relevé — c'est la bande que la guilde
+ * tient, et le défaut d'un réglage qu'on vient de rendre doit être ce que font
+ * les gens plutôt que ce qui arrange le calcul.
+ *
+ * Le défaut précédent était `null`, « laisse l'arbitrage temps/kamas décider ».
+ * L'option existe toujours, mais elle ne pouvait plus rien arbitrer : cet
+ * arbitrage passe entièrement par `kamasPerHour`, qui vaut zéro et n'a plus de
+ * contrôle depuis #94. À temps sans valeur, le moins cher au point gagne
+ * toujours — donc la bande la plus lente, choisie sans l'avoir dit.
+ */
+export const DEFAULT_GAUGE_BAND = 70_000;
+
+/**
  * Secondes pour qu'une jauge passe de `from` à `to` sans être rechargée.
  *
  * Palier par palier, jamais avec un débit moyen : de 100 000 à 0 les débits vont

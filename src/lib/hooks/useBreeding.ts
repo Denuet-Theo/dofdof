@@ -40,7 +40,7 @@ import {
   type PlanFunding,
 } from '@/lib/dofus/breeding/costs';
 import { planWaves, wavesByStep, type Wave } from '@/lib/dofus/breeding/waves';
-import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
+import { DEFAULT_GAUGE_BAND, ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   cycledOf,
@@ -177,46 +177,89 @@ export type FamilyId = 'dragodinde' | 'muldo' | 'volkorne';
  * ces colonnes, et `saveSettings` cesse de les écrire. Elles survivent en base
  * le temps qu'une migration les enlève, avec le commentaire qui dit pourquoi.
  *
- * **Ce n'est pas fini.** #94 avait retiré six réglages de plus au nom du même
- * principe — « the model now gives the answer on its own », en prévenant qu'« a
- * wrong value there silently moves every figure on the screen ». Cinq d'entre
- * eux sont dans le même état : lus ici, sans contrôle nulle part —
- * `count_net_cost`, `gauge_cap`, `minutes_per_fight`, `kamas_per_hour`,
- * `net_recovery_rate`. Ils ne sont pas traités ici parce que les figer demande
- * de décider **quelle** réponse le modèle donne, et que trois d'entre eux
- * portent des valeurs délibérées qu'un défaut écraserait. Voir #181.
+ * ## Les six de #94, et pourquoi deux reviennent plutôt que six
+ *
+ * #94 avait retiré six réglages de plus au nom du même principe — « the model now
+ * gives the answer on its own », en prévenant qu'« a wrong value there silently
+ * moves every figure on the screen ». Aucun ne s'est arrêté d'être lu, et #181 a
+ * demandé de trancher colonne par colonne. Mesuré sur l'export du 17/08, la
+ * réponse n'est pas la même pour les six :
+ *
+ * | colonne | valeur relevée | effet réel | sort |
+ * | --- | --- | --- | --- |
+ * | `count_net_cost` | `false` | met le prix des filets à zéro | **contrôle rendu** |
+ * | `gauge_cap` | `90000` | force la bande, donc toutes les durées | **contrôle rendu** |
+ * | `kamas_per_hour` | `0` | aucun — égal au défaut | figé |
+ * | `minutes_per_fight` | `1` | **aucun**, voir plus bas | figé |
+ * | `net_recovery_rate` | `0.8` | aucun — égal au défaut | figé |
+ * | `recycle_steriles` | `true` | aucun — égal au défaut | figé |
+ *
+ * Les deux premiers sont des faits sur la façon de jouer, comme le nombre
+ * d'enclos : ils retournent à l'écran, dans « Mes stocks », à côté de lui.
+ *
+ * Les quatre autres quittent ce type, ce qui les met hors de portée — voir
+ * `FROZEN_ANSWERS`, qui porte la réponse et le raisonnement de chacun. Et
+ * `recycle_steriles` était le **sixième** : #181 le rangeait parmi ceux qui
+ * gardent leur contrôle, mais il n'en avait aucun non plus.
  */
 export type BreedingSettings = Omit<
   UserBreedingSettings,
   | 'user_id'
   | 'updated_at'
-  | 'kamas_per_hour'
   | 'kamas_available'
-  | 'net_recovery_rate'
   | 'credit_off_target'
   | 'never_sell_mounts'
   | 'breeder_level'
+  | 'kamas_per_hour'
+  | 'minutes_per_fight'
+  | 'net_recovery_rate'
+  | 'recycle_steriles'
 > & {
-  kamas_per_hour: number;
   kamas_available: number;
-  net_recovery_rate: number;
 };
+
+/**
+ * Les réponses que le modèle donne à la place des quatre réglages figés.
+ *
+ * Elles valent toutes le défaut de leur colonne, et c'est vérifié plutôt que
+ * supposé : sur la ligne du 17/08, `kamas_per_hour`, `net_recovery_rate` et
+ * `recycle_steriles` portaient déjà exactement ces valeurs. Les figer ne
+ * réécrit donc rien.
+ *
+ * `minutes_per_fight` est le seul qui divergeait — 1 contre 12 — et le seul dont
+ * il faut prouver que ça ne change rien. C'est
+ * `timeCostPerMount = (minutes / 60) × (kamasPerHour / captures)` : à
+ * `kamasPerHour` nul, le facteur entier est nul, quel que soit le nombre de
+ * minutes. Le douze contre un n'était pas un écart de coût, c'était un écart
+ * multiplié par zéro.
+ *
+ * **Ce qui rend les trois derniers inertes est le premier.** `kamas_per_hour`
+ * n'est pas un réglage parmi les quatre, c'est l'interrupteur du temps : tous les
+ * termes de durée du calcul le traversent. Rendre `minutes_per_fight` ou
+ * `net_recovery_rate` sans lui n'aurait aucun effet observable ; les revaloriser
+ * un jour se fera donc à trois, pas à un.
+ */
+export const FROZEN_ANSWERS = {
+  /** Une heure de jeu ne se convertit pas en kamas — donc aucun coût de temps. */
+  kamas_per_hour: 0,
+  /** Douze minutes par combat de capture, le défaut de la colonne. */
+  minutes_per_fight: 12,
+  /** Quatre filets sur cinq se récupèrent après une capture. */
+  net_recovery_rate: 0.8,
+  /** Les stériles se clonent par deux plutôt que de partir en ambre. */
+  recycle_steriles: true,
+} as const;
 
 /** Ce que le hook applique tant que l'utilisateur n'a rien réglé. */
 export const DEFAULT_SETTINGS: BreedingSettings = {
   enclos_count: 6,
-  kamas_per_hour: 0,
   // 0 = pas de contrainte. Refuser tous les plans à qui n'a pas renseigné son
   // budget serait la pire lecture possible d'un champ vide.
   kamas_available: 0,
-  minutes_per_fight: 12,
-  net_recovery_rate: 0.8,
-  recycle_steriles: true,
   // Le prix des filets compte par défaut : c'est vrai de qui les achète, et
-  // celui qui récolte ses matériaux sait, lui, qu'il doit décocher — sauf que la
-  // case a disparu avec #94. Réglage encore lu, plus réglable : voir #181.
+  // celui qui récolte ses matériaux décoche la case.
   count_net_cost: true,
-  gauge_cap: null,
+  gauge_cap: DEFAULT_GAUGE_BAND,
 };
 
 /**
@@ -258,15 +301,16 @@ const numericSettings = (row: UserBreedingSettings): BreedingSettings => {
   // cesser de lire.
   return {
     enclos_count: Number(merged.enclos_count),
-    kamas_per_hour: Number(merged.kamas_per_hour),
     kamas_available: Number(merged.kamas_available),
-    minutes_per_fight: Number(merged.minutes_per_fight),
-    net_recovery_rate: Number(merged.net_recovery_rate),
-    recycle_steriles: merged.recycle_steriles,
     count_net_cost: merged.count_net_cost,
-    // Seul champ qui a le droit d'être absent : `null` veut dire « laisse
-    // l'arbitrage décider », et `Number(null)` vaudrait zéro, c'est-à-dire
+    // Seul champ qui a le droit d'être absent : `null` veut dire « le moins cher,
+    // sans regarder la vitesse », et `Number(null)` vaudrait zéro, c'est-à-dire
     // « plafond nul ». Les deux ne disent pas la même chose.
+    //
+    // Le `null` d'une ligne existante est donc conservé, et non remplacé par le
+    // nouveau défaut : c'est une option que l'écran propose, pas une absence de
+    // réponse. La migration qui pose le défaut comble les lignes d'avant, où
+    // l'option n'était pas choisissable.
     gauge_cap: merged.gauge_cap === null ? null : Number(merged.gauge_cap),
   };
 };
@@ -592,9 +636,10 @@ export const useBreeding = (
     () =>
       tree
         ? computeSupplyCosts(fuelItems, tree.nets, itemPrices, {
-            kamasPerHour: toNumber(settings.kamas_per_hour),
-            minutesPerFight: settings.minutes_per_fight,
-            netRecoveryRate: toNumber(settings.net_recovery_rate),
+            // Les trois réponses figées, et non des réglages : voir `FROZEN_ANSWERS`.
+            kamasPerHour: FROZEN_ANSWERS.kamas_per_hour,
+            minutesPerFight: FROZEN_ANSWERS.minutes_per_fight,
+            netRecoveryRate: FROZEN_ANSWERS.net_recovery_rate,
             // Un enclos plein amortit le cycle sur dix montures ; c'est le
             // régime visé, et le seul qui ne gaspille pas de transfert.
             mountsInEnclos: 10,
@@ -693,11 +738,14 @@ export const useBreeding = (
             .map(([generation, item]) => [Number(generation), priceOf(item.id)] as const)
             .filter(([, price]) => price > 0)
         ),
-        recycleSteriles: settings.recycle_steriles,
+        recycleSteriles: FROZEN_ANSWERS.recycle_steriles,
         freeXpPoints,
       })
     );
-  }, [tree, prices, supplies, genetonValuation, priceOf, settings]);
+    // Plus de `settings` ici : le seul réglage que ce calcul lisait était
+    // `recycle_steriles`, qui est devenu une réponse figée. Le garder ferait
+    // recalculer les 120 couleurs à chaque frappe dans « Kamas engageables ».
+  }, [tree, prices, supplies, genetonValuation, priceOf]);
 
   /**
    * Le plan d'une couleur : étapes, durée, jauges à remplir et financement.
@@ -722,7 +770,7 @@ export const useBreeding = (
 
         const plan = breedingPlan(colorId, tree.colors, estimates, {
           targetCount: count,
-          recycleSteriles: settings.recycle_steriles,
+          recycleSteriles: FROZEN_ANSWERS.recycle_steriles,
           genetonValue,
           stock: mountStock,
           // L'objectif est un plancher : les places d'enclos permettent de
@@ -736,7 +784,7 @@ export const useBreeding = (
         const waves = planWaves(plan, {
           stock: stockBySex,
           capacity: Math.max(settings.enclos_count, 1) * (timing?.slots ?? ENCLOS_SLOTS),
-          recycleSteriles: settings.recycle_steriles,
+          recycleSteriles: FROZEN_ANSWERS.recycle_steriles,
           filler: null,
         });
 
@@ -811,7 +859,6 @@ export const useBreeding = (
       estimateVariants,
       // Le parc dimensionne les vagues : plus d'enclos, moins de tours.
       settings.enclos_count,
-      settings.recycle_steriles,
       settings.kamas_available,
       genetonValuation,
       timing,

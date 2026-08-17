@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { Boxes, Check, Coins, Plus, Search, Trash2, Upload, Warehouse } from 'lucide-react';
+import { Boxes, Check, Coins, Gauge, Plus, Search, Trash2, Upload, Warehouse } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingAddMount from '@/components/breeding/BreedingAddMount';
@@ -26,6 +26,7 @@ import {
   mountName,
 } from '@/lib/dofus/breeding/naming';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
+import { GAUGE_BANDS, transferRatePerSecond } from '@/lib/dofus/breeding/enclos';
 import type { DofusDBItem } from '@/lib/supabase/types';
 import type {
   AddResult,
@@ -308,6 +309,15 @@ const BreedingStocks = ({
   const [rankFilter, setRankFilter] = useState<FuelRank | null>(null);
   const [budget, setBudget] = useState(String(settings.kamas_available));
   const [enclos, setEnclos] = useState(String(settings.enclos_count));
+  /**
+   * La bande de jauge tenue, en brouillon.
+   *
+   * Une chaîne et non un nombre, parce que `''` porte l'option « le moins cher »
+   * — le `null` de la colonne — et qu'un `<select>` ne sait transporter que du
+   * texte. La conversion se fait à l'enregistrement, une fois.
+   */
+  const [band, setBand] = useState(settings.gauge_cap === null ? '' : String(settings.gauge_cap));
+  const [netCost, setNetCost] = useState(settings.count_net_cost);
   const [savedBudget, setSavedBudget] = useState(false);
 
   const byId = useMemo(() => new Map(colors.map((color) => [color.id, color])), [colors]);
@@ -553,6 +563,8 @@ const BreedingStocks = ({
             if (!value) {
               setBudget(String(settings.kamas_available));
               setEnclos(String(settings.enclos_count));
+              setBand(settings.gauge_cap === null ? '' : String(settings.gauge_cap));
+              setNetCost(settings.count_net_cost);
             }
             return !value;
           })
@@ -575,59 +587,120 @@ const BreedingStocks = ({
 
       {open && (
         <div className="px-5 pb-5 space-y-6 border-t border-dark-700/40 pt-4">
-          {/* Le parc et la caisse : les deux seules choses qu'on possède sans
-              qu'elles soient une monture ou un carburant, et les deux qui
-              bornent ce qu'un plan peut proposer. Le panneau « Mon élevage » qui
-              les portait avec cinq autres réglages a disparu : ce que le modèle
-              décide maintenant, il ne sert plus à rien de le paramétrer. */}
-          <div className="flex flex-wrap items-end gap-4">
-            <div>
-              <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
-                <Warehouse size={13} className="text-kamas" />
-                Enclos possédés
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={enclos}
-                onChange={(event) => setEnclos(event.target.value)}
-                className="w-28 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
-                  text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
-              />
-              <p className="text-[10px] text-dark-600 mt-1">10 places, 2 jauges chacun</p>
+          {/* Les quatre faits sur la façon dont on joue — le parc, la caisse, la
+              bande qu'on tient, les filets qu'on paie ou pas. Le panneau « Mon
+              élevage » qui les portait avec cinq réglages de politique a disparu
+              avec #94, à raison : ce que le modèle décide, il ne sert à rien de
+              le paramétrer. Ces quatre-là ne se décident pas, ils se constatent,
+              et c'est ce qui leur vaut de rester ici. */}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-4">
+              <div>
+                <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
+                  <Warehouse size={13} className="text-kamas" />
+                  Enclos possédés
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={enclos}
+                  onChange={(event) => setEnclos(event.target.value)}
+                  className="w-28 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
+                />
+                <p className="text-[10px] text-dark-600 mt-1">10 places, 2 jauges chacun</p>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
+                  <Coins size={13} className="text-kamas" />
+                  Kamas engageables
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={100_000}
+                  value={budget}
+                  onChange={(event) => setBudget(event.target.value)}
+                  className="w-48 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
+                />
+                <p className="text-[10px] text-dark-600 mt-1">
+                  À 0, aucune contrainte n&apos;est appliquée.
+                </p>
+              </div>
+
+              {/* La bande décide du **débit** des jauges, donc de toutes les
+                  durées de l'écran, donc de la largeur d'une fournée. Elle était
+                  encore lue sans être réglable depuis #94 : une ligne posée
+                  avant gardait sa bande à vie. Voir #181. */}
+              <div>
+                <label
+                  htmlFor="gauge-band"
+                  className="flex items-center gap-2 text-xs text-dark-400 mb-1.5"
+                >
+                  <Gauge size={13} className="text-kamas" />
+                  Bande de jauge tenue
+                </label>
+                <select
+                  id="gauge-band"
+                  data-testid="setting-gauge-band"
+                  value={band}
+                  onChange={(event) => setBand(event.target.value)}
+                  className="w-56 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
+                    text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
+                >
+                  {GAUGE_BANDS.map((cap, index) => (
+                    <option key={cap} value={cap}>
+                      Bande {index + 1} — {cap.toLocaleString('fr-FR')} ·{' '}
+                      {transferRatePerSecond(cap)} pt/s
+                    </option>
+                  ))}
+                  <option value="">Le moins cher, sans regarder la vitesse</option>
+                </select>
+                <p className="text-[10px] text-dark-600 mt-1">
+                  Le rang de carburant que tu rachètes.
+                </p>
+              </div>
             </div>
 
-            <div>
-              <label className="flex items-center gap-2 text-xs text-dark-400 mb-1.5">
-                <Coins size={13} className="text-kamas" />
-                Kamas engageables
-              </label>
+            {/* Le prix des filets : le seul des réglages rendus qui puisse mettre
+                un coût à zéro, ce qui se lit « Capture : 0 kamas » sans rien pour
+                l'expliquer. D'où la case, et non un défaut. */}
+            <label className="flex items-start gap-2.5 text-xs text-dark-300 cursor-pointer w-fit">
               <input
-                type="number"
-                min={0}
-                step={100_000}
-                value={budget}
-                onChange={(event) => setBudget(event.target.value)}
-                className="w-48 px-3 py-2 rounded-xl bg-dark-800/80 border border-dark-600/50
-                  text-dark-100 text-sm transition-all hover:border-dark-500 focus:border-kamas/50"
+                type="checkbox"
+                data-testid="setting-net-cost"
+                checked={netCost}
+                onChange={(event) => setNetCost(event.target.checked)}
+                className="mt-0.5 accent-kamas cursor-pointer"
               />
-              <p className="text-[10px] text-dark-600 mt-1">
-                À 0, aucune contrainte n&apos;est appliquée.
-              </p>
-            </div>
+              <span>
+                Compter le prix des filets dans une capture
+                <span className="block text-[10px] text-dark-600">
+                  Décoche si tu récoltes tes matériaux : la capture ne coûte alors que le
+                  combat.
+                </span>
+              </span>
+            </label>
 
-            <div className="flex items-center gap-3 pb-6">
+            <div className="flex items-center gap-3">
               <Button
                 size="sm"
+                data-testid="save-settings"
                 onClick={async () => {
-                  // Les deux partent ensemble : ils vivent dans la même ligne de
-                  // réglages, et deux boutons côte à côte laisseraient croire
-                  // qu'oublier l'un annule l'autre.
+                  // Les quatre partent ensemble : ils vivent dans la même ligne
+                  // de réglages, et quatre boutons côte à côte laisseraient
+                  // croire qu'oublier l'un annule les autres.
                   const saved = await onSaveSettings({
                     ...settings,
                     kamas_available: Math.max(0, Number(budget) || 0),
                     enclos_count: Math.max(0, Math.min(20, Number(enclos) || 0)),
+                    // `''` est l'option « le moins cher », que la colonne écrit
+                    // `null`. Un `Number('')` vaudrait zéro, soit « plafond nul ».
+                    gauge_cap: band === '' ? null : Number(band),
+                    count_net_cost: netCost,
                   });
                   if (saved) {
                     setSavedBudget(true);
@@ -643,12 +716,14 @@ const BreedingStocks = ({
                 </span>
               )}
             </div>
+
+            <p className="text-[10px] text-dark-600">
+              Les plans qui dépassent le budget sont signalés, avec l&apos;étape où
+              l&apos;argent manque. Le nombre d&apos;enclos traduit les heures d&apos;enclos
+              d&apos;un plan en délai réel — c&apos;est lui qui décide de la largeur d&apos;une
+              fournée.
+            </p>
           </div>
-          <p className="text-[10px] text-dark-600 -mt-4">
-            Les plans qui dépassent le budget sont signalés, avec l&apos;étape où l&apos;argent
-            manque. Le nombre d&apos;enclos traduit les heures d&apos;enclos d&apos;un plan en
-            délai réel — c&apos;est lui qui décide de la largeur d&apos;une fournée.
-          </p>
 
           {/* Montures */}
           <div>

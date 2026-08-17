@@ -9,7 +9,12 @@ import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import { cloneOptions, unpairedObjectiveSteriles } from '@/lib/dofus/breeding/cloning';
 import { extractionOrder } from '@/lib/dofus/breeding/extraction';
-import { useBreeding, type BreedingRow, type FamilyId } from '@/lib/hooks/useBreeding';
+import {
+  useBreeding,
+  FROZEN_ANSWERS,
+  type BreedingRow,
+  type FamilyId,
+} from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
@@ -171,10 +176,10 @@ const BreedingPage = () => {
     return planWaves(target.planned.plan, {
       stock: stockBySex,
       capacity: Math.max(settings.enclos_count, 1) * ENCLOS_SLOTS,
-      recycleSteriles: settings.recycle_steriles,
+      recycleSteriles: FROZEN_ANSWERS.recycle_steriles,
       filler: filler?.colorId ?? null,
     });
-  }, [rows, selectedColorId, stockBySex, settings.enclos_count, settings.recycle_steriles]);
+  }, [rows, selectedColorId, stockBySex, settings.enclos_count]);
 
   /**
    * L'écurie **dont on dispose** : la vraie, moins ce qui est en enclos.

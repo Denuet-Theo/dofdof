@@ -62,8 +62,16 @@ import type { Individual, Sex, Stable } from './stable';
  * Il dit aussi quelque chose de plus fort que le premier relevé : la monture qui
  * porte le raccourci peut être de **génération 1**. Une gen 1 ne s'élève pas,
  * elle se capture — sauf celle-là, qui n'a pu naître que d'un croisement gen 9
- * manqué. Le graphe de recettes la range parmi les feuilles sauvages ; c'est la
- * monture la plus précieuse de l'écurie.
+ * manqué. Le graphe de recettes la range parmi les feuilles sauvages ; c'est l'une
+ * des montures les plus précieuses de l'écurie, et `hdv.ts` la chiffre.
+ *
+ * **Mais la gen 9 dans l'ascendance n'y est pas un détail.** Ce qui donne sa
+ * valeur à cette gen 1, c'est que « gen 9 × gen 1 » nomme une gen 10. Une gen 1
+ * née d'un croisement **gen 10** manqué ne vaut rien de particulier : une gen 10
+ * ne se compose avec rien, c'est le sommet de l'arbre, donc la monture vise la
+ * gen 2 comme n'importe quelle gen 1. Voir plus bas — la cible est ce qu'une
+ * recombinaison sait nommer, et cette conséquence-là ne se voyait pas tant qu'on
+ * la calculait sur le maximum de l'ascendance.
  *
  * ## La cible est ce qu'on sait nommer
  *

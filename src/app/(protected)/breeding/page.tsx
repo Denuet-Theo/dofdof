@@ -478,6 +478,12 @@ const BreedingPage = () => {
         // Le parcours guidé a besoin du catalogue : la fenêtre d'accouplement
         // propose les issues possibles, pas seulement des noms.
         colors={tree?.colors ?? []}
+        // Les coûts de revient et l'écurie entière, pour l'onglet « HDV » : le
+        // prix conseillé se lit sur le chiffrage, et le raccourci d'une monture
+        // se cherche contre les partenaires que l'écurie porte. Le vrac compte,
+        // donc c'est bien `stable` et non `stable.individuals`.
+        rows={rows}
+        stable={stable}
         onRecordBirths={recordBirths}
         onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}

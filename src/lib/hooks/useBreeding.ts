@@ -475,12 +475,37 @@ export const useBreeding = (
 
         if (colorRows.error) throw colorRows.error;
 
+        /**
+         * Les prix de couleurs, **en nombres**.
+         *
+         * `breeding_color_prices.price` est un `bigint` : PostgREST le sérialise
+         * en chaîne décimale, et `ColorPrice` le déclare `number`. Le type mentait
+         * donc, exactement comme il mentait sur les réglages — voir
+         * `numericSettings`.
+         *
+         * Et `tsc` ne pouvait pas le voir, pour une raison qui vaut d'être nommée :
+         * la valeur passait par une **clé calculée**,
+         * `[row.mount_level === 0 ? 'level0' : 'level200']: row.price`. Une clé
+         * calculée élargit le type du littéral, si bien que le compilateur cesse de
+         * confronter la valeur au champ visé. Écrire les deux champs en clair est
+         * donc autant le correctif que la conversion : remettre un `Numeric` ici
+         * échoue maintenant à la compilation, ce qui rend la classe détectable la
+         * prochaine fois.
+         *
+         * Ce que ça coûtait : `estimate.cost` valait la chaîne `"6000"` sur toute
+         * couleur qu'il vaut mieux **acheter** — cette stratégie retient le prix
+         * saisi tel quel. Les multiplications s'en sortaient, JS coerçant `*`, donc
+         * le chiffrage des routes tenait. Une **addition** non. L'onglet HDV,
+         * premier à en faire une, affichait un Indigo gen 1 à `"6000" + 74872` =
+         * **600 074 872** kamas de revient.
+         */
         const nextPrices = new Map<string, ColorPrice>();
         for (const row of (colorRows.data ?? []) as BreedingColorPrice[]) {
           const current = nextPrices.get(row.color_id) ?? { level0: null, level200: null };
+          const price = toNumber(row.price);
           nextPrices.set(row.color_id, {
-            ...current,
-            [row.mount_level === 0 ? 'level0' : 'level200']: row.price,
+            level0: row.mount_level === 0 ? price : current.level0,
+            level200: row.mount_level === 200 ? price : current.level200,
           });
         }
         setPrices(nextPrices);

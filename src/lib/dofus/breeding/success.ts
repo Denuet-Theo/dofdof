@@ -1,3 +1,4 @@
+import { isProjected } from './cloning';
 import { composedColorOf, mateGroups, pairOutlook, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
 import type { Stable } from './stable';
@@ -361,12 +362,27 @@ export const applySuccess = (
     if (!side) continue;
     const sex = side === line.male ? 'M' : 'F';
 
+    /**
+     * Jamais une monture **projetée**.
+     *
+     * `couplesToRecordAll` planifie sur `afterClonings(...)` depuis #223 — l'écurie
+     * telle qu'elle sera une fois les clonages faits — et filtre ensuite les
+     * couples qui portent un clone à venir, faute de ligne en base. Un
+     * détournement qui prendrait un de ces clones verrait donc son couple **écarté
+     * de la saisie de naissance**, alors que le panneau de la fournée, qui
+     * planifie sur l'écurie réelle, en montrerait un autre. Les deux écrans
+     * diraient deux choses de la même bête, ce que mettre la passe dans
+     * `stablePlan` visait précisément à éviter.
+     *
+     * On ne détourne donc que vers une monture qui a une ligne.
+     */
     const replacement = stable.individuals.find(
       (mount) =>
         mount.colorId === into &&
         mount.fertile &&
         mount.sex === sex &&
-        !engaged.has(mount.id)
+        !engaged.has(mount.id) &&
+        !isProjected(mount.id)
     );
 
     /**
@@ -452,6 +468,10 @@ export const applySuccess = (
       const ids = [crossing.male.id, crossing.female.id].filter(
         (id): id is string => id !== null
       );
+      // Même raison que pour un détournement : un clone à venir n'a pas de ligne
+      // en base, donc #223 écarte son couple de la saisie de naissance et les deux
+      // écrans divergeraient.
+      if (ids.some((id) => isProjected(id))) continue;
       if (ids.some((id) => engaged.has(id))) continue;
       for (const id of ids) engaged.add(id);
 

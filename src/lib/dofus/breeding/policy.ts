@@ -48,6 +48,7 @@ import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
 import { carriedGeneration } from './naming';
+import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
 import { consumeCouples, copyStable } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
@@ -305,6 +306,14 @@ export type PolicyInput = {
    */
   target?: string | null;
   /**
+   * Le succès de collection, ou rien.
+   *
+   * Absent, la passe ne s'applique pas — c'est ce qui garde les gardes de parité,
+   * les scripts de mesure et la simulation sur exactement la physique d'avant.
+   * Seul l'écran le fournit, et seulement si l'éleveur a choisi un mode.
+   */
+  success?: { mode: SuccessMode; hatched: ReadonlySet<string> };
+  /**
    * Autoriser la politique à se **procurer** des gen 1 — achat à l'hôtel de
    * vente ou capture au filet — pour compléter la fournée.
    *
@@ -438,7 +447,32 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     (census) => evaluate(network, featuresOf(census, input.colors, economy))
   );
 
-  return readPlan(plan, mounts, input, generations, economy, strategy);
+  const read = readPlan(plan, mounts, input, generations, economy, strategy);
+
+  /**
+   * Le succès de collection, appliqué **après** la recherche et **ici**.
+   *
+   * Ici et non chez l'appelant, parce que deux consommateurs descendent de cette
+   * fonction : le panneau de la fournée et `couplesToRecordAll`, qui la rejoue en
+   * boucle pour la saisie des naissances. Détourner un croisement chez l'un
+   * seulement ferait charger un enclos que la fenêtre de naissance ne connaîtrait
+   * pas — deux écrans en désaccord sur la même bête.
+   *
+   * Après la recherche, et non dedans : `search.ts` est portée en Rust et
+   * comparée au milliardième, et le champion a été entraîné sur cette
+   * physique-là. Même règle que `fillSparePlaces`, un cran plus loin. Voir
+   * `applySuccess`.
+   */
+  if (read && input.success && input.success.mode !== 'ignore') {
+    applySuccess(
+      read,
+      input.stable,
+      { colors: input.colors, generations, hatched: input.success.hatched },
+      input.success.mode
+    );
+  }
+
+  return read;
 };
 
 /**

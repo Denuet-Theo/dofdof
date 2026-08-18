@@ -29,7 +29,9 @@ import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
 import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
 import type { Stable } from '@/lib/dofus/breeding/stable';
-import type { BreedingRow } from '@/lib/hooks/useBreeding';
+import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
+
+type Settings = typeof DEFAULT_SETTINGS;
 import { MINUTE_MS, useWallClock } from '@/lib/hooks/useWallClock';
 import type { Couple, Individual } from '@/lib/dofus/breeding/stable';
 import type {
@@ -117,6 +119,9 @@ type Props = {
   stable?: Stable;
   /** Les couleurs déjà nées, pour l'onglet « Succès ». */
   hatched?: ReadonlySet<string>;
+  /** Les réglages et leur écriture : l'onglet « Succès » porte `success_mode`. */
+  settings?: Settings;
+  onSaveSettings?: (next: Settings) => Promise<boolean>;
   onRecordBirths?: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   onUndoBirth?: (record: BirthRecord) => Promise<boolean>;
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
@@ -158,6 +163,8 @@ const BreedingPolicyPanel = ({
   rows,
   stable,
   hatched,
+  settings,
+  onSaveSettings,
   onRecordBirths,
   onUndoBirth,
   onRecordClonings,
@@ -864,8 +871,15 @@ const BreedingPolicyPanel = ({
 
       {step === 'success' && (
         <div data-testid="pane-success">
-          {colors && hatched ? (
-            <BreedingSuccess colors={colors} hatched={hatched} nameOf={nameOf} />
+          {colors && hatched && stable && settings && onSaveSettings ? (
+            <BreedingSuccess
+              colors={colors}
+              hatched={hatched}
+              stable={stable}
+              settings={settings}
+              onSaveSettings={onSaveSettings}
+              nameOf={nameOf}
+            />
           ) : (
             <p className="text-[11px] text-dark-500">La collection n’est pas encore chargée.</p>
           )}

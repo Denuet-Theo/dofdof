@@ -410,6 +410,13 @@ export type UserBreedingSettings = {
   count_net_cost: boolean;
   /** Plafond de jauge imposé, ou null pour laisser l'arbitrage temps/kamas décider. */
   gauge_cap: number | null;
+  /**
+   * Ce que la politique fait du succès de collection (migration 20260818090000).
+   *
+   * `ignore` par défaut, et il le reste : les deux autres coûtent des montures que
+   * l'échelle réclamait. Voir `success.ts`.
+   */
+  success_mode: 'ignore' | 'free' | 'priority';
   updated_at: string;
 };
 
@@ -815,6 +822,7 @@ export interface Database {
           credit_off_target?: boolean;
           count_net_cost?: boolean;
           gauge_cap?: number | null;
+          success_mode?: 'ignore' | 'free' | 'priority';
           updated_at?: string;
         };
         Update: {

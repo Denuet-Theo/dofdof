@@ -26,16 +26,17 @@ import { openBreeding } from './support/breeding';
  *
  * ## Comment ces tests échouent sans le correctif
  *
- * Mesuré, en retirant le terme de `policy.ts` :
+ * Mesuré, en retirant le terme de `policy.ts` : **4 reproductions contre
+ * aucune**. Une écurie qui n'est **que** des montures prêtes à s'accoupler, et
+ * l'écran répondait « aucun accouplement possible tout de suite ».
  *
- * | | avec | sans |
- * | --- | --- | --- |
- * | fixture du 15/08 | 23 reproductions | 18 |
- * | vingt fécondes et rien d'autre | 4 reproductions | **aucune** |
+ * ## Pourquoi la fixture du 15/08 n'est pas ici
  *
- * Le second cas est le plus net : une écurie qui n'est **que** des montures
- * prêtes à s'accoupler, et l'écran répondait « aucun accouplement possible tout
- * de suite ».
+ * Elle y a été, et elle a été retirée : elle rendait 23 reproductions contre 18
+ * quand ce correctif a été écrit, puis 20 **des deux côtés** une fois rebasée sur
+ * `main`. Un test qui reste vert avec le défaut remis ne garde rien et coûte la
+ * confiance qu'on met dans les autres — il vaut mieux une écurie fabriquée qui
+ * tranche qu'une écurie réelle qui ne tranche plus.
  */
 
 /** Une féconde nommée, prête à s'accoupler sans enclos. */
@@ -94,10 +95,4 @@ test.describe('dépenser la fécondité', () => {
     expect(await matings(page)).toBeGreaterThanOrEqual(3);
   });
 
-  test('l’écurie du 15/08 apparie ses fécondes', async ({ page }) => {
-    await mockSupabase(page);
-    await openBreeding(page);
-
-    expect(await matings(page)).toBeGreaterThanOrEqual(23);
-  });
 });

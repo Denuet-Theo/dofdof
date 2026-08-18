@@ -127,6 +127,14 @@ type Props = {
   onRecordClonings?: (entries: { keep: string; drop: string }[]) => Promise<CloningResult>;
   /** Sortie d'enclos : niveaux relevés, lot passé en fécondes. */
   onEnclosExit?: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
+  /**
+   * Extraction faite en jeu : la monture quitte l'écurie.
+   *
+   * L'onglet « Extraction » disait quoi extraire sans offrir de le dire, si bien
+   * qu'une extraction réelle laissait la stérile en base et l'écran continuait de
+   * la proposer.
+   */
+  onExtract?: (mountId: string) => Promise<void>;
 };
 
 /**
@@ -169,6 +177,7 @@ const BreedingPolicyPanel = ({
   onUndoBirth,
   onRecordClonings,
   onEnclosExit,
+  onExtract,
 }: Props) => {
   /**
    * Le contexte de prix et la feuille de vente de l'onglet HDV.
@@ -866,6 +875,7 @@ const BreedingPolicyPanel = ({
             nameOf={nameOf}
             individuals={individuals}
             resourceName={sacrificeName}
+            onExtract={onExtract}
           />
         </div>
       )}

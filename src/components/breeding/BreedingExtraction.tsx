@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Gem } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Check, Gem } from 'lucide-react';
 import BreedingMountName, { mountNameOf } from '@/components/breeding/BreedingMountName';
 import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
 import type { Individual } from '@/lib/dofus/breeding/stable';
@@ -51,14 +51,36 @@ const BreedingExtraction = ({
   nameOf,
   individuals,
   resourceName,
+  onExtract,
 }: {
   candidates: ExtractionCandidate[];
   nameOf: (colorId: string) => string;
   individuals: Individual[];
   /** Ambre, neurone ou corne : la ressource dépend de la famille. */
   resourceName: string;
+  /**
+   * Retire la monture de l'écurie : le jeu vient de la consommer.
+   *
+   * L'onglet disait quoi extraire et n'offrait **aucun moyen de le dire**. Une
+   * extraction faite en jeu laissait donc la stérile en base, l'écran continuait
+   * de la proposer, et le total annoncé comptait une ressource déjà encaissée. La
+   * seule issue était de passer par « Mes stocks » et de la supprimer à la main,
+   * dans une liste de deux cents lignes.
+   *
+   * `undefined` laisse la liste en lecture seule — c'est ce que voit un écran qui
+   * n'a pas encore chargé l'écurie.
+   */
+  onExtract?: (mountId: string) => Promise<void>;
 }) => {
   const nameOfMount = useMemo(() => mountNameOf(individuals), [individuals]);
+  /**
+   * Les retraits en cours.
+   *
+   * Deux clics sur la même ligne enverraient deux suppressions, dont la seconde ne
+   * trouverait rien — et un `delete` qui ne trouve rien ne rend **aucune erreur**.
+   * L'écran aurait donc annoncé deux extractions pour une.
+   */
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set<string>());
 
   /** Ce que la liste rapporte, en entier : elle ne porte plus que des extractions. */
   const total = candidates.reduce((sum, mount) => sum + mount.amber, 0);
@@ -160,6 +182,47 @@ const BreedingExtraction = ({
               >
                 dépareillée
               </span>
+            )}
+
+            {/* Le bouton qui manquait. Sans identifiant il n'y a rien à retirer —
+                le cas ne se présente pas sur une stérile, qui est toujours suivie
+                une par une, mais `Mate.id` est nullable et l'inventer serait le
+                piège de #165. */}
+            {onExtract && mount.id && (
+              <button
+                type="button"
+                data-testid="extraction-done"
+                data-mount={mount.id}
+                disabled={pending.has(mount.id)}
+                title="Retire la monture de l'écurie : le jeu vient de la consommer. Sans annulation — il faudrait la resaisir."
+                onClick={async () => {
+                  const id = mount.id;
+                  if (!id) return;
+                  setPending((current) => new Set([...current, id]));
+                  await onExtract(id);
+                  // Le retrait réussi fait disparaître la ligne ; refusé, il
+                  // remet la monture et il faut pouvoir réessayer. On relâche
+                  // donc dans les deux cas.
+                  setPending((current) => {
+                    const next = new Set(current);
+                    next.delete(id);
+                    return next;
+                  });
+                }}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg
+                  text-[10px] font-medium border transition-all cursor-pointer
+                  bg-dark-800/80 border-dark-600/50 text-dark-300
+                  hover:border-kamas/40 hover:text-kamas
+                  disabled:opacity-50 disabled:cursor-default"
+              >
+                {pending.has(mount.id) ? (
+                  'retrait…'
+                ) : (
+                  <>
+                    <Check size={11} /> Extraite
+                  </>
+                )}
+              </button>
             )}
           </div>
         ))}

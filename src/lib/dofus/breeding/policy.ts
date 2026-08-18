@@ -11,9 +11,18 @@
  * `buildLoadout` déroule un **plan de recettes** : viser telle couleur, donc
  * croiser tels parents. Il répond à « comment atteindre cette couleur-là ». La
  * politique répond à autre chose : « que faire de cette écurie-ci », sans cible
- * imposée. Elle apparie, elle met en banque, elle clone, elle achète — et le
- * départage entre ces quatre-là est précisément ce que la neuroévolution a appris
- * et qu'aucune heuristique n'a su écrire.
+ * imposée. Elle apparie, elle clone, elle achète — et le départage entre ces
+ * trois-là est précisément ce que la neuroévolution a appris et qu'aucune
+ * heuristique n'a su écrire.
+ *
+ * **Pas la mise en banque**, et cette ligne disait le contraire. Le tapis roulant
+ * tourne à `capacity: 0` ; `randomAction` n'offre `cycle` que si
+ * `places < capacity` ; la fécondation sans croisement n'a donc jamais été
+ * proposable pendant la sélection. Le réseau la note quand même — et
+ * généreusement — d'où `pairedBanking`, qui la borne à ce qui prépare un
+ * croisement existant. Une action jamais proposée à l'entraînement n'est pas une
+ * action apprise, et c'est la troisième fois qu'on l'écrit ici : voir l'ambre
+ * juste en dessous, et `SearchConfig.purchases`.
  *
  * ## Les échelles ne sont pas les vôtres, et c'est voulu
  *
@@ -429,6 +438,15 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       // `fillSparePlaces` : la passe est fermée dans le modèle, qui doit rester
       // comparable au Rust, et ouverte ici, où l'on charge un vrai enclos.
       fillSpare: true,
+      // Une fécondation sans croisement n'est pas une décision que le champion
+      // ait jamais eu à prendre : le tapis roulant tourne à capacité nulle, et
+      // `randomAction` n'offre `cycle` que si `places < capacity`. Ses poids sur
+      // `cycledMales`/`cycledFemales` sont pourtant nettement positifs, et sur un
+      // vrai parc il en achetait jusqu'à épuiser les places — la moitié d'un
+      // enclos en « à féconder sans croiser », dont des montures que rien dans
+      // l'écurie ne pouvait marier. Voir `SearchConfig.pairedBanking` : on garde
+      // l'action, on exige qu'elle prépare un croisement qui existe.
+      pairedBanking: true,
     }),
     {
       mounts,

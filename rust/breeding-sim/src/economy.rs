@@ -269,6 +269,42 @@ pub struct Economy {
     /// produit compte donc autant que d'en produire une, ce que le modèle
     /// ignorait complètement en les traitant comme un rang unique.
     pub top_values: [i64; MAX_COLORS],
+    /// La couleur que l'éleveur **poursuit**, s'il en a une.
+    ///
+    /// ## Ce que ça corrige
+    ///
+    /// Le score est `kamas + liquidation`, donc il est **indifférent** entre
+    /// cinquante-neuf gen 10 quelconques et une seule de la bonne couleur. Un
+    /// éleveur, lui, poursuit une couleur précise — c'est tout l'objet de
+    /// `breeding_projects` côté app, et de la couronne de l'échelle.
+    ///
+    /// Mesuré : sur les graines de départage, **52 % du score du glouton** est du
+    /// stock de gen 10 — 58,7 montures au prix plein. Il gagne en accumulant ce
+    /// que le marché n'absorbe pas et ce que personne n'a demandé.
+    ///
+    /// Renseignée, `play` compte ce que la partie en produit (`crown_held`), et
+    /// c'est ça que la fitness note. `None` garde l'ancien barème, sans quoi
+    /// toutes les mesures publiées cesseraient de se reproduire.
+    pub project: Option<ColorId>,
+    /// Combien l'éleveur en veut. Au-delà, une couronne de plus ne compte pas.
+    ///
+    /// ## Le relevé qui impose ce plafond
+    ///
+    /// Le mainteneur, qui joue : **300 ventes d'Azur-Doré sur le serveur en un
+    /// mois**, pour des milliers de joueurs quotidiens. Soit une dizaine par jour
+    /// pour tout le monde. Un éleveur qui en sort quinze dans sa partie n'en vend
+    /// pas quinze : il inonde un marché qui absorbe dix par jour, prix compris.
+    ///
+    /// Le simulateur ne modélise pas la profondeur de marché — `value_of` paie le
+    /// prix plein au centième exemplaire — donc rien d'autre ne borne la
+    /// production. Ce plafond-ci est la borne du **projet** : `breeding_projects`
+    /// porte un `target_count`, dix chez l'éleveur qui a fait remonter tout ça, et
+    /// une couleur qu'on collectionne au-delà de ce qu'on voulait n'est plus un
+    /// projet, c'est du stock.
+    ///
+    /// `None` ne borne rien, et c'est le défaut : sans projet, la question ne se
+    /// pose pas.
+    pub project_count: Option<usize>,
     pub cycle_serenity_points: f64,
     pub cycle_stat_points: f64,
     pub band_rates: [f64; 4],
@@ -307,6 +343,10 @@ impl Default for Economy {
             geneton_range: (0.0, 0.0),
             top_value_range: (600_000, 600_000),
             top_values: [0; MAX_COLORS],
+            // Aucun projet par défaut : le barème historique, celui de toutes les
+            // mesures publiées.
+            project: None,
+            project_count: None,
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
             band_rates: [1.0, 2.0, 3.0, 4.0],
@@ -974,6 +1014,8 @@ pub struct RunOutcome {
     pub loads_by_unit: [u32; MAX_UNITS],
     pub best_generation: u8,
     pub gen10_held: usize,
+    /// Combien la partie finit avec de la couleur du projet. Voir `Economy::project`.
+    pub crown_held: usize,
     /// Chargements refusés. Doit rester à zéro.
     pub rejected_loads: u32,
     /// **Pourquoi** ils l'ont été, indexé par `Rejected::reason`.
@@ -1513,6 +1555,7 @@ fn run(
         loads_by_unit: [0; MAX_UNITS],
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
+        crown_held: 0,
         rejected_loads: 0,
         rejected_by_reason: [0; Rejected::REASONS],
         hours_used: 0.0,
@@ -1698,6 +1741,10 @@ fn run(
         .iter()
         .filter(|m| catalog.generation(m.color) >= catalog.top_generation())
         .count();
+    outcome.crown_held = match economy.project {
+        Some(project) => stable.mounts.iter().filter(|m| m.color == project).count(),
+        None => 0,
+    };
     outcome.best_generation = outcome.best_generation.max(stable.top_generation(catalog));
     // Le malus est retiré ici, une fois, sur le total : c'est un terme de score et
     // non une dépense, donc il n'a jamais pu influer sur la solvabilité ni sur ce

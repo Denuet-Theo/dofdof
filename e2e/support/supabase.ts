@@ -105,6 +105,61 @@ const NOT_A_FILTER = new Set(['select', 'on_conflict', 'order', 'offset', 'limit
  * fertile côté serveur, la relecture la reproposerait, et le test verrait une
  * fournée qui ne se vide jamais.
  */
+/**
+ * `?order=id.asc` — appliqué pour de vrai.
+ *
+ * Il était dans `NOT_A_FILTER` et s'arrêtait là : le faux serveur rendait les
+ * lignes dans l'ordre où la fixture les porte, c'est-à-dire l'ordre d'insertion.
+ * Le vrai serveur, lui, trie — `useBreeding` lit l'écurie avec
+ * `.order('id', { ascending: true })`.
+ *
+ * ## Ce que cette infidélité cachait
+ *
+ * Une classe entière de défauts, et celle que l'éleveur a signalée. Les écritures
+ * locales **ajoutent en fin de tableau** : un poulain saisi arrive après les 203
+ * montures, alors qu'au rechargement il revient intercalé à sa place d'uuid. Même
+ * contenu, ordre différent — et le plan de la politique dépend de cet ordre, parce
+ * que la recherche départage à valeur égale dans l'ordre du tableau.
+ *
+ * D'où « je saisis mes vingt accouplements, je rafraîchis, il y en a deux
+ * nouveaux » : rien n'avait changé dans l'écurie, seul l'ordre des lignes avait
+ * changé. Aucun test ne pouvait le voir, puisque le mock conservait l'ordre
+ * d'ajout de bout en bout. Un faux serveur qui ignore le `ORDER BY` rend vert
+ * exactement ce qu'on lui demande de surveiller.
+ */
+const ordered = (rows: Row[], query: URLSearchParams): Row[] => {
+  const spec = query.get('order');
+  if (!spec) return rows;
+
+  const keys = spec
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [column, ...flags] = part.split('.');
+      return { column, desc: flags.includes('desc') };
+    });
+
+  return [...rows].sort((a, b) => {
+    for (const { column, desc } of keys) {
+      const left = a[column];
+      const right = b[column];
+      if (left === right) continue;
+      // Postgres met les `null` en dernier en ordre croissant.
+      if (left === null || left === undefined) return 1;
+      if (right === null || right === undefined) return -1;
+      const cmp =
+        typeof left === 'number' && typeof right === 'number'
+          ? left - right
+          : String(left) < String(right)
+            ? -1
+            : 1;
+      if (cmp !== 0) return desc ? -cmp : cmp;
+    }
+    return 0;
+  });
+};
+
 const matcher = (query: URLSearchParams, strict: boolean): ((row: Row) => boolean) => {
   const tests: ((row: Row) => boolean)[] = [];
 
@@ -183,7 +238,7 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
     const match = matcher(url.searchParams, method !== 'GET');
 
     if (method === 'GET') {
-      const rows = tables[table] ?? [];
+      const rows = ordered(tables[table] ?? [], url.searchParams);
       // La pagination de `fetchAllRows` se lit dans la query. Rendre une page
       // pleine à chaque appel la ferait tourner sans fin.
       const offset = Number(url.searchParams.get('offset') ?? 0);

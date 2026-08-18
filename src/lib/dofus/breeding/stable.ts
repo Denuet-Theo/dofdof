@@ -532,6 +532,71 @@ export const consumeCouples = (
  * Postgres refuse la valeur, et un `.in()` sur une ligne qui n'existe pas ne rend
  * **aucune erreur**.
  */
+/**
+ * L'écurie remise dans son ordre **canonique** : par contenu, l'identifiant ne
+ * servant que de dernier départage.
+ *
+ * ## Pourquoi l'ordre compte, alors qu'il ne devrait pas
+ *
+ * `flatten` parcourt le tableau, et la recherche départage à valeur strictement
+ * égale dans l'ordre où elle rencontre les montures. Deux écuries de **contenu
+ * identique** rangées différemment ne rendaient donc pas le même plan. Mesuré sur
+ * l'écurie du 15/08 : **18** accouplements proposés dans l'ordre de la fixture,
+ * **19** dans l'ordre des identifiants. Rien n'avait changé que l'ordre.
+ *
+ * Et ce n'est pas théorique. La lecture de l'écurie trie (`.order('id')`), alors
+ * que les écritures locales ajoutent en **fin** de tableau : un poulain saisi vit
+ * en queue jusqu'au rafraîchissement, où il reprend sa place d'uuid. Même écurie,
+ * deux ordres, deux plans — donc une liste d'accouplements qui bouge sans qu'il se
+ * soit rien passé.
+ *
+ * ## Pourquoi le **contenu** et pas l'identifiant
+ *
+ * Parce que trier par identifiant ne suffit pas là où ça compte le plus : les
+ * projections. Un clone à venir porte `clone-a-venir:…` et un poulain à venir
+ * `naissance-a-venir:…`, tandis que les vraies lignes porteront un uuid tiré par la
+ * base. Trié par identifiant, le même élevage se rangeait donc à une place dans la
+ * projection et à une autre dans la réalité, et le plan changeait entre « ce que je
+ * te propose » et « ce que tu obtiens » — c'est-à-dire précisément la liste qui
+ * repousse. Vu sur `clone-then-mate` : 20 accouplements annoncés, 21 après avoir
+ * exécuté les clonages annoncés.
+ *
+ * Deux montures de même contenu sont interchangeables pour la politique — c'est
+ * même la définition de ce qu'elle sait voir. Les ranger par ce contenu rend le
+ * plan indifférent à l'identité, donc identique dans la projection et dans la
+ * réalité. Le nom est **exclu** de la clé, lui : une monture projetée n'en a pas
+ * encore, et le plan ne le lit pas.
+ *
+ * On ne corrige pas la sensibilité de la recherche, qui est son droit : à valeur
+ * strictement égale il faut bien trancher. On lui donne une entrée canonique, de
+ * sorte que le plan redevienne une fonction du contenu. Vérifié par
+ * `check:plan-order`.
+ *
+ * `bulk` n'en a pas besoin : une `Map` de couleurs n'a pas d'ordre que la politique
+ * lise, et ses clés viennent du catalogue et non de la base.
+ */
+const canonicalKey = (mount: Individual) =>
+  [
+    mount.colorId,
+    mount.sex,
+    mount.fertile ? '1' : '0',
+    mount.cycled ? '1' : '0',
+    String(mount.level).padStart(4, '0'),
+    (mount.parents ?? []).join('+'),
+  ].join('|');
+
+export const canonicalStable = (stable: Stable): Stable => ({
+  bulk: stable.bulk,
+  individuals: [...stable.individuals].sort((a, b) => {
+    const left = canonicalKey(a);
+    const right = canonicalKey(b);
+    if (left !== right) return left < right ? -1 : 1;
+    // Contenu identique : la politique ne les distingue pas, mais l'ordre doit
+    // rester stable d'un appel à l'autre.
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }),
+});
+
 export const PROJECTED_BIRTH_PREFIX = 'naissance-a-venir:';
 
 /**

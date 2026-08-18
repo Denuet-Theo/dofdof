@@ -26,7 +26,9 @@
     "check:settings": "node scripts/check-settings.mjs",
     "check:success": "node scripts/check-success.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "check:plan-order": "node scripts/check-plan-order.mjs",
+    "check:record-fixpoint": "node scripts/check-record-fixpoint.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

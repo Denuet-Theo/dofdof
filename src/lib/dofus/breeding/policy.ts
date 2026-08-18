@@ -59,7 +59,7 @@ import { aimsAt, crownedLadderOf } from './ladder';
 import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
-import { consumeCouples, copyStable, projectBirths } from './stable';
+import { canonicalStable, consumeCouples, copyStable, projectBirths } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
@@ -396,7 +396,12 @@ const TRAINING_ITERATIONS = 600;
  */
 export const stablePlan = (input: PolicyInput): StablePlan | null => {
   const champion = championArtifact as Champion;
-  const mounts = flatten(input.stable);
+  // L'ordre canonique **ici**, et pas chez l'appelant : le plan doit être une
+  // fonction du contenu de l'écurie, pas de l'ordre où ses lignes sont arrivées.
+  // Voir `canonicalStable` — la recherche départage à valeur égale dans l'ordre
+  // du tableau, et cet ordre diffère entre une écriture locale (qui ajoute en
+  // queue) et une relecture (qui trie). C'est vérifié par `check:plan-order`.
+  const mounts = flatten(canonicalStable(input.stable));
   if (mounts.length === 0) return null;
 
   const network = compile(champion);

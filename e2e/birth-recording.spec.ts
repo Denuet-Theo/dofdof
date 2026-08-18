@@ -128,8 +128,10 @@ test.describe('saisie de naissance', () => {
     expect(combien).toBeGreaterThan(2);
 
     const attendus: string[][] = [];
+    const croisements: string[] = [];
     for (const index of [0, 1, 2]) {
       const panel = panels(page).first();
+      croisements.push((await panel.getAttribute('data-cross')) ?? '');
       await recordBirthOn(panel);
       attendus[index] = await bornOn(panel);
 
@@ -146,10 +148,17 @@ test.describe('saisie de naissance', () => {
       expect(await bornOn(panels(page).first())).toEqual(attendus[index]);
     }
 
-    // Chaque naissance porte le nom de **ses** parents : les trois croisements
-    // sont distincts, donc les suffixes le sont aussi.
-    const suffixes = attendus.flat().map((nom) => nom.split(' ').pop());
-    expect(new Set(suffixes).size).toBe(suffixes.length);
+    // Les trois croisements visités sont bien **distincts**, et c'est ce qui
+    // donne son sens à la vérification du dessus : sans ça, on aurait pu
+    // remonter trois fois le même panneau.
+    //
+    // La sonde était le suffixe du nom du poulain, et elle ne tient plus depuis
+    // que les panneaux descendent en génération croissante : les premiers sont
+    // alors souvent de la même forme, donc du même suffixe. Ce n'était pas une
+    // régression mais une inférence fausse — deux croisements distincts peuvent
+    // porter le même nom de poulain, et dans cet outil les noms ne sont de
+    // toute façon pas uniques. On lit donc directement l'identité du croisement.
+    expect(new Set(croisements).size, 'trois croisements différents').toBe(3);
   });
 
   test('annuler retire le poulain et rend leur état aux parents', async ({ page }) => {

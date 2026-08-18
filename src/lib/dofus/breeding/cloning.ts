@@ -532,7 +532,29 @@ export const cloneOptions = (
     }
   }
 
-  return options.sort((a, b) => objectiveFirst(a, b) || b.gain - a.gain).slice(0, limit);
+  /**
+   * Par **génération croissante**, comme les accouplements.
+   *
+   * L'ordre suit la façon dont on les fait : on descend la liste devant l'écurie,
+   * et une progression basse-vers-haute se suit sans perdre sa place. C'est l'ordre
+   * que l'éleveur a demandé.
+   *
+   * Ce que ça relègue au départage : « ce qui sert le projet passe devant », puis le
+   * meilleur gain. Les deux tenaient — le premier surtout, qui met en tête ce qu'il
+   * ne faut pas détruire. Ils restent, mais **à génération égale** seulement, si
+   * bien qu'une paire de gen 2 sans intérêt passe maintenant devant une gen 8 qui
+   * sert le projet. C'est le prix de l'ordre demandé.
+   *
+   * `objectiveFirst` n'est qu'un ordre d'affichage, pas une protection : ce qui
+   * garde une stérile hors des propositions est le filtre de `servesObjective` en
+   * amont, et il n'est pas touché.
+   */
+  return options
+    .sort(
+      (a, b) =>
+        a.keep.generation - b.keep.generation || objectiveFirst(a, b) || b.gain - a.gain
+    )
+    .slice(0, limit);
 };
 
 /**

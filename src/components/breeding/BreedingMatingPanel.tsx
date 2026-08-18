@@ -273,6 +273,18 @@ const BreedingMatingPanel = ({
     // reformulations pour surveiller le **comportement**. Voir `e2e/`.
     <div
       data-testid="mating-panel"
+      /* La génération visée, exposée pour que la suite vérifie l'**ordre** des
+         panneaux : ils descendent en génération croissante depuis que l'éleveur l'a
+         demandé, et cet ordre vient du tri de `stablePlan`. Sans attribut, il
+         faudrait le lire sur un libellé français, ce que ce fichier refuse
+         justement de faire. `''` sur une recopie, qui ne vise rien. */
+      data-generation={targetGeneration ?? ''}
+      /* L'identité du croisement : les deux couleurs parentes. C'est ce qui
+         distingue deux panneaux, et la suite en a besoin pour vérifier qu'elle
+         parcourt bien des croisements **différents**. Le nom du poulain ne le
+         disait pas : deux croisements distincts peuvent le partager, et les noms
+         ne sont de toute façon pas uniques dans cet outil. */
+      data-cross={`${male.colorId}+${female.colorId}`}
       className="rounded-2xl border border-dark-700/40 bg-dark-900/40 p-3 sm:p-4 space-y-4"
     >
       <div className="flex flex-wrap items-center gap-2">

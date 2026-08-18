@@ -243,16 +243,29 @@ export type PullLine = {
 
 export type StablePlan = {
   /**
-   * Les accouplements, groupés par couple identique et **les immédiats d'abord**.
+   * Les accouplements, groupés par couple identique et **par génération cible
+   * croissante**.
    *
-   * « Immédiat » veut dire zéro place d'enclos : les deux parents sont déjà
-   * féconds, donc l'accouplement est un clic, avec ce qu'on tient. Les faire passer
-   * après une liste d'achats revient à faire attendre ce qui ne demande rien
-   * derrière ce qui demande une course à l'hôtel de vente — c'est déjà la raison
-   * pour laquelle la piste « Écurie » ouvre le ruban de la timeline.
+   * L'ordre suit la façon dont on les fait : on descend la liste devant l'enclos,
+   * une ligne après l'autre, et une progression basse-vers-haute se suit sans
+   * perdre sa place. C'est l'ordre que l'éleveur a demandé.
    *
-   * À coût égal, l'ordre de la recherche est conservé : il n'a pas de sens en
-   * lui-même, et le brasser rendrait deux lectures successives incomparables.
+   * ## Ce que ça remplace, et ce que ça coûte
+   *
+   * Les **immédiats d'abord** — zéro place d'enclos, donc un clic avec ce qu'on
+   * tient. L'argument tenait : faire passer ce qui ne demande rien derrière ce qui
+   * demande une course à l'hôtel de vente est un mauvais ordre de travail.
+   *
+   * Il n'est pas perdu, il est **relégué au départage** : à génération égale les
+   * immédiats restent devant. Ce qui change est qu'une gen 2 à acheter passe
+   * maintenant devant une gen 8 gratuite. C'est le prix de l'ordre demandé, et il
+   * est réel.
+   *
+   * Une **recopie** n'a pas de cible et va en fin de liste : elle ne monte rien,
+   * donc elle n'a pas de rang où s'insérer.
+   *
+   * À rang et coût égaux, l'ordre de la recherche est conservé : il n'a pas de sens
+   * en lui-même, et le brasser rendrait deux lectures successives incomparables.
    */
   couples: CoupleLine[];
   /**
@@ -265,7 +278,15 @@ export type StablePlan = {
    * gratuit, dès que le partenaire existe.
    */
   cycles: { colorId: string; mountIds: string[] }[];
-  /** Les clonages, par génération — deux stériles n'en font qu'à rang égal. */
+  /**
+   * Les clonages, **par génération croissante** — deux stériles n'en font qu'à
+   * rang égal.
+   *
+   * Ils sortaient dans l'ordre où la recherche les avait trouvés, c'est-à-dire
+   * dans aucun ordre lisible : la liste changeait de disposition d'un rendu à
+   * l'autre sans que rien ne l'explique. Croissant comme les accouplements, et
+   * pour la même raison — on descend la liste devant l'écurie.
+   */
   clonings: { generation: number; mountIds: string[] }[];
   /** Les gen 1 à acheter à l'hôtel de vente. */
   purchases: { colorId: string; males: number; females: number }[];
@@ -704,9 +725,18 @@ const readPlan = (
 
   return {
     refused,
-    couples: [...couples.values()].sort((a, b) => a.places - b.places),
+    // Génération cible croissante, puis les immédiats devant à rang égal, puis
+    // l'ordre de la recherche. Une recopie n'a pas de cible : elle finit la liste.
+    // Voir le champ `couples` pour ce que cet ordre remplace.
+    couples: [...couples.values()].sort(
+      (a, b) =>
+        (a.targetGeneration ?? Infinity) - (b.targetGeneration ?? Infinity) ||
+        a.places - b.places
+    ),
     cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
-    clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),
+    clonings: [...clonings]
+      .map(([generation, mountIds]) => ({ generation, mountIds }))
+      .sort((a, b) => a.generation - b.generation),
     purchases: [...purchases.values()],
     pull: pullOf(plan, mounts),
     places,

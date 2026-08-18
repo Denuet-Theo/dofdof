@@ -132,6 +132,7 @@ const DUMPS = [
   ['dump-search', 'search-parity.json', true],
   ['dump-schedule', 'schedule-parity.json', false],
   ['dump-ladder', 'ladder-parity.json', false],
+  ['dump-ladder-policy', 'ladder-policy-parity.json', false],
 ];
 
 /** Refait les six références dans `outDir`. */
@@ -187,7 +188,7 @@ if (checkOnly) {
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search', 'schedule', 'ladder-parity']) {
+for (const guard of ['network', 'census', 'delta', 'search', 'schedule', 'ladder-parity', 'ladder-policy']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {

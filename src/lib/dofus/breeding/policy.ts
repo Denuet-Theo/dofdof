@@ -56,6 +56,7 @@ import {
 import { seededRandom } from './random';
 import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
+import { ladderPlan } from './ladder-policy';
 import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
@@ -370,6 +371,22 @@ export type PolicyInput = {
    * Fixe par défaut : le même écran rouvert deux fois doit proposer la même
    * fournée, sans quoi on ne saurait plus si on a déjà chargé celle d'avant.
    */
+  /**
+   * Qui compose la fournée.
+   *
+   * `'champion'` par défaut, l'existant : l'échelle filtre, le réseau choisit
+   * parmi ce qu'elle laisse passer.
+   *
+   * `'ladder'` donne le volant à l'échelle — c'est `LadderPolicy`, portée dans
+   * `ladder-policy.ts` et tenue au Rust par `check-ladder-policy.mjs`. Le banc
+   * la mesure au-dessus du champion et du glouton sur la partie complète, mais
+   * la comparaison qui compte est sur **votre** écurie et **vos** prix, pas sur
+   * les siens : d'où un interrupteur plutôt qu'un remplacement.
+   *
+   * Ce que ce mode ne fait pas encore, et qui pèse : la moisson, et le réglage
+   * du niveau des montures. Voir l'en-tête de `ladder-policy.ts`.
+   */
+  policy?: 'champion' | 'ladder';
   seed?: number;
   iterations?: number;
 };
@@ -488,6 +505,31 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
    */
   const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
 
+  const view = {
+    mounts,
+    colors: input.colors,
+    generations,
+    economy,
+    // Un solde à zéro veut dire « non renseigné », donc pas de contrainte —
+    // même lecture que `planFunding`. Refuser toute fournée à qui n'a pas saisi
+    // son budget serait la pire interprétation d'un champ vide.
+    kamas: input.kamas > 0 ? input.kamas : Number.MAX_SAFE_INTEGER,
+    capacity: input.capacity,
+    loadKamas: input.loadKamas,
+  };
+
+  // L'échelle joue elle-même, si on le lui demande. Voir `PolicyInput.policy`.
+  if (input.policy === 'ladder') {
+    return readPlan(
+      ladderPlan(view, ladder, { purchases: input.purchases ?? true }),
+      mounts,
+      input,
+      generations,
+      economy,
+      strategy
+    );
+  }
+
   const plan = planUnit(
     createSearcher({
       iterations: input.iterations ?? TRAINING_ITERATIONS,
@@ -528,19 +570,7 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       // l'action, on exige qu'elle prépare un croisement qui existe.
       pairedBanking: true,
     }),
-    {
-      mounts,
-      colors: input.colors,
-      generations,
-      economy,
-      strategy,
-      // Un solde à zéro veut dire « non renseigné », donc pas de contrainte —
-      // même lecture que `planFunding`. Refuser toute fournée à qui n'a pas saisi
-      // son budget serait la pire interprétation d'un champ vide.
-      kamas: input.kamas > 0 ? input.kamas : Number.MAX_SAFE_INTEGER,
-      capacity: input.capacity,
-      loadKamas: input.loadKamas,
-    },
+    { ...view, strategy },
     seededRandom(input.seed ?? DEFAULT_SEED),
     (census) =>
       evaluate(network, featuresOf(census, input.colors, economy)) -

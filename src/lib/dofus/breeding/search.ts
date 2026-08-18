@@ -234,6 +234,64 @@ export type SearchConfig = {
    * déjà pour `admissible`.
    */
   fillSpare?: boolean;
+  /**
+   * Ne féconder sans croiser que **sur une place dont aucun croisement ne veut**,
+   * pour une monture qui a un partenaire admissible, et une seule par groupe.
+   *
+   * Deux verrous, et ils ne servent pas à la même chose :
+   *
+   * 1. `randomAction` ne tire plus `cycle`. Banquer cesse d'être en concurrence
+   *    avec accoupler pour une place — c'est ce qui ramène la fournée à zéro ou
+   *    deux fécondations au lieu de la moitié d'un enclos.
+   * 2. `fillSparePlaces`, seule à en poser encore, n'accepte qu'un groupe qui
+   *    apparaît dans un croisement admissible, et pas deux fois le même.
+   *
+   * ## Ce que ça ferme
+   *
+   * `cycle` est la seule action que la recherche puisse composer sans que rien
+   * en aval ne la consomme. Un croisement dépense deux montures, un clonage deux
+   * stériles, un achat n'existe que comme côté d'un croisement ; féconder, lui,
+   * ne se justifie que par l'accouplement **du tour suivant**. Si la monture n'a
+   * aucun partenaire admissible, cet accouplement n'arrivera jamais et la place
+   * est perdue — sur une écurie de mesure, 6 des 36 fécondations proposées
+   * portaient sur des montures que rien dans l'écurie ne pouvait marier.
+   *
+   * ## Pourquoi la recherche y allait à fond
+   *
+   * Le champion embarqué vient du tapis roulant, qui tourne à `capacity: 0`
+   * (`treadmill.rs`). Or `randomAction` n'offre `cycle` que si
+   * `state.places < capacity` : **la fécondation n'a jamais été proposable
+   * pendant la sélection**. Ses poids sur `cycledMales` / `cycledFemales` n'ont
+   * donc jamais été notés sur cette décision-là, et ils sont franchement
+   * positifs — sur une écurie qu'il note 9,92, banquer une gen 2 mâle vaut
+   * +0,64 et une gen 4 mâle +1,48, quand occuper une place en coûte 0,009.
+   * Toute fécondation tirée faisait donc strictement mieux, et la montée en
+   * prenait jusqu'à épuiser les places. Le rendement décroît en `log1p`
+   * (+0,64 · +0,37 · +0,26 · +0,20 …) mais ne passe jamais sous zéro : rien
+   * dans la fonction de valeur ne l'arrête.
+   *
+   * C'est la même famille de défaut que l'ambre et l'achat, qui portent déjà
+   * leur mise en garde ici : une action que l'environnement d'entraînement ne
+   * rendait pas proposable ne peut pas être arbitrée par le réseau. L'ambre est
+   * fermée, l'achat est mesuré et gardé ; la fécondation, elle, était restée
+   * ouverte sans garde-fou.
+   *
+   * ## Pourquoi une seule par groupe
+   *
+   * Un groupe rassemble des montures **interchangeables** : même couleur, même
+   * ascendance, même sexe, même état de cycle. La deuxième vaut donc exactement
+   * ce que vaut la première, et elle attend le même partenaire — en banquer cinq
+   * n'ouvre pas cinq accouplements, ça immobilise cinq places pour un partenaire
+   * qui n'est pas là. Une par groupe garde la préparation et retire la
+   * thésaurisation.
+   *
+   * ## Fermé par défaut
+   *
+   * Comme `admissible` et `fillSpare` : le modèle doit rester le portage exact
+   * du Rust, que `check-search.mjs` compare plan par plan. C'est l'écran qui
+   * l'ouvre, parce que c'est lui qui charge un vrai enclos.
+   */
+  pairedBanking?: boolean;
 };
 
 export const DEFAULT_SEARCH: SearchConfig = {
@@ -309,6 +367,16 @@ type State = {
    * payé.
    */
   cyclableFree: number[];
+  /**
+   * Combien de chaque groupe fertile a **déjà été mis en banque** dans cette
+   * fournée.
+   *
+   * Le complément de `cyclableFree`, et non son inverse : celui-ci baisse aussi
+   * quand un croisement consomme la monture, donc il ne dit pas combien de
+   * fécondations la fournée porte. Seul ce compteur-ci le dit, et c'est lui que
+   * `pairedBanking` plafonne.
+   */
+  banked: number[];
   crossings: number;
   /**
    * Places d'enclos engagées.
@@ -684,6 +752,7 @@ const applyEffects = (
     }
     case 'cycle': {
       state.cyclableFree[action.group] -= 1;
+      state.banked[action.group] += 1;
       state.places += 1;
       const group = fertile[action.group];
       if (group.sex) cycle(state.census, group.generation, group.sex, 1);
@@ -760,6 +829,7 @@ const revertEffects = (
     }
     case 'cycle': {
       state.cyclableFree[action.group] += 1;
+      state.banked[action.group] -= 1;
       state.places -= 1;
       const group = fertile[action.group];
       if (group.sex) cycle(state.census, group.generation, group.sex, -1);
@@ -865,6 +935,45 @@ const undoMutation = (
 const pick = (rng: () => number, count: number): number =>
   Math.min(Math.floor(rng() * count), Math.max(count - 1, 0));
 
+/**
+ * Ce que `pairedBanking` autorise à féconder : les groupes qui apparaissent dans
+ * au moins un croisement admissible.
+ *
+ * On le lit sur `candidates` et non sur le catalogue, et c'est le point : cette
+ * liste est **déjà** filtrée par `admissible`, achats compris. Un groupe qui n'y
+ * figure d'aucun côté est un groupe que la recherche ne peut marier à rien — ni
+ * maintenant ni au tour suivant, puisque l'admissibilité ne dépend que de
+ * l'ascendance, qui ne bouge pas.
+ *
+ * `null` quand le levier est fermé : tout est fécondable, sans plafond, comme le
+ * Rust.
+ */
+type Banking = { paired: boolean[] } | null;
+
+const bankingOf = (candidates: Candidate[], groups: number): Banking => {
+  const paired = new Array<boolean>(groups).fill(false);
+  for (const candidate of candidates) {
+    for (const side of [candidate.male, candidate.female]) {
+      if ('have' in side) paired[side.have] = true;
+    }
+  }
+  return { paired };
+};
+
+/**
+ * Ce groupe est-il fécondable **maintenant** ?
+ *
+ * Trois refus, et le premier vaut dans tous les régimes : on ne féconde pas une
+ * monture déjà prise, ni une dont le cycle est déjà payé. Les deux autres sont le
+ * levier — aucun partenaire admissible, ou une du groupe déjà banquée dans cette
+ * fournée.
+ */
+const bankable = (state: State, banking: Banking, index: number): boolean => {
+  if (state.cyclableFree[index] <= 0) return false;
+  if (!banking) return true;
+  return banking.paired[index] && state.banked[index] === 0;
+};
+
 const randomAction = (
   state: State,
   candidates: Candidate[],
@@ -872,6 +981,7 @@ const randomAction = (
   sterile: Group[],
   capacity: number,
   sacrifices: boolean,
+  banking: Banking,
   rng: () => number
 ): Action | null => {
   const kind = rng();
@@ -901,7 +1011,20 @@ const randomAction = (
   // Féconder sans croiser. Tirée aussi souvent que le clonage : c'est une décision
   // de même nature — préparer plutôt que produire — et rien ne dit encore laquelle
   // des deux paie le plus.
+  //
+  // Sauf sous `pairedBanking`, où elle n'est plus tirée du tout : banquer est ce
+  // qu'on fait d'une place dont aucun croisement ne veut, jamais ce pour quoi on
+  // prend la place d'un croisement. La montée n'a donc plus à arbitrer entre les
+  // deux — `fillSparePlaces` ramasse ce qu'elle laisse. Mesuré sur l'écurie de la
+  // suite : 3 fécondations et 17 accouplements deviennent 0 et 18.
+  //
+  // Rendre `null` ici ne décale aucun tirage : c'est déjà ce que fait la branche
+  // quand aucun groupe n'est fécondable, et rien n'a été tiré depuis `kind`. La
+  // parité avec le Rust ne dépend donc que du levier, fermé par défaut.
   if (kind < 0.8 && state.places < capacity) {
+    if (banking) return null;
+    // `bankable` n'a rien à faire ici : le refus au-dessus est total, donc on est
+    // forcément dans le régime du modèle, où seul le compteur décide.
     const usable: number[] = [];
     for (let index = 0; index < fertile.length; index += 1) {
       if (state.cyclableFree[index] > 0) usable.push(index);
@@ -951,6 +1074,7 @@ const propose = (
   sterile: Group[],
   capacity: number,
   sacrifices: boolean,
+  banking: Banking,
   rng: () => number
 ): Mutation | null => {
   const roll = rng();
@@ -960,7 +1084,16 @@ const propose = (
     return { kind: 'remove', at, old: state.actions[at] };
   }
 
-  const action = randomAction(state, candidates, fertile, sterile, capacity, sacrifices, rng);
+  const action = randomAction(
+    state,
+    candidates,
+    fertile,
+    sterile,
+    capacity,
+    sacrifices,
+    banking,
+    rng
+  );
   if (!action) return null;
   if (state.actions.length > 0 && roll < 0.3) {
     const at = pick(rng, state.actions.length);
@@ -1076,6 +1209,15 @@ const materialise = (
  * mieux ici qu'une gen 2 ordinaire. Le hasard entre les égales est délibéré :
  * rien ne les départage, et un ordre fixe viderait toujours le même groupe.
  *
+ * ## Ce qu'on n'y met plus
+ *
+ * Sous `pairedBanking`, cette passe ne prend que ce que `bankable` accepte : un
+ * groupe qui apparaît dans un croisement admissible, et une seule fois. Elle
+ * s'arrête donc **avant** la capacité, et c'est le comportement voulu — « la
+ * quarantième place » du titre est un reste à occuper, pas un quota à remplir.
+ * Sans ce garde-fou elle bouchait les vingt-sept places qu'une montée avare
+ * avait laissées, avec des montures que rien dans l'écurie ne pouvait marier.
+ *
  * ## La fournée qui n'existe pas
  *
  * Aucune place engagée veut dire aucun enclos chargé, donc aucun carburant déjà
@@ -1089,6 +1231,7 @@ const fillSparePlaces = (
   fertile: Group[],
   sterile: Group[],
   view: SearchView,
+  banking: Banking,
   rng: () => number
 ): void => {
   if (state.places === 0) return;
@@ -1097,7 +1240,7 @@ const fillSparePlaces = (
     let highest = -Infinity;
     const usable: number[] = [];
     for (let index = 0; index < fertile.length; index += 1) {
-      if (state.cyclableFree[index] <= 0) continue;
+      if (!bankable(state, banking, index)) continue;
       const rank = fertile[index].carried;
       if (rank > highest) {
         highest = rank;
@@ -1135,6 +1278,10 @@ export const planUnit = (
   const candidates = candidatesOf(searcher, view, fertile);
   if (candidates.length === 0 && sterile.length === 0) return emptyPlan();
 
+  // Calculé une fois, sur les candidats admissibles : l'ensemble ne bouge pas
+  // pendant la montée, seuls les compteurs bougent. Voir `pairedBanking`.
+  const banking = searcher.config.pairedBanking ? bankingOf(candidates, fertile.length) : null;
+
   const state: State = {
     census: censusOf(
       { bulk: new Map(), individuals: view.mounts },
@@ -1146,6 +1293,7 @@ export const planUnit = (
     fertileFree: fertile.map((group) => group.members.length),
     sterileFree: sterile.map((group) => group.members.length),
     cyclableFree: fertile.map((group) => (group.cycled ? 0 : group.members.length)),
+    banked: fertile.map(() => 0),
     crossings: 0,
     places: 0,
     optimakinaCost: 0,
@@ -1162,6 +1310,7 @@ export const planUnit = (
       sterile,
       view.capacity,
       searcher.config.sacrifices,
+      banking,
       rng
     );
     if (!mutation) continue;
@@ -1181,7 +1330,7 @@ export const planUnit = (
   // tirer dans la montée les ferait annuler par le même critère qui laisse la
   // place vide.
   if (searcher.config.fillSpare) {
-    fillSparePlaces(state, candidates, fertile, sterile, view, rng);
+    fillSparePlaces(state, candidates, fertile, sterile, view, banking, rng);
   }
 
   return materialise(state, candidates, fertile, sterile, view.mounts.length);

@@ -359,6 +359,19 @@ const BreedingPolicyPanel = ({
 
   const loadTotal = pens.reduce((total, pen) => total + pen.units.length, 0);
   /**
+   * Les fécondations sans croisement de la fournée **entière**.
+   *
+   * Affiché parce qu'on ne peut pas le compter soi-même : l'écran ne montre
+   * qu'un enclos à la fois, et c'est sur les cinq que ce geste-là se juge. Une
+   * fécondation prépare un croisement du tour suivant ; en voir la moitié d'un
+   * enclos veut dire que la politique thésaurise au lieu de produire, et c'est
+   * exactement ce que `pairedBanking` borne.
+   */
+  const bankedTotal = pens.reduce(
+    (total, pen) => total + pen.units.filter((unit) => unit.banked).length,
+    0
+  );
+  /**
    * Les montures **physiquement en enclos**, celles que la page a retirées de
    * l'entrée de la politique. Comptées sur l'instantané en base et non sur
    * `pens`, qui vaut la proposition tant qu'aucun verrou n'a été posé.
@@ -606,6 +619,16 @@ const BreedingPolicyPanel = ({
                 <span className="text-xs font-semibold text-dark-200">
                   {pens.length} enclos · {loadTotal} monture{loadTotal > 1 ? 's' : ''}
                 </span>
+                {bankedTotal > 0 && (
+                  <span
+                    data-testid="load-banked"
+                    data-banked={bankedTotal}
+                    className="text-[11px] text-dark-500 tabular-nums"
+                    title="Mises en enclos sans être croisées : elles en sortent fécondes et s'accoupleront sans repasser par l'enclos. C'est une préparation, pas une production — il en faut peu."
+                  >
+                    dont {bankedTotal} à féconder sans croiser
+                  </span>
+                )}
                 <span className="text-[11px] text-dark-500 tabular-nums">
                   {locked.length}/{pens.length} verrouillé{locked.length > 1 ? 's' : ''}
                 </span>

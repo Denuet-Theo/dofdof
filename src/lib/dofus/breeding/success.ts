@@ -33,7 +33,9 @@ import type { Stable } from './stable';
  *   place inoccupée** : il stérilise ses deux parents définitivement, et remplir
  *   les places libres de croisements a coûté quatre fournées et 3,5 % de kamas.
  *   Ce qui est gratuit sur une place libre, c'est la fécondation, et
- *   `fillSparePlaces` y met déjà celle-là.
+ *   `fillSparePlaces` y met déjà celle-là — bornée depuis à ce qui prépare un
+ *   croisement admissible, une par groupe, faute de quoi elle bouchait les
+ *   places avec des montures que rien ne pouvait marier. Voir `pairedBanking`.
  * - `check-recipes.mjs` verrouille le jeu de gen 2 retenu comme **union disjointe
  *   de cliques**, parce qu'un raté de `A × B` rend une gen 1 portant `[A, B]` et
  *   que la réemployer hors clique dédouble la cible : **27 % de la masse utile**

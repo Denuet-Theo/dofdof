@@ -21,6 +21,7 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, Policy, RunOutcome, play};
 use breeding_sim::encode::Census;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
+use breeding_sim::ladder::Route;
 use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
 
@@ -64,6 +65,18 @@ impl ValueFn for PenalisedNet<'_> {
 /// Le rang à lire dans un `finalists.json`. C'est ce qui permet de rejouer une
 /// stratégie alternative et de comparer les **comportements** et pas seulement
 /// les scores.
+/// Jouer sous les contraintes de l'échelle — le régime de l'écran.
+///
+/// Sans ça on compare un champion entraîné sous l'échelle à des parties jouées
+/// sans elle, et le chiffre ne veut rien dire : le même génome a rendu 48,84 M
+/// au départage et 31,44 M dans un tableau non contraint.
+///
+/// Le glouton n'est pas concerné : ce n'est pas une recherche, il ne passe pas
+/// par `Searcher`, donc rien ne peut l'y contraindre. Sa ligne le dit.
+fn under_ladder() -> bool {
+    std::env::args().any(|arg| arg == "--ladder")
+}
+
 fn rank() -> usize {
     std::env::args()
         .nth(3)
@@ -137,7 +150,11 @@ fn main() {
             .collect::<Vec<u32>>()
             .par_iter()
             .map(|&seed| {
-                let mut policy = Searching::new(NetValue(&network)).with_strategies(genome.strategies);
+                let mut policy =
+                    Searching::new(NetValue(&network)).with_strategies(genome.strategies);
+                if under_ladder() {
+                    policy = policy.under_ladder(&catalog, &economy, Route::default());
+                }
                 play(&catalog, &economy, &mut policy, seed)
             })
             .collect();

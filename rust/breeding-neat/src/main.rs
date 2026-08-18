@@ -1388,24 +1388,51 @@ fn main() {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         let (greedy_label, mut greedy) = greedy_runs.remove(0);
+        // Les deux bras de recherche jouent dans **le régime où le génome a été
+        // noté**. Sans ça le tableau final compare un champion entraîné sous
+        // l'échelle à des parties jouées sans elle, et le chiffre ne veut rien
+        // dire : la manche du 18/08 a sorti 48,84 M au départage et 31,44 M dans
+        // ce tableau-là, pour le même génome.
+        //
+        // Le glouton, lui, reste libre : ce n'est pas une recherche, il ne passe
+        // pas par `Searcher` et rien ne l'y contraint. La ligne le dit.
+        let under = || {
+            options
+                .ladder
+                .then_some((&catalog as &Catalog, &economy as &Economy))
+        };
         let mut myopic: Vec<f64> = seeds
             .par_iter()
             .map(|&seed| {
                 let mut policy = Searching::with_iterations(Myopic, options.iterations);
+                if let Some((catalog, economy)) = under() {
+                    policy = policy.under_ladder(catalog, economy, Route::default());
+                }
                 play(&catalog, &economy, &mut policy, seed).score as f64
             })
             .collect();
         let mut evolved: Vec<f64> = seeds
             .par_iter()
             .map(|&seed| {
-                let mut policy = Searching::with_iterations(NetValue(&network), options.iterations)
-                    .with_strategies(best.strategies);
+                let mut policy = policy_of(
+                    &network,
+                    &best,
+                    options.iterations,
+                    options.env,
+                    under(),
+                );
                 play(&catalog, &economy, &mut policy, seed).score as f64
             })
             .collect();
 
         evaluate("ne rien faire", &mut floor);
-        let greedy_median = evaluate(&format!("{greedy_label} (la baseline)"), &mut greedy);
+        let greedy_median = evaluate(
+            &format!(
+                "{greedy_label} (la baseline{})",
+                if options.ladder { ", hors échelle" } else { "" }
+            ),
+            &mut greedy,
+        );
         for (label, scores) in &mut greedy_runs {
             evaluate(&format!("  {label}"), scores);
         }

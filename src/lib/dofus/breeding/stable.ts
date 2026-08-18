@@ -624,7 +624,22 @@ export const PROJECTED_BIRTH_PREFIX = 'naissance-a-venir:';
  * `recordBirths` écrit dans `parent_a_color` / `parent_b_color`, donc on le
  * projette pareil : une naissance est toujours suivie individuellement.
  */
-export const projectBirths = (stable: Stable, couples: Couple[], pass: number) => {
+export const projectBirths = (
+  stable: Stable,
+  couples: Couple[],
+  pass: number,
+  /**
+   * Combien de poulains les vagues précédentes ont déjà projetés.
+   *
+   * L'alternance des sexes doit courir sur la **saisie entière** et non se
+   * remettre à zéro à chaque vague. Sinon une saisie en trois vagues de 11, 3 et
+   * 1 projette 9 mâles pour 7 femelles là où les 15 d'un coup en donnent 8 et 7 :
+   * la boucle planifie alors sur une écurie que la vraie saisie ne produira pas,
+   * et deux couples repoussent au rafraîchissement. `check-record-fixpoint` le
+   * voit, et c'est lui qui l'a trouvé.
+   */
+  projected = 0
+) => {
   couples.forEach((couple, index) => {
     stable.individuals.push({
       id: `${PROJECTED_BIRTH_PREFIX}${pass}-${index}`,
@@ -632,9 +647,9 @@ export const projectBirths = (stable: Stable, couples: Couple[], pass: number) =
       // Pas de nom : la monture n'existe pas, elle n'a rien à recopier en jeu.
       name: null,
       // Le sexe est un tirage à pile ou face que rien ne permet de connaître.
-      // On alterne, comme `addExpectedBirths` : sur une vague, ça rend le
-      // rapport des sexes que la fournée suivante rencontrera.
-      sex: index % 2 === 0 ? 'M' : 'F',
+      // On alterne, comme `addExpectedBirths` — sur la saisie entière, ce qui
+      // rend le rapport des sexes que la fournée suivante rencontrera.
+      sex: (projected + index) % 2 === 0 ? 'M' : 'F',
       level: 1,
       // Fertile et non fécond, comme ce que `recordBirths` insère.
       fertile: true,

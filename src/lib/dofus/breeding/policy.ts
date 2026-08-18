@@ -971,7 +971,9 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
     // Et le poulain. Sans lui la passe suivante planifie sur une écurie qui s'est
     // vidée sans rien produire, la politique change d'avis, et la liste repousse
     // au rafraîchissement suivant — voir `projectBirths` pour la mesure.
-    projectBirths(working, wave, pass);
+    // `all.length - wave.length` : le nombre de poulains déjà projetés par les
+    // vagues d'avant, pour que l'alternance des sexes coure sur la saisie entière.
+    projectBirths(working, wave, pass, all.length - wave.length);
   }
 
   return all;

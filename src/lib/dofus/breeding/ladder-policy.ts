@@ -33,9 +33,9 @@
  */
 
 import type { BreedingColor } from './costs';
-import type { EconomyView } from './census';
+import { genetonWeight, successRate, type EconomyView } from './census';
 import { aimsAt, type Ladder } from './ladder';
-import { canonicalParents, type Mate } from './pairing';
+import { canonicalParents, climbs, pairOutlook, type Mate } from './pairing';
 import { emptyPlan, type UnitPlan } from './search';
 import type { Individual, Sex } from './stable';
 
@@ -52,6 +52,17 @@ export type LadderView = {
   kamas: number;
   /** Ce que coûte le chargement, dès qu'une place est occupée. */
   loadKamas: number;
+  /**
+   * Le niveau auquel la fournée sera montée.
+   *
+   * Sert à deux choses et à rien d'autre : chiffrer si une gen 1 achetée pour la
+   * moisson se rembourse, et donner un niveau au partenaire qu'on n'a pas encore
+   * acheté. Les montures de l'écurie, elles, gardent le leur.
+   *
+   * Côté Rust c'est `economy.mount_level`, une donnée de l'économie et non de la
+   * stratégie — d'où un champ à part plutôt qu'une lecture de `strategy`.
+   */
+  mountLevel: number;
 };
 
 /**
@@ -138,6 +149,14 @@ export type LadderPlanOptions = {
    * de deux teintes d'un même bloc garantit.
    */
   purchases?: boolean;
+  /**
+   * Monnayer les montures que le plan ne sait pas employer.
+   *
+   * Vrai par défaut, comme le Rust. Un croisement réussi paie des génétons, le
+   * barème est quasi exponentiel — 250 pour une gen 9 — et l'écurie d'un éleveur
+   * porte toujours des couleurs hors plan qui ne servent à rien d'autre.
+   */
+  harvest?: boolean;
 };
 
 /**
@@ -275,12 +294,154 @@ export const ladderPlan = (
     }
   }
 
+  /**
+   * La teinte de gen 1 à acheter pour moissonner ce sujet-là.
+   *
+   * Le partenaire ne se choisit pas au hasard : c'est lui qui décide de quelle
+   * couleur sort le poulain, donc de ce qu'il vaudra. On prend celle dont la
+   * cible la plus probable est la mieux payée du jour — le jeu tire un prix par
+   * couleur, et l'éleveur les a saisis.
+   */
+  const bestStarter = (subject: number, sex: Sex): string | null => {
+    let best: [string, number] | null = null;
+    for (const color of colors) {
+      if (color.generation !== 1) continue;
+      const partner: Mate = {
+        id: null,
+        colorId: color.id,
+        sex: sex === 'M' ? 'F' : 'M',
+        level: view.mountLevel,
+        parents: null,
+      };
+      const [male, female] =
+        sex === 'M' ? [groups[subject].sample, partner] : [partner, groups[subject].sample];
+      const outlook = pairOutlook(male, female, colors, generations);
+      if (!outlook || !climbs(outlook)) continue;
+      const target = outlook.targetColors[0];
+      if (!target) continue;
+      const value = economy.valueOf(target.colorId);
+      // À valeur égale, l'ordre du catalogue — le même départage qu'ailleurs.
+      if (
+        best === null ||
+        value > best[1] ||
+        (value === best[1] && (rank.get(color.id) ?? 0) < (rank.get(best[0]) ?? 0))
+      ) {
+        best = [color.id, value];
+      }
+    }
+    return best === null ? null : best[0];
+  };
+
+  /* ------------------------------------------------------------ la moisson -- */
+
+  const starter = economy.starterPrice;
+  let budget = view.kamas - view.loadKamas;
+
+  /**
+   * Monnayer ce que le plan ne sait pas employer.
+   *
+   * Un croisement réussi paie des génétons, et le barème est quasi exponentiel :
+   * une gen 9 réussie en rend 250 à elle seule. L'écurie d'un éleveur porte
+   * toujours des couleurs hors route ; les laisser dormir, c'est laisser ça.
+   *
+   * **Ce qu'on ne touche pas** : les gen 1 des blocs. Elles ne sont pas dans
+   * `wanted` — on les achète au lieu de les produire — mais elles sont la matière
+   * première de l'étage 1. Les moissonner reviendrait à brûler la base de
+   * l'échelle pour un géneton, et c'est mesuré côté Rust : sans cette exclusion,
+   * le départ de zéro perdait 1,5 M.
+   */
+  if (options.harvest !== false) {
+    const planMaterial = (colorId: string) =>
+      ladder.wanted.has(colorId) || ladder.blocks.some((block) => block.includes(colorId));
+    const spare = groups
+      .map((group, at) => at)
+      .filter((at) => !planMaterial(groups[at].colorId));
+
+    if (spare.length > 0) {
+      const weight = (at: number) => genetonWeight(generations.get(groups[at].colorId) ?? 1);
+      // Les plus hautes d'abord : à places comptées, ce sont elles qui paient.
+      const order = [...spare].sort(
+        (a, b) =>
+          weight(b) - weight(a) ||
+          (rank.get(groups[b].colorId) ?? 0) - (rank.get(groups[a].colorId) ?? 0)
+      );
+
+      for (const subject of order) {
+        while (places < view.capacity && free[subject].length > 0) {
+          const sex = groups[subject].sex;
+
+          // Le partenaire le moins cher de l'écurie : celui dont on se prive le
+          // moins. `climbs` et non « a une cible » : les génétons ne tombent que
+          // si l'enfant dépasse l'ascendance.
+          let best: [number, number] | null = null;
+          for (const other of spare) {
+            if (other === subject || groups[other].sex === sex || free[other].length === 0) continue;
+            const [male, female] =
+              sex === 'M'
+                ? [groups[subject].sample, groups[other].sample]
+                : [groups[other].sample, groups[subject].sample];
+            const outlook = pairOutlook(male, female, colors, generations);
+            if (!outlook || !climbs(outlook)) continue;
+            const cost = weight(other);
+            if (best === null || cost < best[0]) best = [cost, other];
+          }
+
+          // Une gen 1 neuve pèse un géneton et coûte mille kamas. Encore faut-il
+          // qu'elle se rembourse : les génétons ne tombent qu'en cas de succès,
+          // donc `taux × (G(sujet) + G(1)) × prix ≥ prix de la gen 1`. Sur un
+          // sujet de gen 2 ça donne 809 kamas espérés pour 1 000 dépensés — on y
+          // perd, et sans ce garde-fou la moisson asséchait le budget que
+          // l'étage 1 attendait pour acheter.
+          const expected =
+            successRate(view.mountLevel, economy, false) *
+            (weight(subject) + genetonWeight(1)) *
+            economy.genetonValue;
+          const bought =
+            budget >= starter && expected >= starter ? bestStarter(subject, sex) : null;
+
+          const takeBought =
+            bought !== null && (best === null || best[0] > genetonWeight(1));
+
+          if (takeBought) {
+            const index = mounts.length + plan.purchases.length;
+            const subjectIndex = free[subject][free[subject].length - 1];
+            const pair: [number, number] =
+              sex === 'M' ? [subjectIndex, index] : [index, subjectIndex];
+            // L'achetée doit son cycle par construction ; le sujet, pas forcément.
+            const cost = placesFor(mounts, pair);
+            if (places + cost > view.capacity) break;
+            free[subject].pop();
+            plan.purchases.push([bought!, sex === 'M' ? 'F' : 'M']);
+            plan.crossings.push(pair);
+            plan.optimakina.push(false);
+            places += cost;
+            budget -= starter;
+            continue;
+          }
+
+          if (best === null) break;
+          const other = best[1];
+          const subjectIndex = free[subject][free[subject].length - 1];
+          const otherIndex = free[other][free[other].length - 1];
+          if (subjectIndex === undefined || otherIndex === undefined) break;
+          const pair: [number, number] =
+            sex === 'M' ? [subjectIndex, otherIndex] : [otherIndex, subjectIndex];
+          const cost = placesFor(mounts, pair);
+          if (places + cost > view.capacity) break;
+          free[subject].pop();
+          free[other].pop();
+          plan.crossings.push(pair);
+          plan.optimakina.push(false);
+          places += cost;
+        }
+      }
+    }
+  }
+
   if (options.purchases === false) return plan;
 
   /* ------------------------------------------------------------- les achats -- */
 
-  const starter = economy.starterPrice;
-  let budget = view.kamas - view.loadKamas;
   /** Ce que l'achat a déjà engagé cette fournée, par gen 2 visée. */
   const bought = new Map<string, number>();
 

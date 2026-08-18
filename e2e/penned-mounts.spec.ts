@@ -35,10 +35,6 @@ const openLoadTab = async (page: Page) => {
   await expect(page.getByTestId('pane-load')).toBeVisible();
 };
 
-/** Le compteur d'un onglet — « Accouplement 20 » rend 20. */
-const tabCount = async (page: Page, step: string) =>
-  Number((await page.getByTestId(`step-${step}`).innerText()).match(/(\d+)\s*$/)![1]);
-
 /** Verrouille les `count` prochains enclos, en attendant chaque écriture. */
 const lockAll = async (page: Page, count: number) => {
   for (let index = 0; index < count; index += 1) {
@@ -53,7 +49,21 @@ test.describe('montures en enclos', () => {
     await openBreeding(page);
     await openLoadTab(page);
 
-    const before = { mate: await tabCount(page, 'mate'), clone: await tabCount(page, 'clone') };
+    // La sonde est le **résumé de la politique**, et non les compteurs d'onglet.
+    //
+    // Ceux-ci ne répondent plus, et c'est une correction : « Accoupler » compte
+    // les couples à zéro place, or un enclos ne reçoit que des fertiles **non
+    // fécondes** — enfermer n'ôte donc rien à ce qui peut s'accoupler
+    // gratuitement, et « Clonage » ne compte que des stériles, qui n'entrent
+    // jamais en enclos. Qu'ils frémissaient venait de la politique changeant
+    // d'avis quand l'écurie bougeait sous elle, ce que `projectBirths` et
+    // `canonicalStable` ferment. Un test qui s'appuie sur ce frémissement mesure
+    // le défaut et non la propriété.
+    //
+    // Le résumé porte le plan entier, places comprises : il perd exactement ce
+    // qu'on enferme.
+    const summary = () => page.getByTestId('policy-summary').innerText();
+    const before = (await summary()).replace(/\s+/g, ' ');
     const enclos = Number(
       (await page.getByTestId('pane-load').innerText()).match(/(\d+) enclos/)![1]
     );
@@ -61,10 +71,9 @@ test.describe('montures en enclos', () => {
     await lockAll(page, enclos);
 
     // Les cinquante montures enfermées ne sont plus dans ce que la politique
-    // arbitre : les compteurs bougent. Sans le retrait ils ne bougent pas d'un
-    // chiffre, l'écurie enregistrée n'ayant pas changé.
-    const after = { mate: await tabCount(page, 'mate'), clone: await tabCount(page, 'clone') };
-    expect(after).not.toEqual(before);
+    // arbitre. Sans le retrait, le résumé ne bougerait pas d'un chiffre —
+    // l'écurie enregistrée, elle, n'a pas changé.
+    expect((await summary()).replace(/\s+/g, ' ')).not.toBe(before);
 
     /* Le **sens** de la variation, lui, n'est pas une propriété, et l'affirmer
        ici était un porte-à-faux.
@@ -173,15 +182,30 @@ test.describe('montures en enclos', () => {
     await openBreeding(page);
     await openLoadTab(page);
 
-    const before = await tabCount(page, 'mate');
+    // La sonde est le **résumé de la politique** — « N accouplements · P/Q
+    // places » — et non le compteur de l'onglet.
+    //
+    // Celui-ci comptait les accouplements à zéro place, et il a cessé de
+    // répondre : un enclos ne reçoit que des fertiles **non fécondes**, donc
+    // enfermer n'ôte rien à ce qui peut s'accoupler gratuitement. Qu'il bougeait
+    // avant était l'effet de bord qu'on vient de corriger — la politique changeait
+    // d'avis quand l'écurie bougeait sous elle (voir `projectBirths`). Un test qui
+    // s'appuie sur ce frémissement mesure le défaut, pas la propriété.
+    //
+    // Le résumé, lui, porte le plan entier, places comprises, donc il perd
+    // exactement ce qu'on enferme et le retrouve à la sortie. C'est bien « les
+    // montures reviennent aux arbitrages » qu'on lit.
+    const summary = () => page.getByTestId('policy-summary').innerText();
+    const before = (await summary()).replace(/\s+/g, ' ');
     await lockAll(page, 1);
-    expect(await tabCount(page, 'mate')).not.toBe(before);
+    const penned = (await summary()).replace(/\s+/g, ' ');
+    expect(penned, 'enfermer doit se voir dans le plan').not.toBe(before);
 
     await page.getByTestId('locked-pen').first().getByTestId('exit-pen').click();
     await page.getByTestId('exit-fertile').click();
     await expect(page.getByTestId('locked-pen')).toHaveCount(0);
 
     await expect(page.getByTestId('penned-notice')).toHaveCount(0);
-    expect(await tabCount(page, 'mate')).toBe(before);
+    expect((await summary()).replace(/\s+/g, ' '), 'et se défaire à la sortie').toBe(before);
   });
 });

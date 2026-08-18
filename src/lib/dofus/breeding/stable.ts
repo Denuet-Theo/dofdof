@@ -470,8 +470,38 @@ export type Couple = {
  * Un accouplement rend ses deux parents **stériles**, définitivement : la
  * monture reste en écurie, elle ne s'accouple plus. C'est pourquoi on ne la
  * supprime pas — il lui reste le clonage et l'extraction, et les deux comptent.
+ *
+ * ## Ceci n'est que la **moitié** du geste
+ *
+ * Un accouplement consomme deux parents *et* rend un poulain. Cette fonction ne
+ * fait que la première moitié, et c'est voulu : à l'intérieur d'une même fournée
+ * le poulain n'est pas encore là, donc `loadout.ts` a raison de ne pas l'ajouter.
+ *
+ * Mais tout appel qui **replanifie ensuite** sur l'écurie ainsi obtenue lit une
+ * écurie que l'éleveur n'aura jamais : celle où les parents ont disparu sans que
+ * rien ne soit né. Il doit donc appeler `projectBirths` à la suite. C'est le
+ * défaut mesuré de #165, revenu par une troisième porte après `afterClonings` —
+ * voir `couplesToRecordAll`.
  */
-export const consumeCouples = (stable: Stable, couples: Couple[]) => {
+export const consumeCouples = (
+  stable: Stable,
+  couples: Couple[],
+  /**
+   * Décrémenter aussi les compteurs de fécondité du vrac.
+   *
+   * Le vrac n'a pas d'identité : on sait combien de montures il porte et combien
+   * d'entre elles sont fécondes, jamais lesquelles. Quand les couples consommés
+   * sont **tous à zéro place**, leurs deux parents étaient forcément fécondes —
+   * c'est la définition d'une place gratuite — donc l'effectif fécond baisse avec
+   * l'effectif total. C'est exactement ce que `recordBirths` écrit en base.
+   *
+   * Faux par défaut, parce qu'un couple d'enclos consomme au contraire des
+   * **non**-fécondes : c'est la place qui paie leur cycle. Décrémenter là
+   * inventerait une pénurie de fécondes, et `loadout.ts` décide des fournées
+   * avec ce compteur.
+   */
+  { spendCycled = false }: { spendCycled?: boolean } = {}
+) => {
   for (const couple of couples) {
     for (const side of [couple.male, couple.female]) {
       if (side.mountId) {
@@ -481,10 +511,137 @@ export const consumeCouples = (stable: Stable, couples: Couple[]) => {
       }
       const bulk = stable.bulk.get(side.colorId);
       if (!bulk) continue;
-      if (side.sex === 'M') bulk.males = Math.max(0, bulk.males - 1);
-      else bulk.females = Math.max(0, bulk.females - 1);
+      const banked = cycledOf(bulk);
+      if (side.sex === 'M') {
+        bulk.males = Math.max(0, bulk.males - 1);
+        if (spendCycled) bulk.cycledMales = Math.max(0, banked.males - 1);
+      } else {
+        bulk.females = Math.max(0, bulk.females - 1);
+        if (spendCycled) bulk.cycledFemales = Math.max(0, banked.females - 1);
+      }
     }
   }
+};
+
+/**
+ * Le préfixe des poulains **projetés** : ceux qu'un accouplement rendra, et qui
+ * n'ont pas encore de ligne en base.
+ *
+ * Même règle que `clone-a-venir:` — voir `isProjected`, qui reconnaît les deux.
+ * Un identifiant fabriqué qui ressemblerait à un uuid est le piège de #165 :
+ * Postgres refuse la valeur, et un `.in()` sur une ligne qui n'existe pas ne rend
+ * **aucune erreur**.
+ */
+/**
+ * L'écurie remise dans son ordre **canonique** : par contenu, l'identifiant ne
+ * servant que de dernier départage.
+ *
+ * ## Pourquoi l'ordre compte, alors qu'il ne devrait pas
+ *
+ * `flatten` parcourt le tableau, et la recherche départage à valeur strictement
+ * égale dans l'ordre où elle rencontre les montures. Deux écuries de **contenu
+ * identique** rangées différemment ne rendaient donc pas le même plan. Mesuré sur
+ * l'écurie du 15/08 : **18** accouplements proposés dans l'ordre de la fixture,
+ * **19** dans l'ordre des identifiants. Rien n'avait changé que l'ordre.
+ *
+ * Et ce n'est pas théorique. La lecture de l'écurie trie (`.order('id')`), alors
+ * que les écritures locales ajoutent en **fin** de tableau : un poulain saisi vit
+ * en queue jusqu'au rafraîchissement, où il reprend sa place d'uuid. Même écurie,
+ * deux ordres, deux plans — donc une liste d'accouplements qui bouge sans qu'il se
+ * soit rien passé.
+ *
+ * ## Pourquoi le **contenu** et pas l'identifiant
+ *
+ * Parce que trier par identifiant ne suffit pas là où ça compte le plus : les
+ * projections. Un clone à venir porte `clone-a-venir:…` et un poulain à venir
+ * `naissance-a-venir:…`, tandis que les vraies lignes porteront un uuid tiré par la
+ * base. Trié par identifiant, le même élevage se rangeait donc à une place dans la
+ * projection et à une autre dans la réalité, et le plan changeait entre « ce que je
+ * te propose » et « ce que tu obtiens » — c'est-à-dire précisément la liste qui
+ * repousse. Vu sur `clone-then-mate` : 20 accouplements annoncés, 21 après avoir
+ * exécuté les clonages annoncés.
+ *
+ * Deux montures de même contenu sont interchangeables pour la politique — c'est
+ * même la définition de ce qu'elle sait voir. Les ranger par ce contenu rend le
+ * plan indifférent à l'identité, donc identique dans la projection et dans la
+ * réalité. Le nom est **exclu** de la clé, lui : une monture projetée n'en a pas
+ * encore, et le plan ne le lit pas.
+ *
+ * On ne corrige pas la sensibilité de la recherche, qui est son droit : à valeur
+ * strictement égale il faut bien trancher. On lui donne une entrée canonique, de
+ * sorte que le plan redevienne une fonction du contenu. Vérifié par
+ * `check:plan-order`.
+ *
+ * `bulk` n'en a pas besoin : une `Map` de couleurs n'a pas d'ordre que la politique
+ * lise, et ses clés viennent du catalogue et non de la base.
+ */
+const canonicalKey = (mount: Individual) =>
+  [
+    mount.colorId,
+    mount.sex,
+    mount.fertile ? '1' : '0',
+    mount.cycled ? '1' : '0',
+    String(mount.level).padStart(4, '0'),
+    (mount.parents ?? []).join('+'),
+  ].join('|');
+
+export const canonicalStable = (stable: Stable): Stable => ({
+  bulk: stable.bulk,
+  individuals: [...stable.individuals].sort((a, b) => {
+    const left = canonicalKey(a);
+    const right = canonicalKey(b);
+    if (left !== right) return left < right ? -1 : 1;
+    // Contenu identique : la politique ne les distingue pas, mais l'ordre doit
+    // rester stable d'un appel à l'autre.
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }),
+});
+
+export const PROJECTED_BIRTH_PREFIX = 'naissance-a-venir:';
+
+/**
+ * L'autre moitié du geste : les poulains que ces couples rendront.
+ *
+ * ## Pourquoi une projection suffit, alors que la couleur est un tirage
+ *
+ * On ne peut pas savoir ce qui va naître : un croisement a une distribution
+ * d'issues, pas un résultat. On projette donc la **cible** — ce que l'écran
+ * demande d'aller viser — et c'est assez, parce que l'enjeu est borné : un
+ * poulain naît fertile et **non fécond**, donc il ne peut entrer dans aucun
+ * couple à zéro place. Il ne pèse que sur les arbitrages du plan, jamais sur les
+ * gestes qu'on saisit. Même raisonnement que `afterClonings` pour `keep`.
+ *
+ * Ce qui compte, et qui est exact, c'est qu'il y ait **une monture de plus** :
+ * sans elle la replanification lit une écurie qui s'est vidée sans rien produire,
+ * et change d'avis. Mesuré sur l'écurie du 15/08 : 19 accouplements proposés,
+ * les 19 saisis, **1 de plus** au rafraîchissement. Avec la projection : 20
+ * proposés, 20 saisis, **0** de plus.
+ *
+ * ## L'ascendance, elle, n'est pas un tirage
+ *
+ * Les deux couleurs parentes sont connues, et c'est elles qui décideront des
+ * cibles de ce poulain-là — voir `lineageDistribution`. C'est ce que
+ * `recordBirths` écrit dans `parent_a_color` / `parent_b_color`, donc on le
+ * projette pareil : une naissance est toujours suivie individuellement.
+ */
+export const projectBirths = (stable: Stable, couples: Couple[], pass: number) => {
+  couples.forEach((couple, index) => {
+    stable.individuals.push({
+      id: `${PROJECTED_BIRTH_PREFIX}${pass}-${index}`,
+      colorId: couple.targetColorId,
+      // Pas de nom : la monture n'existe pas, elle n'a rien à recopier en jeu.
+      name: null,
+      // Le sexe est un tirage à pile ou face que rien ne permet de connaître.
+      // On alterne, comme `addExpectedBirths` : sur une vague, ça rend le
+      // rapport des sexes que la fournée suivante rencontrera.
+      sex: index % 2 === 0 ? 'M' : 'F',
+      level: 1,
+      // Fertile et non fécond, comme ce que `recordBirths` insère.
+      fertile: true,
+      cycled: false,
+      parents: [couple.male.colorId, couple.female.colorId],
+    });
+  });
 };
 
 /**

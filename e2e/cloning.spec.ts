@@ -39,10 +39,26 @@ const individus = 'user_breeding_individuals';
  * liste jusqu'à tomber sur une paire nommée : le test dépendrait alors d'un
  * ordre de tri qui n'a rien à voir avec ce qu'il vérifie.
  */
+/**
+ * Toutes les stériles nommées, et **distinctement**.
+ *
+ * Ce fichier teste la carte de départage : deux montures, deux sexes, deux noms à
+ * chercher dans l'écurie du jeu. Il lui faut donc une paire discernable.
+ *
+ * Le helper ne nommait que les anonymes et laissait les noms de la fixture, dont
+ * certains sont portés par plusieurs montures d'ascendance identique. Depuis que
+ * `cloneOptions` met les **doublons en tête** — ils se clonent cinq fois plus vite
+ * en jeu, voir `indistinguishablePair` — la première paire du lot était l'une de
+ * celles-là, affichée « × 2 » avec une seule carte. Les specs mesuraient alors le
+ * rendu du doublon en croyant mesurer celui du départage.
+ *
+ * Les rendre toutes distinctes remet ces tests sur leur sujet. Le rendu « × 2 », lui,
+ * a son fichier : `clone-twin-pair.spec.ts`.
+ */
 const nameEverySterile = (supabase: SupabaseMock) => {
   let numero = 0;
   for (const mount of supabase.rows(individus)) {
-    if (mount.fertile === false && !mount.name) mount.name = `G1 ZZ M AA-BB ${++numero}`;
+    if (mount.fertile === false) mount.name = `G1 ZZ M AA-BB ${++numero}`;
   }
 };
 

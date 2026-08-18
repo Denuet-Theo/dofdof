@@ -59,7 +59,7 @@ import { aimsAt, crownedLadderOf } from './ladder';
 import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
-import { consumeCouples, copyStable } from './stable';
+import { canonicalStable, consumeCouples, copyStable, projectBirths } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
@@ -243,16 +243,29 @@ export type PullLine = {
 
 export type StablePlan = {
   /**
-   * Les accouplements, groupés par couple identique et **les immédiats d'abord**.
+   * Les accouplements, groupés par couple identique et **par génération cible
+   * croissante**.
    *
-   * « Immédiat » veut dire zéro place d'enclos : les deux parents sont déjà
-   * féconds, donc l'accouplement est un clic, avec ce qu'on tient. Les faire passer
-   * après une liste d'achats revient à faire attendre ce qui ne demande rien
-   * derrière ce qui demande une course à l'hôtel de vente — c'est déjà la raison
-   * pour laquelle la piste « Écurie » ouvre le ruban de la timeline.
+   * L'ordre suit la façon dont on les fait : on descend la liste devant l'enclos,
+   * une ligne après l'autre, et une progression basse-vers-haute se suit sans
+   * perdre sa place. C'est l'ordre que l'éleveur a demandé.
    *
-   * À coût égal, l'ordre de la recherche est conservé : il n'a pas de sens en
-   * lui-même, et le brasser rendrait deux lectures successives incomparables.
+   * ## Ce que ça remplace, et ce que ça coûte
+   *
+   * Les **immédiats d'abord** — zéro place d'enclos, donc un clic avec ce qu'on
+   * tient. L'argument tenait : faire passer ce qui ne demande rien derrière ce qui
+   * demande une course à l'hôtel de vente est un mauvais ordre de travail.
+   *
+   * Il n'est pas perdu, il est **relégué au départage** : à génération égale les
+   * immédiats restent devant. Ce qui change est qu'une gen 2 à acheter passe
+   * maintenant devant une gen 8 gratuite. C'est le prix de l'ordre demandé, et il
+   * est réel.
+   *
+   * Une **recopie** n'a pas de cible et va en fin de liste : elle ne monte rien,
+   * donc elle n'a pas de rang où s'insérer.
+   *
+   * À rang et coût égaux, l'ordre de la recherche est conservé : il n'a pas de sens
+   * en lui-même, et le brasser rendrait deux lectures successives incomparables.
    */
   couples: CoupleLine[];
   /**
@@ -265,7 +278,15 @@ export type StablePlan = {
    * gratuit, dès que le partenaire existe.
    */
   cycles: { colorId: string; mountIds: string[] }[];
-  /** Les clonages, par génération — deux stériles n'en font qu'à rang égal. */
+  /**
+   * Les clonages, **par génération croissante** — deux stériles n'en font qu'à
+   * rang égal.
+   *
+   * Ils sortaient dans l'ordre où la recherche les avait trouvés, c'est-à-dire
+   * dans aucun ordre lisible : la liste changeait de disposition d'un rendu à
+   * l'autre sans que rien ne l'explique. Croissant comme les accouplements, et
+   * pour la même raison — on descend la liste devant l'écurie.
+   */
   clonings: { generation: number; mountIds: string[] }[];
   /** Les gen 1 à acheter à l'hôtel de vente. */
   purchases: { colorId: string; males: number; females: number }[];
@@ -375,7 +396,12 @@ const TRAINING_ITERATIONS = 600;
  */
 export const stablePlan = (input: PolicyInput): StablePlan | null => {
   const champion = championArtifact as Champion;
-  const mounts = flatten(input.stable);
+  // L'ordre canonique **ici**, et pas chez l'appelant : le plan doit être une
+  // fonction du contenu de l'écurie, pas de l'ordre où ses lignes sont arrivées.
+  // Voir `canonicalStable` — la recherche départage à valeur égale dans l'ordre
+  // du tableau, et cet ordre diffère entre une écriture locale (qui ajoute en
+  // queue) et une relecture (qui trie). C'est vérifié par `check:plan-order`.
+  const mounts = flatten(canonicalStable(input.stable));
   if (mounts.length === 0) return null;
 
   const network = compile(champion);
@@ -704,9 +730,18 @@ const readPlan = (
 
   return {
     refused,
-    couples: [...couples.values()].sort((a, b) => a.places - b.places),
+    // Génération cible croissante, puis les immédiats devant à rang égal, puis
+    // l'ordre de la recherche. Une recopie n'a pas de cible : elle finit la liste.
+    // Voir le champ `couples` pour ce que cet ordre remplace.
+    couples: [...couples.values()].sort(
+      (a, b) =>
+        (a.targetGeneration ?? Infinity) - (b.targetGeneration ?? Infinity) ||
+        a.places - b.places
+    ),
     cycles: [...cycles].map(([colorId, mountIds]) => ({ colorId, mountIds })),
-    clonings: [...clonings].map(([generation, mountIds]) => ({ generation, mountIds })),
+    clonings: [...clonings]
+      .map(([generation, mountIds]) => ({ generation, mountIds }))
+      .sort((a, b) => a.generation - b.generation),
     purchases: [...purchases.values()],
     pull: pullOf(plan, mounts),
     places,
@@ -797,11 +832,23 @@ export const couplesToRecord = (plan: StablePlan): Couple[] => {
  * Combien de fois au plus on redemande un plan avant de rendre la liste.
  *
  * Cinq passes suffisent sur une écurie de cent montures — mesuré, la convergence
- * tombe à la cinquième — et la borne n'est pas là pour ça : elle est là pour
- * qu'un jour où la convergence ne viendrait pas, l'écran rende une liste courte
- * au lieu de tourner.
+ * tombe à la cinquième.
+ *
+ * ## La borne ne doit pas pouvoir tronquer
+ *
+ * Elle valait 8, ce qui est un **budget** déguisé en garde-fou : atteindre le
+ * plafond avec une vague non vide rend une liste courte sans le dire, et une
+ * liste courte est précisément le symptôme qu'on répare ici. L'éleveur ne peut
+ * pas distinguer « il n'y a plus rien » de « on s'est arrêté de compter ».
+ *
+ * Or la terminaison est démontrable : une vague non vide consomme au moins deux
+ * fécondes, et rien dans la boucle n'en rend — un poulain projeté naît **non**
+ * fécond, et aucun cycle ne se paie ici. Le nombre de passes utiles est donc
+ * borné par le nombre de fécondes de l'écurie, et la boucle s'arrête d'elle-même.
+ * La borne n'est plus qu'un garde-fou contre une régression future qui rendrait
+ * une vague sans rien consommer ; on la met hors d'atteinte plutôt que juste.
  */
-const RECORD_PASSES = 8;
+const RECORD_PASSES = 64;
 
 /**
  * **Tous** les accouplements réalisables tout de suite, et pas seulement la
@@ -851,7 +898,10 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
     // Une copie par passe : la vraie écurie est celle de l'éleveur, et la
     // parcourir en la vidant effacerait son parc à chaque rendu.
     working = copyStable(working);
-    consumeCouples(working, wave);
+    // `spendCycled` : cette vague ne contient que des couples à zéro place, donc
+    // les deux parents de chacun étaient fécondes. Le vrac doit donc perdre un
+    // fécond avec chaque tête, comme `recordBirths` le fait en base.
+    consumeCouples(working, wave, { spendCycled: true });
     // `consumeCouples` retire la fécondité, pas le cycle. L'accouplement consomme
     // les deux — c'est ce que `recordBirths` écrit en base — et la passe suivante
     // doit voir la même écurie que celle qu'une vraie saisie aurait laissée.
@@ -862,6 +912,10 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
         if (mount) mount.cycled = false;
       }
     }
+    // Et le poulain. Sans lui la passe suivante planifie sur une écurie qui s'est
+    // vidée sans rien produire, la politique change d'avis, et la liste repousse
+    // au rafraîchissement suivant — voir `projectBirths` pour la mesure.
+    projectBirths(working, wave, pass);
   }
 
   return all;

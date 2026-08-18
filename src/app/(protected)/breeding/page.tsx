@@ -546,6 +546,11 @@ const BreedingPage = () => {
         onUndoBirth={undoBirth}
         onRecordClonings={recordClonings}
         onEnclosExit={recordEnclosExit}
+        // L'extraction faite en jeu : la monture est consommée, donc elle quitte
+        // l'écurie. `removeIndividual` porte déjà le rollback — un retrait refusé
+        // remet la monture à l'écran plutôt que de la faire disparaître des deux
+        // côtés.
+        onExtract={removeIndividual}
       />
 
       {/* La fournée suit le planning immédiatement, et c'est la même raison qui

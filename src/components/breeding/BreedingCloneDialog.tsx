@@ -8,6 +8,7 @@ import CopyableText from '@/components/ui/CopyableText';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
 import type { Individual } from '@/lib/dofus/breeding/stable';
+import { indistinguishablePair } from '@/lib/dofus/breeding/cloning';
 import type { CloningToRecord } from '@/lib/dofus/breeding/policy';
 import type { CloningResult } from '@/lib/hooks/useBreeding';
 
@@ -252,12 +253,11 @@ const BreedingCloneDialog = ({
     const a = byId.get(entry.first);
     const b = byId.get(entry.second);
     if (!a || !b) return false;
-    return (
-      a.colorId === b.colorId &&
-      a.sex === b.sex &&
-      a.name === b.name &&
-      (a.parents ?? []).join('+') === (b.parents ?? []).join('+')
-    );
+    // La même notion que celle qui **ordonne** la liste : `cloneOptions` met les
+    // doublons en tête parce qu'ils vont cinq fois plus vite en jeu, et cet écran
+    // les affiche « × 2 ». Deux définitions séparées finiraient par diverger, et
+    // on lirait un « × 2 » sur une paire qui n'a pas été priorisée — ou l'inverse.
+    return indistinguishablePair(a, b);
   };
 
   /**
@@ -463,6 +463,13 @@ const BreedingCloneDialog = ({
                  génération une fois sur deux. L'écran ne le dit pas autrement —
                  une anonyme n'a pas de nom pour le porter. */
               data-carried={current.carried.join(',')}
+              /* La génération de la paire, et si c'est un doublon : c'est l'ordre
+                 de la liste que la suite vérifie — doublons en tête à génération
+                 égale, parce qu'ils vont cinq fois plus vite en jeu. Sans
+                 attributs il faudrait lire « gén. 2 » et compter des cartes, ce
+                 que ce fichier refuse de faire. */
+              data-generation={current.generation}
+              data-duplicate={twinPair(current) ? 'true' : 'false'}
             >
               {card(current.first, 'left')}
               <div className="flex flex-col items-center justify-center gap-1 px-2">

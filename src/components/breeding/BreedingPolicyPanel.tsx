@@ -22,7 +22,7 @@ import {
   type BatchUnit,
 } from '@/lib/dofus/breeding/batch';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
-import { formatCountdown } from '@/lib/dofus/breeding/timeline';
+import { formatCountdown } from '@/lib/dofus/breeding/countdown';
 import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';

@@ -74,28 +74,31 @@ If the suite is red or will not run, **stop and report it**. Do not open the PR
 and do not skip or delete the failing spec. A suite that is allowed to be red
 once stops being a signal.
 
-## Simulate before merging a policy change
+## Measure before merging a policy change
 
 `tsc` and `eslint` cannot see a wrong recommendation, and neither can a
 screenshot — the screen renders a ranked list perfectly whether the ranking is
-sound or nonsense. Only running the policy shows it.
+sound or nonsense. Only playing the policy shows it.
 
-**If the diff touches `next-move.ts`, `pairing.ts`, `cloning.ts` or
-`loadout.ts`, run `simulatePolicy` before opening the PR** and put the number
-in the body. It costs about 200 ms for 20 runs.
+**If the diff touches `ladder.ts`, `policy.ts`, `search.ts`, `census.ts`,
+`pairing.ts` or `cloning.ts`, measure before opening the PR** and put the
+numbers in the body. Three harnesses, in rising cost:
 
-```
-npx tsc src/lib/dofus/breeding/simulate.ts src/lib/dofus/breeding/costs.ts \
-  --outDir "$SCRATCH/lib" --module commonjs --target es2020 \
-  --moduleResolution node --esModuleInterop --skipLibCheck
-```
+| harness | cost | what it answers |
+| --- | --- | --- |
+| `node scripts/policy-report.mjs` | ~1 s | does the policy still mate at all, and what share of its crossings climb no rank |
+| `node scripts/check-search.mjs` | ~10 s | does the TypeScript search still replay the Rust one, plan for plan |
+| `rust/target/release/replay.exe <champion>` | ~1 min | what the policy is **worth**: 200 sealed seeds, full economy, against the greedy and the myopic baselines |
 
-Then call `simulatePolicy` from a throwaway script: same seed, same crossing
-budget, before and after. The figure that matters is **the share of runs
-reaching generation 10**, and it must not drop.
+`replay` is the one that decides. It prints the median score, the gen 10 held,
+and the same line for two baselines that are **never played in the app** and
+exist only as yardsticks. A policy change that does not move those numbers did
+not change the policy; one that moves them down is a regression however good the
+reasoning looked.
 
-Every defect ever found in that policy was found by running it, never by
-rereading it:
+The old `simulatePolicy` harness is gone with `simulate.ts`, `loadout.ts` and
+`next-move.ts` — it measured a heuristic the app no longer runs. Its lesson
+stands and is why this section exists:
 
 | Defect | Found by |
 | --- | --- |
@@ -103,6 +106,7 @@ rereading it:
 | A greedy that never climbs (#78) | simulation |
 | The missing-partner blocker (#80) | simulation |
 | A finite penalty draining the stable (#83) | simulation |
+| A champion hoarding fertility it should spend (#227) | `replay` sweep |
 
 #83 is the cautionary one. #82 looked local — one penalty made finite so a badge
 could show — and it took the climb from **85% to 10%** of runs reaching
@@ -110,7 +114,7 @@ generation 10. `tsc` was green, `eslint` was green, the browser rendered
 correctly, and it shipped. It was caught a day later, by accident, while
 measuring something else.
 
-A change to `scoreOf` is never local.
+A change to what the policy prefers is never local.
 
 ## Recovery, when commits are stranded on a merged PR's branch
 

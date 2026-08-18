@@ -24,7 +24,6 @@
     "check:ladder": "node scripts/check-ladder.mjs",
     "check:recipes": "node scripts/check-recipes.mjs",
     "check:settings": "node scripts/check-settings.mjs",
-    "check:summit": "node scripts/check-summit.mjs",
     "check:success": "node scripts/check-success.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

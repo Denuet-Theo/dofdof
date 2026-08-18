@@ -125,6 +125,16 @@ export const successRate = (level: number, economy: EconomyView, optimakina: boo
 const GENETONS_BY_GENERATION = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 0];
 
 /**
+ * Ce qu'une monture de ce rang pèse en génétons, seule.
+ *
+ * `genetonsForCrossing` en somme deux ; la moisson, elle, compare des montures
+ * une par une — « de laquelle se prive-t-on le moins » — donc elle a besoin du
+ * barème à l'unité. Voir `ladder-policy.ts`.
+ */
+export const genetonWeight = (generation: number): number =>
+  GENETONS_BY_GENERATION[Math.max(0, Math.min(generation, 10))];
+
+/**
  * Les génétons d'un croisement **réussi**.
  *
  * Ils suivent les **parents directs** et non la cible : deux gen 2 visant la gen 4

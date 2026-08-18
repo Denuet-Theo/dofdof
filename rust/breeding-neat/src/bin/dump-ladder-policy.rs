@@ -21,11 +21,9 @@
 //!
 //! ## Ce que la référence n'inclut pas
 //!
-//! La **moisson** est éteinte (`harvesting: false`) et le sommet reste à
-//! `Summit::Hold`, son défaut. Le portage n'a encore ni l'une ni l'autre, et une
-//! garde qui comparerait une politique moissonneuse à une qui ne moissonne pas
-//! rougirait pour la mauvaise raison. Le jour où la moisson est portée, ce
-//! drapeau passe à `true` et la référence se régénère.
+//! Le sommet reste à `Summit::Hold`, son défaut des deux côtés : la branche ne
+//! s'exécute donc jamais et son absence du portage est sans effet. La moisson,
+//! elle, est **allumée** — elle l'est par défaut, et le portage l'a maintenant.
 //!
 //! Les **clonages** et les **sacrifices** sont rendus tels quels pour mémoire,
 //! mais `check-ladder-policy.mjs` ne les compare pas : ils viennent de
@@ -100,7 +98,6 @@ fn main() {
         };
 
         let mut policy = LadderPolicy::new(&catalog, Route::default());
-        policy.harvesting = false;
         let plan = policy.plan(&view, &mut Rng::new(1));
 
         let mounts: Vec<serde_json::Value> = stable
@@ -121,12 +118,17 @@ fn main() {
         cases.push(serde_json::json!({
             "kamas": kamas,
             "capacity": capacity,
-            // Ce que `feasible` retire du solde dès qu'une place est occupée, et
-            // que la phase d'achat déduit du budget. Figé plutôt que recalculé :
-            // côté app il vient des jauges et de leurs cours du jour.
-            "loadKamas": economy.unit_load(unit, strategy).0,
+            // Ce que la politique retire du solde pour ouvrir la fournée, et qui
+            // borne donc ce qu'elle peut acheter. C'est `batch_cost` et non
+            // `unit_load` : la première est le forfait que `LadderPolicy` déduit,
+            // la seconde le carburant que `feasible` facture à la recherche. Les
+            // confondre faisait acheter le portage à côté du Rust sur 20 cas.
+            "loadKamas": economy.batch_cost,
+            "mountLevel": economy.mount_level,
             "economy": {
                 "starterPrice": economy.starter_price,
+                "genetonValue": economy.geneton_value,
+                "optimakinaBonus": economy.optimakina_bonus,
                 "values": (0..catalog.len())
                     .map(|color| serde_json::json!([
                         catalog.slug(color as u16),

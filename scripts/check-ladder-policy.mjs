@@ -28,8 +28,8 @@
  *
  * Les **clonages** et les **sacrifices** : ils viennent de
  * `clone_by_generation`, qui n'est pas dans ce portage-ci. La référence les
- * porte pour mémoire, ce script les ignore. La **moisson** est éteinte des deux
- * côtés — voir l'en-tête de `dump-ladder-policy.rs`.
+ * porte pour mémoire, ce script les ignore. La **moisson**, elle, est allumée
+ * des deux côtés et donc comparée.
  */
 
 import { readFileSync } from 'node:fs';
@@ -68,6 +68,8 @@ for (const [index, entry] of reference.cases.entries()) {
   const values = new Map(entry.economy.values);
   const economy = {
     starterPrice: entry.economy.starterPrice,
+    genetonValue: entry.economy.genetonValue,
+    optimakinaBonus: entry.economy.optimakinaBonus,
     valueOf: (colorId) => values.get(colorId) ?? 0,
   };
 
@@ -101,6 +103,7 @@ for (const [index, entry] of reference.cases.entries()) {
       capacity: entry.capacity,
       kamas: entry.kamas,
       loadKamas: entry.loadKamas,
+      mountLevel: entry.mountLevel,
     },
     ladder
   );

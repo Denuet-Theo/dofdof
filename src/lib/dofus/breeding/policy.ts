@@ -521,7 +521,15 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
   // L'échelle joue elle-même, si on le lui demande. Voir `PolicyInput.policy`.
   if (input.policy === 'ladder') {
     return readPlan(
-      ladderPlan(view, ladder, { purchases: input.purchases ?? true }),
+      ladderPlan(
+        // Le niveau de la fournée vient de la stratégie du génome, faute de
+        // mieux : l'écran ne pilote pas encore la Mangeoire, et c'est le seul
+        // niveau que l'app sache nommer aujourd'hui. Voir `tunedLevel`, qui dit
+        // ce qu'il **devrait** valoir sur les prix de l'éleveur.
+        { ...view, mountLevel: strategy.level },
+        ladder,
+        { purchases: input.purchases ?? true }
+      ),
       mounts,
       input,
       generations,

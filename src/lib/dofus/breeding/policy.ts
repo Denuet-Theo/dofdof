@@ -59,7 +59,7 @@ import { aimsAt, crownedLadderOf } from './ladder';
 import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
-import { consumeCouples, copyStable } from './stable';
+import { consumeCouples, copyStable, projectBirths } from './stable';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
@@ -827,11 +827,23 @@ export const couplesToRecord = (plan: StablePlan): Couple[] => {
  * Combien de fois au plus on redemande un plan avant de rendre la liste.
  *
  * Cinq passes suffisent sur une écurie de cent montures — mesuré, la convergence
- * tombe à la cinquième — et la borne n'est pas là pour ça : elle est là pour
- * qu'un jour où la convergence ne viendrait pas, l'écran rende une liste courte
- * au lieu de tourner.
+ * tombe à la cinquième.
+ *
+ * ## La borne ne doit pas pouvoir tronquer
+ *
+ * Elle valait 8, ce qui est un **budget** déguisé en garde-fou : atteindre le
+ * plafond avec une vague non vide rend une liste courte sans le dire, et une
+ * liste courte est précisément le symptôme qu'on répare ici. L'éleveur ne peut
+ * pas distinguer « il n'y a plus rien » de « on s'est arrêté de compter ».
+ *
+ * Or la terminaison est démontrable : une vague non vide consomme au moins deux
+ * fécondes, et rien dans la boucle n'en rend — un poulain projeté naît **non**
+ * fécond, et aucun cycle ne se paie ici. Le nombre de passes utiles est donc
+ * borné par le nombre de fécondes de l'écurie, et la boucle s'arrête d'elle-même.
+ * La borne n'est plus qu'un garde-fou contre une régression future qui rendrait
+ * une vague sans rien consommer ; on la met hors d'atteinte plutôt que juste.
  */
-const RECORD_PASSES = 8;
+const RECORD_PASSES = 64;
 
 /**
  * **Tous** les accouplements réalisables tout de suite, et pas seulement la
@@ -881,7 +893,10 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
     // Une copie par passe : la vraie écurie est celle de l'éleveur, et la
     // parcourir en la vidant effacerait son parc à chaque rendu.
     working = copyStable(working);
-    consumeCouples(working, wave);
+    // `spendCycled` : cette vague ne contient que des couples à zéro place, donc
+    // les deux parents de chacun étaient fécondes. Le vrac doit donc perdre un
+    // fécond avec chaque tête, comme `recordBirths` le fait en base.
+    consumeCouples(working, wave, { spendCycled: true });
     // `consumeCouples` retire la fécondité, pas le cycle. L'accouplement consomme
     // les deux — c'est ce que `recordBirths` écrit en base — et la passe suivante
     // doit voir la même écurie que celle qu'une vraie saisie aurait laissée.
@@ -892,6 +907,10 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
         if (mount) mount.cycled = false;
       }
     }
+    // Et le poulain. Sans lui la passe suivante planifie sur une écurie qui s'est
+    // vidée sans rien produire, la politique change d'avis, et la liste repousse
+    // au rafraîchissement suivant — voir `projectBirths` pour la mesure.
+    projectBirths(working, wave, pass);
   }
 
   return all;

@@ -7,7 +7,13 @@ import {
   pairOutlook,
   type Mate,
 } from './pairing';
-import { isSterile, type Individual, type Sex, type Stable } from './stable';
+import {
+  isSterile,
+  PROJECTED_BIRTH_PREFIX,
+  type Individual,
+  type Sex,
+  type Stable,
+} from './stable';
 
 /**
  * Quelles deux stériles appairer pour cloner — et laquelle on espère récupérer.
@@ -630,9 +636,18 @@ export const unpairedObjectiveSteriles = (
  */
 const PROJECTED_PREFIX = 'clone-a-venir:';
 
-/** `true` pour une monture que `afterClonings` a projetée, donc sans ligne en base. */
+/**
+ * `true` pour une monture **projetée**, donc sans ligne en base : le clone qu'un
+ * clonage rendra comme le poulain qu'un accouplement rendra.
+ *
+ * Les deux préfixes, et non le seul clonage : c'est le même risque, et il n'y a
+ * aucune raison qu'un appelant ait à savoir laquelle des deux projections l'a
+ * fabriquée. Ce qu'il demande, c'est « cet identifiant désigne-t-il une ligne que
+ * je peux écrire ? ».
+ */
 export const isProjected = (id: string | null | undefined): boolean =>
-  typeof id === 'string' && id.startsWith(PROJECTED_PREFIX);
+  typeof id === 'string' &&
+  (id.startsWith(PROJECTED_PREFIX) || id.startsWith(PROJECTED_BIRTH_PREFIX));
 
 /**
  * L'écurie **telle qu'elle sera** une fois les clonages proposés exécutés.

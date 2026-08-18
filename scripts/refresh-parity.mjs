@@ -1,5 +1,5 @@
 /**
- * Réinstaller un champion et refaire les six références de parité.
+ * Réinstaller un champion et refaire les cinq références de parité.
  *
  * ```sh
  * node scripts/refresh-parity.mjs                 # rust/champion.json
@@ -20,12 +20,6 @@
  * nouveau, et l'écran continue de tourner sur l'ancien sans que rien ne le dise.
  * Ici l'oubli est impossible par construction — le même chemin sert aux deux.
  *
- * ## Ce que ça ne régénère pas
- *
- * Les douze plans embarqués de `model-plans/`. Ils viennent de `plan.rs`, joué sur
- * la partie **complète**, alors que le champion du tapis roulant ne décide que de
- * l'appariement et du clonage. Ce sont deux artefacts distincts, et le second ne
- * périme pas le premier.
  */
 
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -116,25 +110,27 @@ if (checkOnly) {
 /* ------------------------------------------------------------ les fixtures */
 
 /**
- * Les six références et leur dumper. `dump-network` et `dump-search` prennent le
+ * Les cinq références et leur dumper. `dump-network` et `dump-search` prennent le
  * champion ; les autres n'en dépendent pas, mais ils dépendent de `FEATURES` et
  * de `trees.json` — les refaire coûte quelques secondes et évite d'avoir à se
  * demander lesquels.
  *
- * `dump-schedule` est de l'ordonnancement pur et `dump-ladder` se déduit de
- * `trees.json` et de `ladder.rs` : les refaire par réflexe évite d'avoir à se
- * demander lequel des deux a bougé.
+ * `dump-ladder` se déduit de `trees.json` et de `ladder.rs` : le refaire par
+ * réflexe évite d'avoir à se demander s'il a bougé.
+ *
+ * `dump-schedule` est parti avec `schedule.ts` : l'ordonnanceur porté n'était plus
+ * appelé par l'écran, et une garde de parité sur du code que personne n'exécute
+ * coûte à chaque vérification sans rien protéger.
  */
 const DUMPS = [
   ['dump-network', 'network-parity.json', true],
   ['dump-census', 'census-parity.json', false],
   ['dump-delta', 'delta-parity.json', false],
   ['dump-search', 'search-parity.json', true],
-  ['dump-schedule', 'schedule-parity.json', false],
   ['dump-ladder', 'ladder-parity.json', false],
 ];
 
-/** Refait les six références dans `outDir`. */
+/** Refait les cinq références dans `outDir`. */
 const runDumps = (outDir) => {
   // Les six dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
   // les demander séparément relançait six fois la même vérification de crate.
@@ -187,7 +183,7 @@ if (checkOnly) {
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search', 'schedule', 'ladder-parity']) {
+for (const guard of ['network', 'census', 'delta', 'search', 'ladder-parity']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {
@@ -223,6 +219,6 @@ if (failed > 0 || stale.length > 0) process.exit(1);
 
 say(
   checkOnly
-    ? '\nles six gardes passent, et les six références se reproduisent'
-    : '\nles six gardes passent — le portage rejoue ce champion-ci'
+    ? '\nles cinq gardes passent, et les cinq références se reproduisent'
+    : '\nles cinq gardes passent — le portage rejoue ce champion-ci'
 );

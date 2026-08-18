@@ -4,6 +4,43 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# What decides what
+
+Four things get called "the policy" in this repo, and confusing them has cost
+real work. This is the map.
+
+**The ladder — `src/lib/dofus/breeding/ladder.ts` ≡ `rust/breeding-sim/src/ladder.rs`.**
+The reference, and the only thing that exists on both sides by design. It builds
+the plan (which colours, which recipes, which gen 1 blocks), crowns a generation
+10 target, and answers the one question everything else asks it: **is this
+crossing admissible** (`aimsAt`). `check-ladder.mjs` holds the rule,
+`check-ladder-parity.mjs` holds the equality between the two ports. A change on
+one side without the other is a bug, not a divergence.
+
+**The champion — `champion.json` + `search.ts`/`census.ts`.**
+A value function that scores a stable, and a hill climb that composes a batch and
+asks it. It decides **which** of the admissible crossings to play, and nothing
+else. It is an artefact of `rust/breeding-neat`, and it is only as good as the
+environment it was scored in — see the `neat-training` skill for two measured
+ways that environment has not matched the app.
+
+**The measurement witnesses — `Greedy` and `Myopic`, in Rust only.**
+They are yardsticks, printed by `bench` and `replay`. **They are never played by
+the app**, and no TypeScript port of them exists. If a number quotes "glouton",
+it is telling you what a reference player would have done, not what your screen
+did. Deleting them would make "is the champion any good" unanswerable, which is
+exactly how the shipped champion spent weeks scoring barely above doing nothing.
+
+**The screen — everything under `src/components/breeding`.**
+Pens, births, cloning advice, extraction, prices, gauges. It reads the plan; it
+does not make one.
+
+What is *not* here any more, and must not come back without a reason: a second
+heuristic player (`next-move.ts`, `loadout.ts`, `simulate.ts`), a pre-computed
+ribbon (`timeline.ts`, `model-plans/`, `plan.rs`) and their guards. They were
+unreachable from the app while still being maintained and checked on every run —
+guards protecting code nobody executed.
+
 # A bug is never fixed in one place
 
 **Before fixing a bug, grep for every other place the same mistake can be made,

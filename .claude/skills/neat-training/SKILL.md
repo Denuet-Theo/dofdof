@@ -156,53 +156,51 @@ knowing on its own, but it makes the two numbers non-comparable.
 
 ## Shipping a champion to the app
 
-The screen does not run the network — it reads a schedule. `plan` emits it, and
-it emits **one per paddock count**, because the breeder's park is not the park
-the champion trained on:
+The app **runs the network**. `policy.ts` compiles `champion.json` and calls it
+on every census the search proposes, so shipping a champion is copying one file
+and re-running the guards:
 
 ```sh
-cd rust
-for n in $(seq 1 12); do
-  ./target/release/plan.exe champion-r5.json --enclos $n \
-    --out "../src/lib/dofus/breeding/model-plans/$n.json"   # --seed, --hours, --rank
-done
-cd ..
-for n in $(seq 1 12); do node scripts/check-plan.mjs "src/lib/dofus/breeding/model-plans/$n.json"; done
+cp rust/champion-e2.json src/lib/dofus/breeding/champion.json
+node scripts/check-network.mjs      # the port evaluates it like Rust does
+node scripts/check-search.mjs       # and composes the same plans
+node scripts/policy-report.mjs      # it still mates, and what it aims at
+rust/target/release/replay.exe src/lib/dofus/breeding/champion.json
 ```
 
-`--enclos` sets the whole park and lets `split` in `plan.rs` decide how to cut
-it — block only below four paddocks, block plus one free unit above. That
-threshold is a measurement, not a preference; the table is in the doc comment,
-and re-deriving it after an economy change is a `replay` sweep, not a guess.
+`replay` is the number to quote. It plays 200 sealed seeds on the full economy
+and prints the greedy and myopic baselines beside it — **both of which the app
+never runs**; they exist so that "did it learn anything" has an answer.
 
-Each size is a **played game at that size**, never the six-paddock plan scaled.
-Extrapolating would reintroduce exactly the guessing this whole crate exists to
-replace.
+The ribbon that used to read a pre-computed schedule is gone, and `plan.rs`,
+`model-plans/`, `model-plan.ts`, `timeline.ts` and `check-plan.mjs` went with
+it. Do not re-emit per-paddock plans: the screen composes its batch live, from
+the breeder's own stable and prices, which is the whole point of running the
+network in the browser.
 
-Twelve plans are 748 KB, so `model-plan.ts` imports them one at a time through a
-lazy map keyed by size. Adding a size means adding a line there too — the paths
-have to stay statically readable or the bundler cannot split them.
+## What the champion is trained on, and why that has been wrong
 
-The validation step is not optional. `check-plan.mjs` validates with the screen's
-own `parsePlan` from `src/lib/dofus/breeding/timeline.ts`, so a field renamed on
-either side fails loudly instead of rendering an empty ribbon. It caught a real
-overrun the first time it ran.
+Two mismatches between the training environment and the app, both measured on
+2026-08-18. Read them before trusting a new champion.
 
-One thing the emitted plan deliberately does not contain, so don't "fix" it by
-inventing values: **refuel events**. The economy has a price per point and no
-tank capacity, so the plan says how many *points* each gauge needs — which is
-true — rather than a number of refills, which would not be. The Mangeoire is
-the exception: `points_par_unite` is in `economy.toml`, so there it counts
-Extraits.
+**The treadmill cannot teach the enclos.** `play_treadmill` calls the optimiser
+with `capacity: 0` (`treadmill.rs:457`), and `random_action` only offers
+`Action::Cycle` when `places < capacity`. So a champion trained there has never
+been scored on "bank this mount rather than cross it" — and
+`empty_place_genetons`, the lever the maintainer added to make banking
+arbitrable, is dead code for the same reason: `applied.places` is always 0.
+The app then runs that champion with capacity > 0. It hoarded: half a pen in
+"à féconder sans croiser", and 44 fécondes held against 8 spent. Both were
+patched app-side (#224, #227) rather than trained.
 
-`buy` events carry a **deadline**, not an action time: `at` is the moment the
-thing must already be there. Mounts are named with `itemName` from `trees.json`
-("Muldo Doré"), not `name` ("Dore") — the former is what you type into the
-market search.
+**Training does not apply the ladder.** The app passes
+`SearchConfig.admissible` — `aimsAt` against the crowned ladder — so it only
+ever plays crossings the ladder allows. Training passes nothing, so the champion
+learns to choose in a **wider** space than the one it plays in, and part of what
+it learned is unusable. Closing this means threading the ladder into
+`Searching` in `main.rs`.
 
-A plan belongs to its `--seed`: the counts come from one game that actually ran.
-The durations and the ordering carry the model's decision; the per-gesture
-counts do not.
+Until both are closed, a training round measures a game the app does not play.
 
 ## Retargeting at another mount family
 
@@ -215,7 +213,7 @@ those rather than a second hardcoded helper.
 
 **The sizes already hold.** dragodinde has 66 colours, muldo 120, volkorne 120,
 against `MAX_COLORS = 128`; all three top out at generation 10, against
-`MAX_GENERATION = 10`. `FEATURES = 54` counts by generation and not by colour,
+`MAX_GENERATION = 10`. `FEATURES` (75 today) counts by generation and not by colour,
 so the encoding is identical across families and a genome is structurally
 loadable from one to another.
 

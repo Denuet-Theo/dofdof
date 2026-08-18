@@ -1,5 +1,5 @@
 /**
- * Réinstaller un champion et refaire les cinq références de parité.
+ * Réinstaller un champion et refaire les six références de parité.
  *
  * ```sh
  * node scripts/refresh-parity.mjs                 # rust/champion.json
@@ -110,7 +110,7 @@ if (checkOnly) {
 /* ------------------------------------------------------------ les fixtures */
 
 /**
- * Les cinq références et leur dumper. `dump-network` et `dump-search` prennent le
+ * Les six références et leur dumper. `dump-network` et `dump-search` prennent le
  * champion ; les autres n'en dépendent pas, mais ils dépendent de `FEATURES` et
  * de `trees.json` — les refaire coûte quelques secondes et évite d'avoir à se
  * demander lesquels.
@@ -128,9 +128,10 @@ const DUMPS = [
   ['dump-delta', 'delta-parity.json', false],
   ['dump-search', 'search-parity.json', true],
   ['dump-ladder', 'ladder-parity.json', false],
+  ['dump-ladder-policy', 'ladder-policy-parity.json', false],
 ];
 
-/** Refait les cinq références dans `outDir`. */
+/** Refait les six références dans `outDir`. */
 const runDumps = (outDir) => {
   // Les six dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
   // les demander séparément relançait six fois la même vérification de crate.
@@ -183,7 +184,7 @@ if (checkOnly) {
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search', 'ladder-parity']) {
+for (const guard of ['network', 'census', 'delta', 'search', 'ladder-parity', 'ladder-policy']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {
@@ -219,6 +220,6 @@ if (failed > 0 || stale.length > 0) process.exit(1);
 
 say(
   checkOnly
-    ? '\nles cinq gardes passent, et les cinq références se reproduisent'
-    : '\nles cinq gardes passent — le portage rejoue ce champion-ci'
+    ? '\nles six gardes passent, et les six références se reproduisent'
+    : '\nles six gardes passent — le portage rejoue ce champion-ci'
 );

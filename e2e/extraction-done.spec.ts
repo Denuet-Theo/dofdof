@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mockSupabase } from './support/supabase';
-import { openBirthDialog, openBreeding } from './support/breeding';
+import { openBreeding } from './support/breeding';
 
 /**
  * Enregistrer une extraction, et l'ordre des deux listes.

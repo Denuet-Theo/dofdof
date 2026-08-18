@@ -56,8 +56,24 @@ test.describe('clonage — une seule liste', () => {
     await bouton.click();
     await expect(page.getByRole('heading', { name: /^Clonage 1 \/ \d+$/ })).toBeVisible();
 
+    // ## Deux exemplaires indiscernables ne font qu'une carte
+    //
+    // `cloneOptions` met les **doublons en tête** — deux stériles de même nom se
+    // clonent en une recherche au lieu de deux, ce qui va environ cinq fois plus
+    // vite en jeu. La première paire du lot est donc souvent l'une d'elles, et la
+    // fenêtre l'affiche « × 2 » plutôt qu'en deux cartes jumelles : demander de
+    // choisir entre deux choses identiques est une question sans réponse. Voir
+    // `clone-twin`.
+    //
+    // La propriété testée ici n'en dépend pas : c'est que la fenêtre ouvre sur le
+    // couple que la liste affiche en premier. On la lit donc sur l'ensemble des
+    // noms, et le nombre de cartes se vérifie selon le cas.
+    const jumelles =
+      (await page.getByTestId('clone-pair').getAttribute('data-duplicate')) === 'true';
     const cartes = await codesOf(page, 'clone-card');
-    expect([...cartes].sort()).toEqual([...attendu].sort());
+    expect(new Set(cartes)).toEqual(new Set(attendu));
+    if (jumelles) await expect(page.getByTestId('clone-twin')).toBeVisible();
+    else expect([...cartes].sort()).toEqual([...attendu].sort());
   });
 
   test('aucune anonyme, ni dans la liste ni dans la fenêtre', async ({ page }) => {

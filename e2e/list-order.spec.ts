@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mockSupabase } from './support/supabase';
-import { openBirthDialog, openBreeding, panels } from './support/breeding';
+import { openBirthDialog, openBreeding } from './support/breeding';
 
 /**
  * L'ordre des gestes du jour : par génération cible croissante.
@@ -58,5 +58,58 @@ test.describe('l’ordre des gestes du jour', () => {
       .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('data-generation'))));
     expect(generations.length, 'la fixture doit porter plusieurs rangs').toBeGreaterThan(1);
     expect(generations, 'la liste doit monter').toEqual([...generations].sort((a, b) => a - b));
+  });
+
+  test('les doublons passent en tête de leur génération', async ({ page }) => {
+    // Deux stériles de même nom se clonent en une seule recherche dans l'écurie
+    // du jeu : l'éleveur mesure ça environ cinq fois plus rapide que deux noms
+    // différents. L'ordre doit donc les remonter — sans casser la génération
+    // croissante, qui reste l'ordre principal.
+    await mockSupabase(page);
+    await openTab(page, 'clone');
+    await page
+      .getByTestId('pane-clone')
+      .getByRole('button', { name: /clonages? à faire/ })
+      .click();
+    await expect(page.getByTestId('clone-pair')).toBeVisible();
+
+    /** La liste parcourue : une entrée par paire, dans l'ordre affiché. */
+    const seen: { generation: number; duplicate: boolean }[] = [];
+    //
+    // On avance avec « Passer », qui est le seul moyen de descendre la liste sans
+    // rien écrire — il retire la paire de la session, donc la dernière fait
+    // disparaître la carte. C'est la condition d'arrêt.
+    for (let step = 0; step < 60; step += 1) {
+      const pair = page.getByTestId('clone-pair');
+      if ((await pair.count()) === 0) break;
+      seen.push({
+        generation: Number(await pair.getAttribute('data-generation')),
+        duplicate: (await pair.getAttribute('data-duplicate')) === 'true',
+      });
+      const skip = page.getByTestId('clone-skip');
+      if ((await skip.count()) === 0 || !(await skip.isEnabled())) break;
+      await skip.click();
+    }
+
+    expect(seen.length, 'la fixture doit porter plusieurs clonages').toBeGreaterThan(4);
+    expect(
+      seen.some((entry) => entry.duplicate),
+      'et au moins un doublon, sans quoi le test ne prouve rien'
+    ).toBe(true);
+
+    // Génération croissante : l'ordre principal, inchangé.
+    const generations = seen.map((entry) => entry.generation);
+    expect(generations, 'générations croissantes').toEqual([...generations].sort((a, b) => a - b));
+
+    // Et dans chaque génération, aucun doublon après un non-doublon.
+    for (const generation of new Set(generations)) {
+      const block = seen.filter((entry) => entry.generation === generation);
+      const firstPlain = block.findIndex((entry) => !entry.duplicate);
+      if (firstPlain === -1) continue;
+      expect(
+        block.slice(firstPlain).some((entry) => entry.duplicate),
+        `gén. ${generation} : un doublon est passé derrière un non-doublon`
+      ).toBe(false);
+    }
   });
 });

@@ -394,6 +394,46 @@ const optionFor = (
 };
 
 /** Ce qui sert le projet passe devant, avant toute comparaison de kamas. */
+/**
+ * Deux stériles **indiscernables** : même couleur, même ascendance, même sexe,
+ * même nom porté.
+ *
+ * ## Pourquoi le nom, alors que l'ascendance suffisait
+ *
+ * Pour l'espérance, elle suffit : c'est elle qui met `keepChance` à 1. Mais le
+ * geste se fait dans le jeu, et là c'est le **nom** qui compte — cloner deux
+ * exemplaires du même nom se fait en une recherche au lieu de deux, et l'éleveur
+ * le mesure à environ **cinq fois plus rapide**. C'est un gain de temps réel, pas
+ * une préférence d'affichage.
+ *
+ * ## Les deux critères coïncident, et on ne fait pas semblant
+ *
+ * « Même nom donc même ascendance » est une invariante de cet outil : le nom est
+ * généré depuis la couleur, l'ascendance et le sexe (voir `naming.ts`). Vérifiée
+ * sur l'écurie réelle du 17/08 — 145 montures nommées, 83 noms distincts, dont
+ * `G1 DO F DO-IN` porté par sept montures : **aucun** nom porté par deux
+ * ascendances différentes.
+ *
+ * On la vérifie quand même à chaque paire au lieu de s'y fier. Si elle cassait un
+ * jour — une monture achetée qu'on renomme comme une autre — une paire de même
+ * nom serait mise en tête alors que son clone est à pile ou face, et l'écran
+ * conseillerait la vitesse au prix d'une lignée sans le dire. Le prédicat, lui,
+ * refuse simplement de la reconnaître.
+ */
+export const indistinguishablePair = (
+  a: { colorId: string; sex: Sex; name: string | null; parents: readonly string[] | null },
+  b: { colorId: string; sex: Sex; name: string | null; parents: readonly string[] | null }
+): boolean =>
+  a.colorId === b.colorId &&
+  a.sex === b.sex &&
+  a.name === b.name &&
+  (a.parents ?? []).join('+') === (b.parents ?? []).join('+');
+
+/** Les doublons en tête : voir `indistinguishablePair`. */
+const duplicateFirst = (a: CloneOption, b: CloneOption) =>
+  Number(indistinguishablePair(b.keep, b.partner)) -
+  Number(indistinguishablePair(a.keep, a.partner));
+
 const objectiveFirst = (a: { servesObjective: boolean }, b: { servesObjective: boolean }) =>
   Number(b.servesObjective) - Number(a.servesObjective);
 
@@ -545,6 +585,12 @@ export const cloneOptions = (
    * et une progression basse-vers-haute se suit sans perdre sa place. C'est l'ordre
    * que l'éleveur a demandé.
    *
+   * Puis, **à génération égale, les doublons** : deux stériles de même nom se
+   * clonent en une recherche au lieu de deux, ce qui va environ cinq fois plus
+   * vite dans le jeu. Voir `indistinguishablePair`. À génération égale ils ne
+   * coûtent rien à privilégier — ils ont déjà `keepChance` à 1, donc le meilleur
+   * gain aussi.
+   *
    * Ce que ça relègue au départage : « ce qui sert le projet passe devant », puis le
    * meilleur gain. Les deux tenaient — le premier surtout, qui met en tête ce qu'il
    * ne faut pas détruire. Ils restent, mais **à génération égale** seulement, si
@@ -558,7 +604,10 @@ export const cloneOptions = (
   return options
     .sort(
       (a, b) =>
-        a.keep.generation - b.keep.generation || objectiveFirst(a, b) || b.gain - a.gain
+        a.keep.generation - b.keep.generation ||
+        duplicateFirst(a, b) ||
+        objectiveFirst(a, b) ||
+        b.gain - a.gain
     )
     .slice(0, limit);
 };

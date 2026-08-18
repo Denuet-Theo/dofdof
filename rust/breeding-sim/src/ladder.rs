@@ -157,7 +157,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::economy::{MAX_UNITS, Policy, Rng, Strategy, UnitPlan, UnitView};
+use crate::economy::{Economy, MAX_UNITS, Policy, Rng, Strategy, UnitPlan, UnitView};
 use crate::pairing::{MateSignature, pair_outlook};
 use crate::stable::{Sex, Stable};
 use crate::trees::{Catalog, ColorId};
@@ -2276,6 +2276,39 @@ impl LadderPolicy {
     /// qu'une de ses cibles sort du plan. Quand plusieurs couleurs voulues sont
     /// atteignables, on retient **la plus probable** : `target_colors` est
     /// triée par poids décroissant.
+    /// Poser la couronne, si elle ne l'est pas déjà.
+    ///
+    /// Appelée par `plan` à la première fournée — les prix du jour, que seule la
+    /// partie connaît, décident laquelle. Publique parce que la **recherche** en a
+    /// besoin aussi : quand on entraîne le champion sous les contraintes de
+    /// l'échelle, il faut que le plan soit couronné avant que `aims_at` réponde,
+    /// sinon le filtre laisserait passer des croisements que la politique mesurée
+    /// refuse. Voir `Searcher::admissible`.
+    pub fn crown(&mut self, catalog: &Catalog, economy: &Economy) {
+        if self.crowned {
+            return;
+        }
+        let choice = self.forced_crown.or_else(|| match self.crowning {
+            Crowning::PriceOnly => None,
+            // Le partenaire d'abord : voir `Crowning` pour le relevé, et pour les
+            // deux explications que la mesure a écartées.
+            Crowning::PartnerThenPrice => self.ladder.best_partner_crown(catalog, economy),
+        });
+        self.ladder.crown_at(catalog, economy, choice);
+        self.admissible.clear();
+        self.crowned = true;
+    }
+
+    /// Ce couple monte-t-il, et vers une couleur du plan ? Voir `aims_at`.
+    pub fn admits(
+        &mut self,
+        catalog: &Catalog,
+        male: &crate::pairing::Mate,
+        female: &crate::pairing::Mate,
+    ) -> bool {
+        self.aims_at(catalog, male, female).is_some()
+    }
+
     fn aims_at(
         &mut self,
         catalog: &Catalog,
@@ -2333,19 +2366,7 @@ impl Policy for LadderPolicy {
 
         // La couronne dépend des prix du jour, que seule la partie connaît : on
         // la pose à la première fournée, une fois pour toutes.
-        if !self.crowned {
-            let choice = self.forced_crown.or_else(|| match self.crowning {
-                Crowning::PriceOnly => None,
-                // Le partenaire d'abord : voir `Crowning` pour le relevé, et pour
-                // les deux explications que la mesure a écartées.
-                Crowning::PartnerThenPrice => {
-                    self.ladder.best_partner_crown(catalog, view.economy)
-                }
-            });
-            self.ladder.crown_at(catalog, view.economy, choice);
-            self.admissible.clear();
-            self.crowned = true;
-        }
+        self.crown(catalog, view.economy);
 
         // Ce que l'écurie tient déjà de chaque couleur voulue : c'est le
         // dénominateur du ratio, donc ce qui décide quoi fabriquer ensuite.

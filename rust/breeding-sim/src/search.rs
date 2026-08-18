@@ -43,6 +43,7 @@ use std::sync::Arc;
 use crate::economy::{Economy, MAX_UNITS, Rng, Strategy, UnitPlan, UnitView};
 use crate::encode::{Census, PairDelta};
 use crate::pairing::{Mate, MateSignature};
+use crate::ladder::{LadderPolicy, Route};
 use crate::stable::{Sex, Stable};
 use crate::trees::{Catalog, ColorId};
 
@@ -150,6 +151,24 @@ pub struct Searcher {
     /// passe son temps à recalculer des lignées.
     cache: HashMap<(MateSignature, MateSignature, u16, u8), Option<Arc<PairDelta>>>,
     pub config: SearchConfig,
+    /// Ce que l'échelle accepte, ou `None` — et `None` est le défaut.
+    ///
+    /// ## Le décalage que ça ferme
+    ///
+    /// L'écran passe déjà ce filtre (`SearchConfig.admissible`, côté TypeScript) :
+    /// il ne joue **que** les croisements que l'échelle autorise. L'entraînement,
+    /// lui, n'en passait aucun. Le champion apprenait donc à choisir dans un
+    /// espace **plus large** que celui où il joue, et une part de ce qu'il a
+    /// appris — préférer des croisements que l'écran lui refusera — est
+    /// inutilisable par construction.
+    ///
+    /// C'est la troisième forme du même défaut, après l'ambre et la fécondation :
+    /// une décision que l'environnement d'entraînement ne pose pas comme l'app la
+    /// pose. Voir `AGENTS.md`, « What decides what ».
+    ///
+    /// Fermé par défaut, et il le faut : `check-search.mjs` compare des plans
+    /// entiers au portage, qui n'ouvre le filtre que depuis l'écran.
+    pub admissible: Option<LadderPolicy>,
 }
 
 impl Default for Searcher {
@@ -196,6 +215,7 @@ impl Searcher {
         Self {
             cache: HashMap::new(),
             config,
+            admissible: None,
         }
     }
 
@@ -372,6 +392,14 @@ impl Searcher {
 
         let mut out = Vec::with_capacity(pairs.len());
         for (male_side, female_side, male, female) in pairs {
+            // La règle de l'échelle entre **dans** la recherche et non après elle :
+            // filtrer le plan rendu laisserait la montée dépenser ses places en
+            // croisements qu'on jette ensuite. Même raison que côté écran.
+            if let Some(policy) = self.admissible.as_mut()
+                && !policy.admits(catalog, &male, &female)
+            {
+                continue;
+            }
             if let Some(delta) = self.delta(catalog, economy, &male, &female, strategy) {
                 out.push(Candidate {
                     male: male_side,
@@ -897,6 +925,17 @@ impl<V: ValueFn> Searching<V> {
     /// Ferme l'extraction en ambre. Voir `SearchConfig::sacrifices`.
     pub fn without_sacrifices(mut self) -> Self {
         self.searcher.config.sacrifices = false;
+        self
+    }
+
+    /// N'autoriser que les croisements de l'échelle. Voir `Searcher::admissible`.
+    ///
+    /// La couronne se pose ici, une fois : `aims_at` ne répond juste que sur un
+    /// plan couronné, et la recherche n'a pas d'endroit où le faire plus tard.
+    pub fn under_ladder(mut self, catalog: &Catalog, economy: &Economy, route: Route) -> Self {
+        let mut policy = LadderPolicy::new(catalog, route);
+        policy.crown(catalog, economy);
+        self.searcher.admissible = Some(policy);
         self
     }
 

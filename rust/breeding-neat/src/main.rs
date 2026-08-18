@@ -37,6 +37,7 @@ use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, NeverBreeds, play};
 use breeding_sim::encode::{Census, FEATURES};
+use breeding_sim::ladder::Route;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
 use breeding_sim::treadmill::{StartState, TreadmillConfig, play_treadmill};
 use breeding_sim::trees::{Catalog, muldo};
@@ -88,6 +89,8 @@ struct Options {
     /// perte qu'on ne peut pas se permettre.
     resume: Option<String>,
     env: Env,
+    /// Entraîner sous les contraintes de l'échelle. Voir `policy_of`.
+    ladder: bool,
     /// Cycles d'un épisode de tapis. Sans effet sur l'économie complète.
     cycles: usize,
     /// Montures de l'écurie de départ, sur le tapis. Le levier de coût principal.
@@ -113,6 +116,7 @@ impl Options {
             seed: 20_260_808,
             resume: None,
             env: Env::Economy,
+            ladder: false,
             cycles: 30,
             mounts: TreadmillConfig::default().mounts,
             sealed: false,
@@ -144,6 +148,7 @@ impl Options {
                         _ => Env::Economy,
                     }
                 }
+                "--ladder" => options.ladder = value != "off" && value != "0",
                 "--cycles" => options.cycles = value.parse().unwrap_or(options.cycles),
                 "--mounts" => options.mounts = value.parse().unwrap_or(options.mounts),
                 _ => {}
@@ -167,13 +172,25 @@ impl Options {
 /// est en génétons, donc les kamas qu'un sacrifice rapporte n'y entrent pas. Il
 /// ne sert qu'à tenir l'écurie, jamais à extraire de la valeur — et c'est
 /// exactement la distinction demandée.
+/// La politique d'un génome, telle que l'entraînement la joue.
+///
+/// `ladder` ferme l'espace des croisements sur ce que l'échelle autorise — ce que
+/// l'écran fait **déjà** quand il joue le champion. Sans lui, le génome apprend à
+/// choisir dans un espace plus large que celui où il jouera, et une part de ce
+/// qu'il a appris est inutilisable par construction. Voir `Searcher::admissible`.
 fn policy_of<'a>(
     network: &'a Network,
     genome: &Genome,
     iterations: usize,
     _env: Env,
+    ladder: Option<(&Catalog, &Economy)>,
 ) -> Searching<NetValue<'a>> {
-    Searching::with_iterations(NetValue(network), iterations).with_strategies(genome.strategies)
+    let policy =
+        Searching::with_iterations(NetValue(network), iterations).with_strategies(genome.strategies);
+    match ladder {
+        Some((catalog, economy)) => policy.under_ladder(catalog, economy, Route::default()),
+        None => policy,
+    }
 }
 
 fn fitness(
@@ -185,6 +202,7 @@ fn fitness(
     env: Env,
     cycles: usize,
     mounts: usize,
+    ladder: bool,
 ) -> f64 {
     let network = Network::compile(genome);
     if !network.is_connected() {
@@ -209,7 +227,13 @@ fn fitness(
     let total: f64 = seeds
         .iter()
         .map(|&seed| {
-            let mut policy = policy_of(&network, genome, iterations, env);
+            let mut policy = policy_of(
+                &network,
+                genome,
+                iterations,
+                env,
+                ladder.then_some((catalog, economy)),
+            );
             match env {
                 Env::Economy => play(catalog, economy, &mut policy, seed).score as f64,
                 // Les génétons, et rien d'autre. Ils ne tombent qu'à la naissance
@@ -286,7 +310,7 @@ fn treadmill_behaviour(
     let runs: Vec<_> = seeds
         .par_iter()
         .map(|&seed| {
-            let mut policy = policy_of(&network, genome, iterations, Env::Treadmill);
+            let mut policy = policy_of(&network, genome, iterations, Env::Treadmill, None);
             play_treadmill(catalog, economy, &mut policy, seed, &config)
         })
         .collect();
@@ -879,7 +903,7 @@ fn main() {
             .map(|genome| {
                 fitness(
                     &catalog, &economy, genome, &seeds, options.iterations, options.env,
-                    options.cycles, options.mounts,
+                    options.cycles, options.mounts, options.ladder,
                 )
             })
             .collect();
@@ -1162,6 +1186,7 @@ fn main() {
                     options.env,
                     options.cycles,
                     options.mounts,
+                    options.ladder,
                 ),
             )
         })
@@ -1435,7 +1460,7 @@ fn main() {
                 .map(|&seed| {
                     if learned {
                         let mut policy =
-                            policy_of(&network, &best, options.iterations, Env::Treadmill);
+                            policy_of(&network, &best, options.iterations, Env::Treadmill, None);
                         play_treadmill(&catalog, &economy, &mut policy, seed, &config)
                     } else {
                         let mut policy = Searching::with_iterations(Myopic, options.iterations);

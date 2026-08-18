@@ -614,6 +614,18 @@ impl Census {
         sum
     }
 
+    /// Les fécondes **encore en stock**, tous rangs et deux sexes confondus.
+    ///
+    /// Une féconde est une place d'enclos déjà payée qui n'a rien produit. La
+    /// garder n'est pas neutre : c'est du capital immobilisé, et le réseau ne le
+    /// sait pas — ses poids sur `cycled_*` viennent du tapis roulant, où la
+    /// fécondité tombe au hasard et ne s'achète pas. D'où cet accesseur, qui
+    /// permet de **mesurer** ce que coûte cette lecture-là. Voir `replay`.
+    #[inline]
+    pub fn cycled_held(&self) -> f64 {
+        self.cycled_males.iter().chain(self.cycled_females.iter()).sum()
+    }
+
     #[inline]
     pub fn kamas(&self) -> f64 {
         self.kamas

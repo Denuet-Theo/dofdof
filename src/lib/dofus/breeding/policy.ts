@@ -44,7 +44,7 @@
 
 import championArtifact from './champion.json';
 import { compile, evaluate, isConnected, type Champion } from './network';
-import { featuresOf, pairDelta, type EconomyView } from './census';
+import { featuresOf, pairDelta, MAX_GENERATION, type Census, type EconomyView } from './census';
 import {
   createSearcher,
   flatten,
@@ -374,6 +374,60 @@ export type PolicyInput = {
   iterations?: number;
 };
 
+/**
+ * Ce qu'on retire au score pour chaque **féconde restée en stock**.
+ *
+ * ## Le défaut
+ *
+ * Une féconde est une place d'enclos déjà payée qui n'a encore rien produit.
+ * Le réseau, lui, la compte comme un actif : ses poids sur `cycledMales` /
+ * `cycledFemales` sont francs et positifs — sur une écurie qu'il note 9,92, en
+ * tenir une de gen 4 vaut +1,48. Il paie donc pour en fabriquer (fermé par
+ * `pairedBanking`) **et** pour ne pas les dépenser : sur l'écurie qui l'a fait
+ * remonter, 44 fécondes en stock, 8 dépensées, un seul accouplement sans enclos
+ * là où la valeur myope en fait cinq.
+ *
+ * La cause est la même que pour la mise en banque : le champion vient du tapis
+ * roulant, où la fécondité **tombe au hasard** et ne s'achète pas. « Plus de
+ * fécondes » y était le signe d'une bonne écurie, jamais une décision. Ici c'en
+ * est une, et il la prend à l'envers.
+ *
+ * ## Pourquoi trois, et pourquoi ce n'est pas un réglage
+ *
+ * Balayé par `replay`, 200 graines scellées, économie complète :
+ *
+ * | pénalité | score médian | gen 10 tenues | croisements | achats |
+ * | --- | --- | --- | --- | --- |
+ * | 0 — aujourd'hui | 28,03 M | 17,8 | 390 | 270 |
+ * | 1 | 28,80 M | 21,0 | 348 | 207 |
+ * | **3** | **30,58 M** | **22,7** | 331 | 189 |
+ * | 10 | 30,58 M | 22,7 | 331 | 189 |
+ * | 30 | 30,58 M | 22,7 | 331 | 189 |
+ *
+ * **+2,55 M et +4,9 gen 10**, avec moins de croisements et moins d'achats. Et
+ * la courbe **sature** à 3 : au-delà, le plan ne bouge plus d'une action. Ce
+ * n'est donc pas une constante à régler mais une **règle** que trois suffit à
+ * exprimer — à valeur égale, dépenser une féconde plutôt que la garder. Un
+ * nombre plus grand ne dirait rien de plus ; un plus petit dirait moins.
+ *
+ * ## Ce que ça ne dit pas
+ *
+ * Le même tableau donne 57,23 M au glouton et 43,11 M à la valeur myope. Le
+ * champion perd contre les deux sur cette économie — il a été sélectionné sur le
+ * tapis, qui n'en a pas — et cette pénalité ne referme pas cet écart-là. Elle
+ * corrige une lecture fausse, elle ne remplace pas un réentraînement.
+ */
+const UNSPENT_FERTILITY = 3;
+
+/** Les fécondes encore en stock, tous rangs et les deux sexes. */
+const cycledHeld = (census: Census): number => {
+  let held = 0;
+  for (let generation = 0; generation <= MAX_GENERATION; generation += 1) {
+    held += census.cycledMales[generation] + census.cycledFemales[generation];
+  }
+  return held;
+};
+
 const DEFAULT_SEED = 1;
 
 /**
@@ -488,7 +542,9 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       loadKamas: input.loadKamas,
     },
     seededRandom(input.seed ?? DEFAULT_SEED),
-    (census) => evaluate(network, featuresOf(census, input.colors, economy))
+    (census) =>
+      evaluate(network, featuresOf(census, input.colors, economy)) -
+      UNSPENT_FERTILITY * cycledHeld(census)
   );
 
   const read = readPlan(plan, mounts, input, generations, economy, strategy);

@@ -44,6 +44,23 @@ impl ValueFn for NetValue<'_> {
     }
 }
 
+/// Le champion, moins ce que coûtent les fécondes qu'il n'a pas dépensées.
+///
+/// Une féconde en stock est une place d'enclos déjà payée qui n'a rien produit.
+/// Le réseau, lui, la compte comme un actif : ses poids sur `cycled_*` sont
+/// francs et positifs, et ils viennent du tapis roulant, où `Action::Cycle`
+/// n'était **jamais proposable** (`capacity: 0`) et où la fécondité tombait au
+/// hasard. Il n'a donc jamais été noté ni sur en fabriquer, ni sur en garder.
+///
+/// On ne devine pas le bon poids : on le balaye et on lit le score.
+struct PenalisedNet<'a>(&'a Network, f64);
+
+impl ValueFn for PenalisedNet<'_> {
+    fn value(&self, census: &Census, catalog: &Catalog, economy: &Economy) -> f64 {
+        self.0.value(&census.features(catalog, economy)) - self.1 * census.cycled_held()
+    }
+}
+
 /// Le rang à lire dans un `finalists.json`. C'est ce qui permet de rejouer une
 /// stratégie alternative et de comparer les **comportements** et pas seulement
 /// les scores.
@@ -125,6 +142,22 @@ fn main() {
             })
             .collect();
         reports.push(("recherche / NEAT".to_string(), outcomes));
+
+        // Le balayage de la pénalité, sur les mêmes graines et la même économie.
+        // 3 est ce que l'app applique (`UNSPENT_FERTILITY`) ; 1 et 10 encadrent,
+        // et montrent que la courbe sature — au-delà de 3 le plan ne bouge plus.
+        for lambda in [1.0_f64, 3.0, 10.0] {
+            let outcomes = seeds()
+                .collect::<Vec<u32>>()
+                .par_iter()
+                .map(|&seed| {
+                    let mut policy = Searching::new(PenalisedNet(&network, lambda))
+                        .with_strategies(genome.strategies);
+                    play(&catalog, &economy, &mut policy, seed)
+                })
+                .collect();
+            reports.push((format!("NEAT / pénalité {lambda}"), outcomes));
+        }
     }
 
     println!("{} parties par politique, graines {:?}\n", seeds().len(), seeds());

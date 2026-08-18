@@ -902,51 +902,6 @@ export const crownedLadderOf = (
  * zéro, pas une exploitation du sommet ; l'y admettre en silence changerait la
  * politique sans que rien ne l'ait mesurée. C'est un plan à part.
  */
-/**
- * Ce qu'on fait d'un croisement du sommet — celui qui ne peut plus monter.
- *
- * ## Pourquoi trois valeurs et non un booléen
- *
- * Le booléen confondait deux choses que la mesure sépare :
- *
- * - **`'all'`** est la boucle du forum, `Summit::Duplicate` côté Rust : accoupler
- *   n'importe quelle gen 10 avec n'importe quoi pour en refaire. Elle gagne 43 M
- *   dans le modèle et perd dans le jeu, parce que le modèle vend la 162ᵉ gen 10
- *   au prix de la première. Elle reste éteinte.
- * - **`'target'`** ne retient que les croisements qui nomment une couleur de
- *   `ladder.summit`, c'est-à-dire **ce pour quoi l'échelle a été construite**.
- *
- * La distinction n'est pas de degré. L'objection au sommet est une objection de
- * **marché** — on ne vend pas cent gen 10 — et elle ne dit rien de l'éleveur qui
- * en veut **une**, nommée, parce que c'est son projet. Refuser ces
- * croisements-là revenait à refuser la seule route vers la couleur que l'écran
- * affiche en cible.
- *
- * ## Ce que ça ouvrait, mesuré
- *
- * Sur l'écurie qui l'a fait remonter : cible Azur-Doré, dont la seule recette est
- * `Azur (g9) × Doré (g1)` — un Azur gen 9 que l'éleveur n'a pas. Il tient en
- * revanche deux gen 10 azurées, et **26 partenaires de son coffre** nomment
- * Azur-Doré avec elles, jusqu'à **13,95 %** sur une simple Doré gen 1. `climbs`
- * rendait `false` sur les 26 — une gen 10 ne monte pas — donc `aimsAt` rendait
- * `null`, donc la recherche ne les voyait pas et l'écran ne proposait aucune
- * tentative.
- *
- * ## Ce que ça n'ouvre pas
- *
- * Le reste du sommet. Un croisement qui ne nomme que d'autres gen 10 reste
- * refusé, donc la boucle qui accumule n'est toujours pas représentable. Et la
- * fécondité borne le débit d'elle-même : chaque tentative consomme la gen 10
- * qu'elle emploie.
- */
-export type SummitRule =
-  /** Rien. La fécondité d'une gen 10 se garde, faute de savoir quoi en faire. */
-  | 'hold'
-  /** Les croisements qui nomment une couleur de `ladder.summit`, et eux seuls. */
-  | 'target'
-  /** La boucle entière. Mesurée, écrite, prête — et éteinte. Voir `aimsAtSummit`. */
-  | 'all';
-
 export const aimsAt = (
   male: Mate,
   female: Mate,
@@ -954,26 +909,20 @@ export const aimsAt = (
   generations: Map<string, number>,
   ladder: Ladder,
   /**
-   * Ce qu'on accepte au **sommet**, là où le plafond interdit de monter. Voir
-   * `aimsAtSummit`.
+   * Admettre aussi les croisements du **sommet**, ceux que le plafond empêche de
+   * monter. Voir `aimsAtSummit`.
    *
-   * `'hold'` par défaut, comme `Summit::Hold` côté Rust, et pour la raison qui y
-   * est écrite : la boucle de duplication gagne dans le modèle et perd au
-   * marché, que le modèle ne sait pas encore chiffrer. Les deux défauts doivent
-   * bouger ensemble, sans quoi l'écran proposerait ce que la politique mesurée
-   * refuse.
+   * `false` par défaut, comme `Summit::Hold` côté Rust — et pour la raison qui y
+   * est écrite : la boucle gagne dans le modèle et perd au marché, que le modèle
+   * ne sait pas encore chiffrer. Les deux défauts doivent bouger ensemble, sans
+   * quoi l'écran proposerait ce que la politique mesurée refuse.
    */
-  summit: SummitRule = 'hold'
+  summit = false
 ): string | null => {
   const outlook = pairOutlook(male, female, colors, generations);
   if (!outlook || outlook.targetColors.length === 0) return null;
   if (!climbs(outlook)) {
-    if (summit === 'hold' || !aimsAtSummit(outlook, generations)) return null;
-    if (summit === 'all') return outlook.targetColors[0].colorId;
-    // `'target'` : on ne retient que ce qui nomme la couleur pour laquelle
-    // l'échelle entière existe, et on rend **celle-là** plutôt que la plus
-    // probable — c'est ce que la tentative vise, et ce que l'écran doit dire.
-    return outlook.targetColors.find((t) => ladder.summit.includes(t.colorId))?.colorId ?? null;
+    return summit && aimsAtSummit(outlook, generations) ? outlook.targetColors[0].colorId : null;
   }
   if (!outlook.targetColors.every((target) => ladder.wanted.has(target.colorId))) return null;
   return outlook.targetColors[0].colorId;

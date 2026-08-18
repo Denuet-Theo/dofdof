@@ -934,6 +934,13 @@ impl<V: ValueFn> Searching<V> {
     /// plan couronné, et la recherche n'a pas d'endroit où le faire plus tard.
     pub fn under_ladder(mut self, catalog: &Catalog, economy: &Economy, route: Route) -> Self {
         let mut policy = LadderPolicy::new(catalog, route);
+        // Le projet impose la couronne. Sans ça le filtre viserait la gen 10 la
+        // mieux payée pendant que la fitness compterait celle que l'éleveur
+        // poursuit : la recherche serait notée sur ce qu'on lui a interdit de
+        // fabriquer.
+        if let Some(project) = economy.project {
+            policy = policy.with_forced_crown(project);
+        }
         policy.crown(catalog, economy);
         self.searcher.admissible = Some(policy);
         self

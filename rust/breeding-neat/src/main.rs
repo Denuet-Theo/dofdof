@@ -91,6 +91,10 @@ struct Options {
     env: Env,
     /// Entraîner sous les contraintes de l'échelle. Voir `policy_of`.
     ladder: bool,
+    /// La couleur poursuivie. Voir `Economy::project`.
+    project: Option<String>,
+    /// Combien on en veut. Voir `Economy::project_count`.
+    project_count: Option<usize>,
     /// Cycles d'un épisode de tapis. Sans effet sur l'économie complète.
     cycles: usize,
     /// Montures de l'écurie de départ, sur le tapis. Le levier de coût principal.
@@ -117,6 +121,8 @@ impl Options {
             resume: None,
             env: Env::Economy,
             ladder: false,
+            project: None,
+            project_count: None,
             cycles: 30,
             mounts: TreadmillConfig::default().mounts,
             sealed: false,
@@ -149,6 +155,8 @@ impl Options {
                     }
                 }
                 "--ladder" => options.ladder = value != "off" && value != "0",
+                "--project" => options.project = Some(value.clone()),
+                "--project-count" => options.project_count = value.parse().ok(),
                 "--cycles" => options.cycles = value.parse().unwrap_or(options.cycles),
                 "--mounts" => options.mounts = value.parse().unwrap_or(options.mounts),
                 _ => {}
@@ -178,6 +186,14 @@ impl Options {
 /// l'écran fait **déjà** quand il joue le champion. Sans lui, le génome apprend à
 /// choisir dans un espace plus large que celui où il jouera, et une part de ce
 /// qu'il a appris est inutilisable par construction. Voir `Searcher::admissible`.
+/// Ce qu'une monture de la couleur poursuivie pèse devant le score.
+///
+/// Cent millions : au-delà de ce qu'une partie entière liquide — la meilleure
+/// mesurée rend 57 M — donc une couronne de plus l'emporte toujours sur une
+/// écurie plus riche. C'est un ordre lexicographique écrit en arithmétique, et
+/// non un taux de change : les deux termes ne se comparent pas.
+const CROWN_WEIGHT: f64 = 100_000_000.0;
+
 fn policy_of<'a>(
     network: &'a Network,
     genome: &Genome,
@@ -235,7 +251,37 @@ fn fitness(
                 ladder.then_some((catalog, economy)),
             );
             match env {
-                Env::Economy => play(catalog, economy, &mut policy, seed).score as f64,
+                // Avec un projet, la couleur poursuivie passe **avant** le score :
+                // celui-ci est indifférent entre cinquante-neuf gen 10 quelconques
+                // et une seule de la bonne couleur, et c'est ce qui fait gagner le
+                // glouton en accumulant ce que le marché n'absorbe pas.
+                //
+                // Lexicographique, et pas un compte seul : produire une gen 10
+                // précise est **rare**, donc le compte vaut zéro sur presque toute
+                // la population et la recherche n'a plus aucune pente à gravir —
+                // mesuré, trente générations à 0,00. Le score ordinaire sert donc
+                // de gradient tant qu'aucune couronne n'est sortie, et cesse de
+                // décider dès qu'il y en a une.
+                //
+                // `CROWN_WEIGHT` domine par construction : une couronne vaut plus
+                // que n'importe quelle écurie liquidée, donc jamais une politique
+                // riche ne passe devant une qui a livré le projet.
+                Env::Economy => {
+                    let outcome = play(catalog, economy, &mut policy, seed);
+                    match economy.project {
+                        Some(_) => {
+                            // Plafonné à ce que l'éleveur en veut : au-delà, ce
+                            // n'est plus son projet, c'est du stock que le marché
+                            // n'absorbe pas. Voir `Economy::project_count`.
+                            let kept = match economy.project_count {
+                                Some(cap) => outcome.crown_held.min(cap),
+                                None => outcome.crown_held,
+                            };
+                            kept as f64 * CROWN_WEIGHT + outcome.score as f64
+                        }
+                        None => outcome.score as f64,
+                    }
+                }
                 // Les génétons, et rien d'autre. Ils ne tombent qu'à la naissance
                 // réussie, donc ils ne comptent que les reproductions.
                 // En kamas comme l'économie complète : les deux environnements se
@@ -791,7 +837,7 @@ fn millions(kamas: f64) -> String {
 fn main() {
     let options = Options::parse();
     let catalog = muldo();
-    let economy = Prices::load_default()
+    let mut economy = Prices::load_default()
         .map(|prices| prices.economy)
         .unwrap_or_else(|error| {
             // Mesurer sur une économie différente de celle du fichier serait pire
@@ -799,6 +845,19 @@ fn main() {
             eprintln!("{error}");
             std::process::exit(1);
         });
+    if let Some(slug) = options.project.as_deref() {
+        match catalog.id_of(slug) {
+            Some(color) => economy.project = Some(color),
+            // Une couleur mal orthographiée noterait la partie sur zéro sans que
+            // rien ne le dise : autant s'arrêter.
+            None => {
+                eprintln!("{slug} : couleur inconnue du catalogue.");
+                std::process::exit(1);
+            }
+        }
+    }
+    economy.project_count = options.project_count;
+    let economy = economy;
     let config = Config {
         population: options.population,
         ..Config::default()
@@ -1411,7 +1470,7 @@ fn main() {
                 play(&catalog, &economy, &mut policy, seed).score as f64
             })
             .collect();
-        let mut evolved: Vec<f64> = seeds
+        let evolved_runs: Vec<_> = seeds
             .par_iter()
             .map(|&seed| {
                 let mut policy = policy_of(
@@ -1421,9 +1480,15 @@ fn main() {
                     options.env,
                     under(),
                 );
-                play(&catalog, &economy, &mut policy, seed).score as f64
+                play(&catalog, &economy, &mut policy, seed)
             })
             .collect();
+        // La couleur poursuivie, comptée et non déduite du score : avec
+        // `CROWN_WEIGHT` la fitness se lit en centaines de millions, ce qui
+        // n'apprend rien à qui veut savoir combien d'Azur-Doré sont sorties.
+        let crowns = evolved_runs.iter().map(|o| o.crown_held as f64).sum::<f64>()
+            / evolved_runs.len().max(1) as f64;
+        let mut evolved: Vec<f64> = evolved_runs.iter().map(|o| o.score as f64).collect();
 
         evaluate("ne rien faire", &mut floor);
         let greedy_median = evaluate(
@@ -1438,6 +1503,11 @@ fn main() {
         }
         let myopic_median = evaluate("recherche / valeur myope", &mut myopic);
         let evolved_median = evaluate("recherche / valeur NEAT", &mut evolved);
+        if economy.project.is_some() {
+            println!(
+                "  couleur poursuivie : {crowns:.1} par partie en moyenne — c'est ce que la fitness note"
+            );
+        }
 
         println!(
             "écart au glouton : {:+.2} M ({:+.0} %) · écart à la valeur myope : {:+.2} M ({:+.0} %)",

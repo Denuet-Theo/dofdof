@@ -6,6 +6,7 @@ import BreedingStocks from '@/components/breeding/BreedingStocks';
 import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
+import { tunedLevel, valuePerSuccessToward } from '@/lib/dofus/breeding/tuned-level';
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import {
   afterClonings,
@@ -257,6 +258,66 @@ const BreedingPage = () => {
    * couleur choisie, la politique décide quoi faire de l'écurie telle qu'elle est.
    * Voir `policy.ts`.
    */
+  /**
+   * Le niveau auquel monter les montures, sur les prix de l'éleveur.
+   *
+   * Le seul arbitrage que le prix seul ne tranche pas : monter coûte des kamas
+   * et fait gagner des heures d'enclos. `optimalParentLevel` ne compte que des
+   * kamas et le dit lui-même ; celui-ci compte les deux. Voir `tunedLevel`.
+   *
+   * `null` tant qu'il manque une pièce — pas de cible, pas de prix, pas de cycle
+   * relevé. Un niveau inventé affiché à côté de chiffres réels se lirait comme
+   * une mesure.
+   */
+  const advisedLevel = useMemo(() => {
+    const colors = tree?.colors ?? [];
+    const crown = colors.find((color) => color.id === selectedColorId);
+    if (!crown || !supplies) return null;
+
+    // Sans prix saisi sur la cible, on ne sait pas ce qu'une réussite vaut. On
+    // rend la raison plutôt que rien : un espace vide se lit comme « le calcul
+    // dit non », pas comme « il me manque une donnée » — c'est la panne #179,
+    // qu'un prix bloqué avait fait passer pour un marché difficile.
+    const crownValue = rows.find((row) => row.colorId === crown.id)?.estimate.priceLevel0 ?? 0;
+    if (!(crownValue > 0)) return { missing: `le prix de ${crown.name}` } as const;
+    // La frontière : la génération la plus haute que l'écurie tient déjà. C'est
+    // sur ce qui reste à gravir qu'une réussite s'amortit.
+    // La frontière **de la route**, et non la meilleure monture de l'écurie.
+    //
+    // Un éleveur qui tient déjà une gen 10 hors plan — une Azur-Turquoise quand
+    // il vise Azur-Doré — n'est pas pour autant arrivé : ces montures-là
+    // n'avancent pas d'un barreau. Compter la meilleure de toutes donnait une
+    // frontière de 10, donc un amortissement sur un seul barreau, donc « monte
+    // au plafond » quel que soit le reste. On ne compte donc que les couleurs
+    // que le plan réclame.
+    const plan = ladderOf(colors);
+    const generationOf = new Map(colors.map((color) => [color.id, color.generation]));
+    const onRoute = (colorId: string) => plan.wanted.has(colorId);
+    let frontier = 1;
+    for (const mount of available.individuals) {
+      if (onRoute(mount.colorId)) {
+        frontier = Math.max(frontier, generationOf.get(mount.colorId) ?? 1);
+      }
+    }
+    for (const [colorId, counts] of available.bulk) {
+      if (onRoute(colorId) && counts.males + counts.females > 0) {
+        frontier = Math.max(frontier, generationOf.get(colorId) ?? 1);
+      }
+    }
+
+    const tuned = tunedLevel({
+      cycleHours: supplies.cycleHours ?? 0,
+      fuelPerLoad: (supplies.fuelCostPerCycle ?? 0) * ENCLOS_SLOTS,
+      mangeoireCostPerMountPoint: supplies.mangeoireCostPerMountPoint ?? 0,
+      levelUpHours: supplies.levelUpHours ?? 0,
+      valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
+    });
+    // Le prix de la Mangeoire manque : `tunedLevel` refuse plutôt que de rendre
+    // le plafond, qui est ce qu'un niveau gratuit donne toujours.
+    if (tuned === null) return { missing: 'le carburant de Mangeoire' } as const;
+    return { ...tuned, missing: null } as const;
+  }, [tree, supplies, selectedColorId, rows, available]);
+
   const policyInput = useMemo(() => {
     const colors = tree?.colors ?? [];
     if (colors.length === 0) return null;
@@ -640,6 +701,24 @@ const BreedingPage = () => {
             {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
           </strong>
         </span>
+        {/* Le niveau conseillé. Il vit ici, à côté du cycle et de la Mangeoire
+            dont il est l'arbitrage, et pas dans la fournée : c'est une décision
+            de Mangeoire que l'éleveur prend avant de charger. */}
+        {advisedLevel && (
+          <span className="text-dark-400" data-testid="advised-level">
+            Niveau conseillé :{' '}
+            <strong className="text-dark-200">
+              {advisedLevel.missing !== null ? (
+                `il manque ${advisedLevel.missing}`
+              ) : (
+                <>
+                  {advisedLevel.level}
+                  <span className="text-dark-500 font-normal"> · au-delà, la Mangeoire coûte plus d’heures qu’elle n’en fait gagner</span>
+                </>
+              )}
+            </strong>
+          </span>
+        )}
         {supplies?.levelUpHours != null && (
           <span className="text-dark-400">
             Montée au niveau 200 :{' '}

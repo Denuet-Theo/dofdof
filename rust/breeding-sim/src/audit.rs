@@ -168,8 +168,9 @@ mod tests {
         let catalog = muldo();
         let economy = Prices::load_default().expect("economy.toml").economy;
         let mut capped_when_duplicating = 0;
+        let mut capped_when_targeting = 0;
         for seed in 0..25 {
-            for summit in [Summit::Hold, Summit::Duplicate] {
+            for summit in [Summit::Hold, Summit::Target, Summit::Duplicate] {
                 let mut audit = Audit::new(
                     LadderPolicy::new(&catalog, Route::default()).with_summit(summit),
                 );
@@ -189,6 +190,7 @@ mod tests {
                         "graine {seed} : le sommet dort, rien ne doit être plafonné — {:?}",
                         audit.tally
                     ),
+                    Summit::Target => capped_when_targeting += audit.tally.capped,
                     Summit::Duplicate => capped_when_duplicating += audit.tally.capped,
                 }
             }
@@ -196,6 +198,16 @@ mod tests {
         assert!(
             capped_when_duplicating > 0,
             "la boucle du sommet n'a proposé aucun croisement plafonné : elle ne tourne pas"
+        );
+        // `Target` est un **sous-ensemble strict** de `Duplicate` : elle ne retient
+        // que les croisements nommant une couleur de `ladder.summit`, là où la
+        // boucle du forum prend n'importe quelle gen 10. L'inégalité est ce qui
+        // distingue les deux réglages ; à égalité, `Target` n'aurait rien filtré et
+        // ouvrirait la boucle que #225 dit laisser éteinte.
+        assert!(
+            capped_when_targeting <= capped_when_duplicating,
+            "le sommet ciblé ({capped_when_targeting}) doit rester sous la boucle \
+             entière ({capped_when_duplicating})"
         );
     }
 

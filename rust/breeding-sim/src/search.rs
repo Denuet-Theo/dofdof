@@ -43,7 +43,7 @@ use std::sync::Arc;
 use crate::economy::{Economy, MAX_UNITS, Rng, Strategy, UnitPlan, UnitView};
 use crate::encode::{Census, PairDelta};
 use crate::pairing::{Mate, MateSignature};
-use crate::ladder::{LadderPolicy, Route};
+use crate::ladder::{LadderPolicy, Route, Summit};
 use crate::stable::{Sex, Stable};
 use crate::trees::{Catalog, ColorId};
 
@@ -941,6 +941,16 @@ impl<V: ValueFn> Searching<V> {
         if let Some(project) = economy.project {
             policy = policy.with_forced_crown(project);
         }
+        // Le sommet s'ouvre **ici aussi**, et pas seulement à l'écran.
+        //
+        // `SearchConfig.admissible` côté TypeScript filtre avec `'target'` : sans
+        // le même réglage de ce côté-ci, la recherche Rust refuserait les
+        // croisements que l'écran compose, et le champion s'entraînerait dans un
+        // espace plus étroit que celui où il joue. C'est exactement la famille de
+        // défauts de #236 — mesurer, entraîner ou noter une politique dans un
+        // régime qui n'est pas le sien — et c'est ce que #225 avait laissé ouvert
+        // en ne portant que le côté écran. Les deux portes bougent ensemble.
+        policy = policy.with_summit(Summit::Target);
         policy.crown(catalog, economy);
         self.searcher.admissible = Some(policy);
         self

@@ -369,6 +369,19 @@ impl Prices {
             economy.barren_crossing_malus as f64,
         ) as i64;
 
+        // La prime du succès de collection, par génération. Absente, elle vaut zéro
+        // partout et la fitness est celle d'avant — les mesures publiées tiennent.
+        //
+        // `succes.gen1 = 100000` … `succes.gen10 = 2000000`. On lit clé par clé
+        // plutôt qu'un tableau : un tableau de onze entrées dont on décale un cran
+        // se relit sans erreur et paie la mauvaise génération, ce qui est
+        // exactement le genre de chiffre qu'on finit par croire.
+        for generation in 1..=10usize {
+            let key = format!("gen{generation}");
+            economy.collection_bonus[generation] =
+                get(&["succes", key.as_str()], 0.0) as i64;
+        }
+
         economy.slots_per_enclos = slots_per_enclos;
         economy.sync_enclos = get(&["fournee", "enclos_synchronises"], 5.0) as usize;
         economy.free_enclos = get(&["fournee", "enclos_libres"], 0.0) as usize;

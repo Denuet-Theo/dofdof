@@ -432,3 +432,43 @@ descente_serenite = 5_001
 points_par_stat = 20_000
 # Deux jauges au plus à la fois, Mangeoire comprise.
 places_paralleles = 2
+
+# ---------------------------------------------------------------------------
+[succes]
+# ---------------------------------------------------------------------------
+
+# La prime du **succès de collection** : avoir fait naître chaque couleur de la
+# famille au moins une fois.
+#
+# Elle ne se touche qu'**une fois par couleur**. C'est ce qui la distingue d'un
+# barème de valeur : `valeurs` paie la centième Doré comme la première, et c'est
+# précisément ce qui laisse le glouton gagner en accumulant 58,7 gen 10 que
+# personne n'a demandées. Une prime de collection ne se gagne pas deux fois.
+#
+# ## Pourquoi elle existe
+#
+# `success.ts` mesure que la collection est **hors plan** : l'échelle ne veut que
+# 30 couleurs sur 120 en muldo, et les 90 autres — dont les 50 gen 10, puisqu'on
+# n'en couronne qu'une — ne sont sur aucune route. Le succès demande donc de
+# produire ce que le plan ne demande pas, et le module conclut que le choix de
+# stratégie reste **bloqué** faute d'avoir chiffré ce que ça coûte.
+#
+# Ces chiffres-ci sont ce chiffrage. On ne décide pas à la main si poursuivre la
+# collection paie : on le met dans la fitness et on laisse la recherche arbitrer.
+#
+# ## Le barème
+#
+# Cent mille par génération, et le double du dernier cran au sommet — une gen 10
+# demande neuf croisements réussis en amont, pas dix fois plus qu'une gen 9.
+#
+# Tout à zéro rend la fitness d'avant, à l'identique.
+gen1 = 100000
+gen2 = 200000
+gen3 = 300000
+gen4 = 400000
+gen5 = 500000
+gen6 = 600000
+gen7 = 700000
+gen8 = 800000
+gen9 = 900000
+gen10 = 2000000

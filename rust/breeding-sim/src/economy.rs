@@ -305,6 +305,37 @@ pub struct Economy {
     /// `None` ne borne rien, et c'est le défaut : sans projet, la question ne se
     /// pose pas.
     pub project_count: Option<usize>,
+    /// La prime du **succès de collection**, par génération, indexée 1..=10.
+    ///
+    /// Le succès demande d'avoir fait naître chaque couleur de la famille **au
+    /// moins une fois**. C'est donc une prime qui ne se touche qu'une fois par
+    /// couleur, et pas un barème de valeur : la centième Doré ne rapporte rien de
+    /// plus que la première, ce qui est exactement ce que `value_of` ne sait pas
+    /// dire.
+    ///
+    /// ## Pourquoi la fitness et pas le plan
+    ///
+    /// `success.ts` mesure déjà que la collection est **hors plan** : l'échelle ne
+    /// veut que 30 couleurs sur 120 en muldo, et les 90 autres ne sont sur aucune
+    /// route — dont les 50 gen 10, puisqu'on n'en couronne qu'une. Le succès demande
+    /// donc de produire ce que le plan ne demande pas, et le module conclut qu'aucun
+    /// chemin gratuit n'y mène et que le choix de stratégie reste **bloqué** faute
+    /// d'avoir chiffré ce que ça coûte.
+    ///
+    /// Chiffrer, c'est précisément ce qu'une prime dans la fitness fait : on ne
+    /// décide pas à la main si poursuivre la collection paie, on laisse la recherche
+    /// arbitrer contre le reste de l'économie.
+    ///
+    /// ## Un terme de score, comme le malus stérile
+    ///
+    /// Retiré une seule fois sur le total, jamais en cours de partie : il n'influe
+    /// donc ni sur la solvabilité ni sur ce que la politique peut se permettre, et
+    /// deux barèmes différents rejouent **exactement** la même partie. Ce qui change,
+    /// c'est le réseau que l'évolution retient.
+    ///
+    /// Tout à zéro par défaut, pour que les mesures publiées ne bougent pas sous les
+    /// pieds de qui n'a rien demandé.
+    pub collection_bonus: [i64; 11],
     pub cycle_serenity_points: f64,
     pub cycle_stat_points: f64,
     pub band_rates: [f64; 4],
@@ -347,6 +378,7 @@ impl Default for Economy {
             // mesures publiées.
             project: None,
             project_count: None,
+            collection_bonus: [0; 11],
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
             band_rates: [1.0, 2.0, 3.0, 4.0],
@@ -1026,6 +1058,16 @@ pub struct RunOutcome {
     /// attribué ces refus au budget sans l'avoir vérifié — c'est le genre de
     /// chiffre qu'on finit par croire.
     pub rejected_by_reason: [u32; Rejected::REASONS],
+    /// Couleurs **distinctes** nées au moins une fois sur la partie.
+    ///
+    /// L'avancement du succès de collection, et le seul chiffre qui dise si une
+    /// politique élargit sa palette ou repasse sur la même.
+    pub collection_done: usize,
+    /// Ce que cet avancement vaut, au barème de `Economy::collection_bonus`.
+    ///
+    /// Compté toujours, facturé seulement si le barème n'est pas nul — même règle
+    /// que `barren_crossings` : le compte est une observation, le prix est un choix.
+    pub collection_bonus: i64,
     pub hours_used: f64,
     /// Heures passées à attendre une fenêtre, enclos libre et personne devant le
     /// jeu. Nulles sans fenêtre posée. C'est la mesure de ce que la disponibilité
@@ -1514,6 +1556,19 @@ pub fn play_recorded(
     (outcome, log)
 }
 
+/// Une naissance entre dans l'écurie **et** dans la collection, jamais l'une sans
+/// l'autre.
+///
+/// Les deux points d'insertion de `run` passent par ici. C'est délibéré : marquer
+/// la collection à la main sur chaque `stable.push(baby)` marche jusqu'au
+/// troisième point d'insertion que personne ne pense à modifier, et le succès
+/// compterait alors les naissances d'une unité et pas de l'autre — un chiffre faux
+/// et silencieux. Une seule porte rend ce défaut irreprésentable.
+fn welcome(stable: &mut Stable, hatched: &mut [bool; MAX_COLORS], baby: Mount) {
+    hatched[usize::from(baby.color).min(MAX_COLORS - 1)] = true;
+    stable.push(baby);
+}
+
 fn run(
     catalog: &Catalog,
     economy: &Economy,
@@ -1526,6 +1581,10 @@ fn run(
     let drawn = economy.for_run(catalog, &draws);
     let economy = &drawn;
     let mut stable = starting_stable(catalog, economy, &draws);
+    // La collection ne compte que ce qui **naît**. L'écurie de départ est achetée,
+    // pas élevée, donc elle n'y entre pas — même lecture que `success.ts`, dont
+    // l'en-tête refuse de déduire la collection de ce que l'écurie porte.
+    let mut hatched = [false; MAX_COLORS];
     let mut kamas = economy.starting_kamas;
     // Décalée exprès : la politique ne doit pas pouvoir rejouer le flux des
     // naissances en devinant sa propre graine.
@@ -1543,6 +1602,8 @@ fn run(
         score: 0,
         balance_before_liquidation: 0,
         liquidation: 0,
+        collection_done: 0,
+        collection_bonus: 0,
         crossings: 0,
         barren_crossings: 0,
         purchases: 0,
@@ -1604,7 +1665,7 @@ fn run(
 
         // 1. les naissances du chargement précédent arrivent maintenant.
         for baby in pending[unit].drain(..) {
-            stable.push(baby);
+            welcome(&mut stable, &mut hatched, baby);
         }
 
         // 2. la politique décide.
@@ -1726,7 +1787,7 @@ fn run(
     for unit in 0..units {
         let babies: Vec<Mount> = pending[unit].drain(..).collect();
         for baby in babies {
-            stable.push(baby);
+            welcome(&mut stable, &mut hatched, baby);
         }
     }
 
@@ -1750,8 +1811,20 @@ fn run(
     // non une dépense, donc il n'a jamais pu influer sur la solvabilité ni sur ce
     // que la politique pouvait se permettre en cours de partie. Deux malus
     // différents rejouent exactement la même partie.
+    // L'avancement du succès, et ce qu'il vaut. Une couleur ne paie qu'une fois :
+    // c'est ce qui distingue cette prime d'un barème de valeur, et ce qui fait
+    // qu'accumuler la même gen 10 ne la déclenche pas deux fois.
+    outcome.collection_done = hatched.iter().filter(|seen| **seen).count();
+    outcome.collection_bonus = (0..MAX_COLORS)
+        .filter(|color| hatched[*color])
+        .map(|color| {
+            let generation = catalog.generation(color as ColorId);
+            economy.collection_bonus[usize::from(generation).min(10)]
+        })
+        .sum();
     outcome.score = kamas + outcome.liquidation
-        - economy.barren_crossing_malus * outcome.barren_crossings as i64;
+        - economy.barren_crossing_malus * outcome.barren_crossings as i64
+        + outcome.collection_bonus;
     outcome
 }
 

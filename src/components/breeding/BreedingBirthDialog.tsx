@@ -38,7 +38,7 @@ import type { BirthEntry, BirthRecord, RecordBirthsResult } from '@/lib/hooks/us
  * qui dit à quoi s'attendre. Voir `matingOutcomes`, qui reproduit cette liste au
  * centième sur le relevé #59.
  *
- * La **disposition** vient ensuite : mâle à gauche, femelle à droite, œuf au
+ * La **disposition** vient ensuite : femelle à gauche, mâle à droite, œuf au
  * milieu, « Génération cible » puis « Autres » en dessous. C'est celle du jeu, et
  * elle se lit côte à côte avec lui — voir `BreedingMatingPanel`, qui la porte.
  * Ce module ne fait plus que découper la fournée en croisements et tenir le
@@ -238,8 +238,8 @@ const BreedingBirthDialog = ({
    * pas — `matingOutcomes` est symétrique d'un bout à l'autre, puisqu'une paire
    * de teintes se lit triée — et le nom non plus, depuis qu'il range ses deux
    * codes. Elles se séparent de nouveau, et pour une raison qui n'existait pas
-   * alors : le panneau **désigne un mâle à gauche et une femelle à droite**.
-   * Fondre « ♂ Ébène × ♀ Orchidée » et son miroir dans un seul panneau
+   * alors : le panneau **désigne une femelle à gauche et un mâle à droite**.
+   * Fondre « ♀ Ébène × ♂ Orchidée » et son miroir dans un seul panneau
    * obligerait à choisir un côté pour les deux, donc à en désigner un faux — et
    * c'est précisément ce que cet écran est là pour éviter devant l'enclos.
    */

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import ItemCard from '@/components/ui/ItemCard';
+import { copyToClipboard } from '@/lib/utils/clipboard';
 
 type IconSize = 'sm' | 'md' | 'lg';
 
@@ -37,13 +38,9 @@ const CopyableIcon = ({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(name);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error('Clipboard copy failed:', err);
-    }
+    if (!(await copyToClipboard(name))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   const glyph = GLYPH_SIZES[size];

@@ -582,7 +582,12 @@ const canonicalKey = (mount: Individual) =>
     mount.fertile ? '1' : '0',
     mount.cycled ? '1' : '0',
     String(mount.level).padStart(4, '0'),
-    (mount.parents ?? []).join('+'),
+    // Trié : l'ordre des deux parents n'est que celui du couple qui a écrit la
+    // naissance, et deux montures de **même contenu** doivent tomber au même
+    // rang, sinon la clé les sépare — exactement ce que cette fonction existe
+    // pour empêcher. Voir `canonicalParents`, qui porte la règle. La réduction
+    // `[a, a]` ⇒ rien ne s'applique pas ici : ceci ordonne, ça n'identifie pas.
+    [...(mount.parents ?? [])].sort().join('+'),
   ].join('|');
 
 export const canonicalStable = (stable: Stable): Stable => ({

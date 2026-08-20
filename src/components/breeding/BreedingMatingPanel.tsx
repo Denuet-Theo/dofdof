@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { Egg } from 'lucide-react';
 import CopyableText from '@/components/ui/CopyableText';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+import { copyToClipboard } from '@/lib/utils/clipboard';
 
 /**
  * Ce qu'on affiche à la place d'un nom quand la monture **reste à acheter**.
@@ -21,19 +23,28 @@ import type { Sex } from '@/lib/dofus/breeding/stable';
  * La fenêtre d'accouplement du jeu, reproduite — mais pour **saisir** ce qui est
  * né.
  *
- * Le jeu affiche cet écran avant l'accouplement : le mâle à gauche, la femelle à
- * droite, chacun avec sa couleur, sa génération et sa généalogie, l'œuf au
+ * Le jeu affiche cet écran avant l'accouplement : les deux montures de part et
+ * d'autre, chacune avec sa couleur, sa génération et sa généalogie, l'œuf au
  * milieu, et en dessous les deux listes « Génération cible » et « Autres ». On
  * reprend cette disposition telle quelle, pour une raison qui n'est pas
  * esthétique : c'est **côte à côte avec le jeu** qu'on s'en sert. Une liste qui
  * range les mêmes informations autrement oblige à traduire d'un écran à
  * l'autre, et c'est là qu'on charge la mauvaise monture.
  *
+ * D'où **la femelle à gauche et le mâle à droite** : c'est le côté où chacun se
+ * charge dans l'enclos du jeu. L'ordre inverse tenait ici depuis l'origine et
+ * demandait le croisement mental à chaque couple — le seul geste que cet écran
+ * est là pour supprimer.
+ *
  * Ce qu'on ajoute au modèle, et qui est toute la raison d'être de l'écran : deux
  * boutons ♂ et ♀ sur chaque issue. Le jeu montre des probabilités *avant* ; nous
  * enregistrons un résultat *après*. Un clic, et le nom à recopier en jeu apparaît
  * — voir `naming.ts` sur pourquoi ce nom est la seule chose qui distingue ensuite
  * deux montures de même couleur.
+ *
+ * Ce clic **met aussi ce nom dans le presse-papier**, sans qu'on ait à viser le
+ * bouton de copie : le geste qui suit est toujours le même — aller renommer le
+ * poulain dans le jeu — et il se fait dans l'autre fenêtre, au clavier.
  */
 
 /** Le glyphe du sexe, celui que le jeu pose en haut de chaque fiche. */
@@ -58,7 +69,14 @@ type CardProps = {
 };
 
 const MountCard = ({ mate, sex, names, nameOf, generationOf, iconOf, codeOf }: CardProps) => (
-  <div className="relative rounded-2xl bg-dark-800/60 border border-dark-700/50 p-3 space-y-2.5">
+  <div
+    data-testid="mate-card"
+    /* Le côté est une propriété de l'écran, pas une décoration : la suite
+       vérifie que la femelle est bien la première fiche du panneau. Le lire sur
+       le glyphe ♂/♀ marcherait aussi, mais l'attribut dit *pourquoi* il est là. */
+    data-sex={sex}
+    className="relative rounded-2xl bg-dark-800/60 border border-dark-700/50 p-3 space-y-2.5"
+  >
     <span
       className={`absolute top-2.5 right-3 text-sm ${sex === 'M' ? 'text-info' : 'text-loss-light'}`}
       title={SEX_LABEL[sex]}
@@ -213,6 +231,37 @@ const BreedingMatingPanel = ({
   const done = births.length;
   const complete = done >= total;
 
+  /**
+   * Le dernier nom passé au presse-papier, et s'il y est arrivé.
+   *
+   * Reste affiché jusqu'au clic suivant, sans minuterie : c'est ce que le
+   * `Ctrl+V` d'à-côté va poser, donc l'information est vraie tant qu'on n'a pas
+   * recliqué. Une confirmation qui s'efface au bout de deux secondes est une
+   * confirmation qu'on rate en regardant le jeu, ce qui est la posture de
+   * travail de cet écran — voir `write-failures.ts`, même raisonnement.
+   */
+  const [clipboard, setClipboard] = useState<{ name: string; ok: boolean } | null>(null);
+
+  /**
+   * Un clic sur une issue : le nom part au presse-papier, la naissance part en
+   * base.
+   *
+   * **La copie d'abord, et sans l'attendre.** Le navigateur n'ouvre le
+   * presse-papier que sur le geste de l'utilisateur ; la placer après l'aller-
+   * retour avec la base — une requête réseau — la sortirait de cette fenêtre et
+   * elle serait refusée une fois sur deux, en silence.
+   *
+   * Elle ne dépend d'ailleurs pas du sort de l'écriture : le nom se calcule à
+   * partir des deux parents et de ce qui est né, et c'est le même nom qu'il
+   * faudra taper dans le jeu, que la base ait accepté ou non. Un refus se
+   * reclique, et recopie la même chose.
+   */
+  const pick = (colorId: string, sex: Sex) => {
+    const name = nameFor(colorId, sex);
+    void copyToClipboard(name).then((ok) => setClipboard({ name, ok }));
+    onPick(colorId, sex);
+  };
+
   const row = (outcome: MatingOutcome) => {
     const born = nameOf(outcome.colorId);
 
@@ -245,13 +294,13 @@ const BreedingMatingPanel = ({
               key={sex}
               type="button"
               disabled={complete || busy}
-              onClick={() => onPick(outcome.colorId, sex)}
+              onClick={() => pick(outcome.colorId, sex)}
               title={
                 busy
                   ? 'Enregistrement en cours…'
                   : complete
                     ? 'Tous les accouplements de ce croisement ont déjà leur résultat.'
-                    : `Un ${SEX_LABEL[sex].toLowerCase()} ${born} est né — à nommer « ${nameFor(outcome.colorId, sex)} » — enregistré au clic`
+                    : `Un ${SEX_LABEL[sex].toLowerCase()} ${born} est né — à nommer « ${nameFor(outcome.colorId, sex)} » — enregistré au clic, et le nom copié dans le presse-papier`
               }
               className={`w-7 h-7 rounded-lg text-[12px] border transition-all cursor-pointer
                 bg-dark-800/80 border-dark-600/50 hover:border-kamas/50 hover:text-kamas
@@ -310,13 +359,37 @@ const BreedingMatingPanel = ({
         </p>
       )}
 
-      {/* Les deux montures et l'œuf, dans la disposition du jeu. En colonne sous
-          640 px : deux fiches côte à côte y deviendraient illisibles. */}
+      {/* Ce que le presse-papier contient — donc ce que le `Ctrl+V` d'à-côté va
+          poser. Dit aussi quand il n'a rien pris : un presse-papier refusé colle
+          le nom du poulain **précédent**, et une monture mal nommée est une
+          monture perdue dans une écurie où tout s'appelle « Anonyme ». */}
+      {clipboard && (
+        <p
+          data-testid="clipboard-note"
+          data-ok={clipboard.ok ? 'true' : 'false'}
+          className={`flex flex-wrap items-center gap-1.5 text-[11px] ${
+            clipboard.ok ? 'text-dark-400' : 'text-loss-light'
+          }`}
+        >
+          {clipboard.ok ? 'Dans le presse-papier :' : 'Copie refusée par le navigateur :'}
+          <code className="px-1.5 py-0.5 rounded-md bg-dark-900/60 text-dark-200">
+            {clipboard.name}
+          </code>
+          {clipboard.ok
+            ? '— colle-le sur le poulain dans le jeu.'
+            : '— à copier à la main sur la puce « Nés », plus bas.'}
+        </p>
+      )}
+
+      {/* Les deux montures et l'œuf, dans la disposition du jeu : femelle à
+          gauche, mâle à droite. En colonne sous 640 px — deux fiches côte à côte
+          y deviendraient illisibles — et la femelle reste alors en tête, donc
+          l'ordre de lecture ne change pas d'une largeur à l'autre. */}
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-center">
         <MountCard
-          mate={male}
-          sex="M"
-          names={maleNames}
+          mate={female}
+          sex="F"
+          names={femaleNames}
           nameOf={nameOf}
           generationOf={generationOf}
           iconOf={iconOf}
@@ -348,9 +421,9 @@ const BreedingMatingPanel = ({
         </div>
 
         <MountCard
-          mate={female}
-          sex="F"
-          names={femaleNames}
+          mate={male}
+          sex="M"
+          names={maleNames}
           nameOf={nameOf}
           generationOf={generationOf}
           iconOf={iconOf}

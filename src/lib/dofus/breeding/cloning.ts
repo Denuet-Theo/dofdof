@@ -1,6 +1,7 @@
 import type { BreedingColor } from './costs';
 import { carriedGeneration } from './naming';
 import {
+  ascendanceKey,
   BULK_MATE_LEVEL,
   mateGroups,
   mateSignature,
@@ -419,6 +420,14 @@ const optionFor = (
  * nom serait mise en tête alors que son clone est à pile ou face, et l'écran
  * conseillerait la vitesse au prix d'une lignée sans le dire. Le prédicat, lui,
  * refuse simplement de la reconnaître.
+ *
+ * ## L'ascendance se compare par `ascendanceKey`, jamais à la main
+ *
+ * Elle se comparait par un `join` sur l'ordre stocké, et deux montures nées du
+ * même croisement joué dans les deux sens n'étaient donc pas reconnues — alors
+ * qu'elles portent le même nom, ce que le critère d'au-dessus exige déjà. Les
+ * deux `G2 DOPO M DO-PO` de l'écurie du 15/08 s'affichaient ainsi en paire à
+ * départager au lieu d'un « × 2 » certain.
  */
 export const indistinguishablePair = (
   a: { colorId: string; sex: Sex; name: string | null; parents: readonly string[] | null },
@@ -427,7 +436,7 @@ export const indistinguishablePair = (
   a.colorId === b.colorId &&
   a.sex === b.sex &&
   a.name === b.name &&
-  (a.parents ?? []).join('+') === (b.parents ?? []).join('+');
+  ascendanceKey(a.colorId, a.parents) === ascendanceKey(b.colorId, b.parents);
 
 /** Les doublons en tête : voir `indistinguishablePair`. */
 const duplicateFirst = (a: CloneOption, b: CloneOption) =>

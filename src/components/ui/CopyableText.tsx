@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { copyToClipboard } from '@/lib/utils/clipboard';
 
 /**
  * Un texte qu'on ne lit pas : on le recopie ailleurs.
@@ -35,14 +36,13 @@ const CopyableText = ({ value, title, className = '', onCopy }: Props) => {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      onCopy?.();
-      setTimeout(() => setCopied(false), 1500);
-    } catch (error) {
-      console.error('Clipboard copy failed:', error);
-    }
+    // Une copie ratée ne coche rien et ne prévient pas `onCopy` : le verrou de
+    // l'ajout de monture en dépend, et un nom qui n'est pas dans le
+    // presse-papier n'a pas pu être collé dans le jeu.
+    if (!(await copyToClipboard(value))) return;
+    setCopied(true);
+    onCopy?.();
+    setTimeout(() => setCopied(false), 1500);
   };
 
   return (

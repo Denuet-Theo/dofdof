@@ -62,7 +62,7 @@ import {
   type PairDelta,
 } from './census';
 import { carriedGeneration } from './naming';
-import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
+import { ascendanceKey, BULK_MATE_LEVEL, type Mate } from './pairing';
 import type { BreedingColor } from './costs';
 import { cycledOf, type Individual, type Sex, type Stable } from './stable';
 
@@ -511,7 +511,7 @@ export const flatten = (stable: Stable): Individual[] => {
 /* ------------------------------------------------------------ la recherche -- */
 
 const signatureOf = (colorId: string, parents: [string, string] | null) =>
-  `${colorId}|${(canonicalParents(colorId, parents) ?? []).join('+')}`;
+  `${colorId}|${ascendanceKey(colorId, parents)}`;
 
 const partition = (
   mounts: Individual[],

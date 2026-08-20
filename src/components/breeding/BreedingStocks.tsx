@@ -36,6 +36,7 @@ import type {
   WriteResult,
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
+import useCensusBar from '@/components/breeding/useCensusBar';
 import BreedingStableAudit from '@/components/breeding/BreedingStableAudit';
 import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
 import BreedingStockFilters from '@/components/breeding/BreedingStockFilters';
@@ -405,6 +406,17 @@ const BreedingStocks = ({
     [bulk, individuals, generationOfColor]
   );
 
+  /**
+   * Le rapprochement avec le jeu.
+   *
+   * Appelé ici et pas plus bas parce qu'il rend deux choses qui vivent à deux
+   * endroits : la barre de question, et la teinture du panneau de filtres.
+   * « Voir ces N montures » pose les filtres de la cellule sur la liste — c'est
+   * là qu'on finit, nom par nom, et c'est gratuit puisqu'une cellule **est** un
+   * jeu de filtres.
+   */
+  const census = useCensusBar({ entries: roster, nameOf, onFocus: setFilters });
+
   const owned = useMemo(() => {
     return individuals
       .filter((mount) =>
@@ -772,6 +784,10 @@ const BreedingStocks = ({
               onRemoveIndividuals={onRemoveIndividuals}
             />
 
+            {/* Le rapprochement avec le jeu : la barre pose la question, le
+                panneal du dessous la porte en couleurs. Voir `useCensusBar`. */}
+            {census.bar}
+
             {/* Les mêmes facettes que dans le jeu, aux mêmes intitulés et dans le
                 même ordre : c'est ce qui permet de poser les deux écrans côte à
                 côte et de voir **où** un écart se loge. Voir `roster.ts`. */}
@@ -781,6 +797,7 @@ const BreedingStocks = ({
               onChange={setFilters}
               nameOf={nameOf}
               familyLabel={familyLabel}
+              review={census.review}
             />
 
             <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">

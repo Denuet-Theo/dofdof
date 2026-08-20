@@ -92,6 +92,21 @@ pub fn target_generation_rate(level_a: u16, level_b: u16) -> f64 {
 /// La réduction est exacte et ne s'applique qu'à ce cas : `[a, a]` avec la couleur
 /// `a`. Une ascendance mixte, elle, ouvre des cibles et doit être gardée — un Ébène
 /// né d'Ébène × Doré porte du Doré, et c'est ce qui lui permet de viser plus haut.
+///
+/// ## Une ascendance n'a pas d'ordre
+///
+/// Deuxième réduction, exactement la même histoire. `[indigo, dore]` et
+/// `[dore, indigo]` sont la même ascendance : l'ordre stocké n'est que celui du
+/// couple qui l'a écrite — voir `Economy::breed`, qui pose `[m.color, f.color]` —
+/// et la même recette jouée dans l'autre sens écrit le miroir. Rien ne lit cet
+/// ordre : `pair_shape` range ses deux signatures avant de mémoïser, et
+/// `lineage_distribution` somme.
+///
+/// Il n'était lu qu'ici, et il fragmentait les groupes comme le cas `[a, a]`.
+/// Trouvé côté app, où le même défaut posait deux `G2 DOPO M DO-PO` — l'une née
+/// de Doré × Pourpre, l'autre de Pourpre × Doré — en paire de clonage « à
+/// départager » au lieu d'un doublon certain. Les deux ports le portaient ; ils
+/// le perdent ensemble, sans quoi `check-ladder-policy.mjs` cesserait d'être vrai.
 pub type MateSignature = (ColorId, Option<[ColorId; 2]>);
 
 #[inline]
@@ -99,8 +114,8 @@ pub fn mate_signature(mate: &Mate) -> MateSignature {
     (mate.color, canonical_parents(mate.color, mate.parents))
 }
 
-/// `None` quand les deux parents sont de la couleur de la monture. Voir
-/// `MateSignature`.
+/// `None` quand les deux parents sont de la couleur de la monture, et les deux
+/// couleurs triées sinon. Voir `MateSignature`.
 #[inline]
 pub fn canonical_parents(
     color: ColorId,
@@ -108,6 +123,7 @@ pub fn canonical_parents(
 ) -> Option<[ColorId; 2]> {
     match parents {
         Some([a, b]) if a == color && b == color => None,
+        Some([a, b]) if a > b => Some([b, a]),
         other => other,
     }
 }
@@ -695,5 +711,42 @@ mod tests {
                 seen.probability
             );
         }
+    }
+
+    /// Une ascendance n'a pas d'ordre : le miroir est la **même** monture.
+    ///
+    /// Deux naissances de la même recette jouée dans les deux sens écrivent
+    /// `[a, b]` et `[b, a]` — voir `Economy::breed`, qui pose `[m.color,
+    /// f.color]`. La signature les séparait, donc le regroupement aussi.
+    ///
+    /// On vérifie les deux moitiés : la signature les confond, et la loi
+    /// d'appariement ne les distinguait effectivement en rien — sans quoi les
+    /// confondre serait un raccourci, pas une réduction.
+    #[test]
+    fn une_ascendance_miroir_est_la_meme_ascendance() {
+        let catalog = muldo();
+        let endroit = mate(&catalog, "dore_pourpre", 67, Some(["dore", "pourpre"]));
+        let envers = mate(&catalog, "dore_pourpre", 67, Some(["pourpre", "dore"]));
+
+        assert_eq!(
+            mate_signature(&endroit),
+            mate_signature(&envers),
+            "l'ordre des deux parents n'est que celui du couple qui l'a écrite"
+        );
+
+        let temoin = mate(&catalog, "ebene", 67, None);
+        let a = mating_outcomes(&catalog, &endroit, &temoin);
+        let b = mating_outcomes(&catalog, &envers, &temoin);
+        assert_eq!(a.len(), b.len());
+        for (left, right) in a.iter().zip(b.iter()) {
+            assert_eq!(left.color, right.color);
+            assert_eq!(left.kind, right.kind);
+            assert!((left.probability - right.probability).abs() < 1e-12);
+        }
+
+        // La réduction `[a, a]` tient toujours, et le tri ne l'a pas mangée.
+        let recopie = mate(&catalog, "dore", 67, Some(["dore", "dore"]));
+        let achetee = mate(&catalog, "dore", 67, None);
+        assert_eq!(mate_signature(&recopie), mate_signature(&achetee));
     }
 }

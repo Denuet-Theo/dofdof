@@ -54,7 +54,7 @@ import {
   type UnitPlan,
 } from './search';
 import { seededRandom } from './random';
-import { BULK_MATE_LEVEL, canonicalParents, type Mate } from './pairing';
+import { ascendanceKey, BULK_MATE_LEVEL, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
 import { ladderPlan } from './ladder-policy';
 import { carriedGeneration } from './naming';
@@ -642,8 +642,7 @@ const strategyOf = (champion: Champion): SearchStrategy => {
  * Voir `canonicalParents`.
  */
 const signatureOf = (mount: Pick<Individual, 'colorId' | 'parents' | 'cycled'>) =>
-  `${mount.colorId}|${(canonicalParents(mount.colorId, mount.parents) ?? []).join('+')}` +
-  `|${mount.cycled ? 1 : 0}`;
+  `${mount.colorId}|${ascendanceKey(mount.colorId, mount.parents)}|${mount.cycled ? 1 : 0}`;
 
 const mateOf = (mount: Individual): Mate => ({
   id: mount.id,

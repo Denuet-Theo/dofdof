@@ -729,15 +729,55 @@ export const pairOutlook = (
  * La réduction ne vaut que pour ce cas : `[a, a]` avec la couleur `a`. Une
  * ascendance mixte ouvre des cibles et doit être gardée — un Ébène né d'Ébène ×
  * Doré porte du Doré, et c'est ce qui lui permet de viser plus haut.
+ *
+ * ## Une ascendance n'a pas d'ordre
+ *
+ * `[indigo, dore]` et `[dore, indigo]` sont **la même ascendance**. L'ordre
+ * stocké n'est que celui du couple qui l'a produite — la naissance écrit
+ * `[mâle, femelle]` — et le même croisement joué dans l'autre sens écrit le
+ * miroir. Rien dans le modèle ne lit cet ordre : `pairShape` range ses deux
+ * signatures avant de mettre en cache, `lineageDistribution` somme, et le nom
+ * dicté trie déjà ses deux codes (voir `naming.ts`) — c'est pourquoi les deux
+ * portent le même nom en jeu, donc désignent la même monture pour l'éleveur.
+ *
+ * Il n'était lu qu'ici, et il y séparait deux montures identiques. Sur l'écurie
+ * du 15/08 : deux `G2 DOPO M DO-PO` stériles, l'une née de Doré × Pourpre,
+ * l'autre de Pourpre × Doré. L'écran de clonage les posait côte à côte sous
+ * « laquelle est sortie » — deux cartes rigoureusement identiques, deux boutons
+ * qui font la même chose — au lieu du « × 2 » certain qu'elles méritaient. Même
+ * classe que la réduction ci-dessus, même conséquence : le stock se fragmente.
+ *
+ * On trie donc, et l'ordre stocké cesse d'exister pour tout ce qui compare.
  */
 export const canonicalParents = (
   colorId: string,
   parents: [string, string] | null
-): [string, string] | null =>
-  parents && parents[0] === colorId && parents[1] === colorId ? null : parents;
+): [string, string] | null => {
+  if (!parents) return null;
+  if (parents[0] === colorId && parents[1] === colorId) return null;
+  return parents[0] <= parents[1] ? parents : [parents[1], parents[0]];
+};
+
+/**
+ * L'ascendance réduite à ce qui la distingue, en une chaîne comparable.
+ *
+ * Le seul passage autorisé pour **comparer** deux ascendances. Cinq endroits le
+ * faisaient chacun à leur façon — `mateSignature`, les deux `signatureOf` de la
+ * politique et de la recherche, le repli de `ladder-policy`, le prédicat de
+ * clonage — tous par un `join` sur l'ordre stocké, donc tous faux de la même
+ * façon devant un miroir. Une fonction, et la classe n'a plus qu'un endroit où
+ * exister. Voir `canonicalParents` pour les deux réductions qu'elle applique.
+ */
+export const ascendanceKey = (colorId: string, parents: readonly string[] | null): string =>
+  (
+    canonicalParents(
+      colorId,
+      parents && parents.length === 2 ? [parents[0], parents[1]] : null
+    ) ?? []
+  ).join('+');
 
 export const mateSignature = (mate: Mate) =>
-  `${mate.colorId}|${(canonicalParents(mate.colorId, mate.parents) ?? []).join('+')}`;
+  `${mate.colorId}|${ascendanceKey(mate.colorId, mate.parents)}`;
 
 /** Des montures interchangeables, et combien l'écurie en porte. */
 export type MateGroup = {

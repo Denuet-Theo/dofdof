@@ -207,6 +207,22 @@ export type Individual = {
   cycled: boolean;
   /** Les deux ascendants directs, ou `null` pour une monture achetée ou capturée. */
   parents: [string, string] | null;
+  /**
+   * Quand la ligne est **entrée en base**, telle que Postgres l'a datée.
+   *
+   * Facultative, et ça n'est pas une commodité : toutes les montures ne viennent
+   * pas d'une ligne. Les naissances projetées du ruban n'existent que dans un
+   * calcul (`PROJECTED_BIRTH_PREFIX`), et les montures fabriquées par les tests
+   * et les simulations non plus. Leur inventer une date les ferait passer pour
+   * des faits.
+   *
+   * Ne sert qu'à **ordonner ce qu'on relit** — l'audit des clonages montre les
+   * saisies récentes d'abord, parce qu'une erreur de saisie se cherche dans la
+   * séance qu'on vient de faire. Rien qui décide d'un croisement ne la lit, et
+   * rien ne doit commencer : ce qu'une monture vaut ne dépend pas de son âge en
+   * base.
+   */
+  createdAt?: string | null;
 };
 
 /**

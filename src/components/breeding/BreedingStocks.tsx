@@ -33,8 +33,10 @@ import type {
   BreedingRow,
   DEFAULT_SETTINGS,
   FuelPriceResult,
+  WriteResult,
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
+import BreedingCloneAudit from '@/components/breeding/BreedingCloneAudit';
 import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
 import BreedingStockFilters from '@/components/breeding/BreedingStockFilters';
 import {
@@ -103,7 +105,12 @@ type Props = {
   onUpdateIndividual: (
     id: string,
     patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
-  ) => Promise<void>;
+  ) => Promise<WriteResult>;
+  /** Réécrit l'identité d'une ligne — le rattrapage d'un clonage saisi de travers. */
+  onRecastIndividual: (
+    id: string,
+    identity: { colorId: string; sex: Sex; name: string | null; parents: [string, string] | null }
+  ) => Promise<WriteResult>;
   onRemoveIndividual: (id: string) => Promise<void>;
   /** Retire un lot en une écriture — le purge des anonymes stériles s'en sert. */
   onRemoveIndividuals?: (ids: string[]) => Promise<void>;
@@ -275,6 +282,7 @@ const BreedingStocks = ({
   onSaveBulk,
   onAddIndividual,
   onUpdateIndividual,
+  onRecastIndividual,
   onRemoveIndividual,
   onRemoveIndividuals,
   onSaveItem,
@@ -768,6 +776,19 @@ const BreedingStocks = ({
               ce qui les sépare est le cycle de jauges, que la féconde a déjà payé. Seule la
               stérile est hors jeu — il ne lui reste que le clonage.
             </p>
+
+            {/* La vérification d'après-clonage. Repliée, et au-dessus de la
+                liste plutôt que dedans : ce qu'elle montre n'est pas un défaut
+                mais une affirmation à confronter au jeu, et elle se fait avant
+                de chercher quoi que ce soit dans la liste. Voir
+                `BreedingCloneAudit`. */}
+            <BreedingCloneAudit
+              individuals={individuals}
+              colors={colors}
+              nameOf={nameOf}
+              onUpdateIndividual={onUpdateIndividual}
+              onRecastIndividual={onRecastIndividual}
+            />
 
             {/* Les restes, comptés et retirables d'un geste. Voir `phantoms` :
                 une anonyme stérile n'est pas une monture qu'on aurait oublié de

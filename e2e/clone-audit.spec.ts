@@ -1,0 +1,244 @@
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { mockSupabase } from './support/supabase';
+import { failureBanner, openBreeding } from './support/breeding';
+
+/**
+ * Vérifier une séance de clonage contre le jeu.
+ *
+ * Un clonage détruit ses deux entrées et n'en rend qu'une : c'est le seul geste
+ * de l'élevage qui ne s'annule pas. Et c'est aussi le plus facile à saisir de
+ * travers, puisqu'il consigne un **tirage du jeu** que l'éleveur lit sur un
+ * autre écran. Le raisonnement est dans `clone-audit.ts` ; ce qui se vérifie ici
+ * est que l'écran rassemble les bonnes lignes, et que ses deux corrections
+ * partent réellement en base.
+ *
+ * ## Ce que la fixture donne, et pourquoi ça compte
+ *
+ * L'écurie du 15/08 porte **trois** fertiles au-dessus du niveau 1 — deux au
+ * niveau 42, une au niveau 44 — dont `G10 PO F AZTU-DO`, une gen 10. Ce ne sont
+ * pas des lignes fabriquées pour le test : ce sont exactement celles que le
+ * panneau existe pour montrer, et elles étaient déjà là avant lui. Un test bâti
+ * sur une écurie inventée n'aurait rien dit de l'écurie réelle.
+ */
+
+const individus = 'user_breeding_individuals';
+
+const openStocks = async (page: Page) => {
+  const bouton = page.getByRole('button', { name: /montures ·/ });
+  await expect(bouton).toBeVisible({ timeout: 30_000 });
+  await bouton.click();
+};
+
+/** Ouvre le panneau replié et rend ses lignes. */
+const openAudit = async (page: Page): Promise<Locator> => {
+  const panneau = page.getByTestId('clone-audit');
+  await expect(panneau).toBeVisible();
+  await page.getByTestId('clone-audit-toggle').click();
+  await expect(page.getByTestId('clone-audit-tally')).toBeVisible();
+  return panneau;
+};
+
+const patches = (supabase: Awaited<ReturnType<typeof mockSupabase>>) =>
+  supabase.writes.filter((write) => write.table === individus && write.method === 'PATCH');
+
+test.describe('vérification des clonages', () => {
+  test('le panneau rassemble les fertiles au-dessus du niveau 1, et les compte par niveau', async ({
+    page,
+  }) => {
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+
+    // Ce que la fixture porte vraiment — calculé ici plutôt que codé en dur,
+    // sinon le test surveillerait un nombre et non une règle.
+    const clones = supabase
+      .rows(individus)
+      .filter((row) => row.fertile === true && row.cycled === false && (row.level as number) > 1);
+    expect(clones.length).toBeGreaterThan(0);
+
+    const panneau = await openAudit(page);
+    await expect(panneau).toHaveAttribute('data-claims', String(clones.length));
+    await expect(page.getByTestId('clone-audit-claim')).toHaveCount(clones.length);
+
+    // Le compte par niveau : c'est le seul contrôle qui trouve un clonage fait
+    // en jeu et jamais enregistré, puisque celui-là ne laisse aucune ligne à
+    // lister. Il se lit dans les FILTRES du jeu, FERTILITÉ × NIVEAUX.
+    const parNiveau = new Map<number, number>();
+    for (const row of clones) {
+      const level = row.level as number;
+      parNiveau.set(level, (parNiveau.get(level) ?? 0) + 1);
+    }
+    await expect(page.getByTestId('clone-audit-level')).toHaveCount(parNiveau.size);
+    for (const [level, count] of parNiveau) {
+      await expect(
+        page.locator(`[data-testid="clone-audit-level"][data-level="${level}"]`)
+      ).toHaveAttribute('data-count', String(count));
+    }
+
+    // Une féconde est fertile **et** au niveau 48 : c'est l'état ordinaire d'une
+    // monture qui a fait son cycle d'enclos. La confondre avec un clone
+    // remplirait la liste de toute l'écurie prête à s'accoupler.
+    const fecondes = supabase
+      .rows(individus)
+      .filter((row) => row.fertile === true && row.cycled === true);
+    expect(fecondes.length).toBeGreaterThan(0);
+    for (const feconde of fecondes.slice(0, 5)) {
+      await expect(
+        page.locator(`[data-testid="clone-audit-claim"][data-mount-id="${feconde.id}"]`)
+      ).toHaveCount(0);
+    }
+  });
+
+  test('« le clonage n’a pas eu lieu » repasse la ligne stérile, en base', async ({ page }) => {
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+    await openAudit(page);
+
+    const ligne = page.getByTestId('clone-audit-claim').first();
+    const id = await ligne.getAttribute('data-mount-id');
+    expect(id).toBeTruthy();
+
+    await ligne.getByTestId('clone-audit-undo').click();
+    await expect(ligne.getByTestId('clone-audit-fixed')).toBeVisible();
+
+    // Ce que la base porte, et non ce que l'écran annonce. C'est toute la
+    // différence que cette suite existe pour tenir.
+    const apres = supabase.rows(individus).find((row) => row.id === id);
+    expect(apres?.fertile).toBe(false);
+    expect(apres?.cycled).toBe(false);
+
+    // La seconde stérile n'est pas devinée : le clonage l'a supprimée, la paire
+    // n'est consignée nulle part, et fabriquer une jumelle plausible rangerait
+    // une invention au milieu de faits. L'écran le dit au lieu de le faire.
+    await expect(ligne.getByTestId('clone-audit-fixed')).toContainText(/partenaire/i);
+    expect(
+      supabase.writes.filter((write) => write.table === individus && write.method === 'POST')
+    ).toHaveLength(0);
+  });
+
+  test('une correction refusée ne coche rien, le dit, et laisse la ligne en place', async ({
+    page,
+  }) => {
+    /*
+     * La règle de toute la maison, et la seule raison pour laquelle ce fichier
+     * touche `updateIndividual` : l'écran ne peut annoncer que ce que la base a
+     * pris. La correction partait en optimiste **sans retour arrière et sans
+     * message** — l'état local gardait la stérilisation, la base gardait la
+     * fertile, et les deux ne se départageaient qu'au rechargement suivant.
+     *
+     * C'est exactement la forme qui a coûté 22 montures à la saisie de
+     * naissance : une écriture perdue derrière un écran qui dit « c'est fait ».
+     */
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+    await openAudit(page);
+
+    const ligne = page.getByTestId('clone-audit-claim').first();
+    const id = await ligne.getAttribute('data-mount-id');
+
+    supabase.refuse({ table: individus, method: 'PATCH' });
+    await ligne.getByTestId('clone-audit-undo').click();
+
+    await expect(page.getByTestId('clone-audit-refusal')).toBeVisible();
+    await expect(failureBanner(page)).toBeVisible();
+    // Rien de coché : la ligne garde ses trois issues, donc le geste se refait.
+    await expect(ligne.getByTestId('clone-audit-fixed')).toHaveCount(0);
+    await expect(ligne.getByTestId('clone-audit-undo')).toBeVisible();
+
+    // Et la base n'a pas bougé — ni l'écran, qui doit la refléter.
+    const apres = supabase.rows(individus).find((row) => row.id === id);
+    expect(apres?.fertile).toBe(true);
+    await expect(
+      page.locator(`[data-testid="clone-audit-claim"][data-mount-id="${id}"]`)
+    ).toBeVisible();
+
+    // Puis ça repasse une fois la base rouverte : le refus n'a pas laissé
+    // l'écran dans un état d'où l'on ne peut plus rien faire.
+    supabase.allow();
+    await ligne.getByTestId('clone-audit-undo').click();
+    await expect(ligne.getByTestId('clone-audit-fixed')).toBeVisible();
+    expect(supabase.rows(individus).find((row) => row.id === id)?.fertile).toBe(false);
+  });
+
+  test('« le jeu montre un autre nom » réécrit l’identité de la ligne', async ({ page }) => {
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+    await openAudit(page);
+
+    const ligne = page.getByTestId('clone-audit-claim').first();
+    const id = await ligne.getAttribute('data-mount-id');
+    const avant = supabase.rows(individus).find((row) => row.id === id)!;
+
+    await ligne.getByTestId('clone-audit-recast').click();
+
+    // Un nom illisible ne corrige rien : le même chemin que l'import d'une
+    // liste, donc le même refus. Sans ça, une faute de frappe écrirait une
+    // ascendance inventée sur une monture qui existe.
+    await ligne.getByTestId('clone-audit-name').fill('pas un nom');
+    await expect(ligne.getByTestId('clone-audit-unreadable')).toBeVisible();
+    await expect(ligne.getByTestId('clone-audit-recast-save')).toBeDisabled();
+    expect(patches(supabase)).toHaveLength(0);
+
+    // Le nom que le jeu affiche sur la survivante. Il porte à lui seul la
+    // couleur, le sexe et les deux parents — c'est pour ça qu'il est la clé de
+    // réparation, et non un libellé.
+    await ligne.getByTestId('clone-audit-name').fill('G2 DOPO M DO-PO');
+    await expect(ligne.getByTestId('clone-audit-preview')).toBeVisible();
+    await ligne.getByTestId('clone-audit-recast-save').click();
+    await expect(ligne.getByTestId('clone-audit-fixed')).toBeVisible();
+
+    const apres = supabase.rows(individus).find((row) => row.id === id)!;
+    expect(apres.name).toBe('G2 DOPO M DO-PO');
+    expect(apres.color_id).toBe('dore_pourpre');
+    expect(apres.sex).toBe('M');
+    expect([apres.parent_a_color, apres.parent_b_color].sort()).toEqual(['dore', 'pourpre']);
+
+    // La ligne est **corrigée**, pas remplacée : l'identifiant tient, donc les
+    // enfants qui la référencent aussi, et la date d'entrée avec. Voir la
+    // compétence `ecurie-en-jeu`, qui pose la règle après un recensement entier.
+    expect(apres.id).toBe(avant.id);
+    expect(apres.created_at).toBe(avant.created_at);
+    expect(
+      supabase.writes.filter((write) => write.table === individus && write.method === 'DELETE')
+    ).toHaveLength(0);
+  });
+
+  test('deux corrections d’affilée partent chacune sur sa propre ligne', async ({ page }) => {
+    /*
+     * Le second clic, celui qui trouve les régressions. La liste se recalcule
+     * sous les doigts — une ligne corrigée cesse d'être un clone — et une
+     * correction qui viserait « la première ligne » plutôt que la sienne
+     * écraserait la voisine. Une fournée de clonages en compte une douzaine ;
+     * un test à un seul clic n'en prouve rien.
+     */
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+    await openAudit(page);
+
+    const lignes = page.getByTestId('clone-audit-claim');
+    expect(await lignes.count()).toBeGreaterThanOrEqual(2);
+    const premier = await lignes.nth(0).getAttribute('data-mount-id');
+    const second = await lignes.nth(1).getAttribute('data-mount-id');
+    expect(premier).not.toBe(second);
+
+    await lignes.nth(0).getByTestId('clone-audit-undo').click();
+    await expect(lignes.nth(0).getByTestId('clone-audit-fixed')).toBeVisible();
+
+    await lignes.nth(1).getByTestId('clone-audit-recast').click();
+    await lignes.nth(1).getByTestId('clone-audit-name').fill('G4 AM F DO-DOAM');
+    await lignes.nth(1).getByTestId('clone-audit-recast-save').click();
+    await expect(lignes.nth(1).getByTestId('clone-audit-fixed')).toBeVisible();
+
+    const un = supabase.rows(individus).find((row) => row.id === premier)!;
+    const deux = supabase.rows(individus).find((row) => row.id === second)!;
+    // Chacune a reçu la sienne, et rien n'a débordé sur l'autre.
+    expect(un.fertile).toBe(false);
+    expect(un.name).not.toBe('G4 AM F DO-DOAM');
+    expect(deux.name).toBe('G4 AM F DO-DOAM');
+    expect(deux.fertile).toBe(true);
+  });
+});

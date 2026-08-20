@@ -104,6 +104,7 @@ const BreedingPage = () => {
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    recastIndividual,
     recordEnclosExit,
     removeIndividual,
     removeIndividuals,
@@ -642,6 +643,7 @@ const BreedingPage = () => {
         onSaveBulk={saveBulkStock}
         onAddIndividual={addIndividual}
         onUpdateIndividual={updateIndividual}
+        onRecastIndividual={recastIndividual}
         onRemoveIndividual={removeIndividual}
         // Le purge des anonymes stériles part en une écriture : soixante-dix
         // suppressions séparées laisseraient un état que personne ne peut dire.

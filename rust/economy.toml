@@ -456,19 +456,31 @@ places_paralleles = 2
 # Ces chiffres-ci sont ce chiffrage. On ne décide pas à la main si poursuivre la
 # collection paie : on le met dans la fitness et on laisse la recherche arbitrer.
 #
-# ## Le barème
+# ## Le barème, et pourquoi ce dixième
 #
-# Cent mille par génération, et le double du dernier cran au sommet — une gen 10
+# Dix mille par génération, et le double du dernier cran au sommet — une gen 10
 # demande neuf croisements réussis en amont, pas dix fois plus qu'une gen 9.
 #
+# La forme vient du relevé du mainteneur ; l'**échelle**, elle, a été corrigée
+# après mesure. Au barème d'origine — dix fois celui-ci — la collection complète
+# muldo valait **137,7 M**, dont **100 M** pour les seules gen 10 : l'arbre en
+# compte cinquante, soit 73 % du succès sur le dernier barreau. Or une partie
+# entière pèse 30 à 56 M de kamas. La prime ne départageait donc plus les
+# politiques, elle les commandait, et le champion entraîné dessous finissait à
+# 51 gen 10 par partie — la production en volume que le marché n'absorbe pas, et
+# que `Summit::Duplicate` reste éteinte pour éviter.
+#
+# À ce dixième, la collection complète vaut 13,8 M contre une partie de 30 à
+# 56 M : elle départage, elle ne commande plus.
+#
 # Tout à zéro rend la fitness d'avant, à l'identique.
-gen1 = 100000
-gen2 = 200000
-gen3 = 300000
-gen4 = 400000
-gen5 = 500000
-gen6 = 600000
-gen7 = 700000
-gen8 = 800000
-gen9 = 900000
-gen10 = 2000000
+gen1 = 10000
+gen2 = 20000
+gen3 = 30000
+gen4 = 40000
+gen5 = 50000
+gen6 = 60000
+gen7 = 70000
+gen8 = 80000
+gen9 = 90000
+gen10 = 200000

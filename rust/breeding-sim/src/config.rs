@@ -382,6 +382,11 @@ impl Prices {
                 get(&["succes", key.as_str()], 0.0) as i64;
         }
 
+        // La profondeur de marché. Absente, elle vaut zéro et la liquidation reste
+        // linéaire — le barème de toutes les mesures publiées avant elle.
+        economy.sale_price_decay = get(&["marche", "baisse_par_vente"], 0.0);
+        economy.daily_price_recovery = get(&["marche", "hausse_par_jour"], 0.0);
+
         economy.slots_per_enclos = slots_per_enclos;
         economy.sync_enclos = get(&["fournee", "enclos_synchronises"], 5.0) as usize;
         economy.free_enclos = get(&["fournee", "enclos_libres"], 0.0) as usize;

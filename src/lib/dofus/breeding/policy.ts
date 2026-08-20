@@ -977,11 +977,60 @@ const RECORD_PASSES = 64;
  * Et rien ne s'y perd : un poulain naît niveau 1 et non fécond, donc il ne peut
  * pas figurer dans un couple à zéro place de toute façon.
  */
-export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
+export type Reclone = (stable: Stable) => Stable;
+
+export const couplesToRecordAll = (
+  input: PolicyInput,
+  /**
+   * Comment l'écurie se relit **après les clonages**, à chaque passe.
+   *
+   * ## Ce que la saisie fabrique
+   *
+   * L'écran planifie sur l'écurie d'après les clonages (#223), et il les appliquait
+   * **une fois**, avant d'entrer ici. Le point fixe n'était alors juste qu'à
+   * clonages constants — or la saisie en crée : un accouplement rend ses deux
+   * parents stériles, et deux stériles de même génération sont une paire clonable
+   * de plus. Sur l'écurie de `check-record-fixpoint` : quatre clonages à l'entrée,
+   * **six** après saisie. Les deux de plus font réarbitrer la politique, et la
+   * liste repousse — le défaut de #165, revenu par une troisième porte, après
+   * `projectBirths` et `afterClonings`.
+   *
+   * Mesuré au navigateur sur cette écurie, écritures réelles comprises : **2
+   * accouplements repoussent** sans cette reprojection, **0** avec. Voir
+   * `e2e/clone-then-mate.spec.ts`.
+   *
+   * ## Pourquoi un paramètre obligatoire
+   *
+   * Parce que passer l'écurie déjà clonée est exactement l'erreur qu'on vient de
+   * corriger : elle se lit juste, elle compile, et elle ne tient qu'à clonages
+   * constants. Un appelant doit dire `null` pour s'en passer — un choix, pas un
+   * oubli.
+   *
+   * ## Ce que la boucle ne peut toujours pas deviner
+   *
+   * **Lequel des deux clones** le jeu rendra. C'est un nom : ni la couleur, ni la
+   * génération, ni la fécondité n'en dépendent, donc l'appariement non plus.
+   */
+  reclone: Reclone | null
+): Couple[] => {
   const all: Couple[] = [];
-  let working = input.stable;
+  /**
+   * L'écurie **réelle** telle que la saisie la laisse : les fécondités dépensées,
+   * les stériles neuves, les poulains projetés — et **aucun clone**.
+   *
+   * Les clonages ne s'y accumulent pas, ils se redérivent à chaque passe. C'est ce
+   * qui fait que la boucle apparie les mêmes stériles que la replanification :
+   * celle-ci part toujours de l'écurie nue et appelle `cloneOptions` une fois, donc
+   * une boucle qui empilerait ses clones passe après passe apparierait, elle, des
+   * stériles déjà retirées par les passes d'avant. Les deux jeux divergeaient d'un
+   * couple sur l'écurie de `check-record-fixpoint`, et c'était ça.
+   */
+  let working = reclone ? reclone(input.stable) : input.stable;
 
   for (let pass = 0; pass < RECORD_PASSES; pass += 1) {
+    // Les clonages redérivés à neuf, comme la replanification les redérive. Un
+    // clone sort `cycled: false`, donc il ne peut jamais entrer dans un couple à
+    // zéro place : la vague ne nomme que des montures que `working` porte aussi.
     const plan = stablePlan({ ...input, stable: working });
     if (!plan) break;
 
@@ -1012,6 +1061,7 @@ export const couplesToRecordAll = (input: PolicyInput): Couple[] => {
     // `all.length - wave.length` : le nombre de poulains déjà projetés par les
     // vagues d'avant, pour que l'alternance des sexes coure sur la saisie entière.
     projectBirths(working, wave, pass, all.length - wave.length);
+    if (reclone) working = reclone(working);
   }
 
   return all;

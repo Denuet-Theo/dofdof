@@ -22,10 +22,20 @@
  * garde joue donc les deux régimes, et surveille les deux — un correctif qui
  * viderait la liste dans l'un en la faisant repousser dans l'autre n'en est pas un.
  *
- * Une reprojection des clonages **à chaque passe** a été essayée et jetée : elle
- * fait passer le résidu de 0 à 1 sur cette écurie. La boucle ne peut pas prévoir
- * quels clonages la saisie va rendre possibles, parce qu'elle ne sait pas quelles
- * montures seront devenues stériles ni lequel des deux clones le jeu rendra.
+ * Une reprojection des clonages **à chaque passe** avait été essayée et jetée, sur
+ * la foi d'un résidu passé de 0 à 1. C'est elle qui tient ce régime désormais, et
+ * l'objection écrite ici était fausse sur un point : la boucle « ne peut pas
+ * prévoir quels clonages la saisie va rendre possibles ». Elle le peut —
+ * `consumeCouples` stérilise les deux parents de chaque couple saisi, donc les
+ * stériles neuves sont les siennes. Ce qu'elle ne sait pas, c'est **lequel des deux
+ * clones** le jeu rendra, et c'est un nom : ni couleur, ni génération, ni
+ * fécondité, donc rien dont l'appariement dépende.
+ *
+ * Quatre clonages à l'entrée, **six** après saisie : ce sont les deux de plus qui
+ * faisaient réarbitrer la politique. Au navigateur, écritures réelles comprises,
+ * **2 accouplements repoussaient** sans la reprojection et **0** avec — voir
+ * `e2e/clone-then-mate.spec.ts`, qui mesure ce que l'onglet annonce et non la
+ * première tranche.
  *
  * ## La limite, et elle est réelle
  *
@@ -161,12 +171,56 @@ const applyRecording = (stable, couples) => {
 };
 
 /** Ce qui repousse après avoir tout saisi, dans un régime donné. */
+/**
+ * La reprojection des clonages, telle que l'écran la passe.
+ *
+ * `null` sans clonages : c'est le régime, pas un oubli. Le paramètre est
+ * obligatoire côté `couplesToRecordAll` exprès — mais ce fichier est un `.mjs`,
+ * donc `tsc` ne l'aurait pas rattrapé et l'oubli serait passé en silence.
+ */
+const pairKey = (o) => `${o.keep.id}+${o.partner.id}`;
+/** `sink` recueille les clonages que la boucle **suppose**, dans l'ordre. */
+const recloneFor = (withClonings, tag, sink) =>
+  withClonings
+    ? (working) => {
+        const options = cloneOptions(working, cloneContext, Number.POSITIVE_INFINITY);
+        if (process.env.DIAG) {
+          console.log(`   [${tag}] ${options.length} clonage(s) : ${options.map(pairKey).join(', ') || '-'}`);
+        }
+        if (sink) sink.push(...options);
+        return afterClonings(working, options);
+      }
+    : null;
+
 const residueOf = (withClonings) => {
   const stable = buildStable();
-  const promised = couplesToRecordAll(inputFor(stable, withClonings));
-  const after = applyRecording(stable, promised);
-  const plan = stablePlan(inputFor(after, withClonings));
-  return { promised: promised.length, left: plan ? couplesToRecord(plan).length : 0 };
+  // L'écurie **brute** entre dans la boucle, comme sur l'écran : c'est `reclone`
+  // qui pose les clonages, à l'entrée puis entre chaque passe.
+  const assumed = [];
+  const promised = couplesToRecordAll(inputFor(stable, false), recloneFor(withClonings, 'boucle', assumed));
+  // La saisie se fait sur l'écurie **d'après les clonages**, parce que c'est la
+  // fournée que l'écran promet : « voici les clonages, voici les accouplements ».
+  // Les mesurer sur une écurie où les clonages n'ont pas eu lieu demanderait à la
+  // boucle de tenir une promesse qu'elle n'a pas faite — et faisait diverger
+  // l'appariement des stériles, la boucle en ayant retiré que la replanification
+  // retrouvait.
+  // L'éleveur fait les clonages que la fournée **suppose** — ceux d'entrée et ceux
+  // que la saisie fait apparaître — puis saisit. Les mesurer sur une écurie où ces
+  // clonages n'ont pas eu lieu ferait réapparier les stériles autrement, et c'est
+  // cette divergence-là qu'on lisait comme un couple qui repousse.
+  const done = withClonings ? afterClonings(stable, assumed) : stable;
+  const after = applyRecording(done, promised);
+  // Ce qui **reste à l'onglet**, et non la première tranche du plan. Les deux
+  // divergent — une tranche vide peut cacher une liste pleine — et c'est la liste
+  // entière que l'éleveur voit annoncée. Mesurée du même côté que l'entrée, donc
+  // écurie brute plus `reclone`.
+  const left = couplesToRecordAll(inputFor(after, false), recloneFor(withClonings, 'replan', null));
+  if (process.env.DIAG) {
+    for (const c of left) {
+      console.log(`   RESTE ${c.male.colorId}(${c.male.mountId ?? 'vrac'}) x ${c.female.colorId}(${c.female.mountId ?? 'vrac'}) -> ${c.targetColorId}`);
+    }
+  }
+  return { promised: promised.length, left: left.length };
 };
 
 const plain = residueOf(false);

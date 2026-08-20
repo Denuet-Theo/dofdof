@@ -66,6 +66,29 @@ free check. The converse does not hold: niveau 48 mixes fécondes and stériles.
 This depends on the Mangeoire setting. Re-verify it before relying on it; the
 plan label in `breeding_timeline` says which level is in use.
 
+## A clone comes back at niveau 1 — confirmed in game, 2026-08-20
+
+Cloning does not hand back an experienced mount. It hands back a **new** one
+carrying the sacrificed mount's colour, sex, name and genealogy: gauges reset,
+**and level reset**. The breeder confirmed it in game.
+
+This was assumed the other way round and the assumption reached code.
+`recordClonings` wrote `level: mount.level` — the consumed sterile's, typically
+48 — and `afterClonings` spread the same. It is not decorative: the crossing
+success rate is `0.3 + 0.0015 × (levelA + levelB)`, so two such mounts announced
+44.4 % where the game gives 30.3 %.
+
+Two consequences worth keeping:
+
+- The invariant above **holds without exception**: every route into the fertile
+  state lands on niveau 1. A fertile above niveau 1 is a write bug or a mount
+  bought already levelled — the audit panel lists them.
+- A clone is therefore **indistinguishable from a foal** in the base: same
+  state, same level, same naming, no column separating them. A cloning entered
+  wrongly cannot be found after the fact by any local rule. What is left is the
+  census total, which a cloning lowers by one, and a cloning journal that does
+  not exist.
+
 ## Getting the truth back into the app
 
 The breeder has **no database access**. Everything is reachable from the UI:

@@ -167,6 +167,33 @@ export const colorCoder = (colors: readonly { name: string }[]): ColorCoder => {
 };
 
 /**
+ * Le chemin inverse : d'un code lu dans un nom vers la couleur qu'il désigne.
+ *
+ * `null` en valeur signale un code **ambigu** — deux couleurs le portent — et
+ * c'est délibérément distinct de « absent ». Un code ambigu arbitré au hasard
+ * rendrait une relecture de nom silencieusement fausse, alors que la ligne
+ * concernée mérite d'être montrée à l'éleveur. `colorCoder` n'en produit aucun
+ * sur les trois familles, mais ça ne se vérifie qu'ici.
+ *
+ * Vit à côté de `colorCoder` et non dans l'écran d'import parce que deux écrans
+ * relisent maintenant un nom dicté : l'import d'une liste, et la correction d'un
+ * clonage saisi de travers — qui rattrape la monture que le jeu a réellement
+ * rendue. Deux tables construites séparément dériveraient au premier code qui
+ * change, et un code qui change renomme toute une écurie.
+ */
+export const colorsByCode = (
+  colors: readonly { id: string; name: string }[]
+): Map<string, string | null> => {
+  const code = colorCoder(colors);
+  const seen = new Map<string, string | null>();
+  for (const color of colors) {
+    const key = code(color.name);
+    seen.set(key, seen.has(key) ? null : color.id);
+  }
+  return seen;
+};
+
+/**
  * Le nom à inscrire en jeu sur une monture, ou `ANONYMOUS_NAME` si elle n'a pas
  * d'ascendance.
  *
@@ -228,6 +255,58 @@ export const carriedGeneration = (
   ownGeneration: number,
   parentGenerations: [number, number] | null
 ): number => Math.max(ownGeneration, ...(parentGenerations ?? []));
+
+/** Une couleur du catalogue, réduite à ce qu'un nom en a besoin. */
+export type NamedColor = { id: string; name: string; generation: number };
+
+/**
+ * Le nom qu'une monture **devrait** porter en jeu, d'après ce qu'elle est.
+ *
+ * `null` pour une monture sans ascendance : il n'y a rien à inscrire, et
+ * « Anonyme » est déjà son nom dans le jeu.
+ *
+ * ## Pourquoi ce calcul est un instrument de contrôle et pas seulement d'écriture
+ *
+ * Le nom est **dérivé** — couleur, sexe, ascendance — donc il se recalcule à tout
+ * moment, et l'écart entre le nom porté et le nom dû est la preuve locale que
+ * quelque chose a bougé sans que l'autre suive. Deux façons d'y arriver, et les
+ * deux sont arrivées : corriger le sexe d'une monture dans « Mes stocks » sans
+ * la renommer en jeu, et importer une ligne dont le nom ne décrit pas ce qu'on
+ * a tapé à côté.
+ *
+ * Ça compte plus qu'une étiquette de travers. Le nom est **la seule chose qui se
+ * lise depuis la liste de l'écurie du jeu** : une monture dont le nom ment n'est
+ * plus retrouvable devant l'enclos, et c'est là qu'on la cherche.
+ *
+ * Extrait de `BreedingStocks`, où il vivait en fermeture locale, le jour où le
+ * relevé d'écurie a eu besoin de compter les écarts au lieu de les afficher un
+ * par un au fil d'une liste de deux cents lignes.
+ */
+export const dictatedNameFor = (
+  mount: { colorId: string; sex: Sex; parents: readonly string[] | null },
+  colors: readonly NamedColor[]
+): string | null => {
+  if (!mount.parents || mount.parents.length !== 2) return null;
+
+  const byId = new Map(colors.map((color) => [color.id, color]));
+  const own = byId.get(mount.colorId);
+  const parents = mount.parents.map((id) => byId.get(id));
+  // Une couleur absente du catalogue rendrait un code inventé, donc un « écart »
+  // qui n'en est pas un et un bouton qui renomme de travers. On préfère ne rien
+  // dire : c'est la même règle que `purityOf` sur une ascendance à moitié connue.
+  if (!own || !parents[0] || !parents[1]) return null;
+
+  return mountName({
+    carriedGeneration: carriedGeneration(own.generation, [
+      parents[0].generation,
+      parents[1].generation,
+    ]),
+    colorName: own.name,
+    sex: mount.sex,
+    parentNames: [parents[0].name, parents[1].name],
+    code: colorCoder(colors),
+  });
+};
 
 /**
  * Un nom relu — l'inverse de `mountName`.

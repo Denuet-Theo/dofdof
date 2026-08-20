@@ -71,7 +71,7 @@ test.describe('les réglages de « Mes stocks »', () => {
     await page.getByTestId('setting-gauge-band').selectOption('70000');
     await page.getByTestId('setting-net-cost').check();
     await page.getByTestId('save-settings').click();
-    await expect(page.getByText('Enregistré')).toBeVisible();
+    await expect(page.getByText('Enregistré', { exact: true })).toBeVisible();
 
     const body = lastSettingsWrite(mock.writes);
     expect(body.gauge_cap).toBe(70000);
@@ -97,11 +97,11 @@ test.describe('les réglages de « Mes stocks »', () => {
     for (const band of ['70000', '100000']) {
       await page.getByTestId('setting-gauge-band').selectOption(band);
       await page.getByTestId('save-settings').click();
-      await expect(page.getByText('Enregistré')).toBeVisible();
+      await expect(page.getByText('Enregistré', { exact: true })).toBeVisible();
       expect(lastSettingsWrite(mock.writes).gauge_cap).toBe(Number(band));
       // Le message s'efface au bout de deux secondes ; l'attendre évite de
       // confondre celui du premier clic avec celui du second.
-      await expect(page.getByText('Enregistré')).toHaveCount(0, { timeout: 5_000 });
+      await expect(page.getByText('Enregistré', { exact: true })).toHaveCount(0, { timeout: 5_000 });
     }
 
     expect(
@@ -129,7 +129,7 @@ test.describe('les réglages de « Mes stocks »', () => {
 
     await page.getByTestId('setting-gauge-band').selectOption('');
     await page.getByTestId('save-settings').click();
-    await expect(page.getByText('Enregistré')).toBeVisible();
+    await expect(page.getByText('Enregistré', { exact: true })).toBeVisible();
 
     expect(lastSettingsWrite(mock.writes).gauge_cap).toBeNull();
   });

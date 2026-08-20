@@ -6,7 +6,12 @@ import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
-import { carriedGeneration, colorCoder, parseMountName } from '@/lib/dofus/breeding/naming';
+import {
+  carriedGeneration,
+  colorCoder,
+  colorsByCode,
+  parseMountName,
+} from '@/lib/dofus/breeding/naming';
 import { MOUNT_STATUS_LABEL, type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
 import type { AddResult } from '@/lib/hooks/useBreeding';
 
@@ -285,22 +290,8 @@ const BreedingImportMounts = ({ isOpen, onClose, colors, onAdd }: Props) => {
   const byId = useMemo(() => new Map(colors.map((color) => [color.id, color])), [colors]);
   const code = useMemo(() => colorCoder(colors), [colors]);
 
-  /**
-   * La table qui traduit un code en couleur.
-   *
-   * Un code ambigu est **retiré** plutôt qu'arbitré : deux couleurs sous le même
-   * code rendraient l'import silencieusement faux, et la ligne concernée mérite
-   * d'être signalée. Sur les trois familles `colorCoder` n'en produit aucun,
-   * mais ça ne se vérifie qu'ici.
-   */
-  const colorByCode = useMemo(() => {
-    const seen = new Map<string, string | null>();
-    for (const color of colors) {
-      const key = code(color.name);
-      seen.set(key, seen.has(key) ? null : color.id);
-    }
-    return seen;
-  }, [colors, code]);
+  /** La table qui traduit un code en couleur — voir `colorsByCode`. */
+  const colorByCode = useMemo(() => colorsByCode(colors), [colors]);
 
   const nameOf = (colorId: string) => byId.get(colorId)?.name ?? colorId;
   const generationOf = useCallback(

@@ -44,6 +44,7 @@ import { DEFAULT_GAUGE_BAND, ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   cycledOf,
+  FRESH_LEVEL,
   stableBySex,
   statusFlags,
   tracksIndividually,
@@ -138,7 +139,18 @@ export type RecordBirthsResult =
  * les deux stériles y sont toujours. La fenêtre peut donc laisser le clonage
  * dans le lot à faire au lieu de le compter fait.
  */
-export type CloningResult = { ok: true } | { ok: false; message: string };
+/**
+ * Ce qu'une écriture rend à qui l'a demandée : passée, ou refusée **avec le
+ * message de la base**.
+ *
+ * Un `void` qui journalise est la classe qui a coûté 22 montures : la fournée
+ * annonçait « enregistré », la ligne n'était pas partie, et rien à l'écran ne
+ * séparait les deux cas. Toute écriture dont un écran annonce le résultat rend
+ * donc ceci, et l'écran affiche le refus là où on vient de cliquer.
+ */
+export type WriteResult = { ok: true } | { ok: false; message: string };
+
+export type CloningResult = WriteResult;
 
 /**
  * Assemble les trois sources dont le classement d'élevage a besoin : les arbres
@@ -319,6 +331,46 @@ const numericSettings = (row: UserBreedingSettings): BreedingSettings => {
     gauge_cap: merged.gauge_cap === null ? null : Number(merged.gauge_cap),
   };
 };
+
+/**
+ * Une ligne de la base relue en monture — le **seul** chemin.
+ *
+ * Cinq endroits le faisaient chacun à la main : le chargement, l'ajout, la
+ * promotion d'une sortie d'enclos, la naissance et le clonage. Cinq copies du
+ * même dépliage, dont deux réécrivaient en dur ce que la ligne disait déjà
+ * (`fertile: true` sur le retour d'un `insert` qui venait de poser `true`), et
+ * une posait `parents: null` là où la ligne n'en portait de toute façon pas.
+ *
+ * Elles étaient toutes justes. Le défaut n'est pas là : c'est qu'ajouter un
+ * champ à `Individual` demandait de trouver les cinq, et qu'un sixième site
+ * écrit demain n'a rien qui l'oblige à connaître les précédents. `createdAt`,
+ * ajouté pour l'audit des clonages, est arrivé par exactement cette porte — il
+ * manquait à quatre des cinq, et une monture sans date se serait rangée au
+ * hasard dans une liste triée par récence.
+ *
+ * Le commentaire sur `cycled` a suivi la lecture qu'il explique : c'est ici qu'on
+ * décide, une fois, qu'un cycle inconnu vaut « à repayer ».
+ */
+const individualFromRow = (row: UserBreedingIndividual): Individual => ({
+  id: row.id,
+  colorId: row.color_id,
+  name: row.name ?? null,
+  sex: row.sex,
+  level: row.level,
+  fertile: row.fertile,
+  // `?? false` et non le champ nu : la colonne date de la migration
+  // 20260809210000, et une base non migrée rendrait `undefined` — ce qui vaut
+  // « cycle inconnu », donc à repayer, le sens prudent.
+  cycled: row.cycled ?? false,
+  // Les deux couleurs vont ensemble ou pas du tout : une ascendance à moitié
+  // connue ne se distingue pas d'une monture achetée, et la traiter comme telle
+  // vaut mieux que d'inventer le parent manquant.
+  parents:
+    row.parent_a_color && row.parent_b_color
+      ? [row.parent_a_color, row.parent_b_color]
+      : null,
+  createdAt: row.created_at ?? null,
+});
 
 export type BreedingRow = {
   colorId: string;
@@ -548,25 +600,7 @@ export const useBreeding = (
                 },
               ])
           ),
-          individuals: individualRows.map((row) => ({
-            id: row.id,
-            colorId: row.color_id,
-            name: row.name ?? null,
-            sex: row.sex,
-            level: row.level,
-            fertile: row.fertile,
-            // `?? false` et non le champ nu : la colonne date de la migration
-            // 20260809210000, et une base non migrée rendrait `undefined` — ce
-            // qui vaut « cycle inconnu », donc à repayer, le sens prudent.
-            cycled: row.cycled ?? false,
-            // Les deux couleurs vont ensemble ou pas du tout : une ascendance à
-            // moitié connue ne se distingue pas d'une monture achetée, et la
-            // traiter comme telle vaut mieux que d'inventer le parent manquant.
-            parents:
-              row.parent_a_color && row.parent_b_color
-                ? [row.parent_a_color, row.parent_b_color]
-                : null,
-          })),
+          individuals: individualRows.map(individualFromRow),
         });
         setItemStock(
           new Map(
@@ -1113,20 +1147,7 @@ export const useBreeding = (
         };
       }
 
-      const row = data as UserBreedingIndividual;
-      const added: Individual = {
-        id: row.id,
-        colorId: row.color_id,
-        name: row.name ?? null,
-        sex: row.sex,
-        level: row.level,
-        fertile: row.fertile,
-        cycled: row.cycled ?? false,
-        parents:
-          row.parent_a_color && row.parent_b_color
-            ? [row.parent_a_color, row.parent_b_color]
-            : null,
-      };
+      const added = individualFromRow(data as UserBreedingIndividual);
 
       setStable((current) => ({ ...current, individuals: [...current.individuals, added] }));
       return { ok: true as const, mount: added };
@@ -1317,16 +1338,10 @@ export const useBreeding = (
           complete = false;
         }
 
-        inserted = (data ?? []).map((row) => ({
-          id: row.id,
-          colorId: row.color_id,
-          name: row.name ?? null,
-          sex: row.sex,
-          level: row.level,
-          fertile: row.fertile,
-          cycled: row.cycled ?? false,
-          parents: null,
-        }));
+        // Sans ascendance : la promotion n'en insère aucune, donc la ligne
+        // relue n'en porte pas — le `parents: null` qui était écrit ici en dur
+        // disait la même chose, une fois de plus.
+        inserted = (data ?? []).map(individualFromRow);
       }
 
       // Les mises à jour **avant** l'état local, et non l'inverse : une monture
@@ -1388,9 +1403,28 @@ export const useBreeding = (
     [family, stable.bulk, stable.individuals]
   );
 
-  /** Corrige une monture suivie : niveau, sexe ou fertilité. */
+  /**
+   * Corrige une monture suivie : niveau, sexe ou fertilité.
+   *
+   * L'écran part devant — la liste se refiltre à la frappe — mais un refus
+   * **revient en arrière** et se dit. Il ne faisait ni l'un ni l'autre : l'état
+   * local gardait la correction, la base gardait l'ancienne valeur, et les deux
+   * ne se départageaient qu'au rechargement suivant. Même classe que la
+   * suppression d'à côté, qui elle remettait déjà la monture retirée.
+   *
+   * Elle rend maintenant son résultat, parce qu'un appelant l'annonce : l'audit
+   * des clonages dit « remise stérile » après avoir cliqué, et le dire sur une
+   * écriture refusée est exactement le mensonge que `reportWriteFailure` existe
+   * pour empêcher.
+   */
   const updateIndividual = useCallback(
-    async (id: string, patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>) => {
+    async (
+      id: string,
+      patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
+    ): Promise<WriteResult> => {
+      // Ce qu'on écrase, gardé de côté pour pouvoir le remettre.
+      const before = stable.individuals.find((mount) => mount.id === id);
+
       setStable((current) => ({
         ...current,
         individuals: current.individuals.map((mount) =>
@@ -1404,9 +1438,88 @@ export const useBreeding = (
         .update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-      if (saveError) reportWriteFailure('la correction de cette monture', saveError);
+      if (saveError) {
+        if (before) {
+          setStable((current) => ({
+            ...current,
+            individuals: current.individuals.map((mount) =>
+              mount.id === id ? before : mount
+            ),
+          }));
+        }
+        return {
+          ok: false as const,
+          message: reportWriteFailure('la correction de cette monture', saveError),
+        };
+      }
+      return { ok: true as const };
     },
-    []
+    [stable.individuals]
+  );
+
+  /**
+   * Réécrit **l'identité** d'une monture : couleur, sexe, nom, ascendance.
+   *
+   * Le rattrapage d'un clonage saisi de travers. Le jeu tire la survivante,
+   * l'éleveur consigne l'autre, et la ligne porte alors une ascendance qui n'est
+   * pas celle de la monture qui existe réellement. Voir `clone-audit.ts`.
+   *
+   * ## Pourquoi corriger la ligne et non la remplacer
+   *
+   * Supprimer puis rajouter donnerait le même contenu et perdrait le reste :
+   * l'identifiant, que les `parent_a_id` / `parent_b_id` des enfants
+   * référencent, et la date d'entrée. La compétence `ecurie-en-jeu` pose la
+   * règle après un recensement entier — « éditer sur place, ça préserve
+   * l'ascendance et l'historique qu'un supprimer-réimporter jette ».
+   *
+   * `updateIndividual` ne pouvait pas le faire, et pas par oubli : ses clés sont
+   * celles du modèle (`colorId`, `parents`) et se versent telles quelles dans
+   * l'`update`, là où la base attend `color_id`, `parent_a_color`,
+   * `parent_b_color`. La traduction se fait donc ici, une fois, plutôt que
+   * d'élargir un chemin qui marche par coïncidence de noms.
+   */
+  const recastIndividual = useCallback(
+    async (
+      id: string,
+      identity: { colorId: string; sex: Sex; name: string | null; parents: [string, string] | null }
+    ): Promise<WriteResult> => {
+      const before = stable.individuals.find((mount) => mount.id === id);
+      if (!before) {
+        return { ok: false as const, message: 'Cette monture n’est plus dans l’écurie.' };
+      }
+
+      const supabase = createClient();
+      const { error: saveError } = await supabase
+        .from('user_breeding_individuals')
+        .update({
+          color_id: identity.colorId,
+          sex: identity.sex,
+          name: identity.name,
+          parent_a_color: identity.parents?.[0] ?? null,
+          parent_b_color: identity.parents?.[1] ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      if (saveError) {
+        return {
+          ok: false as const,
+          message: reportWriteFailure('la correction de cette monture', saveError),
+        };
+      }
+
+      // Après l'écriture et non avant : celle-ci n'est pas une frappe dans un
+      // champ, c'est un clic unique. Rien ne gagne à afficher une identité que
+      // la base n'a pas prise, et l'annuler ensuite ferait clignoter la ligne.
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.map((mount) =>
+          mount.id === id ? { ...mount, ...identity } : mount
+        ),
+      }));
+      return { ok: true as const };
+    },
+    [stable.individuals]
   );
 
   /**
@@ -1584,19 +1697,7 @@ export const useBreeding = (
       }
 
       const rows = insertResult.data as UserBreedingIndividual[];
-      const added = rows.map((row) => ({
-        id: row.id,
-        colorId: row.color_id,
-        name: row.name ?? null,
-        sex: row.sex,
-        level: row.level,
-        fertile: row.fertile,
-        cycled: row.cycled ?? false,
-        parents:
-          row.parent_a_color && row.parent_b_color
-            ? ([row.parent_a_color, row.parent_b_color] as [string, string])
-            : null,
-      }));
+      const added = rows.map(individualFromRow);
 
       // 2. Les parents. Le poulain est acquis : ce qui suit ne peut plus rien
       //    faire perdre, seulement laisser une monture dépensée en trop dans la
@@ -1858,7 +1959,22 @@ export const useBreeding = (
             color_id: mount.colorId,
             name: mount.name,
             sex: mount.sex,
-            level: mount.level,
+            /*
+             * **Niveau 1**, et non celui de la stérile consommée.
+             *
+             * Le jeu ne rend pas une monture expérimentée : il rend une monture
+             * neuve qui porte le nom et l'ascendance de celle qu'on a
+             * sacrifiée. Jauges à zéro, niveau à zéro. Vérifié en jeu.
+             *
+             * Ça copiait `mount.level`, donc typiquement 48 — une stérile a
+             * vécu. Et le niveau n'est pas décoratif : il décide du taux de
+             * réussite d'un croisement, `0,3 + 0,0015 × (niveauA + niveauB)`
+             * dans `mating.ts`. Deux clones ainsi surévalués s'annonçaient à
+             * **44,4 %** là où le jeu en donne **30,3 %** — la moitié en trop,
+             * sur des croisements que la politique choisit justement parce
+             * qu'ils ont l'air sûrs.
+             */
+            level: FRESH_LEVEL,
             // Le clone naît **fertile et non fécond** : son cycle est à payer,
             // comme celui d'un poulain.
             fertile: true,
@@ -1899,19 +2015,10 @@ export const useBreeding = (
         ...current,
         individuals: [
           ...current.individuals.filter((mount) => !gone.includes(mount.id)),
-          ...(insertResult.data ?? []).map((row) => ({
-            id: row.id,
-            colorId: row.color_id,
-            name: row.name,
-            sex: row.sex as Sex,
-            level: row.level,
-            fertile: true,
-            cycled: false,
-            parents:
-              row.parent_a_color && row.parent_b_color
-                ? ([row.parent_a_color, row.parent_b_color] as [string, string])
-                : null,
-          })),
+          // `fertile: true, cycled: false` étaient écrits en dur ici : c'est ce
+          // que l'`insert` juste au-dessus vient de poser, donc ce que la ligne
+          // relue rend. Deux vérités à tenir d'accord là où il n'en faut qu'une.
+          ...(insertResult.data ?? []).map(individualFromRow),
         ],
       }));
 
@@ -2112,6 +2219,7 @@ export const useBreeding = (
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    recastIndividual,
     recordEnclosExit,
     removeIndividual,
     removeIndividuals,

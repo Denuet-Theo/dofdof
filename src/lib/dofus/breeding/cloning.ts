@@ -9,6 +9,7 @@ import {
   type Mate,
 } from './pairing';
 import {
+  FRESH_LEVEL,
   isSterile,
   PROJECTED_BIRTH_PREFIX,
   type Individual,
@@ -429,14 +430,33 @@ const optionFor = (
  * deux `G2 DOPO M DO-PO` de l'écurie du 15/08 s'affichaient ainsi en paire à
  * départager au lieu d'un « × 2 » certain.
  */
-export const indistinguishablePair = (
-  a: { colorId: string; sex: Sex; name: string | null; parents: readonly string[] | null },
-  b: { colorId: string; sex: Sex; name: string | null; parents: readonly string[] | null }
-): boolean =>
-  a.colorId === b.colorId &&
-  a.sex === b.sex &&
-  a.name === b.name &&
-  ascendanceKey(a.colorId, a.parents) === ascendanceKey(b.colorId, b.parents);
+export type MountIdentity = {
+  colorId: string;
+  sex: Sex;
+  name: string | null;
+  parents: readonly string[] | null;
+};
+
+/**
+ * Ce qui fait que deux montures sont **la même** pour l'éleveur, en une chaîne.
+ *
+ * Les quatre champs ci-dessus, et rien d'autre : ni le niveau, ni l'état, ni
+ * l'identifiant. Deux montures qui partagent cette clé ne se distinguent par
+ * aucun moyen dont l'éleveur dispose devant l'écurie du jeu — c'est la
+ * définition de l'indiscernable, pas une approximation.
+ *
+ * Extraite de `indistinguishablePair` le jour où un second lecteur en a eu
+ * besoin : l'audit des clonages **groupe** par identité au lieu de comparer deux
+ * à deux, et grouper avec un prédicat demande soit de le rappeler n² fois, soit
+ * de refabriquer la clé à côté. La refabriquer est exactement ce que #242 a
+ * passé un correctif à défaire, sur six sites qui comparaient chacun à leur
+ * façon — donc une seule clé, et les deux lecteurs derrière elle.
+ */
+export const identityKey = (mount: MountIdentity): string =>
+  `${mount.colorId}|${mount.sex}|${mount.name ?? ''}|${ascendanceKey(mount.colorId, mount.parents)}`;
+
+export const indistinguishablePair = (a: MountIdentity, b: MountIdentity): boolean =>
+  identityKey(a) === identityKey(b);
 
 /** Les doublons en tête : voir `indistinguishablePair`. */
 const duplicateFirst = (a: CloneOption, b: CloneOption) =>
@@ -764,6 +784,18 @@ export const afterClonings = (stable: Stable, clonings: CloneOption[]): Stable =
       // exactement ce que `recordClonings` écrit en base.
       fertile: true,
       cycled: false,
+      // **Et son niveau repart à 1**, comme celui d'un poulain : le jeu rend une
+      // monture neuve. Le `...original` le laissait à celui de la stérile
+      // consommée — soit exactement la même erreur que `recordClonings`, à
+      // l'autre bout du même geste.
+      //
+      // Deux endroits, une seule vérité, et l'écart entre les deux se paie
+      // comptant : la projection sert à planifier les accouplements **d'après**
+      // les clonages, donc une projection qui surévalue les niveaux fait
+      // planifier une fournée que la saisie réelle contredit ensuite. Mesuré par
+      // `clone-then-mate.spec.ts` : 21 accouplements proposés avant saisie, 20
+      // après, sur une liste qui doit être identique.
+      level: FRESH_LEVEL,
     });
   }
 

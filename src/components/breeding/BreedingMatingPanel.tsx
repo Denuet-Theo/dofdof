@@ -138,6 +138,13 @@ const MountCard = ({ mate, sex, names, nameOf, generationOf, iconOf, codeOf }: C
 );
 
 /** Une naissance déjà saisie sur ce croisement. */
+/**
+ * Ce qui distingue deux croisements : la couleur de chaque parent **et** son
+ * ascendance. Deux montures de même couleur dont l'une porte une généalogie et
+ * l'autre non ne nomment pas les mêmes cibles, donc ne sont pas le même geste.
+ */
+const crossKey = (mate: Mate): string => `${mate.colorId}[${(mate.parents ?? []).join('|')}]`;
+
 export type PanelBirth = { colorId: string; sex: Sex; name: string };
 
 type Props = {
@@ -279,12 +286,18 @@ const BreedingMatingPanel = ({
          faudrait le lire sur un libellé français, ce que ce fichier refuse
          justement de faire. `''` sur une recopie, qui ne vise rien. */
       data-generation={targetGeneration ?? ''}
-      /* L'identité du croisement : les deux couleurs parentes. C'est ce qui
-         distingue deux panneaux, et la suite en a besoin pour vérifier qu'elle
-         parcourt bien des croisements **différents**. Le nom du poulain ne le
-         disait pas : deux croisements distincts peuvent le partager, et les noms
-         ne sont de toute façon pas uniques dans cet outil. */
-      data-cross={`${male.colorId}+${female.colorId}`}
+      /* L'identité du croisement, et il en faut une vraie.
+         C'était les deux couleurs parentes, et c'était faux : une Doré du vrac et
+         une Doré nommée qui porte `[Doré, Pourpre]` sont deux croisements
+         **différents** — les ascendances ne se recombinent pas pareil — et l'écran
+         les affiche bien sur deux cartes. Elles rendaient pourtant la même chaîne,
+         si bien que `birth-recording` lisait deux panneaux distincts comme un
+         seul ; il n'a rougi qu'au changement de champion, quand les deux se sont
+         retrouvées côte à côte.
+         C'est la deuxième sonde à tomber ici : le nom du poulain avait déjà été
+         écarté, deux croisements distincts pouvant le partager. On prend donc ce
+         qui décide réellement du tirage, couleur **et** ascendance. */
+      data-cross={`${crossKey(male)}+${crossKey(female)}`}
       className="rounded-2xl border border-dark-700/40 bg-dark-900/40 p-3 sm:p-4 space-y-4"
     >
       <div className="flex flex-wrap items-center gap-2">

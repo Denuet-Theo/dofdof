@@ -36,7 +36,7 @@ import type {
   WriteResult,
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
-import BreedingCloneAudit from '@/components/breeding/BreedingCloneAudit';
+import BreedingStableAudit from '@/components/breeding/BreedingStableAudit';
 import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
 import BreedingStockFilters from '@/components/breeding/BreedingStockFilters';
 import {
@@ -405,30 +405,6 @@ const BreedingStocks = ({
     [bulk, individuals, generationOfColor]
   );
 
-  /**
-   * Les anonymes stériles, un état que le jeu ne rend pas.
-   *
-   * Une monture est anonyme parce qu'elle n'a **pas d'ascendance** à porter :
-   * achetée ou capturée, donc gen 1. Or une gen 1 fertile sans ascendance
-   * appartient au compteur de vrac, pas aux montures suivies — il ne reste donc,
-   * parmi les anonymes individuelles, que la **féconde**. La stérile, elle, ne
-   * peut rien : le jeu n'extrait pas les gen 1, et le clonage ne prend pas les
-   * anonymes, qui ne se désignent pas dans l'écurie du jeu.
-   *
-   * Ce ne sont pas des montures, ce sont des restes. L'écurie en a déjà porté
-   * cinquante-sept d'un coup — les « fantômes gen 1 » du recensement du 16/08,
-   * qui affichaient 255 là où le jeu en comptait 198. Un écart de cette taille
-   * sur le seul chiffre que l'éleveur compare au jeu ne se rattrape pas au
-   * jugé.
-   *
-   * On les compte, et on les retire d'un geste. Pas en silence : c'est une
-   * suppression, elle s'annonce avec son nombre.
-   */
-  const phantoms = useMemo(
-    () => individuals.filter((mount) => mount.name === null && !mount.fertile),
-    [individuals]
-  );
-
   const owned = useMemo(() => {
     return individuals
       .filter((mount) =>
@@ -777,47 +753,24 @@ const BreedingStocks = ({
               stérile est hors jeu — il ne lui reste que le clonage.
             </p>
 
-            {/* La vérification d'après-clonage. Repliée, et au-dessus de la
-                liste plutôt que dedans : ce qu'elle montre n'est pas un défaut
-                mais une affirmation à confronter au jeu, et elle se fait avant
-                de chercher quoi que ce soit dans la liste. Voir
-                `BreedingCloneAudit`. */}
-            <BreedingCloneAudit
+            {/* Le relevé d'écurie, au-dessus de la liste plutôt que dedans : il
+                se lit avant de chercher quoi que ce soit, et il dit combien il y
+                a à chercher.
+
+                La bannière des anonymes stériles vivait ici et y est absorbée.
+                Elle n'y perd pas sa force — un défaut déplie le relevé de
+                lui-même — et elle y gagne d'être comptée avec les deux autres
+                classes au lieu d'être le seul signal visible sur trois. Voir
+                `BreedingStableAudit`. */}
+            <BreedingStableAudit
               individuals={individuals}
+              bulk={bulk}
               colors={colors}
               nameOf={nameOf}
               onUpdateIndividual={onUpdateIndividual}
               onRecastIndividual={onRecastIndividual}
+              onRemoveIndividuals={onRemoveIndividuals}
             />
-
-            {/* Les restes, comptés et retirables d'un geste. Voir `phantoms` :
-                une anonyme stérile n'est pas une monture qu'on aurait oublié de
-                nommer, c'est un état que le jeu ne rend pas. */}
-            {phantoms.length > 0 && onRemoveIndividuals && (
-              <div
-                data-testid="phantom-notice"
-                className="flex flex-wrap items-center gap-2 mb-2 px-3 py-2 rounded-xl
-                  bg-loss/10 border border-loss/30"
-              >
-                <span className="text-[11px] text-dark-300">
-                  <strong className="text-loss-light">{phantoms.length}</strong> anonyme
-                  {phantoms.length > 1 ? 's' : ''} stérile{phantoms.length > 1 ? 's' : ''}
-                  {' — '}un état que le jeu ne rend pas. Sans nom il n&apos;y a pas d&apos;ascendance,
-                  donc c&apos;est une gen 1 : elle ne s&apos;extrait pas, et le clonage ne
-                  prend pas ce qu&apos;on ne sait pas désigner en jeu.
-                </span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="ml-auto"
-                  onClick={() => onRemoveIndividuals(phantoms.map((mount) => mount.id))}
-                  title="Suppression définitive, en une écriture. Le compte de l’écurie baisse d’autant — c’est le but : il ne compte plus ce que le jeu n’a pas."
-                >
-                  <Trash2 size={13} />
-                  Retirer {phantoms.length === 1 ? 'la' : 'les'} {phantoms.length}
-                </Button>
-              </div>
-            )}
 
             {/* Les mêmes facettes que dans le jeu, aux mêmes intitulés et dans le
                 même ordre : c'est ce qui permet de poser les deux écrans côte à

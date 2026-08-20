@@ -29,11 +29,17 @@ const openStocks = async (page: Page) => {
   await bouton.click();
 };
 
-/** Ouvre le panneau replié et rend ses lignes. */
+/**
+ * Le relevé, déplié.
+ *
+ * Il s'ouvre **de lui-même** dès qu'il porte un défaut, et la fixture en porte
+ * cinquante-huit — les anonymes stériles du 15/08. On ne clique donc pas sur le
+ * chevron : ça le refermerait. C'est justement la propriété qu'on veut, et le
+ * premier test la vérifie explicitement.
+ */
 const openAudit = async (page: Page): Promise<Locator> => {
-  const panneau = page.getByTestId('clone-audit');
+  const panneau = page.getByTestId('stable-audit');
   await expect(panneau).toBeVisible();
-  await page.getByTestId('clone-audit-toggle').click();
   await expect(page.getByTestId('clone-audit-tally')).toBeVisible();
   return panneau;
 };
@@ -41,7 +47,112 @@ const openAudit = async (page: Page): Promise<Locator> => {
 const patches = (supabase: Awaited<ReturnType<typeof mockSupabase>>) =>
   supabase.writes.filter((write) => write.table === individus && write.method === 'PATCH');
 
-test.describe('vérification des clonages', () => {
+test.describe('relevé d’écurie', () => {
+  test('un défaut déplie le relevé de lui-même ; il se replie à la main', async ({ page }) => {
+    /*
+     * La bannière des anonymes stériles était **toujours visible** quand il y
+     * avait un reste, et c'était juste : 255 montures annoncées contre 198 en
+     * jeu ne se découvre pas en dépliant un tiroir. L'absorber dans un panneau
+     * replié aurait troqué un compte perdu contre un compte caché.
+     */
+    const supabase = await mockSupabase(page);
+    await openBreeding(page);
+    await openStocks(page);
+
+    const restes = supabase
+      .rows(individus)
+      .filter((row) => !row.name && row.fertile === false).length;
+    expect(restes).toBeGreaterThan(0);
+
+    // Déplié sans qu'on ait rien cliqué, et le défaut est là.
+    const panneau = page.getByTestId('stable-audit');
+    await expect(panneau).toHaveAttribute('data-defects', String(restes));
+    await expect(page.getByTestId('phantom-notice')).toBeVisible();
+
+    // Et il se referme quand même : un relevé qu'on ne peut pas ranger est un
+    // bandeau, et un bandeau finit par ne plus se lire.
+    await page.getByTestId('stable-audit-toggle').click();
+    await expect(page.getByTestId('phantom-notice')).toHaveCount(0);
+  });
+
+  test('un nom qui ne décrit plus sa monture est compté, et se rectifie', async ({ page }) => {
+    /*
+     * La façon dont ça arrive vraiment : on corrige le sexe d'une monture dans
+     * « Mes stocks », et le nom — qui encode le sexe — ment dès la seconde
+     * d'après. Le signal existait déjà, en petit bouton ambre au fil d'une liste
+     * de deux cents lignes : présent, et introuvable.
+     */
+    const supabase = await mockSupabase(page);
+    const cible = supabase
+      .rows(individus)
+      .find((row) => row.name && row.parent_a_color && row.parent_b_color)!;
+    const nomPorte = cible.name as string;
+    cible.sex = cible.sex === 'M' ? 'F' : 'M';
+
+    await openBreeding(page);
+    await openStocks(page);
+
+    const ligne = page.locator(`[data-testid="stale-name"][data-mount-id="${cible.id}"]`);
+    await expect(ligne).toBeVisible();
+    const attendu = await ligne.getAttribute('data-expected');
+    expect(attendu).not.toBe(nomPorte);
+    // Le nom attendu porte bien le sexe qu'on vient de poser : c'est ce qui
+    // rend la monture retrouvable dans l'écurie du jeu.
+    expect(attendu).toContain(` ${cible.sex} `);
+
+    await ligne.getByTestId('stale-name-fix').click();
+    await expect(page.getByTestId('stable-audit-refusal')).toHaveCount(0);
+    expect(supabase.rows(individus).find((row) => row.id === cible.id)?.name).toBe(attendu);
+  });
+
+  test('une fertile sans ascendance que le vrac tient déjà se signale', async ({ page }) => {
+    /*
+     * La porte par laquelle les cinquante-sept fantômes sont entrés : le
+     * compteur de vrac ne porte **que** des fertiles sans ascendance, donc une
+     * monture suivie de même couleur et de même sexe est peut-être la même,
+     * comptée deux fois.
+     *
+     * Elle va dans les affirmations et non dans les défauts : deux montures
+     * distinctes peuvent parfaitement exister, et c'est le compte du jeu qui
+     * tranche. Le test le vérifie aussi — un faux positif rangé parmi les
+     * certitudes ferait supprimer une monture bien réelle.
+     */
+    const supabase = await mockSupabase(page);
+    const vrac = supabase.rows('user_breeding_mounts')[0];
+    vrac.males = 4;
+    supabase.rows(individus).push({
+      ...supabase.rows(individus)[0],
+      id: 'sonde-double-compte',
+      color_id: vrac.color_id,
+      sex: 'M',
+      name: null,
+      parent_a_color: null,
+      parent_b_color: null,
+      fertile: true,
+      cycled: false,
+      level: 1,
+    });
+
+    await openBreeding(page);
+    await openStocks(page);
+
+    const ligne = page.locator('[data-testid="double-counted"][data-mount-id="sonde-double-compte"]');
+    await expect(ligne).toBeVisible();
+    await expect(ligne).toHaveAttribute('data-bulk', '4');
+
+    // Rangée du bon côté : dans les affirmations, pas dans les défauts.
+    const panneau = page.getByTestId('stable-audit');
+    const defauts = Number(await panneau.getAttribute('data-defects'));
+    const restes = supabase
+      .rows(individus)
+      .filter((row) => !row.name && row.fertile === false).length;
+    expect(defauts).toBe(restes);
+
+    // Et l'écarter n'écrit rien : ce n'est pas une correction, c'est un constat.
+    await ligne.getByTestId('double-counted-ok').click();
+    expect(supabase.writes.filter((write) => write.table === individus)).toHaveLength(0);
+  });
+
   test('le panneau rassemble les fertiles au-dessus du niveau 1, et les compte par niveau', async ({
     page,
   }) => {
@@ -56,8 +167,7 @@ test.describe('vérification des clonages', () => {
       .filter((row) => row.fertile === true && row.cycled === false && (row.level as number) > 1);
     expect(clones.length).toBeGreaterThan(0);
 
-    const panneau = await openAudit(page);
-    await expect(panneau).toHaveAttribute('data-claims', String(clones.length));
+    await openAudit(page);
     await expect(page.getByTestId('clone-audit-claim')).toHaveCount(clones.length);
 
     // Le compte par niveau : c'est le seul contrôle qui trouve un clonage fait
@@ -141,7 +251,7 @@ test.describe('vérification des clonages', () => {
     supabase.refuse({ table: individus, method: 'PATCH' });
     await ligne.getByTestId('clone-audit-undo').click();
 
-    await expect(page.getByTestId('clone-audit-refusal')).toBeVisible();
+    await expect(page.getByTestId('stable-audit-refusal')).toBeVisible();
     await expect(failureBanner(page)).toBeVisible();
     // Rien de coché : la ligne garde ses trois issues, donc le geste se refait.
     await expect(ligne.getByTestId('clone-audit-fixed')).toHaveCount(0);

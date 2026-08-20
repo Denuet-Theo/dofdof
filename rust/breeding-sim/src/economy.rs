@@ -98,8 +98,8 @@ const GENETONS_BY_GENERATION: [i64; 11] = [0, 1, 2, 4, 8, 15, 30, 60, 120, 250, 
 ///
 /// C'est le levier le plus lourd de l'économie après la valeur des montures, et
 /// il ne tombe qu'en cas de succès — un raté ne rend rien. Deux gen 9 rendent
-/// 500 génétons, soit 269 000 kamas, mais à 50,1 % de réussite l'espérance vaut
-/// 134 800. Le rapport entre croiser haut et croiser bas reste de 250 : deux
+/// 500 génétons, soit 490 000 kamas au relevé du 20/08, mais à 50,1 % de réussite
+/// l'espérance vaut 245 500. Le rapport entre croiser haut et croiser bas reste de 250 : deux
 /// gen 1 n'en rendent que deux.
 ///
 /// Le rendement suit les **parents directs** et non la cible : deux gen 2 visant
@@ -305,6 +305,31 @@ pub struct Economy {
     /// `None` ne borne rien, et c'est le défaut : sans projet, la question ne se
     /// pose pas.
     pub project_count: Option<usize>,
+    /// Ce qu'une monture de la couleur poursuivie pèse devant le score, en kamas.
+    ///
+    /// ## L'ordre lexicographique, et ce qu'il a coûté
+    ///
+    /// Cent millions au départ, choisis **au-dessus** de ce qu'une partie entière
+    /// liquide pour qu'une couronne de plus l'emporte toujours : un ordre
+    /// lexicographique écrit en arithmétique, et non un taux de change.
+    ///
+    /// Il tenait tant que le score pesait assez pour départager à couronnes égales.
+    /// Il ne tient plus : la prime de collection ramenée au dixième et la
+    /// profondeur de marché ont réduit le score, et le plafond de `project_count`
+    /// aplatit le terme de couronne dès qu'il est atteint. Mesuré sur la manche du
+    /// 20/08 — champion à 987,25 M de départage, dont **2,9 % seulement** venaient
+    /// du score. Gagner un dixième de couronne en moyenne valait plus que gagner un
+    /// tiers de toute l'économie, et la recherche s'est arrêtée à 91 croisements
+    /// contre 1335 pour le champion embarqué.
+    ///
+    /// ## L'échelle d'aujourd'hui
+    ///
+    /// Cinq millions : dix couronnes valent 50 M, soit à peu près **une partie**
+    /// (30 à 60 M). Le projet reste une préférence forte — une gen 10 se liste à
+    /// 600 000, et dix d'une même couleur n'en rendent que 3,9 M sous la
+    /// profondeur — mais il doit encore gagner sa place au lieu de rendre tout le
+    /// reste indifférent.
+    pub crown_weight: f64,
     /// Ce qu'une vente retire au prix de **sa** couleur, en part.
     ///
     /// ## Le trou que ça bouche
@@ -416,6 +441,8 @@ impl Default for Economy {
             // mesures publiées.
             project: None,
             project_count: None,
+            // L'ordre lexicographique d'avant : absent du fichier, rien ne bouge.
+            crown_weight: 100_000_000.0,
             sale_price_decay: 0.0,
             daily_price_recovery: 0.0,
             collection_bonus: [0; 11],

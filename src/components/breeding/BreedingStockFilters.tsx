@@ -11,6 +11,7 @@ import {
   countOf,
   unranked,
   NO_FILTERS,
+  type Facet,
   type RosterEntry,
   type RosterFilters,
 } from '@/lib/dofus/breeding/roster';
@@ -57,9 +58,53 @@ type Props = {
   nameOf: (colorId: string) => string;
   /** Le nom de la famille, pour la ligne « Type » que le jeu affiche. */
   familyLabel: string;
+  /** Non nul pendant un rapprochement — voir `Review`. */
+  review?: Review | null;
+};
+
+/**
+ * Ce que le panneau devient pendant un rapprochement.
+ *
+ * On ne fabrique pas un second écran : celui-ci est **déjà** la copie du panneau
+ * du jeu, aux mêmes intitulés et dans le même ordre, et c'est très exactement ce
+ * qu'on veut mettre en vis-à-vis. Il change de rôle, pas de forme — les valeurs
+ * du croisement en cours passent en bleu, les effectifs à confronter en jaune.
+ */
+export type Review = {
+  /** Vrai pour une valeur figée par le croisement — bleu. */
+  fixed: (facet: Facet, value: string | number) => boolean;
+  /** Vrai pour une valeur dont l'effectif est demandé — jaune. */
+  asked: (facet: Facet, value: string | number) => boolean;
+  /** Non nul quand l'éleveur saisit : rend ce qu'il a tapé pour cette case. */
+  typed: ((facet: Facet, value: string | number) => string) | null;
+  onType: (facet: Facet, value: string | number, next: string) => void;
 };
 
 const SECTION = 'text-[10px] uppercase tracking-wider text-dark-500 mb-1.5';
+
+/**
+ * Le rôle d'une ligne pendant un rapprochement.
+ *
+ * `fixed` — **bleu** — la valeur est figée par le croisement en cours : c'est le
+ * filtre que l'éleveur vient de poser dans le jeu, pas une question.
+ *
+ * `asked` — **jaune** — son effectif est celui qu'on demande de confronter.
+ *
+ * `plain` — le reste, qui n'est ni posé ni demandé et se lit en gris.
+ */
+export type RowTone = 'plain' | 'fixed' | 'asked';
+
+const TONE: Record<RowTone, string> = {
+  plain: 'text-dark-300 hover:bg-dark-800/60',
+  fixed: 'bg-info/15 text-info',
+  asked: 'bg-kamas/10 text-kamas',
+};
+
+const BOX: Record<RowTone, string> = {
+  plain: 'border-dark-600',
+  fixed: 'bg-info/70 border-info',
+  asked: 'border-kamas/60',
+};
 
 /** Une ligne à cocher : intitulé à gauche, effectif à droite, comme en jeu. */
 const CheckRow = ({
@@ -68,34 +113,86 @@ const CheckRow = ({
   checked,
   onToggle,
   title,
+  tone = 'plain',
+  typed,
 }: {
   label: string;
   count: number;
   checked: boolean;
   onToggle: () => void;
   title?: string;
-}) => (
-  <button
-    type="button"
-    onClick={onToggle}
-    title={title}
-    // Les effectifs à zéro restent visibles et cliquables : leur disparition
-    // ferait croire à une couleur absente du catalogue là où elle n'est
-    // qu'absente de l'écurie — et c'est justement ce qu'on vient vérifier.
-    className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-[11px]
-      transition-colors cursor-pointer ${
-        checked ? 'bg-kamas/10 text-kamas' : 'text-dark-300 hover:bg-dark-800/60'
-      }`}
-  >
-    <span
-      className={`w-3 h-3 shrink-0 rounded border ${
-        checked ? 'bg-kamas/70 border-kamas' : 'border-dark-600'
-      }`}
-    />
-    <span className="flex-1 text-left truncate">{label}</span>
-    <span className={count === 0 ? 'text-dark-600' : 'text-dark-500'}>{count}</span>
-  </button>
-);
+  /** Pendant un rapprochement : ce que cette ligne est pour la question posée. */
+  tone?: RowTone;
+  /** Non nul quand l'éleveur saisit ce que le jeu montre sur cette ligne. */
+  typed?: { value: string; onChange: (next: string) => void } | null;
+}) => {
+  const shade = checked && tone === 'plain' ? 'asked' : tone;
+  const body = (
+    <>
+      <span
+        className={`w-3 h-3 shrink-0 rounded border ${
+          checked && tone === 'plain' ? 'bg-kamas/70 border-kamas' : BOX[shade]
+        }`}
+      />
+      <span className="flex-1 text-left truncate">{label}</span>
+    </>
+  );
+
+  // Un champ de saisie ne peut pas vivre dans un bouton — HTML invalide, et le
+  // clic du bouton volerait le focus au champ. La ligne cesse donc d'être
+  // cliquable le temps qu'on y tape : de toute façon, on ne filtre pas pendant
+  // qu'on répond à une question sur le filtre.
+  if (typed) {
+    return (
+      <div
+        data-testid="filter-row"
+        data-tone={shade}
+        className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-[11px] ${TONE[shade]}`}
+      >
+        {body}
+        <span className="text-dark-600 tabular-nums">{count}</span>
+        <span className="text-dark-600">→</span>
+        <input
+          data-testid="filter-seen"
+          value={typed.value}
+          onChange={(event) => typed.onChange(event.target.value)}
+          inputMode="numeric"
+          placeholder="?"
+          className="w-14 px-1.5 py-0.5 rounded-md bg-dark-900/70 border border-kamas/40
+            text-[11px] text-right text-kamas tabular-nums"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      data-testid="filter-row"
+      data-tone={shade}
+      onClick={onToggle}
+      title={title}
+      // Les effectifs à zéro restent visibles et cliquables : leur disparition
+      // ferait croire à une couleur absente du catalogue là où elle n'est
+      // qu'absente de l'écurie — et c'est justement ce qu'on vient vérifier.
+      className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-[11px]
+        transition-colors cursor-pointer ${TONE[shade]}`}
+    >
+      {body}
+      <span
+        className={
+          tone === 'asked'
+            ? 'text-kamas font-semibold tabular-nums'
+            : count === 0
+              ? 'text-dark-600'
+              : 'text-dark-500'
+        }
+      >
+        {count}
+      </span>
+    </button>
+  );
+};
 
 /** Ajoute ou retire une valeur d'une liste de facette. */
 const toggled = <T,>(list: T[], value: T): T[] =>
@@ -104,7 +201,30 @@ const toggled = <T,>(list: T[], value: T): T[] =>
 const STATUS_ORDER: MountStatus[] = ['fertile', 'feconde', 'sterile'];
 const SEX_LABEL: Record<Sex, string> = { F: 'Monture femelle', M: 'Monture mâle' };
 
-const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel }: Props) => {
+const BreedingStockFilters = ({
+  entries,
+  filters,
+  onChange,
+  nameOf,
+  familyLabel,
+  review = null,
+}: Props) => {
+  /** Le rôle d'une ligne : bleu si le croisement la fixe, jaune si on la demande. */
+  const toneOf = (facet: Facet, value: string | number): RowTone => {
+    if (!review) return 'plain';
+    if (review.fixed(facet, value)) return 'fixed';
+    return review.asked(facet, value) ? 'asked' : 'plain';
+  };
+
+  /** Le champ de saisie d'une ligne, ou `null` tant qu'on n'a pas répondu KO. */
+  const typedOf = (facet: Facet, value: string | number) =>
+    review?.typed && review.asked(facet, value)
+      ? {
+          value: review.typed(facet, value),
+          onChange: (next: string) => review.onType(facet, value, next),
+        }
+      : null;
+
   const patch = (next: Partial<RosterFilters>) => onChange({ ...filters, ...next });
 
   const generations = facetCounts(entries, filters, nameOf, 'generation', (entry) => entry.generation);
@@ -205,6 +325,8 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
                 label={`Génération ${generation}`}
                 count={generations.get(generation) ?? 0}
                 checked={filters.generations.includes(generation)}
+                tone={toneOf('generation', generation)}
+                typed={typedOf('generation', generation)}
                 onToggle={() => patch({ generations: toggled(filters.generations, generation) })}
               />
             ))}
@@ -220,6 +342,8 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
                 label={MOUNT_STATUS_LABEL[status]}
                 count={statuses.get(status) ?? 0}
                 checked={filters.statuses.includes(status)}
+                tone={toneOf('status', status)}
+                typed={typedOf('status', status)}
                 onToggle={() => patch({ statuses: toggled(filters.statuses, status) })}
                 title={
                   status === 'sterile'
@@ -248,6 +372,8 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
                 label={SEX_LABEL[sex]}
                 count={sexes.get(sex) ?? 0}
                 checked={filters.sexes.includes(sex)}
+                tone={toneOf('sex', sex)}
+                typed={typedOf('sex', sex)}
                 onToggle={() => patch({ sexes: toggled(filters.sexes, sex) })}
               />
             ))}
@@ -266,6 +392,8 @@ const BreedingStockFilters = ({ entries, filters, onChange, nameOf, familyLabel 
                   label={row.label}
                   count={row.count}
                   checked={filters.colorIds.includes(row.colorId)}
+                  tone={toneOf('color', row.colorId)}
+                  typed={typedOf('color', row.colorId)}
                   onToggle={() => patch({ colorIds: toggled(filters.colorIds, row.colorId) })}
                 />
               ))

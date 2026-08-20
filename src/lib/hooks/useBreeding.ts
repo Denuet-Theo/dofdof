@@ -1457,70 +1457,6 @@ export const useBreeding = (
     [stable.individuals]
   );
 
-  /**
-   * Réécrit **l'identité** d'une monture : couleur, sexe, nom, ascendance.
-   *
-   * Le rattrapage d'un clonage saisi de travers. Le jeu tire la survivante,
-   * l'éleveur consigne l'autre, et la ligne porte alors une ascendance qui n'est
-   * pas celle de la monture qui existe réellement. Voir `clone-audit.ts`.
-   *
-   * ## Pourquoi corriger la ligne et non la remplacer
-   *
-   * Supprimer puis rajouter donnerait le même contenu et perdrait le reste :
-   * l'identifiant, que les `parent_a_id` / `parent_b_id` des enfants
-   * référencent, et la date d'entrée. La compétence `ecurie-en-jeu` pose la
-   * règle après un recensement entier — « éditer sur place, ça préserve
-   * l'ascendance et l'historique qu'un supprimer-réimporter jette ».
-   *
-   * `updateIndividual` ne pouvait pas le faire, et pas par oubli : ses clés sont
-   * celles du modèle (`colorId`, `parents`) et se versent telles quelles dans
-   * l'`update`, là où la base attend `color_id`, `parent_a_color`,
-   * `parent_b_color`. La traduction se fait donc ici, une fois, plutôt que
-   * d'élargir un chemin qui marche par coïncidence de noms.
-   */
-  const recastIndividual = useCallback(
-    async (
-      id: string,
-      identity: { colorId: string; sex: Sex; name: string | null; parents: [string, string] | null }
-    ): Promise<WriteResult> => {
-      const before = stable.individuals.find((mount) => mount.id === id);
-      if (!before) {
-        return { ok: false as const, message: 'Cette monture n’est plus dans l’écurie.' };
-      }
-
-      const supabase = createClient();
-      const { error: saveError } = await supabase
-        .from('user_breeding_individuals')
-        .update({
-          color_id: identity.colorId,
-          sex: identity.sex,
-          name: identity.name,
-          parent_a_color: identity.parents?.[0] ?? null,
-          parent_b_color: identity.parents?.[1] ?? null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-
-      if (saveError) {
-        return {
-          ok: false as const,
-          message: reportWriteFailure('la correction de cette monture', saveError),
-        };
-      }
-
-      // Après l'écriture et non avant : celle-ci n'est pas une frappe dans un
-      // champ, c'est un clic unique. Rien ne gagne à afficher une identité que
-      // la base n'a pas prise, et l'annuler ensuite ferait clignoter la ligne.
-      setStable((current) => ({
-        ...current,
-        individuals: current.individuals.map((mount) =>
-          mount.id === id ? { ...mount, ...identity } : mount
-        ),
-      }));
-      return { ok: true as const };
-    },
-    [stable.individuals]
-  );
 
   /**
    * Enregistre ce qu'une fournée a donné : parents stériles, bébés en écurie.
@@ -2219,7 +2155,6 @@ export const useBreeding = (
     saveBulkStock,
     addIndividual,
     updateIndividual,
-    recastIndividual,
     recordEnclosExit,
     removeIndividual,
     removeIndividuals,

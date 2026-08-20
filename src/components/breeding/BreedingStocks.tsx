@@ -21,9 +21,8 @@ import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage
 import type { DriftSignal } from '@/lib/dofus/breeding/drift';
 import {
   ANONYMOUS_NAME,
-  carriedGeneration,
   colorCoder,
-  mountName,
+  dictatedNameFor,
 } from '@/lib/dofus/breeding/naming';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { GAUGE_BANDS, transferRatePerSecond } from '@/lib/dofus/breeding/enclos';
@@ -36,7 +35,7 @@ import type {
   WriteResult,
 } from '@/lib/hooks/useBreeding';
 import PriceEntry from '@/components/breeding/PriceEntry';
-import BreedingStableAudit from '@/components/breeding/BreedingStableAudit';
+import useCensusBar from '@/components/breeding/useCensusBar';
 import BreedingDriftSignals from '@/components/breeding/BreedingDriftSignals';
 import BreedingStockFilters from '@/components/breeding/BreedingStockFilters';
 import {
@@ -105,11 +104,6 @@ type Props = {
   onUpdateIndividual: (
     id: string,
     patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
-  ) => Promise<WriteResult>;
-  /** Réécrit l'identité d'une ligne — le rattrapage d'un clonage saisi de travers. */
-  onRecastIndividual: (
-    id: string,
-    identity: { colorId: string; sex: Sex; name: string | null; parents: [string, string] | null }
   ) => Promise<WriteResult>;
   onRemoveIndividual: (id: string) => Promise<void>;
   /** Retire un lot en une écriture — le purge des anonymes stériles s'en sert. */
@@ -282,7 +276,6 @@ const BreedingStocks = ({
   onSaveBulk,
   onAddIndividual,
   onUpdateIndividual,
-  onRecastIndividual,
   onRemoveIndividual,
   onRemoveIndividuals,
   onSaveItem,
@@ -372,20 +365,15 @@ const BreedingStocks = ({
    *
    * Les montures saisies avant que l'outil dicte les noms n'en ont aucun ; c'est
    * ce calcul qui permet de les rattraper une par une, au rythme où on y passe.
+   *
+   * Il vit dans `naming.ts` et non ici : c'est l'inverse exact de `mountName`, et
+   * le garder en fermeture locale le mettait hors de portée de tout autre
+   * lecteur — le nom dérivant de la couleur, du sexe et de l'ascendance, l'écart
+   * entre le nom porté et le nom dû est une preuve locale qui a vocation à
+   * servir ailleurs.
    */
   const nameForIndividual = (mount: Individual): string | null =>
-    mount.parents
-      ? mountName({
-          carriedGeneration: carriedGeneration(generationOfColor(mount.colorId), [
-            generationOfColor(mount.parents[0]),
-            generationOfColor(mount.parents[1]),
-          ]),
-          colorName: nameOf(mount.colorId),
-          sex: mount.sex,
-          parentNames: [nameOf(mount.parents[0]), nameOf(mount.parents[1])],
-          code,
-        })
-      : null;
+    dictatedNameFor(mount, colors);
 
   /**
    * L'écurie affichée : les fertiles devant, puis par couleur et par niveau.
@@ -403,6 +391,34 @@ const BreedingStocks = ({
   const roster = useMemo(
     () => rosterOf({ bulk, individuals }, generationOfColor),
     [bulk, individuals, generationOfColor]
+  );
+
+  /**
+   * Le rapprochement avec le jeu.
+   *
+   * Appelé ici et pas plus bas parce qu'il rend deux choses qui vivent à deux
+   * endroits : la barre de question, et la teinture du panneau de filtres.
+   * « Voir ces N montures » pose les filtres de la cellule sur la liste — c'est
+   * là qu'on finit, nom par nom, et c'est gratuit puisqu'une cellule **est** un
+   * jeu de filtres.
+   */
+  const census = useCensusBar({ entries: roster, nameOf, onFocus: setFilters });
+
+  /**
+   * Les anonymes stériles, un état que le jeu ne rend pas.
+   *
+   * Sans nom il n'y a pas d'ascendance : achetée ou capturée, donc gen 1. Or une
+   * gen 1 fertile sans ascendance appartient au compteur de vrac — il ne reste
+   * donc, parmi les anonymes individuelles, que la féconde. La stérile, elle, ne
+   * peut rien : le jeu n'extrait pas les gen 1, et le clonage ne prend pas les
+   * anonymes, qui ne se désignent pas dans l'écurie du jeu.
+   *
+   * Ce ne sont pas des montures, ce sont des restes. L'écurie en a porté
+   * cinquante-sept d'un coup — 255 annoncées là où le jeu en comptait 198.
+   */
+  const phantoms = useMemo(
+    () => individuals.filter((mount) => mount.name === null && !mount.fertile),
+    [individuals]
   );
 
   const owned = useMemo(() => {
@@ -753,24 +769,45 @@ const BreedingStocks = ({
               stérile est hors jeu — il ne lui reste que le clonage.
             </p>
 
-            {/* Le relevé d'écurie, au-dessus de la liste plutôt que dedans : il
-                se lit avant de chercher quoi que ce soit, et il dit combien il y
-                a à chercher.
+            {/* Les restes, comptés et retirables d'un geste. Voir `phantoms` :
+                une anonyme stérile n'est pas une monture qu'on aurait oublié de
+                nommer, c'est un état que le jeu ne rend pas.
 
-                La bannière des anonymes stériles vivait ici et y est absorbée.
-                Elle n'y perd pas sa force — un défaut déplie le relevé de
-                lui-même — et elle y gagne d'être comptée avec les deux autres
-                classes au lieu d'être le seul signal visible sur trois. Voir
-                `BreedingStableAudit`. */}
-            <BreedingStableAudit
-              individuals={individuals}
-              bulk={bulk}
-              colors={colors}
-              nameOf={nameOf}
-              onUpdateIndividual={onUpdateIndividual}
-              onRecastIndividual={onRecastIndividual}
-              onRemoveIndividuals={onRemoveIndividuals}
-            />
+                Elle a été absorbée un temps dans un relevé de défauts locaux qui
+                comptait des lignes là où il fallait compter des décisions : sur
+                l'écurie réelle il annonçait « 113 à corriger », dont plus de la
+                moitié étaient ces anonymes-ci — un seul geste, un seul bouton.
+                Un compteur de cette taille ne se lit plus, il se replie. La
+                bannière est donc revenue seule, à sa place et à son échelle. */}
+            {phantoms.length > 0 && onRemoveIndividuals && (
+              <div
+                data-testid="phantom-notice"
+                className="flex flex-wrap items-center gap-2 mb-2 px-3 py-2 rounded-xl
+                  bg-loss/10 border border-loss/30"
+              >
+                <span className="text-[11px] text-dark-300">
+                  <strong className="text-loss-light">{phantoms.length}</strong> anonyme
+                  {phantoms.length > 1 ? 's' : ''} stérile{phantoms.length > 1 ? 's' : ''}
+                  {' — '}un état que le jeu ne rend pas. Sans nom il n&apos;y a pas d&apos;ascendance,
+                  donc c&apos;est une gen 1 : elle ne s&apos;extrait pas, et le clonage ne
+                  prend pas ce qu&apos;on ne sait pas désigner en jeu.
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ml-auto"
+                  onClick={() => onRemoveIndividuals(phantoms.map((mount) => mount.id))}
+                  title="Suppression définitive, en une écriture. Le compte de l’écurie baisse d’autant — c’est le but : il ne compte plus ce que le jeu n’a pas."
+                >
+                  <Trash2 size={13} />
+                  Retirer {phantoms.length === 1 ? 'la' : 'les'} {phantoms.length}
+                </Button>
+              </div>
+            )}
+
+            {/* Le rapprochement avec le jeu : la barre pose la question, le
+                panneal du dessous la porte en couleurs. Voir `useCensusBar`. */}
+            {census.bar}
 
             {/* Les mêmes facettes que dans le jeu, aux mêmes intitulés et dans le
                 même ordre : c'est ce qui permet de poser les deux écrans côte à
@@ -781,6 +818,7 @@ const BreedingStocks = ({
               onChange={setFilters}
               nameOf={nameOf}
               familyLabel={familyLabel}
+              review={census.review}
             />
 
             <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">

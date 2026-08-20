@@ -167,6 +167,33 @@ export const colorCoder = (colors: readonly { name: string }[]): ColorCoder => {
 };
 
 /**
+ * Le chemin inverse : d'un code lu dans un nom vers la couleur qu'il désigne.
+ *
+ * `null` en valeur signale un code **ambigu** — deux couleurs le portent — et
+ * c'est délibérément distinct de « absent ». Un code ambigu arbitré au hasard
+ * rendrait une relecture de nom silencieusement fausse, alors que la ligne
+ * concernée mérite d'être montrée à l'éleveur. `colorCoder` n'en produit aucun
+ * sur les trois familles, mais ça ne se vérifie qu'ici.
+ *
+ * Vit à côté de `colorCoder` et non dans l'écran d'import parce que deux écrans
+ * relisent maintenant un nom dicté : l'import d'une liste, et la correction d'un
+ * clonage saisi de travers — qui rattrape la monture que le jeu a réellement
+ * rendue. Deux tables construites séparément dériveraient au premier code qui
+ * change, et un code qui change renomme toute une écurie.
+ */
+export const colorsByCode = (
+  colors: readonly { id: string; name: string }[]
+): Map<string, string | null> => {
+  const code = colorCoder(colors);
+  const seen = new Map<string, string | null>();
+  for (const color of colors) {
+    const key = code(color.name);
+    seen.set(key, seen.has(key) ? null : color.id);
+  }
+  return seen;
+};
+
+/**
  * Le nom à inscrire en jeu sur une monture, ou `ANONYMOUS_NAME` si elle n'a pas
  * d'ascendance.
  *

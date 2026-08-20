@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ScanSearch, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import {
@@ -98,6 +98,35 @@ const useCensusBar = ({
   );
   const found = useMemo(() => (root && !probe ? pinned(root, nameOf) : []), [root, probe, nameOf]);
 
+  /**
+   * Le croisement de la question est **posé pour de vrai** sur le panneau.
+   *
+   * Pas seulement teinté en bleu : coché. C'est ce qui rend les chiffres jaunes
+   * justes, et ça ne se voyait pas au premier essai — le panneau calcule ses
+   * effectifs sur ses propres filtres, donc la colonne SEXE affichait 106 et 97,
+   * les totaux de l'écurie, là où la question portait sur les **fécondes** par
+   * sexe. On lisait une question sur une population et des nombres sur une
+   * autre.
+   *
+   * Poser le filtre plutôt que de recalculer à côté a un second mérite : c'est
+   * exactement le geste que l'éleveur fait dans le jeu au même moment, et les
+   * deux écrans restent superposables.
+   *
+   * La référence garde le dernier posé : sans elle, l'effet réécrirait les
+   * filtres à chaque rendu et l'éleveur ne pourrait plus rien toucher.
+   */
+  const applied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!probe) {
+      applied.current = null;
+      return;
+    }
+    const wanted = JSON.stringify(probe.within);
+    if (applied.current === wanted) return;
+    applied.current = wanted;
+    onFocus(probe.within);
+  }, [probe, onFocus]);
+
   const keyOf = (value: string | number) => String(value);
 
   const answerOk = () => {
@@ -111,16 +140,42 @@ const useCensusBar = ({
     setTyped(null);
   };
 
+  /**
+   * La clé d'une case dans la saisie.
+   *
+   * Le total n'est pas une ligne de filtre — c'est le nombre que l'écurie
+   * affiche à l'ouverture, sans rien cocher — donc il n'a aucune valeur de
+   * facette pour se désigner, et sa case vit dans la barre. Sans cette clé à
+   * part, un KO sur le total n'ouvrait **aucun** champ : on répondait « ça ne
+   * colle pas » sans pouvoir dire ce qu'on voyait, et la recherche concluait
+   * que tout collait.
+   */
+  const TOTAL_KEY = 'total';
+
   const answerKo = () => {
     if (!probe) return;
-    setTyped(new Map(probe.cells.map((cell) => [keyOf(valueOn(cell.cell, FACET_OF[probe.axis as Axis]) ?? ''), ''])));
+    if (probe.axis === 'total') {
+      setTyped(new Map([[TOTAL_KEY, '']]));
+      return;
+    }
+    setTyped(
+      new Map(
+        probe.cells.map((cell) => [
+          keyOf(valueOn(cell.cell, FACET_OF[probe.axis as Axis]) ?? ''),
+          '',
+        ])
+      )
+    );
   };
 
   const submit = () => {
     if (!root || !probe || !typed) return;
     const facet = FACET_OF[probe.axis as Axis];
     const seen = probe.cells.map((cell) => {
-      const raw = typed.get(keyOf(valueOn(cell.cell, facet) ?? '')) ?? '';
+      const raw =
+        probe.axis === 'total'
+          ? (typed.get(TOTAL_KEY) ?? '')
+          : (typed.get(keyOf(valueOn(cell.cell, facet) ?? '')) ?? '');
       const parsed = Number(raw);
       // Une case laissée vide vaut « pareil » : c'est le geste le plus courant
       // quand une seule ligne cloche, et l'exiger partout ferait recopier dix
@@ -206,10 +261,30 @@ const useCensusBar = ({
           </div>
           {typed && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-dark-400">
-                Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
-                comptent comme identiques.
-              </span>
+              {probe.axis === 'total' ? (
+                <span className="flex flex-wrap items-center gap-2 text-[11px] text-dark-400">
+                  L’app en tient{' '}
+                  <strong className="text-dark-200 tabular-nums">{probe.cells[0].held}</strong> — le
+                  jeu en montre
+                  <input
+                    data-testid="census-total-seen"
+                    value={typed.get(TOTAL_KEY) ?? ''}
+                    onChange={(event) =>
+                      setTyped((current) => new Map(current ?? []).set(TOTAL_KEY, event.target.value))
+                    }
+                    inputMode="numeric"
+                    placeholder="?"
+                    autoFocus
+                    className="w-16 px-1.5 py-0.5 rounded-md bg-dark-900/70 border border-kamas/40
+                      text-[11px] text-right text-kamas tabular-nums"
+                  />
+                </span>
+              ) : (
+                <span className="text-[11px] text-dark-400">
+                  Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
+                  comptent comme identiques.
+                </span>
+              )}
               <Button
                 size="sm"
                 variant="primary"

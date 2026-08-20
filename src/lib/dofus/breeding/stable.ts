@@ -243,6 +243,20 @@ export type Individual = {
  * avec une grossesse a coûté une migration — voir 20260809210000, qui la
  * répare, et le défaut qu'elle décrit.
  */
+/**
+ * Le niveau d'une monture qui vient d'entrer dans l'écurie.
+ *
+ * Un poulain naît là. Un clone y **revient** : le jeu lui rend sa reproduction
+ * et remet à zéro ses jauges *et son niveau*, si bien qu'un clone n'a rien d'une
+ * monture expérimentée — c'est une monture neuve qui porte le nom et
+ * l'ascendance de celle qu'on a sacrifiée.
+ *
+ * Vérifié en jeu par l'éleveur. `recordClonings` supposait le contraire et
+ * recopiait le niveau de la stérile consommée : voir la constante à son point
+ * d'écriture, et ce que ça coûtait à `targetGenerationRate`.
+ */
+export const FRESH_LEVEL = 1;
+
 export type MountStatus = 'fertile' | 'feconde' | 'sterile';
 
 export const MOUNT_STATUS_LABEL: Record<MountStatus, string> = {

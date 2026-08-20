@@ -44,6 +44,7 @@ import { DEFAULT_GAUGE_BAND, ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import {
   emptyStable,
   cycledOf,
+  FRESH_LEVEL,
   stableBySex,
   statusFlags,
   tracksIndividually,
@@ -1958,7 +1959,22 @@ export const useBreeding = (
             color_id: mount.colorId,
             name: mount.name,
             sex: mount.sex,
-            level: mount.level,
+            /*
+             * **Niveau 1**, et non celui de la stérile consommée.
+             *
+             * Le jeu ne rend pas une monture expérimentée : il rend une monture
+             * neuve qui porte le nom et l'ascendance de celle qu'on a
+             * sacrifiée. Jauges à zéro, niveau à zéro. Vérifié en jeu.
+             *
+             * Ça copiait `mount.level`, donc typiquement 48 — une stérile a
+             * vécu. Et le niveau n'est pas décoratif : il décide du taux de
+             * réussite d'un croisement, `0,3 + 0,0015 × (niveauA + niveauB)`
+             * dans `mating.ts`. Deux clones ainsi surévalués s'annonçaient à
+             * **44,4 %** là où le jeu en donne **30,3 %** — la moitié en trop,
+             * sur des croisements que la politique choisit justement parce
+             * qu'ils ont l'air sûrs.
+             */
+            level: FRESH_LEVEL,
             // Le clone naît **fertile et non fécond** : son cycle est à payer,
             // comme celui d'un poulain.
             fertile: true,

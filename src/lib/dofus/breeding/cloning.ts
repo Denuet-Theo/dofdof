@@ -9,6 +9,7 @@ import {
   type Mate,
 } from './pairing';
 import {
+  FRESH_LEVEL,
   isSterile,
   PROJECTED_BIRTH_PREFIX,
   type Individual,
@@ -783,6 +784,18 @@ export const afterClonings = (stable: Stable, clonings: CloneOption[]): Stable =
       // exactement ce que `recordClonings` écrit en base.
       fertile: true,
       cycled: false,
+      // **Et son niveau repart à 1**, comme celui d'un poulain : le jeu rend une
+      // monture neuve. Le `...original` le laissait à celui de la stérile
+      // consommée — soit exactement la même erreur que `recordClonings`, à
+      // l'autre bout du même geste.
+      //
+      // Deux endroits, une seule vérité, et l'écart entre les deux se paie
+      // comptant : la projection sert à planifier les accouplements **d'après**
+      // les clonages, donc une projection qui surévalue les niveaux fait
+      // planifier une fournée que la saisie réelle contredit ensuite. Mesuré par
+      // `clone-then-mate.spec.ts` : 21 accouplements proposés avant saisie, 20
+      // après, sur une liste qui doit être identique.
+      level: FRESH_LEVEL,
     });
   }
 

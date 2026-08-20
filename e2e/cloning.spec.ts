@@ -269,6 +269,52 @@ test.describe('clonage', () => {
     expect(supabase.rows(individus)).toHaveLength(avant + tranches - 2 * tranches);
   });
 
+  test('le clone naît au niveau 1, pas à celui de la stérile consommée', async ({ page }) => {
+    /*
+     * Le jeu ne rend pas une monture expérimentée : il rend une monture
+     * **neuve** qui porte le nom et l'ascendance de celle qu'on a sacrifiée.
+     * Jauges à zéro, niveau à zéro. Vérifié en jeu par l'éleveur.
+     *
+     * `recordClonings` recopiait `mount.level` — donc typiquement 48, une
+     * stérile a vécu. Et le niveau n'est pas décoratif : `targetGenerationRate`
+     * vaut `0,3 + 0,0015 × (niveauA + niveauB)`, si bien que deux clones ainsi
+     * surévalués s'annonçaient à 44,4 % là où le jeu en donne 30,3 %. La
+     * politique choisissait donc des croisements pour une sûreté qu'ils
+     * n'avaient pas.
+     */
+    const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
+    await openBreeding(page);
+    await openCloning(page);
+
+    const avant = new Map(supabase.rows(individus).map((row) => [row.id, row]));
+
+    const garder = page.getByRole('button', { name: 'C’est celle-ci qui est sortie' });
+    await expect(garder).toHaveCount(2);
+    await garder.first().click();
+    await expect(page.getByText('Enregistrement…')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('clone-refusal')).toHaveCount(0);
+
+    const insere = supabase.writes.find(
+      (write) => write.table === individus && write.method === 'POST'
+    );
+    const lignes = (Array.isArray(insere?.body) ? insere.body : [insere?.body]) as {
+      level: number;
+    }[];
+    expect(lignes).toHaveLength(1);
+    expect(lignes[0].level).toBe(1);
+
+    // Et la stérile consommée était bien au-dessus : sans ça le test passerait
+    // au vert sur une écurie où 1 est la bonne réponse par accident.
+    const consommees = supabase.writes
+      .filter((write) => write.table === individus && write.method === 'DELETE')
+      .flatMap((write) => [...write.query.matchAll(/[0-9a-f-]{36}/g)].map((match) => match[0]));
+    expect(consommees.length).toBeGreaterThan(0);
+    expect(
+      consommees.some((id) => Number((avant.get(id) as { level?: number } | undefined)?.level) > 1)
+    ).toBe(true);
+  });
+
   test('« Passer » écarte un arbitrage sans rien écrire', async ({ page }) => {
     // Le lot est figé à l'ouverture, le jeu ne l'est pas : une paire proposée
     // peut ne plus exister. Sans sortie, l'écran restait planté dessus et le

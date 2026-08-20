@@ -162,8 +162,12 @@ catches(
   defects.get('anonymous-sterile') ?? 0
 );
 
-// Et le clonage, qui lui trouve déjà sur l'écurie réelle.
-if (!claims.has('clone-claim')) problems.push('la règle « clone-claim » ne trouve rien — morte ?');
+// La fertile au-dessus du niveau 1, que l'écurie du 15/08 porte déjà pour de
+// bon : trois lignes, écrites par `recordClonings` quand il recopiait le niveau
+// de la stérile consommée. C'est la règle qui trouve les dégâts de ce défaut.
+if (!defects.has('impossible-level')) {
+  problems.push('la règle « impossible-level » ne trouve rien — morte ?');
+}
 
 // Et aucune ne doit déborder. Le seuil est grossier exprès : il ne défend pas un
 // chiffre, il attrape une règle qui vient de s'élargir d'un ordre de grandeur.

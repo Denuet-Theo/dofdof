@@ -305,6 +305,44 @@ pub struct Economy {
     /// `None` ne borne rien, et c'est le défaut : sans projet, la question ne se
     /// pose pas.
     pub project_count: Option<usize>,
+    /// Ce qu'une vente retire au prix de **sa** couleur, en part.
+    ///
+    /// ## Le trou que ça bouche
+    ///
+    /// `value_of` paie la centième gen 10 au prix de la première. C'est la chose
+    /// la plus coûteuse qui manquait au simulateur : toute politique dont le gain
+    /// vient d'accumuler des exemplaires d'une couleur chère est **sur-notée**, et
+    /// le score ne le dit pas. La boucle du sommet (#188) a mesuré +43,18 M et 200
+    /// parties gagnées sur 200 en finissant avec 162 gen 10 ; le mainteneur, qui
+    /// joue, a tranché en une phrase — « non le marché n'absorbe pas ça ». La règle
+    /// était juste, la mesure était juste, le chiffre était faux.
+    ///
+    /// ## La règle
+    ///
+    /// Chaque vente fait baisser le prix de la couleur vendue, et d'elle seule :
+    /// un éleveur qui écoule dix Azur-Doré effondre l'Azur-Doré, pas le marché
+    /// entier. Vendre `n` exemplaires rend donc `prix × (1 − 0,9ⁿ) / 0,1`, soit au
+    /// plus **dix fois** le prix unitaire quel que soit le stock. C'est ce plafond
+    /// qui manquait.
+    ///
+    /// ## Ce qui n'y est pas soumis : l'ambre
+    ///
+    /// `value_of` ne cote au marché que le **plafond** de l'arbre ; en dessous, une
+    /// monture vaut son ambre (`génération × amber_per_generation`), qui est une
+    /// ressource d'extraction et non une vente. La profondeur ne mord donc que sur
+    /// les gen 10 — exactement là où l'accumulation payait plein tarif.
+    ///
+    /// Zéro par défaut : le barème d'avant, et les mesures publiées avec lui.
+    pub sale_price_decay: f64,
+    /// Ce que vingt-quatre heures rendent au prix, en part, **sans plafond**.
+    ///
+    /// Le marché se retend tout seul, et beaucoup plus lentement qu'il ne s'effondre
+    /// — un point contre dix. Choix du mainteneur : rien ne le ramène à son prix de
+    /// départ et rien ne l'y arrête. Sur l'horizon de 2084 heures, soit 87 jours,
+    /// une couleur jamais vendue dérive donc à `1,01⁸⁷ ≈ 2,4` fois son prix listé.
+    ///
+    /// Zéro par défaut, comme au-dessus.
+    pub daily_price_recovery: f64,
     /// La prime du **succès de collection**, par génération, indexée 1..=10.
     ///
     /// Le succès demande d'avoir fait naître chaque couleur de la famille **au
@@ -378,6 +416,8 @@ impl Default for Economy {
             // mesures publiées.
             project: None,
             project_count: None,
+            sale_price_decay: 0.0,
+            daily_price_recovery: 0.0,
             collection_bonus: [0; 11],
             cycle_serenity_points: 15_010.0,
             cycle_stat_points: 60_000.0,
@@ -1058,6 +1098,13 @@ pub struct RunOutcome {
     /// attribué ces refus au budget sans l'avoir vérifié — c'est le genre de
     /// chiffre qu'on finit par croire.
     pub rejected_by_reason: [u32; Rejected::REASONS],
+    /// Ce que la profondeur de marché a retiré à la liquidation.
+    ///
+    /// Compté toujours, nul tant que `sale_price_decay` l'est. C'est le seul
+    /// chiffre qui dise **de combien** une politique était sur-notée : sans lui, un
+    /// score qui baisse ne distingue pas « elle produit moins » de « elle vendait à
+    /// un prix qui n'existait pas ».
+    pub market_discount: i64,
     /// Couleurs **distinctes** nées au moins une fois sur la partie.
     ///
     /// L'avancement du succès de collection, et le seul chiffre qui dise si une
@@ -1604,6 +1651,7 @@ fn run(
         liquidation: 0,
         collection_done: 0,
         collection_bonus: 0,
+        market_discount: 0,
         crossings: 0,
         barren_crossings: 0,
         purchases: 0,
@@ -1792,11 +1840,39 @@ fn run(
     }
 
     outcome.balance_before_liquidation = kamas;
-    outcome.liquidation = stable
-        .mounts
-        .iter()
-        .map(|m| economy.value_of(catalog, m.color))
-        .sum();
+    // La liquidation, écoulée **une monture après l'autre** et non en bloc.
+    //
+    // C'est là que la profondeur mord, parce que c'est le seul endroit où des
+    // montures se vendent : rien d'autre dans la partie ne convertit une monture en
+    // kamas. Vendre le nᵉ exemplaire d'une couleur le paie `0,9ⁿ` fois son prix, si
+    // bien qu'un stock, aussi gros soit-il, ne rapporte jamais plus de dix fois le
+    // prix unitaire. L'ambre, lui, n'est pas une vente et ne baisse pas — voir
+    // `sale_price_decay`.
+    let drift = if economy.daily_price_recovery > 0.0 {
+        (1.0 + economy.daily_price_recovery).powf(outcome.hours_used / 24.0)
+    } else {
+        1.0
+    };
+    let mut sold = [0u32; MAX_COLORS];
+    let mut liquidation = 0i64;
+    let mut at_list = 0i64;
+    for mount in &stable.mounts {
+        let listed = economy.value_of(catalog, mount.color);
+        at_list += listed;
+        if economy.sale_price_decay <= 0.0
+            || catalog.generation(mount.color) < catalog.top_generation()
+        {
+            // En dessous du plafond, `value_of` cote de l'ambre : hors marché.
+            liquidation += listed;
+            continue;
+        }
+        let slot = usize::from(mount.color).min(MAX_COLORS - 1);
+        let factor = drift * (1.0 - economy.sale_price_decay).powi(sold[slot] as i32);
+        sold[slot] += 1;
+        liquidation += (listed as f64 * factor) as i64;
+    }
+    outcome.liquidation = liquidation;
+    outcome.market_discount = at_list - liquidation;
     outcome.gen10_held = stable
         .mounts
         .iter()
@@ -1853,6 +1929,48 @@ mod tests {
 
     fn economy() -> Economy {
         Prices::load_default().expect("economy.toml").economy
+    }
+
+    /// Le plafond que la profondeur pose, et qui est toute sa raison d'être.
+    ///
+    /// Écouler `n` exemplaires d'une couleur rend `(1 − 0,9ⁿ) / 0,1` fois le prix
+    /// unitaire — donc jamais plus de **dix fois**, quel que soit le stock. Sans
+    /// elle, cinquante gen 10 d'une même couleur valaient cinquante prix pleins, et
+    /// c'est ce chiffre-là qui a fait croire à +43,18 M à la boucle du sommet.
+    #[test]
+    fn la_profondeur_plafonne_ce_qu_un_stock_rapporte() {
+        let decay: f64 = 0.10;
+        let rendement = |n: u32| (0..n).map(|k| (1.0 - decay).powi(k as i32)).sum::<f64>();
+
+        assert!((rendement(1) - 1.0).abs() < 1e-9, "le premier se vend plein tarif");
+        assert!((rendement(5) - 4.0951).abs() < 1e-3);
+        assert!((rendement(10) - 6.5132).abs() < 1e-3);
+        // Le plafond : cinquante exemplaires ne valent pas cinquante prix.
+        // La somme géométrique tend vers dix par au-dessous, et l'égalité stricte
+        // finit par arriver en flottant : `0,9¹⁰⁰⁰` passe sous l'epsilon du double.
+        assert!(rendement(50) <= 10.0, "borné par dix quoi qu'il arrive");
+        assert!(rendement(1_000) <= 10.0, "et le stock infini aussi");
+        assert!(rendement(50) > 9.9, "mais on s'en approche vraiment");
+    }
+
+    /// L'ambre n'est pas une vente. En dessous du plafond de l'arbre, `value_of`
+    /// cote une extraction, et la profondeur ne doit pas y toucher — sans quoi
+    /// stériliser une gen 2 vaudrait moins parce qu'on en a vendu une autre.
+    #[test]
+    fn l_ambre_echappe_a_la_profondeur() {
+        let catalog = crate::trees::muldo();
+        let mut economy = economy();
+        economy.sale_price_decay = 0.10;
+        let top = catalog.top_generation();
+
+        let sous_plafond = (0..catalog.colors().len() as ColorId)
+            .find(|c| catalog.generation(*c) > 1 && catalog.generation(*c) < top)
+            .expect("une couleur sous le plafond");
+        assert_eq!(
+            economy.value_of(&catalog, sous_plafond),
+            i64::from(catalog.generation(sous_plafond)) * economy.amber_per_generation,
+            "sous le plafond, c'est de l'ambre et rien d'autre"
+        );
     }
 
     #[test]

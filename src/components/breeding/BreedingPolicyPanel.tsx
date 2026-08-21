@@ -1,7 +1,20 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Dna, Egg, Gem, Heart, Lock, LockOpen, LogOut, Check, Store, Trophy } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Dna,
+  Egg,
+  Gem,
+  Heart,
+  Lock,
+  LockOpen,
+  LogOut,
+  RefreshCw,
+  Store,
+  Trophy,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
 import BreedingBirthDialog from '@/components/breeding/BreedingBirthDialog';
@@ -23,7 +36,7 @@ import {
 } from '@/lib/dofus/breeding/batch';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { formatCountdown } from '@/lib/dofus/breeding/countdown';
-import { acquiredMountId } from '@/lib/dofus/breeding/search';
+import { acquiredMountId, parseCountedMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
@@ -362,6 +375,35 @@ const BreedingPolicyPanel = ({
    */
   const pens = batch.pens.length > 0 ? batch.pens : proposed;
   const current = nextPenIndex(pens);
+
+  /**
+   * Les montures d'un enclos **à venir** qui ne peuvent plus y entrer.
+   *
+   * La fournée se fige au premier verrou, enclos à venir compris, et c'est juste
+   * — sans ça la liste change sous les doigts pendant qu'on remplit. Mais
+   * l'écurie, elle, continue de bouger, et rien ne reliait les deux : une
+   * monture corrigée en stérile restait inscrite à l'enclos 3, l'écran
+   * continuait de la réclamer, et on allait la chercher dans le jeu **pour
+   * rien**. Un F5 n'y changeait rien, ce qui est la pire forme du défaut :
+   * l'outil a l'air cassé alors qu'il fait exactement ce qu'on lui a demandé.
+   *
+   * Relevé le 20/08 sur `G2 EB M DOEB-DOIN`, et le seul recours était
+   * d'abandonner la fournée entière — donc de perdre aussi le contenu des enclos
+   * déjà refermés.
+   *
+   * Les identifiants fabriqués — vrac `couleur#M3`, achat `couleur+F0` — n'ont
+   * pas de ligne à confronter : ils décrivent une quantité ou un achat, pas une
+   * monture suivie. Les regarder ferait se signaler toute fournée qui achète.
+   */
+  const unloadable = useMemo(() => {
+    if (current === null || batch.pens.length === 0) return [];
+    const byId = new Map(individuals.map((mount) => [mount.id, mount]));
+    return pens[current].units.filter((unit) => {
+      if (parseCountedMountId(unit.id)) return false;
+      const mount = byId.get(unit.id);
+      return !mount || !mount.fertile;
+    });
+  }, [batch.pens.length, current, individuals, pens]);
   const locked = pens
     .map((pen, index) => ({ pen, index }))
     .filter((entry) => entry.pen.lockedAt !== null);
@@ -387,13 +429,28 @@ const BreedingPolicyPanel = ({
    */
   const penned = pennedUnits(batch.pens).length;
 
-  /** Les nommées d'un enclos : une ligne par nom, comptée si elle se répète. */
+  /** Les identifiants que l'écurie ne peut plus fournir — voir `unloadable`. */
+  const unloadableIds = useMemo(
+    () => new Set(unloadable.map((unit) => unit.id)),
+    [unloadable]
+  );
+
+  /**
+   * Les nommées d'un enclos : une ligne par nom, comptée si elle se répète.
+   *
+   * `gone` compte celles de la ligne que l'écurie ne peut plus fournir. Un
+   * décompte et non un drapeau, parce que le regroupement fond plusieurs
+   * montures sous un même nom : deux `G2 DOEB F DO-EB` dont une seule est
+   * devenue stérile donnent « × 2 · 1 indisponible », et barrer la ligne entière
+   * ferait renoncer à celle qui reste.
+   */
   const namedGroups = (units: BatchUnit[]) => {
-    const groups = new Map<string, { unit: BatchUnit; count: number }>();
+    const groups = new Map<string, { unit: BatchUnit; count: number; gone: number }>();
     for (const unit of units.filter((entry) => entry.name)) {
       const key = `${unit.name}|${unit.colorId}|${unit.sex}|${unit.banked}`;
-      const group = groups.get(key) ?? { unit, count: 0 };
+      const group = groups.get(key) ?? { unit, count: 0, gone: 0 };
       group.count += 1;
+      if (unloadableIds.has(unit.id)) group.gone += 1;
       groups.set(key, group);
     }
     return [...groups.values()].sort((a, b) =>
@@ -716,16 +773,67 @@ const BreedingPolicyPanel = ({
                     </span>
                   </div>
 
+                  {/* Ce que la liste réclame et que l'écurie ne peut plus donner.
+                      Ici, sur la carte, et pas dans un panneau à côté : c'est
+                      devant cet écran qu'on part chercher une monture dans le
+                      jeu, donc c'est ici qu'il faut dire de ne pas y aller. */}
+                  {unloadable.length > 0 && (
+                    <div
+                      data-testid="pen-unloadable"
+                      data-count={unloadable.length}
+                      className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+                        bg-loss/10 border border-loss/30"
+                    >
+                      <AlertTriangle size={13} className="text-loss-light shrink-0" />
+                      <span className="text-[11px] text-dark-300">
+                        {unloadable.length === 1 ? (
+                          <>
+                            <strong className="text-loss-light">
+                              {unloadable[0].name ?? nameOf(unloadable[0].colorId)}
+                            </strong>{' '}
+                            ne peut plus entrer en enclos
+                          </>
+                        ) : (
+                          <>
+                            <strong className="text-loss-light">{unloadable.length}</strong> montures
+                            de cette liste ne peuvent plus entrer en enclos
+                          </>
+                        )}
+                        {' — '}stérile{unloadable.length > 1 ? 's' : ''} ou retirée
+                        {unloadable.length > 1 ? 's' : ''} de l’écurie depuis que la fournée a été
+                        figée. Ne va pas {unloadable.length > 1 ? 'les' : 'la'} chercher dans le jeu.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="ml-auto"
+                        onClick={() => batch.refresh(proposed)}
+                        title="Refait la liste des enclos pas encore verrouillés à partir de l’écurie d’aujourd’hui. Les enclos déjà refermés ne bougent pas : ce sont des objets fermés dans le jeu."
+                      >
+                        <RefreshCw size={13} />
+                        Recalculer les enclos à venir
+                      </Button>
+                    </div>
+                  )}
+
                   {namedGroups(pens[current].units).length > 0 && (
                     <div className="space-y-0.5">
                       <p className="text-[10px] uppercase tracking-wider text-dark-500">
                         Nommées — à chercher par leur nom
                       </p>
-                      {namedGroups(pens[current].units).map(({ unit, count }) => (
+                      {namedGroups(pens[current].units).map(({ unit, count, gone }) => (
                         <div
                           key={`${unit.name}-${unit.sex}-${unit.banked}`}
                           data-testid="load-named"
-                          className="flex flex-wrap items-center gap-2 text-xs"
+                          data-gone={gone}
+                          /* Atténuée quand toute la ligne est indisponible : le
+                             bandeau au-dessus dit de ne pas y aller, et la
+                             laisser à l'identique en dessous redonne la consigne
+                             inverse à l'endroit même où on lit ce qu'il faut
+                             chercher. */
+                          className={`flex flex-wrap items-center gap-2 text-xs ${
+                            gone >= count ? 'opacity-45' : ''
+                          }`}
                         >
                           <span
                             className={unit.sex === 'M' ? 'text-info' : 'text-loss-light'}
@@ -740,6 +848,14 @@ const BreedingPolicyPanel = ({
                           />
                           {count > 1 && (
                             <span className="text-[10px] text-dark-500">× {count}</span>
+                          )}
+                          {gone > 0 && (
+                            <span
+                              className="text-[10px] px-1.5 py-0.5 rounded-md bg-loss/15 text-loss-light"
+                              title="Stérile ou retirée de l’écurie depuis que la fournée a été figée : elle ne peut plus entrer en enclos. Recalcule les enclos à venir pour la retirer de la liste."
+                            >
+                              {gone >= count ? 'ne peut plus entrer' : `${gone} indisponible`}
+                            </span>
                           )}
                           {unit.banked && (
                             <em

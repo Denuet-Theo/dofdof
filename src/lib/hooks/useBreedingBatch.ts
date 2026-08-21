@@ -51,6 +51,31 @@ export type BreedingBatchState = {
   release: (index: number) => Promise<void>;
   /** Abandonne la fournée entière sans rien écrire sur les montures. */
   discard: () => Promise<void>;
+  /**
+   * Recalcule les enclos **pas encore verrouillés**, en gardant les autres.
+   *
+   * ## Pourquoi il fallait une porte, et pourquoi elle s'ouvre à la main
+   *
+   * Le premier verrou fige la fournée entière, enclos à venir compris, et c'est
+   * juste : sans ça la liste change sous les doigts pendant qu'on remplit, et on
+   * ne sait plus ce qu'on a mis où. Voir `batch.ts`.
+   *
+   * Mais figée veut dire figée **jusqu'à la fin de la fournée**, et l'écurie,
+   * elle, continue de bouger. Une monture corrigée en stérile reste inscrite à
+   * un enclos où elle ne peut plus entrer, et l'éleveur va la chercher dans le
+   * jeu pour rien. Mesuré : une correction de clonage a laissé
+   * `G2 EB M DOEB-DOIN` dans l'enclos 3, et le seul recours était d'abandonner
+   * la fournée — donc de perdre aussi le contenu des enclos déjà refermés.
+   *
+   * D'où un recalcul **explicite**. Ce que le figeage protège est « rien ne
+   * change tout seul », pas « rien ne peut changer » : un geste demandé n'est
+   * pas une liste qui bouge sous les doigts.
+   *
+   * Les verrouillés ne sont pas touchés. Ils décrivent des enclos **fermés dans
+   * le jeu**, et rien de ce que l'app recalcule ne peut changer ce qu'ils
+   * contiennent.
+   */
+  refresh: (proposed: BatchPen[]) => Promise<void>;
 };
 
 export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
@@ -162,7 +187,19 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
     await commit(pens, []);
   }, [commit, pens]);
 
+  const refresh = useCallback(
+    async (proposed: BatchPen[]) => {
+      const kept = pens.filter((pen) => pen.lockedAt !== null);
+      // Plus rien de verrouillé **et** plus rien à proposer : la fournée n'a
+      // plus de raison d'exister, et `commit([])` efface la ligne — l'écran
+      // repasse alors sur la proposition vivante, ce qui est exactement l'état
+      // « aucune fournée en cours ».
+      await commit(pens, [...kept, ...proposed]);
+    },
+    [commit, pens]
+  );
+
   const nextIndex = useMemo(() => nextPenIndex(pens), [pens]);
 
-  return { pens, loading, nextIndex, lock, unlock, release, discard };
+  return { pens, loading, nextIndex, lock, unlock, release, discard, refresh };
 };

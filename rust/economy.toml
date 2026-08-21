@@ -256,8 +256,8 @@ malus_croisement_sterile = 0
 # ## Ils ne tombent qu'en cas de succès
 #
 # Un croisement qui manque sa génération ne rend rien. Deux gen 9 rapportent donc
-# 269 000 kamas quand ça passe, mais à 50,1 % de réussite l'espérance vaut
-# 134 800 — la moitié de ce qu'un rendement garanti donnerait.
+# 490 000 kamas quand ça passe, mais à 50,1 % de réussite l'espérance vaut
+# 245 500 — la moitié de ce qu'un rendement garanti donnerait.
 #
 # Conséquence sur l'Optimakina : son bonus de dix points achète aussi dix pour
 # cent du géneton, ce qui resserre son calcul sans le renverser — 21 900 gagnés
@@ -269,12 +269,25 @@ malus_croisement_sterile = 0
 #
 # ## Le prix
 #
-# Meilleur rapport à l'HDV : le **Petit Parchemin**, 10 génétons pour 5 490
-# kamas. Les gros paliers sont moins bons — 50 génétons pour 21 997 (440 le
-# géneton), 100 pour 43 998 (440), 160 pour 84 984 (531).
+# Le **Petit Parchemin**, 10 génétons pour **10 000 kamas** — relevé du 20/08. Le
+# géneton vaut donc 980 net, contre 538 au relevé précédent : il a presque doublé,
+# et il est aujourd'hui au **plafond** de la bande des trente jours ci-dessous.
+#
+# Les gros paliers relevés en août — 50 génétons pour 21 997, 100 pour 43 998,
+# 160 pour 84 984, soit 440 à 531 le géneton — ne tiennent plus. Le mainteneur,
+# qui joue, a confirmé le 20/08 : **980 est la valeur du jour**. Ils restent notés
+# ici parce qu'un relevé qui a changé se relit mieux qu'un relevé effacé.
+#
+# ## Ce chiffre-ci ne change aucune mesure, et il faut le savoir
+#
+# `for_run` **retire** le prix du géneton dans la bande ci-dessous à chaque partie,
+# et n'ouvre `prix_unitaire` que si la bande est absente. Le prix courant est donc
+# de la documentation et un secours : ce qui pilote les mesures, c'est
+# `prix_unitaire_min` et `prix_unitaire_max`. 980 est aujourd'hui le **plafond**
+# de cette bande, pas au-delà — la bande n'a donc pas bougé.
 #
 # Le prix est net de la taxe HDV de 2 %, puisqu'il faut vendre le parchemin.
-prix_unitaire = 5_490
+prix_unitaire = 10_000
 genetons_par_unite = 10
 taxe_hdv = 0.02
 
@@ -531,3 +544,38 @@ gen10 = 200000
 # Les deux à zéro rendent la liquidation linéaire d'avant, à l'identique.
 baisse_par_vente = 0.10
 hausse_par_jour = 0.01
+
+# ---------------------------------------------------------------------------
+[projet]
+# ---------------------------------------------------------------------------
+
+# Ce qu'une monture de la **couleur poursuivie** pèse devant le score, en kamas.
+#
+# ## L'ordre lexicographique, et pourquoi il a cessé de tenir
+#
+# Ce poids valait cent millions, choisis exprès **au-dessus** de ce qu'une partie
+# entière liquide : une couronne de plus l'emportait alors toujours sur une
+# écurie plus riche. Ce n'était pas un taux de change, c'était un ordre
+# lexicographique écrit en arithmétique.
+#
+# Il tenait tant que le score pesait assez pour départager à couronnes égales.
+# Deux changements l'ont vidé : la prime de collection ramenée au dixième, et la
+# profondeur de marché qui plafonne ce qu'un stock rapporte. Le terme de couronne,
+# lui, est **plat** dès que `--project-count` est atteint.
+#
+# Mesuré sur la manche du 20/08, 1679 générations : champion à 987,25 M de
+# départage, dont **2,9 % seulement** venaient du score. Gagner un dixième de
+# couronne en moyenne pesait plus que gagner un tiers de toute l'économie. La
+# recherche s'est arrêtée à **91 croisements** là où le champion embarqué en fait
+# 1335, et elle a rendu 29,05 M contre 48,06 M — pire que la valeur myope.
+#
+# ## L'échelle d'aujourd'hui
+#
+# Cinq millions. Dix couronnes valent 50 M, soit à peu près **une partie** (30 à
+# 60 M). Pour comparaison : une gen 10 se liste à 600 000, et dix d'une même
+# couleur n'en rendent que 3,9 M sous la profondeur de marché. Le projet reste
+# donc une préférence forte — huit fois le prix du marché — mais il doit encore
+# gagner sa place, au lieu de rendre tout le reste indifférent.
+#
+# Absent, on retrouve les cent millions et l'ordre lexicographique.
+poids_couronne = 5_000_000

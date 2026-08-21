@@ -186,13 +186,6 @@ impl Options {
 /// l'écran fait **déjà** quand il joue le champion. Sans lui, le génome apprend à
 /// choisir dans un espace plus large que celui où il jouera, et une part de ce
 /// qu'il a appris est inutilisable par construction. Voir `Searcher::admissible`.
-/// Ce qu'une monture de la couleur poursuivie pèse devant le score.
-///
-/// Cent millions : au-delà de ce qu'une partie entière liquide — la meilleure
-/// mesurée rend 57 M — donc une couronne de plus l'emporte toujours sur une
-/// écurie plus riche. C'est un ordre lexicographique écrit en arithmétique, et
-/// non un taux de change : les deux termes ne se comparent pas.
-const CROWN_WEIGHT: f64 = 100_000_000.0;
 
 fn policy_of<'a>(
     network: &'a Network,
@@ -263,9 +256,13 @@ fn fitness(
                 // de gradient tant qu'aucune couronne n'est sortie, et cesse de
                 // décider dès qu'il y en a une.
                 //
-                // `CROWN_WEIGHT` domine par construction : une couronne vaut plus
-                // que n'importe quelle écurie liquidée, donc jamais une politique
-                // riche ne passe devant une qui a livré le projet.
+                // `Economy::crown_weight` dit **combien** une couronne pèse, et ce
+                // n'est plus un ordre lexicographique : à cinq millions, dix
+                // couronnes valent à peu près une partie, donc une écurie riche peut
+                // repasser devant une qui a livré le projet. C'est voulu — à cent
+                // millions le terme écrasait le score, et la recherche s'arrêtait
+                // dès le plafond de `project_count` atteint. Voir le fichier
+                // d'économie, section `[projet]`.
                 Env::Economy => {
                     let outcome = play(catalog, economy, &mut policy, seed);
                     match economy.project {
@@ -277,7 +274,7 @@ fn fitness(
                                 Some(cap) => outcome.crown_held.min(cap),
                                 None => outcome.crown_held,
                             };
-                            kept as f64 * CROWN_WEIGHT + outcome.score as f64
+                            kept as f64 * economy.crown_weight + outcome.score as f64
                         }
                         None => outcome.score as f64,
                     }
@@ -1483,9 +1480,9 @@ fn main() {
                 play(&catalog, &economy, &mut policy, seed)
             })
             .collect();
-        // La couleur poursuivie, comptée et non déduite du score : avec
-        // `CROWN_WEIGHT` la fitness se lit en centaines de millions, ce qui
-        // n'apprend rien à qui veut savoir combien d'Azur-Doré sont sorties.
+        // La couleur poursuivie, comptée et non déduite du score : la fitness mêle
+        // les deux termes, ce qui n'apprend rien à qui veut savoir combien
+        // d'Azur-Doré sont sorties.
         let crowns = evolved_runs.iter().map(|o| o.crown_held as f64).sum::<f64>()
             / evolved_runs.len().max(1) as f64;
         let mut evolved: Vec<f64> = evolved_runs.iter().map(|o| o.score as f64).collect();

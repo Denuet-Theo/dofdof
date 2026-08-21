@@ -305,6 +305,36 @@ pub struct Economy {
     /// `None` ne borne rien, et c'est le défaut : sans projet, la question ne se
     /// pose pas.
     pub project_count: Option<usize>,
+    /// Ce qu'un croisement coûte à **l'éleveur**, en kamas, indépendamment de ce
+    /// qu'il coûte au jeu.
+    ///
+    /// ## Le coût que le modèle ne voyait pas
+    ///
+    /// Un croisement est un geste : on le lance à la main, monture par monture. Le
+    /// simulateur facturait la **fournée** — 150 000 le chargement — et jamais le
+    /// croisement, si bien qu'une politique qui en fait deux fois plus pour le même
+    /// argent lui paraissait équivalente. Elle ne l'est pas pour qui joue.
+    ///
+    /// Mesuré sur les deux champions de gen 1 à 600 h, sur deux fenêtres de graines :
+    ///
+    /// | | croisements | chargements | score |
+    /// | --- | --- | --- | --- |
+    /// | champion embarqué | 2 600 | 144 | 43,24 M |
+    /// | champion du 21/08 | **1 556** | 102 | 39,05 M |
+    ///
+    /// Mille croisements de moins pour 4,19 M de moins : le point mort est à
+    /// **4 004 kamas** le croisement, 1 730 sur l'autre fenêtre. Au-dessus, celui qui
+    /// en fait moins gagne. Le mainteneur, qui joue, l'a chiffré à **dix mille**.
+    ///
+    /// ## Un terme de score, comme le malus stérile
+    ///
+    /// Ce n'est pas une dépense : le temps de l'éleveur ne sort pas de sa bourse,
+    /// donc il ne touche ni la solvabilité ni ce que la politique peut se permettre.
+    /// Retiré une fois sur le total, deux barèmes rejouent exactement la même partie
+    /// — seul le réseau retenu change.
+    ///
+    /// Zéro par défaut : le barème d'avant, et les mesures publiées avec lui.
+    pub crossing_effort: f64,
     /// Ce qu'une monture de la couleur poursuivie pèse devant le score, en kamas.
     ///
     /// ## L'ordre lexicographique, et ce qu'il a coûté
@@ -442,6 +472,7 @@ impl Default for Economy {
             project: None,
             project_count: None,
             // L'ordre lexicographique d'avant : absent du fichier, rien ne bouge.
+            crossing_effort: 0.0,
             crown_weight: 100_000_000.0,
             sale_price_decay: 0.0,
             daily_price_recovery: 0.0,
@@ -1125,6 +1156,9 @@ pub struct RunOutcome {
     /// attribué ces refus au budget sans l'avoir vérifié — c'est le genre de
     /// chiffre qu'on finit par croire.
     pub rejected_by_reason: [u32; Rejected::REASONS],
+    /// Ce que le temps de l'éleveur a coûté au score, au barème de
+    /// `Economy::crossing_effort`. Nul tant que ce barème l'est.
+    pub effort_charged: i64,
     /// Ce que la profondeur de marché a retiré à la liquidation.
     ///
     /// Compté toujours, nul tant que `sale_price_decay` l'est. C'est le seul
@@ -1679,6 +1713,7 @@ fn run(
         collection_done: 0,
         collection_bonus: 0,
         market_discount: 0,
+        effort_charged: 0,
         crossings: 0,
         barren_crossings: 0,
         purchases: 0,
@@ -1925,9 +1960,14 @@ fn run(
             economy.collection_bonus[usize::from(generation).min(10)]
         })
         .sum();
+    // Le temps de l'éleveur, retiré une fois sur le total. Chaque croisement est un
+    // geste à la main : deux politiques qui rapportent autant ne se valent pas si
+    // l'une en demande mille de plus. Voir `Economy::crossing_effort`.
+    outcome.effort_charged = (economy.crossing_effort * outcome.crossings as f64) as i64;
     outcome.score = kamas + outcome.liquidation
         - economy.barren_crossing_malus * outcome.barren_crossings as i64
-        + outcome.collection_bonus;
+        + outcome.collection_bonus
+        - outcome.effort_charged;
     outcome
 }
 

@@ -61,6 +61,7 @@ import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
 import type { BreedingColor } from './costs';
 import { canonicalStable, consumeCouples, copyStable, projectBirths } from './stable';
+import type { CloneOption } from './cloning';
 import type { Couple, Individual, Sex, Stable } from './stable';
 
 /**
@@ -999,7 +1000,39 @@ const RECORD_PASSES = 64;
  * Et rien ne s'y perd : un poulain naît niveau 1 et non fécond, donc il ne peut
  * pas figurer dans un couple à zéro place de toute façon.
  */
-export type Reclone = (stable: Stable) => Stable;
+/**
+ * Relit l'écurie **après les clonages**, et dit lesquels.
+ *
+ * Rendre les clonages appliqués et non seulement l'écurie n'est pas une commodité :
+ * la boucle les **suppose**, et une fournée qui suppose un geste que l'écran ne
+ * demande pas est une promesse fausse. Mesuré au navigateur — la boucle projetait
+ * 203 montures + 20 poulains et finissait à 201, soit **22 clonages** qu'elle avait
+ * tenus pour acquis. L'éleveur saisissait ses 20 accouplements, ne clonait rien, et
+ * quatre accouplements repoussaient. Voir `couplesToRecordAll`.
+ */
+export type Reclone = (stable: Stable) => { stable: Stable; clonings: CloneOption[] };
+
+/**
+ * Ce qu'une fournée demande : les accouplements **et** les clonages qu'ils
+ * supposent.
+ *
+ * Les deux ensemble, parce que la promesse ne tient qu'ensemble — « saisis tout ça
+ * et il ne reste rien » est faux si `clonings` n'est pas fait aussi.
+ */
+export type RecordPlan = {
+  couples: Couple[];
+  /**
+   * Les clonages que la boucle a supposés, dans l'ordre où elle les a posés.
+   *
+   * Ceux d'entrée d'abord, puis ceux que chaque vague de saisie rend possibles :
+   * un accouplement stérilise ses deux parents, et deux stériles de même génération
+   * sont une paire clonable de plus. Les derniers ne sont donc **pas encore
+   * faisables** au moment où l'écran les annonce — ils le deviennent à mesure que
+   * la saisie avance, et c'est pour ça que l'écran les compte sans les proposer
+   * tous d'emblée.
+   */
+  clonings: CloneOption[];
+};
 
 export const couplesToRecordAll = (
   input: PolicyInput,
@@ -1034,8 +1067,9 @@ export const couplesToRecordAll = (
    * génération, ni la fécondité n'en dépendent, donc l'appariement non plus.
    */
   reclone: Reclone | null
-): Couple[] => {
+): RecordPlan => {
   const all: Couple[] = [];
+  const assumed: CloneOption[] = [];
   /**
    * L'écurie **réelle** telle que la saisie la laisse : les fécondités dépensées,
    * les stériles neuves, les poulains projetés — et **aucun clone**.
@@ -1047,7 +1081,12 @@ export const couplesToRecordAll = (
    * stériles déjà retirées par les passes d'avant. Les deux jeux divergeaient d'un
    * couple sur l'écurie de `check-record-fixpoint`, et c'était ça.
    */
-  let working = reclone ? reclone(input.stable) : input.stable;
+  let working = input.stable;
+  if (reclone) {
+    const entry = reclone(working);
+    working = entry.stable;
+    assumed.push(...entry.clonings);
+  }
 
   for (let pass = 0; pass < RECORD_PASSES; pass += 1) {
     // Les clonages redérivés à neuf, comme la replanification les redérive. Un
@@ -1083,10 +1122,14 @@ export const couplesToRecordAll = (
     // `all.length - wave.length` : le nombre de poulains déjà projetés par les
     // vagues d'avant, pour que l'alternance des sexes coure sur la saisie entière.
     projectBirths(working, wave, pass, all.length - wave.length);
-    if (reclone) working = reclone(working);
+    if (reclone) {
+      const again = reclone(working);
+      working = again.stable;
+      assumed.push(...again.clonings);
+    }
   }
 
-  return all;
+  return { couples: all, clonings: assumed };
 };
 
 /**

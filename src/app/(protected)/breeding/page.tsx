@@ -489,19 +489,50 @@ const BreedingPage = () => {
    * clone ne peut pas déborder ici, lui : il ressort non fécond, donc jamais
    * dans un couple à zéro place. Le filtre ci-dessous est le second verrou.
    */
-  const policyCouples = useMemo(
+  const policyPlan = useMemo(
     () =>
       policyInput
         ? couplesToRecordAll(
             policyInput,
             cloneContext
-              ? (working) =>
-                  afterClonings(working, cloneOptions(working, cloneContext, Number.POSITIVE_INFINITY))
+              ? (working) => {
+                  const options = cloneOptions(working, cloneContext, Number.POSITIVE_INFINITY);
+                  return { stable: afterClonings(working, options), clonings: options };
+                }
               : null
-          ).filter((couple) => !isProjected(couple.male.mountId) && !isProjected(couple.female.mountId))
-        : [],
+          )
+        : { couples: [], clonings: [] },
     [policyInput, cloneContext]
   );
+
+  const policyCouples = useMemo(
+    () =>
+      policyPlan.couples.filter(
+        (couple) => !isProjected(couple.male.mountId) && !isProjected(couple.female.mountId)
+      ),
+    [policyPlan]
+  );
+
+  /**
+   * Les clonages que la fournée **suppose**, et qu'il faut donc annoncer.
+   *
+   * `clonings` au-dessus n'énumère que ceux qu'on peut faire **tout de suite**. La
+   * boucle d'accouplements, elle, en suppose davantage : chaque vague saisie
+   * stérilise ses parents, et deux stériles de même génération sont une paire
+   * clonable de plus. Elle planifiait donc sur une écurie déjà clonée sans que
+   * personne l'ait demandé.
+   *
+   * Mesuré au navigateur : la boucle projetait 203 montures et 20 poulains puis
+   * finissait à 201 — **22 clonages** tenus pour acquis. L'éleveur saisissait ses
+   * 20 accouplements, ne clonait rien, et **4 accouplements repoussaient**. La
+   * liste ne repoussait pas : elle disait la moitié de ce qu'elle demandait.
+   *
+   * On garde donc le compte entier ici. Les derniers ne sont pas encore faisables
+   * — leurs stériles n'existeront qu'après la saisie — donc l'onglet continue de ne
+   * **proposer** que `clonings`, et ce compte-ci dit ce que la fournée demande en
+   * tout.
+   */
+  const assumedClonings = policyPlan.clonings;
 
   /** Les protégées du projet que rien n'apparie : le seul écran qui puisse les dire. */
   const heldForObjective = useMemo(
@@ -579,6 +610,7 @@ const BreedingPage = () => {
         couples={policyCouples}
         // Ce que valent les stériles, à l'étape où on les clone : voir #163.
         cloneAdvice={clonings}
+        assumedCloningCount={assumedClonings.length}
         // Celles que le projet protège et que rien n'apparie : elles ne sont sur
         // aucun autre écran.
         cloneHeld={heldForObjective}

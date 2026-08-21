@@ -227,6 +227,37 @@ test.describe('clonages puis accouplements', () => {
     expect(await matePairs(page)).toEqual(couplesAvant);
   });
 
+  test('la fournée annonce les clonages qu’elle suppose, et pas seulement ceux du jour', async ({
+    page,
+  }) => {
+    // Le défaut mesuré : la boucle d'accouplements planifie sur une écurie
+    // **déjà clonée**, et n'en disait rien. Sur l'écurie du 15/08 elle projetait
+    // 203 montures et 20 poulains puis finissait à 201 — vingt-deux clonages tenus
+    // pour acquis. L'éleveur saisissait ses accouplements, ne clonait rien parce
+    // que personne ne le lui avait demandé, et des accouplements repoussaient.
+    //
+    // La liste ne repoussait donc pas : elle disait la moitié de ce qu'elle
+    // demandait. L'onglet Clonage annonce désormais le total supposé, tout en ne
+    // **proposant** que les paires formables aujourd'hui — les autres n'existent
+    // pas encore, leurs stériles naîtront de la saisie.
+    const supabase = await mockSupabase(page);
+    nameEverySterile(supabase);
+    await openBreeding(page);
+
+    const proposes = await stepCount(page, 'clone');
+    expect(proposes, 'la fixture doit proposer des clonages').toBeGreaterThan(0);
+
+    await page.getByTestId('step-clone').click();
+    await expect(page.getByTestId('pane-clone')).toBeVisible();
+
+    const annonce = page.getByTestId('clonings-assumed');
+    await expect(annonce).toBeVisible();
+
+    // Le total annoncé dépasse ce qui est proposé, sinon il n'y aurait rien à dire.
+    const total = Number((await annonce.innerText()).match(/suppose (\d+)/)![1]);
+    expect(total, `annoncé ${total}, proposé ${proposes}`).toBeGreaterThan(proposes);
+  });
+
   test('saisir les accouplements ne fait pas repousser la liste par les clonages qu’ils créent', async ({
     page,
   }) => {

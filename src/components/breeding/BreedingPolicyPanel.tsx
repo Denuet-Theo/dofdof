@@ -115,6 +115,17 @@ type Props = {
   couples?: Couple[];
   /** Ce que valent les stériles de l'écurie, à l'onglet « Clonage ». */
   cloneAdvice?: CloneOption[];
+  /**
+   * Combien de clonages la **fournée d'accouplements** suppose en tout.
+   *
+   * Distinct de `cloneAdvice`, qui n'énumère que les paires formables tout de
+   * suite. La boucle de `couplesToRecordAll` en suppose davantage : chaque vague
+   * saisie stérilise ses parents, et deux stériles de même génération sont une
+   * paire de plus. Elle planifiait donc sur une écurie déjà clonée sans que
+   * l'écran l'ait jamais demandé — 22 clonages tenus pour acquis sur l'écurie du
+   * 15/08, et quatre accouplements qui repoussaient faute de les avoir faits.
+   */
+  assumedCloningCount?: number;
   /** Les stériles que le projet protège et qu'aucun clonage n'apparie encore. */
   cloneHeld?: SterileMount[];
   /** La couleur visée par le projet, pour nommer ce qu'une monture protégée sert. */
@@ -174,6 +185,7 @@ const BreedingPolicyPanel = ({
   batch,
   couples,
   cloneAdvice = [],
+  assumedCloningCount = 0,
   cloneHeld = [],
   objectiveName = null,
   extraction = [],
@@ -646,6 +658,19 @@ const BreedingPolicyPanel = ({
               <p className="text-[11px] text-dark-500">
                 Deux stériles, une survivante — c&apos;est toi qui choisis laquelle.
               </p>
+              {assumedCloningCount > toClone.length && (
+                /* Ce que la fournée d'accouplements suppose, et qu'elle ne disait
+                   pas. Les manquants n'existent pas encore : leurs stériles
+                   naîtront de la saisie. Sans eux la liste d'accouplements
+                   repousse, ce qui se lisait comme un défaut alors que c'était une
+                   consigne incomplète. */
+                <p data-testid="clonings-assumed" className="text-[11px] text-kamas">
+                  La fournée d&apos;accouplements en suppose {assumedCloningCount} en tout.
+                  Les {assumedCloningCount - toClone.length} autres deviendront possibles
+                  à mesure que tu saisis les naissances — sans eux, la liste
+                  d&apos;accouplements repoussera.
+                </p>
+              )}
             </>
           ) : cloneHeld.length > 0 ? (
             /* Rien à apparier, mais quelque chose à ne pas détruire : la liste des

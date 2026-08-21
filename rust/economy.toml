@@ -624,3 +624,30 @@ poids_couronne = 5_000_000
 #
 # À zéro, la fitness d'avant, à l'identique.
 cout_par_croisement = 10_000
+
+# ## Et ce qu'une féconde laissée au repos coûte
+#
+# Une féconde est une place d'enclos **déjà payée** qui n'a rien produit : son
+# cycle est acquis, elle s'accouple d'un clic. La garder immobilise du capital, ce
+# que #227 a chiffré et corrigé — mais **côté application seulement**. Le score
+# n'a jamais porté le terme, donc la recherche ne pouvait pas l'apprendre.
+#
+# Mesuré le 21/08 sur l'écurie de `e2e/spend-fertility` — vingt fécondes, deux par
+# couleur et par sexe, aucune place à payer, aucune excuse :
+#
+# | politique | couples appariés sur 10 |
+# | --- | --- |
+# | champion embarqué | 4 |
+# | champion de la manche | **2** |
+# | ses 43 finalistes | **0 sur 43 passent** |
+#
+# Pas un génome malchanceux : mille générations entières, toutes aveugles au même
+# endroit. Trier après coup ne servait à rien, il n'y avait rien à choisir.
+#
+# Trente mille : trois fois le prix d'un croisement. Garder une féconde doit coûter
+# plus cher que la dépenser, sans quoi attendre reste une stratégie — mais pas au
+# point d'obliger à tout croiser à perte, ce que `cout_par_croisement` facture par
+# ailleurs. Les deux se répondent.
+#
+# À zéro, la fitness d'avant, à l'identique.
+malus_feconde_au_repos = 30_000

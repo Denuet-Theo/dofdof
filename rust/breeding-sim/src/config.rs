@@ -382,6 +382,10 @@ impl Prices {
                 get(&["succes", key.as_str()], 0.0) as i64;
         }
 
+        // Ce qu'une féconde laissée au repos coûte au score. Absent, zéro : le
+        // barème d'avant, celui qui produisait des thésauriseurs sans le voir.
+        economy.idle_fertility_malus = get(&["effort", "malus_feconde_au_repos"], 0.0);
+
         // Ce qu'un croisement coûte au temps de l'éleveur. Absent, zéro : le
         // barème d'avant, où seule la fournée était facturée.
         economy.crossing_effort = get(&["effort", "cout_par_croisement"], 0.0);

@@ -199,23 +199,25 @@ fn main() {
 
     println!("\nD'où vient le score :");
     println!(
-        "{:<20} {:>14} {:>16} {:>14} {:>12} {:>14} {:>14}",
-        "politique", "solde final", "liquidation", "dont gen 10", "couleurs", "prime succès", "remise marché"
+        "{:<20} {:>14} {:>16} {:>14} {:>12} {:>14} {:>14} {:>13} {:>14}",
+        "politique", "solde final", "liquidation", "dont gen 10", "couleurs", "prime succès", "remise marché", "féc. au repos", "temps facturé"
     );
-    println!("{}", "-".repeat(112));
+    println!("{}", "-".repeat(140));
     for (label, outcomes) in &reports {
         let gen10_value = mean(outcomes.iter().map(|o| o.gen10_held as f64)) * 500_000.0;
         // La collection est une colonne à part et non un terme fondu dans la
         // liquidation : elle ne se vend pas, elle se possède une fois. Sans elle on
         // lirait un score qui a bougé sans pouvoir dire de combien de couleurs.
         println!(
-            "{label:<20} {:>14} {:>16} {:>14} {:>12} {:>14} {:>14}",
+            "{label:<20} {:>14} {:>16} {:>14} {:>12} {:>14} {:>14} {:>13} {:>14}",
             format!("{:.2} M", mean(outcomes.iter().map(|o| o.balance_before_liquidation as f64)) / 1e6),
             format!("{:.2} M", mean(outcomes.iter().map(|o| o.liquidation as f64)) / 1e6),
             format!("{:.2} M", gen10_value / 1e6),
             format!("{:.1}", mean(outcomes.iter().map(|o| o.collection_done as f64))),
             format!("{:.2} M", mean(outcomes.iter().map(|o| o.collection_bonus as f64)) / 1e6),
             format!("{:.2} M", mean(outcomes.iter().map(|o| o.market_discount as f64)) / 1e6),
+            format!("{:.1}", mean(outcomes.iter().map(|o| o.idle_fertility as f64))),
+            format!("{:.2} M", mean(outcomes.iter().map(|o| o.effort_charged as f64)) / 1e6),
         );
     }
 }

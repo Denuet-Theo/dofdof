@@ -10,6 +10,8 @@ import {
   recordAnswer,
   type Axis,
   type CensusNode,
+  type Probe,
+  type ProbeCell,
 } from '@/lib/dofus/breeding/reconcile';
 import {
   isPristine,
@@ -67,6 +69,9 @@ const SECTION_LABEL: Record<Axis | 'total', string> = {
   generation: 'la colonne GÉNÉRATION',
   color: 'la colonne COULEURS',
 };
+
+/** Un écart signé, dit dans le sens du jeu : « 2 de plus », « 1 de moins ». */
+const gapPhrase = (gap: number): string => `${Math.abs(gap)} de ${gap > 0 ? 'plus' : 'moins'}`;
 
 /** La valeur qu'une cellule fixe sur une facette, ou `null` si elle ne la fixe pas. */
 const valueOn = (cell: RosterFilters, facet: Facet): string | number | null => {
@@ -134,6 +139,35 @@ const useCensusBar = ({
 
   const keyOf = (value: string | number) => String(value);
 
+  /** La clé de saisie d'une case : sa valeur de facette, ou le total. */
+  const keyFor = (cell: RosterFilters): string =>
+    probe && probe.axis !== 'total'
+      ? keyOf(valueOn(cell, FACET_OF[probe.axis as Axis]) ?? '')
+      : TOTAL_VALUE;
+
+  /** Des cases vides pour toute la colonne : vide vaut « pareil ». */
+  const blank = (current: Probe): Map<string, string> =>
+    current.axis === 'total'
+      ? new Map([[TOTAL_VALUE, '']])
+      : new Map(current.cells.map((cell) => [keyFor(cell.cell), '']));
+
+  /**
+   * Les cases ouvertes : celles que le KO a ouvertes, ou celles qu'une colonne à
+   * écart **déjà déclaré** ouvre d'office.
+   *
+   * Une colonne partitionne sa cellule : si l'éleveur vient de dire qu'il y a un
+   * fertile mâle de plus qu'annoncé, les générations de ces fertiles mâles ne
+   * peuvent pas toutes coller. Lui demander « est-ce pareil ? » est lui demander
+   * de répondre non à une question dont il vient de donner la réponse, puis de
+   * cliquer une troisième fois pour ouvrir les cases. Elles s'ouvrent seules, et
+   * la seule question qui reste est posée : **où**.
+   *
+   * Dérivé plutôt que posé dans un effet : c'est une lecture de la question en
+   * cours, pas un état à synchroniser, et un `setState` dans un effet fait
+   * cascader les rendus.
+   */
+  const fields = typed ?? (probe && probe.owed !== null ? blank(probe) : null);
+
   const answerOk = () => {
     if (!root || !probe) return;
     // Un objet neuf : `recordAnswer` mute l'arbre en place — il porte des
@@ -147,28 +181,33 @@ const useCensusBar = ({
 
   const answerKo = () => {
     if (!probe) return;
-    if (probe.axis === 'total') {
-      setTyped(new Map([[TOTAL_VALUE, '']]));
-      return;
-    }
-    setTyped(
-      new Map(
-        probe.cells.map((cell) => [
-          keyOf(valueOn(cell.cell, FACET_OF[probe.axis as Axis]) ?? ''),
-          '',
-        ])
-      )
-    );
+    setTyped(blank(probe));
   };
 
+  /** Ce que l'éleveur a saisi sur une case, ou l'effectif de l'app si rien. */
+  const seenOn = (cell: ProbeCell): number => {
+    const raw = fields?.get(keyFor(cell.cell)) ?? '';
+    const parsed = Number(raw);
+    return raw.trim() === '' || !Number.isFinite(parsed) ? cell.held : parsed;
+  };
+
+  /**
+   * Ce qu'il reste de l'écart déclaré à placer dans la colonne.
+   *
+   * Un compteur vivant plutôt qu'un contrôle : il dit à quel moment la saisie
+   * rend compte de ce qui a été annoncé au-dessus, sans jamais bloquer — deux
+   * écarts qui se compensent dans la colonne restent une réponse recevable, et
+   * c'est à la cellule suivante de les départager.
+   */
+  const left =
+    probe && probe.owed !== null && fields
+      ? probe.owed - probe.cells.reduce((sum, cell) => sum + (seenOn(cell) - cell.held), 0)
+      : 0;
+
   const submit = () => {
-    if (!root || !probe || !typed) return;
-    const facet = FACET_OF[probe.axis as Axis];
+    if (!root || !probe || !fields) return;
     const seen = probe.cells.map((cell) => {
-      const raw =
-        probe.axis === 'total'
-          ? (typed.get(TOTAL_VALUE) ?? '')
-          : (typed.get(keyOf(valueOn(cell.cell, facet) ?? '')) ?? '');
+      const raw = fields.get(keyFor(cell.cell)) ?? '';
       const parsed = Number(raw);
       // Une case laissée vide vaut « pareil » : c'est le geste le plus courant
       // quand une seule ligne cloche, et l'exiger partout ferait recopier dix
@@ -190,9 +229,9 @@ const useCensusBar = ({
             : probe.axis !== 'total' &&
               FACET_OF[probe.axis as Axis] === facet &&
               probe.cells.some((cell) => valueOn(cell.cell, facet) === value),
-        typed: typed ? (_facet, value) => typed.get(keyOf(value)) ?? '' : null,
+        typed: fields ? (_facet, value) => fields.get(keyOf(value)) ?? '' : null,
         onType: (_facet, value, next) =>
-          setTyped((current) => new Map(current ?? []).set(keyOf(value), next)),
+          setTyped((current) => new Map(current ?? fields ?? []).set(keyOf(value), next)),
       }
     : null;
 
@@ -242,7 +281,14 @@ const useCensusBar = ({
                   , avec <strong className="text-info">le filtre bleu</strong> posé.
                 </>
               )}{' '}
-              {probe.axis === 'total' ? (
+              {probe.owed !== null ? (
+                <>
+                  Tu viens de dire qu&apos;ici le jeu en compte{' '}
+                  <strong className="text-loss-light">{gapPhrase(probe.owed)}</strong> : dans
+                  quelle ligne <strong className="text-kamas">en jaune</strong> ? Recopie celles
+                  qui diffèrent, laisse les autres vides.
+                </>
+              ) : probe.axis === 'total' ? (
                 <>
                   Le chiffre <strong className="text-kamas">en jaune</strong> ci-dessous, sur la
                   ligne TYPE, le jeu le montre-t-il pareil ?
@@ -254,7 +300,10 @@ const useCensusBar = ({
                 </>
               )}
             </span>
-            {!typed && (
+            {/* Pas d'OK sur une colonne dont l'écart est déjà déclaré : il n'y a
+                rien à valider, et le laisser paraître le temps d'une frame le
+                rendrait cliquable. */}
+            {!fields && (
               <span className="ml-auto flex gap-1.5">
                 <Button size="sm" variant="secondary" data-testid="census-ok" onClick={answerOk}>
                   <Check size={13} />
@@ -267,14 +316,24 @@ const useCensusBar = ({
               </span>
             )}
           </div>
-          {typed && (
+          {fields && (
             <div className="flex flex-wrap items-center gap-2">
               {/* Une seule consigne pour toutes les questions, le total compris :
                   sa case est désormais dans le panneau comme les autres, sur la
                   ligne du Type. */}
-              <span className="text-[11px] text-dark-400">
-                Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
-                comptent comme identiques.
+              <span className="text-[11px] text-dark-400" data-testid="census-left" data-left={left}>
+                {probe.owed === null ? (
+                  <>
+                    Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
+                    comptent comme identiques.
+                  </>
+                ) : left === 0 ? (
+                  <>L’écart annoncé est placé.</>
+                ) : (
+                  <>
+                    Reste à placer : <strong className="text-loss-light">{gapPhrase(left)}</strong>.
+                  </>
+                )}
               </span>
               <Button
                 size="sm"
@@ -325,16 +384,25 @@ const useCensusBar = ({
                 l’app en tient <strong className="text-dark-200">{cell.held}</strong>, le jeu{' '}
                 <strong className="text-loss-light">{cell.seen}</strong>
               </span>
-              <Button
-                size="sm"
-                variant="secondary"
-                className="ml-auto"
-                data-testid="census-focus"
-                onClick={() => onFocus(cell.cell)}
-                title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
-              >
-                Voir ces {cell.held} montures
-              </Button>
+              {/* Rien à ouvrir quand l'app n'en tient aucune : il n'y a pas de
+                  liste à comparer, seulement des montures à saisir. C'est le cas
+                  d'une case que le croisement vide et que le jeu remplit. */}
+              {cell.held === 0 ? (
+                <span className="ml-auto text-[11px] text-dark-400">
+                  L’app n’en connaît aucune — à ajouter à l’écurie.
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ml-auto"
+                  data-testid="census-focus"
+                  onClick={() => onFocus(cell.cell)}
+                  title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
+                >
+                  Voir ces {cell.held} montures
+                </Button>
+              )}
             </div>
           ))}
 

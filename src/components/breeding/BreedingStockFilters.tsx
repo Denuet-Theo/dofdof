@@ -197,7 +197,10 @@ const CheckRow = ({
         className={`w-full flex items-center gap-2 px-2 py-1 rounded-lg text-[11px] ${TONE[shade]}`}
       >
         {body}
-        <span className="text-dark-600 tabular-nums">{count}</span>
+        {/* Le compte de l'app reste lisible pendant la saisie : c'est l'autre
+            moitié de la comparaison, et l'éteindre revenait à demander de
+            recopier un chiffre en face de rien. */}
+        <span className={countClass(shade, count)}>{count}</span>
         <SeenField typed={typed} />
       </div>
     );

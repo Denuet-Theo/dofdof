@@ -63,6 +63,18 @@ type Props = {
 };
 
 /**
+ * Ce sur quoi une question peut porter.
+ *
+ * `'total'` n'est pas une facette : rien ne se coche, et l'effectif est celui
+ * que le jeu montre à l'ouverture, sans un seul filtre posé. Il a pourtant une
+ * ligne dans le panneau — celle du **Type** — et c'est là que le chiffre se
+ * lit. Sans lui dans cette liste, la première question annonçait « les chiffres
+ * en jaune ci-dessous » et n'en teintait aucun : l'éleveur avait à comparer un
+ * nombre qu'on ne lui montrait pas.
+ */
+export type ReviewFacet = Facet | 'total';
+
+/**
  * Ce que le panneau devient pendant un rapprochement.
  *
  * On ne fabrique pas un second écran : celui-ci est **déjà** la copie du panneau
@@ -72,13 +84,16 @@ type Props = {
  */
 export type Review = {
   /** Vrai pour une valeur figée par le croisement — bleu. */
-  fixed: (facet: Facet, value: string | number) => boolean;
+  fixed: (facet: ReviewFacet, value: string | number) => boolean;
   /** Vrai pour une valeur dont l'effectif est demandé — jaune. */
-  asked: (facet: Facet, value: string | number) => boolean;
+  asked: (facet: ReviewFacet, value: string | number) => boolean;
   /** Non nul quand l'éleveur saisit : rend ce qu'il a tapé pour cette case. */
-  typed: ((facet: Facet, value: string | number) => string) | null;
-  onType: (facet: Facet, value: string | number, next: string) => void;
+  typed: ((facet: ReviewFacet, value: string | number) => string) | null;
+  onType: (facet: ReviewFacet, value: string | number, next: string) => void;
 };
+
+/** La valeur qui désigne la ligne du total : il n'en a aucune à lui. */
+export const TOTAL_VALUE = 'total';
 
 const SECTION = 'text-[10px] uppercase tracking-wider text-dark-500 mb-1.5';
 
@@ -106,6 +121,38 @@ const BOX: Record<RowTone, string> = {
   asked: 'border-kamas/60',
 };
 
+/** Ce qu'une ligne demande de recopier : le compte du jeu, à côté du nôtre. */
+type Typed = { value: string; onChange: (next: string) => void };
+
+/**
+ * La case où l'éleveur recopie ce que le jeu montre.
+ *
+ * Partagée entre les lignes à cocher et la ligne du Type, qui n'en est pas une :
+ * deux champs séparés auraient dérivé, et c'est le même geste.
+ */
+const SeenField = ({ typed }: { typed: Typed }) => (
+  <>
+    <span className="text-dark-600">→</span>
+    <input
+      data-testid="filter-seen"
+      value={typed.value}
+      onChange={(event) => typed.onChange(event.target.value)}
+      inputMode="numeric"
+      placeholder="?"
+      className="w-14 px-1.5 py-0.5 rounded-md bg-dark-900/70 border border-kamas/40
+        text-[11px] text-right text-kamas tabular-nums"
+    />
+  </>
+);
+
+/** L'effectif d'une ligne, mis en avant quand c'est lui qu'on vient comparer. */
+const countClass = (tone: RowTone, count: number) =>
+  tone === 'asked'
+    ? 'text-kamas font-semibold tabular-nums'
+    : count === 0
+      ? 'text-dark-600'
+      : 'text-dark-500';
+
 /** Une ligne à cocher : intitulé à gauche, effectif à droite, comme en jeu. */
 const CheckRow = ({
   label,
@@ -124,7 +171,7 @@ const CheckRow = ({
   /** Pendant un rapprochement : ce que cette ligne est pour la question posée. */
   tone?: RowTone;
   /** Non nul quand l'éleveur saisit ce que le jeu montre sur cette ligne. */
-  typed?: { value: string; onChange: (next: string) => void } | null;
+  typed?: Typed | null;
 }) => {
   const shade = checked && tone === 'plain' ? 'asked' : tone;
   const body = (
@@ -151,16 +198,7 @@ const CheckRow = ({
       >
         {body}
         <span className="text-dark-600 tabular-nums">{count}</span>
-        <span className="text-dark-600">→</span>
-        <input
-          data-testid="filter-seen"
-          value={typed.value}
-          onChange={(event) => typed.onChange(event.target.value)}
-          inputMode="numeric"
-          placeholder="?"
-          className="w-14 px-1.5 py-0.5 rounded-md bg-dark-900/70 border border-kamas/40
-            text-[11px] text-right text-kamas tabular-nums"
-        />
+        <SeenField typed={typed} />
       </div>
     );
   }
@@ -179,17 +217,7 @@ const CheckRow = ({
         transition-colors cursor-pointer ${TONE[shade]}`}
     >
       {body}
-      <span
-        className={
-          tone === 'asked'
-            ? 'text-kamas font-semibold tabular-nums'
-            : count === 0
-              ? 'text-dark-600'
-              : 'text-dark-500'
-        }
-      >
-        {count}
-      </span>
+      <span className={countClass(tone, count)}>{count}</span>
     </button>
   );
 };
@@ -210,14 +238,14 @@ const BreedingStockFilters = ({
   review = null,
 }: Props) => {
   /** Le rôle d'une ligne : bleu si le croisement la fixe, jaune si on la demande. */
-  const toneOf = (facet: Facet, value: string | number): RowTone => {
+  const toneOf = (facet: ReviewFacet, value: string | number): RowTone => {
     if (!review) return 'plain';
     if (review.fixed(facet, value)) return 'fixed';
     return review.asked(facet, value) ? 'asked' : 'plain';
   };
 
   /** Le champ de saisie d'une ligne, ou `null` tant qu'on n'a pas répondu KO. */
-  const typedOf = (facet: Facet, value: string | number) =>
+  const typedOf = (facet: ReviewFacet, value: string | number): Typed | null =>
     review?.typed && review.asked(facet, value)
       ? {
           value: review.typed(facet, value),
@@ -234,6 +262,10 @@ const BreedingStockFilters = ({
 
   /** Le total de la famille, tous filtres appliqués : la ligne « Type » du jeu. */
   const shown = countOf(entries.filter((entry) => matches(entry, filters, nameOf)));
+
+  /** La ligne du Type porte la question du total : voir `ReviewFacet`. */
+  const totalTone = toneOf('total', TOTAL_VALUE);
+  const totalTyped = typedOf('total', TOTAL_VALUE);
 
   /** Les montures que la plage de niveaux ne peut pas classer. */
   const noLevel = unranked(entries, filters, nameOf);
@@ -309,10 +341,18 @@ const BreedingStockFilters = ({
           <p className={SECTION}>Type</p>
           {/* Une seule famille à l'écran, choisie par l'onglet du dessus : la case
               n'aurait rien à décocher. On garde le chiffre, qui est ce qu'on vient
-              comparer. */}
-          <div className="flex items-center gap-2 px-2 py-1 text-[11px] text-dark-300">
+              comparer — et c'est lui que la première question du rapprochement
+              teinte, puisque le total n'a pas d'autre ligne où se lire. */}
+          <div
+            data-testid="filter-row"
+            data-tone={totalTone}
+            className={`flex items-center gap-2 px-2 py-1 rounded-lg text-[11px] ${
+              totalTone === 'plain' ? 'text-dark-300' : TONE[totalTone]
+            }`}
+          >
             <span className="flex-1 text-left">{familyLabel}</span>
-            <span className="text-dark-500">{shown}</span>
+            <span className={countClass(totalTone, shown)}>{shown}</span>
+            {totalTyped && <SeenField typed={totalTyped} />}
           </div>
         </div>
 

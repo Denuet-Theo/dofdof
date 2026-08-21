@@ -404,13 +404,27 @@ export const pinned = (root: CensusNode, nameOf: (colorId: string) => string): P
       found.push({ cell: node.cell, held: node.held, seen: node.seen, label });
       return;
     }
+    const before = found.length;
     for (const column of explored) {
       for (const child of column.children) {
         walk(child, cellLabel(column.axis, child.cell, nameOf));
       }
     }
+    /*
+     * L'écart du nœud que **rien en dessous** n'explique.
+     *
+     * Le cas se lit d'un mot : le total ne colle pas, et pourtant chaque colonne
+     * colle. C'est contradictoire, donc c'est un résultat — une saisie fautive,
+     * ou un écart dans une dimension que le panneau ne montre pas. Sans cette
+     * remontée, la réponse « le jeu en montre 202, pas 203 » était prise, rangée,
+     * et l'écran concluait « l'écurie colle au jeu » : une question posée pour
+     * rien, ce qui est pire que ne pas la poser.
+     */
+    if (node.seen !== null && !settled(node) && found.length === before) {
+      found.push({ cell: node.cell, held: node.held, seen: node.seen, label });
+    }
   };
-  walk(root, 'Toutes');
+  walk(root, 'Toute l’écurie');
   return found;
 };
 

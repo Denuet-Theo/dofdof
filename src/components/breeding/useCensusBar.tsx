@@ -11,8 +11,13 @@ import {
   type Axis,
   type CensusNode,
 } from '@/lib/dofus/breeding/reconcile';
-import type { Facet, RosterEntry, RosterFilters } from '@/lib/dofus/breeding/roster';
-import type { Review } from '@/components/breeding/BreedingStockFilters';
+import {
+  isPristine,
+  type Facet,
+  type RosterEntry,
+  type RosterFilters,
+} from '@/lib/dofus/breeding/roster';
+import { TOTAL_VALUE, type Review } from '@/components/breeding/BreedingStockFilters';
 
 /**
  * Le rapprochement avec le jeu : une poignée de questions, et l'écart localisé.
@@ -140,22 +145,10 @@ const useCensusBar = ({
     setTyped(null);
   };
 
-  /**
-   * La clé d'une case dans la saisie.
-   *
-   * Le total n'est pas une ligne de filtre — c'est le nombre que l'écurie
-   * affiche à l'ouverture, sans rien cocher — donc il n'a aucune valeur de
-   * facette pour se désigner, et sa case vit dans la barre. Sans cette clé à
-   * part, un KO sur le total n'ouvrait **aucun** champ : on répondait « ça ne
-   * colle pas » sans pouvoir dire ce qu'on voyait, et la recherche concluait
-   * que tout collait.
-   */
-  const TOTAL_KEY = 'total';
-
   const answerKo = () => {
     if (!probe) return;
     if (probe.axis === 'total') {
-      setTyped(new Map([[TOTAL_KEY, '']]));
+      setTyped(new Map([[TOTAL_VALUE, '']]));
       return;
     }
     setTyped(
@@ -174,7 +167,7 @@ const useCensusBar = ({
     const seen = probe.cells.map((cell) => {
       const raw =
         probe.axis === 'total'
-          ? (typed.get(TOTAL_KEY) ?? '')
+          ? (typed.get(TOTAL_VALUE) ?? '')
           : (typed.get(keyOf(valueOn(cell.cell, facet) ?? '')) ?? '');
       const parsed = Number(raw);
       // Une case laissée vide vaut « pareil » : c'est le geste le plus courant
@@ -189,11 +182,14 @@ const useCensusBar = ({
 
   const review: Review | null = probe
     ? {
-        fixed: (facet, value) => valueOn(probe.within, facet) === value,
+        // Le total ne fixe rien — il se lit sans un seul filtre posé.
+        fixed: (facet, value) => facet !== 'total' && valueOn(probe.within, facet) === value,
         asked: (facet, value) =>
-          probe.axis !== 'total' &&
-          FACET_OF[probe.axis as Axis] === facet &&
-          probe.cells.some((cell) => valueOn(cell.cell, facet) === value),
+          facet === 'total'
+            ? probe.axis === 'total'
+            : probe.axis !== 'total' &&
+              FACET_OF[probe.axis as Axis] === facet &&
+              probe.cells.some((cell) => valueOn(cell.cell, facet) === value),
         typed: typed ? (_facet, value) => typed.get(keyOf(value)) ?? '' : null,
         onType: (_facet, value, next) =>
           setTyped((current) => new Map(current ?? []).set(keyOf(value), next)),
@@ -236,15 +232,27 @@ const useCensusBar = ({
             <span className="text-[11px] text-dark-300">
               Question {asked + 1} — dans le jeu, lis{' '}
               <strong className="text-kamas">{SECTION_LABEL[probe.axis]}</strong>
-              {probe.axis === 'total' ? (
+              {/* Les quatre marges se lisent à l'ouverture, sans rien cocher :
+                  annoncer « le filtre bleu » quand il n'y en a aucun envoyait
+                  chercher une couleur absente de l'écran. */}
+              {isPristine(probe.within) ? (
                 ', sans aucun filtre.'
               ) : (
                 <>
                   , avec <strong className="text-info">le filtre bleu</strong> posé.
                 </>
               )}{' '}
-              Les chiffres <strong className="text-kamas">en jaune</strong> ci-dessous, le jeu les
-              montre-t-il pareils ?
+              {probe.axis === 'total' ? (
+                <>
+                  Le chiffre <strong className="text-kamas">en jaune</strong> ci-dessous, sur la
+                  ligne TYPE, le jeu le montre-t-il pareil ?
+                </>
+              ) : (
+                <>
+                  Les chiffres <strong className="text-kamas">en jaune</strong> ci-dessous, le jeu
+                  les montre-t-il pareils ?
+                </>
+              )}
             </span>
             {!typed && (
               <span className="ml-auto flex gap-1.5">
@@ -261,30 +269,13 @@ const useCensusBar = ({
           </div>
           {typed && (
             <div className="flex flex-wrap items-center gap-2">
-              {probe.axis === 'total' ? (
-                <span className="flex flex-wrap items-center gap-2 text-[11px] text-dark-400">
-                  L’app en tient{' '}
-                  <strong className="text-dark-200 tabular-nums">{probe.cells[0].held}</strong> — le
-                  jeu en montre
-                  <input
-                    data-testid="census-total-seen"
-                    value={typed.get(TOTAL_KEY) ?? ''}
-                    onChange={(event) =>
-                      setTyped((current) => new Map(current ?? []).set(TOTAL_KEY, event.target.value))
-                    }
-                    inputMode="numeric"
-                    placeholder="?"
-                    autoFocus
-                    className="w-16 px-1.5 py-0.5 rounded-md bg-dark-900/70 border border-kamas/40
-                      text-[11px] text-right text-kamas tabular-nums"
-                  />
-                </span>
-              ) : (
-                <span className="text-[11px] text-dark-400">
-                  Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
-                  comptent comme identiques.
-                </span>
-              )}
+              {/* Une seule consigne pour toutes les questions, le total compris :
+                  sa case est désormais dans le panneau comme les autres, sur la
+                  ligne du Type. */}
+              <span className="text-[11px] text-dark-400">
+                Recopie ce que le jeu affiche dans les cases jaunes. Celles que tu laisses vides
+                comptent comme identiques.
+              </span>
               <Button
                 size="sm"
                 variant="primary"

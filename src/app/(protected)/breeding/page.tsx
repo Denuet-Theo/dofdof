@@ -492,12 +492,15 @@ const BreedingPage = () => {
   const policyCouples = useMemo(
     () =>
       policyInput
-        ? couplesToRecordAll({
-            ...policyInput,
-            stable: afterClonings(policyInput.stable, clonings),
-          }).filter((couple) => !isProjected(couple.male.mountId) && !isProjected(couple.female.mountId))
+        ? couplesToRecordAll(
+            policyInput,
+            cloneContext
+              ? (working) =>
+                  afterClonings(working, cloneOptions(working, cloneContext, Number.POSITIVE_INFINITY))
+              : null
+          ).filter((couple) => !isProjected(couple.male.mountId) && !isProjected(couple.female.mountId))
         : [],
-    [policyInput, clonings]
+    [policyInput, cloneContext]
   );
 
   /** Les protégées du projet que rien n'apparie : le seul écran qui puisse les dire. */

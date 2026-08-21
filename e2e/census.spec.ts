@@ -103,18 +103,81 @@ test.describe('comparer avec le jeu', () => {
     await saisie.fill(String(total - 1));
     await page.getByTestId('census-submit').click();
 
-    // Les quatre marges collent. La réponse au total est alors seule à démentir,
-    // et c'est ce qui doit ressortir : sans ça l'écran concluait « l'écurie
-    // colle au jeu » après avoir demandé, pris et perdu le chiffre.
+    // Les quatre marges collent. Elles ne proposent plus « OK » : l'écart du
+    // total est déclaré, et une colonne partitionne sa cellule, donc elles ne
+    // peuvent pas toutes coller. On laisse les cases vides — ce qui vaut
+    // « pareil » — et c'est justement la contradiction qui doit ressortir :
+    // sans ça l'écran concluait « l'écurie colle au jeu » après avoir demandé,
+    // pris et perdu le chiffre.
     for (const marge of [1, 2, 3, 4]) {
       await answered(page, marge);
       await expect(asked(page)).not.toHaveCount(0);
-      await page.getByTestId('census-ok').click();
+      await expect(page.getByTestId('census-ok')).toHaveCount(0);
+      await page.getByTestId('census-submit').click();
     }
 
     const trouve = page.getByTestId('census-pinned');
     await expect(trouve).toHaveCount(1);
     await expect(trouve).toHaveAttribute('data-held', String(total));
     await expect(trouve).toHaveAttribute('data-seen', String(total - 1));
+  });
+
+  /**
+   * Le cas rencontré en jeu : sous Fertile ⋅ Mâle, la fixture ne tient aucune
+   * gen 10, le panneau affiche donc « Génération 10 — 0 », et le jeu en montre
+   * une. La colonne n'énumérait que les valeurs **présentes dans la cellule** :
+   * la ligne était là, en gris, sans case pour la corriger. Une monture que
+   * l'app ignore entièrement était indéclarable, ce qui est exactement la
+   * monture qu'on vient chercher.
+   */
+  test('une ligne que le croisement vide reste corrigeable', async ({ page }) => {
+    await start(page);
+
+    // Le total colle.
+    await page.getByTestId('census-ok').click();
+
+    // FERTILITÉ : un fertile de plus en jeu.
+    await answered(page, 1);
+    const fertile = asked(page).filter({ hasText: 'Fertile' });
+    const fertiles = await heldOn(fertile);
+    await page.getByTestId('census-ko').click();
+    await fertile.getByTestId('filter-seen').fill(String(fertiles + 1));
+    await page.getByTestId('census-submit').click();
+
+    // SEXE, dans les fertiles. L'écart est déjà déclaré, donc plus de « OK » à
+    // cliquer : les cases sont ouvertes et la barre dit ce qu'il reste à placer.
+    await answered(page, 2);
+    await expect(page.getByTestId('census-ok')).toHaveCount(0);
+    await expect(page.getByTestId('census-left')).toHaveAttribute('data-left', '1');
+    const males = asked(page).filter({ hasText: 'Monture mâle' });
+    const male = await heldOn(males);
+    await males.getByTestId('filter-seen').fill(String(male + 1));
+    await expect(page.getByTestId('census-left')).toHaveAttribute('data-left', '0');
+    await page.getByTestId('census-submit').click();
+
+    // GÉNÉRATION, dans les fertiles mâles : la fixture n'en tient aucune en
+    // gen 10, et c'est là que la monture manquante se déclare.
+    await answered(page, 3);
+    const gen10 = asked(page).filter({ hasText: 'Génération 10' });
+    await expect(gen10).toHaveCount(1);
+    expect(await heldOn(gen10)).toBe(0);
+    await gen10.getByTestId('filter-seen').fill('1');
+    await page.getByTestId('census-submit').click();
+
+    // Le reste de l'écurie colle : on finit le balayage des marges.
+    for (let question = 4; question < 12; question += 1) {
+      if ((await page.getByTestId('census-ok').count()) === 0) break;
+      await page.getByTestId('census-ok').click();
+    }
+
+    const trouve = page.getByTestId('census-pinned');
+    await expect(trouve).toHaveCount(1);
+    await expect(trouve).toContainText('Génération 10');
+    await expect(trouve).toHaveAttribute('data-held', '0');
+    await expect(trouve).toHaveAttribute('data-seen', '1');
+    // Rien à ouvrir : la liste filtrée serait vide, il n'y a que des montures à
+    // saisir.
+    await expect(trouve.getByTestId('census-focus')).toHaveCount(0);
+    await expect(trouve).toContainText('à ajouter');
   });
 });

@@ -127,6 +127,18 @@ export type Probe = {
   /** Les filtres déjà posés pour atteindre cette colonne — à recopier en jeu. */
   within: RosterFilters;
   cells: ProbeCell[];
+  /**
+   * L'écart **déjà déclaré** sur la cellule qui porte cette colonne, ou `null`
+   * si elle colle encore.
+   *
+   * Une colonne partitionne sa cellule : chaque monture y tombe dans une case et
+   * une seule. Donc si l'éleveur vient de dire « il y a un fertile mâle de plus
+   * qu'annoncé », les générations de ces fertiles mâles **ne peuvent pas** toutes
+   * coller — demander « est-ce pareil ? » serait demander une réponse dont on
+   * sait qu'elle est non. Ce qui reste à savoir, c'est **où**, et c'est la seule
+   * chose à demander.
+   */
+  owed: number | null;
 };
 
 /** Ça colle, ou voici ce que le jeu montre, case par case. */
@@ -147,23 +159,6 @@ export const censusRoot = (
   sweep: true,
 });
 
-const valuesOn = (
-  entries: RosterEntry[],
-  cell: RosterFilters,
-  axis: Axis,
-  nameOf: (id: string) => string
-): (string | number)[] => {
-  const inside = entries.filter((entry) => matches(entry, cell, nameOf));
-  const seen = new Set<string | number>();
-  for (const entry of inside) {
-    if (axis === 'sex') seen.add(entry.sex);
-    else if (axis === 'status') seen.add(entry.status);
-    else if (axis === 'generation') seen.add(entry.generation);
-    else seen.add(entry.colorId);
-  }
-  return [...seen];
-};
-
 const withAxis = (cell: RosterFilters, axis: Axis, value: string | number): RosterFilters => {
   if (axis === 'sex') return { ...cell, sexes: [value as Sex] };
   if (axis === 'status') return { ...cell, statuses: [value as MountStatus] };
@@ -172,6 +167,31 @@ const withAxis = (cell: RosterFilters, axis: Axis, value: string | number): Rost
 };
 
 const STATUS_ORDER: MountStatus[] = ['fertile', 'feconde', 'sterile'];
+
+/**
+ * Les valeurs d'un axe, telles que **le panneau les affiche** — celles que le
+ * croisement ramène à zéro comprises.
+ *
+ * C'est l'énumération de `BreedingStockFilters`, et il faut que ce soit
+ * exactement la même. Une ligne montrée sans case pour la corriger est un
+ * chiffre que l'éleveur voit faux et ne peut pas dire : sous Fertile ⋅ Mâle,
+ * « Génération 10 — 0 » s'affichait sans champ, alors que le jeu en montrait
+ * une. L'énumération se faisait **dans la cellule**, donc une case vide n'y
+ * existait pas — et une monture entièrement inconnue de l'app est précisément
+ * ce qu'on vient chercher.
+ *
+ * Les fertilités et les sexes sont donc les listes fixes du panneau, les
+ * générations et les couleurs celles de l'écurie entière. Un zéro qui colle ne
+ * coûte rien : la case reste vide, ça vaut « pareil », et la cellule sort de la
+ * recherche comme les autres.
+ */
+const valuesOn = (entries: RosterEntry[], axis: Axis): (string | number)[] => {
+  if (axis === 'status') return [...STATUS_ORDER];
+  if (axis === 'sex') return ['M', 'F'];
+  const seen = new Set<string | number>();
+  for (const entry of entries) seen.add(axis === 'generation' ? entry.generation : entry.colorId);
+  return [...seen];
+};
 
 /**
  * L'ordre d'affichage d'un axe — celui du jeu, pour lire les deux écrans en
@@ -195,7 +215,7 @@ export const splitCell = (
   nameOf: (colorId: string) => string
 ): Column | null => {
   if (node.used.includes(axis)) return null;
-  const values = ordered(axis, valuesOn(entries, node.cell, axis, nameOf));
+  const values = ordered(axis, valuesOn(entries, axis));
   // Un axe qui ne porte qu'une valeur ne sépare rien : le demander serait une
   // question dont on connaît la réponse, et elle coûte autant qu'une vraie.
   if (values.length < 2) return null;
@@ -277,6 +297,7 @@ export const nextProbe = (
       axis: 'total',
       within: NO_FILTERS,
       cells: [{ cell: root.cell, held: root.held, label: 'Toutes' }],
+      owed: null,
     };
   }
 
@@ -301,6 +322,7 @@ export const nextProbe = (
             held: child.held,
             label: cellLabel(axis, child.cell, nameOf),
           })),
+          owed: node.seen === null || settled(node) ? null : node.seen - node.held,
         };
       }
 

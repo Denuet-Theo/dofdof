@@ -1307,6 +1307,31 @@ pub enum Summit {
     /// Rien. La fécondité d'une gen 10 se garde, faute de savoir quoi en faire.
     #[default]
     Hold,
+    /// Les croisements qui nomment une couleur de `ladder.summit`, et eux seuls.
+    ///
+    /// La distinction avec `Duplicate` n'est pas de degré. L'objection au sommet
+    /// est une objection de **marché** — on ne vend pas cent gen 10 — et elle ne
+    /// dit rien de l'éleveur qui en veut **une**, nommée, parce que c'est son
+    /// projet. Une gen 10 ne monte plus, `climbs` rend donc `false`, et `aims_at`
+    /// refusait ainsi la seule route vers la couleur que l'échelle a été construite
+    /// pour produire.
+    ///
+    /// Mesuré sur l'écurie qui l'a fait remonter : cible Azur-Doré, dont la seule
+    /// recette est `Azur (g9) × Doré (g1)`. L'éleveur n'a pas d'Azur gen 9 ; il
+    /// tient deux gen 10 azurées, et **26 partenaires de son coffre** nomment
+    /// Azur-Doré avec elles, jusqu'à **13,95 %**. Aucun n'était proposable.
+    ///
+    /// Ce que ça n'ouvre pas : un croisement qui ne nomme que d'autres gen 10
+    /// reste refusé, donc la boucle qui accumule n'est pas représentable par ce
+    /// biais. Et la fécondité borne le débit d'elle-même — chaque tentative
+    /// consomme la gen 10 qu'elle emploie.
+    ///
+    /// **C'est le pendant de `SummitRule` côté TypeScript, et les deux doivent
+    /// bouger ensemble.** #225 n'avait ouvert que l'écran : la recherche Rust
+    /// refusait toujours ces croisements, donc le champion s'entraînait dans un
+    /// espace plus étroit que celui où il joue. C'est la famille de défauts de
+    /// #236, et c'est ce qui a motivé cette variante.
+    Target,
     /// La boucle décrite par Olxinos-etenn#1917 sur le forum officiel, et
     /// vérifiée ici sur `mating_outcomes`.
     ///
@@ -1486,6 +1511,10 @@ impl LadderPolicy {
     /// Ce qu'on fait du sommet. Voir `Summit`.
     pub fn with_summit(mut self, summit: Summit) -> Self {
         self.summit = summit;
+        // Le mémo de `aims_at` a été rempli sous l'ancienne règle : le garder
+        // rendrait des réponses que la nouvelle ne donne pas. `crown` le vide pour
+        // la même raison.
+        self.admissible.clear();
         self
     }
 
@@ -2330,10 +2359,32 @@ impl LadderPolicy {
         // génération : deux fécondités consommées pour rester au même barreau,
         // ce que l'échelle ne propose pas. Ce que la boucle du sommet en ferait
         // est un autre plan, et il se mesurera à part.
-        let answer = if !outlook.climbs()
-            || !targets
-                .iter()
-                .all(|t| self.ladder.wanted.contains(&t.color))
+        let answer = if targets.is_empty() {
+            // La purification : le couple ne nomme aucune couleur, donc il n'y a rien
+            // à viser. `climbs` le refusait déjà, mais il le faisait en passant — la
+            // branche du sommet ci-dessous lit `targets[0]`, et une cible vide y
+            // paniquait. Le TypeScript pose la même garde en tête de `aimsAt`.
+            None
+        } else if !outlook.climbs() {
+            // Le plafond. `climbs` est faux par construction — rien ne monte plus
+            // haut qu'une gen 10 — donc c'est `Summit` qui décide, et non l'échelle.
+            // Voir `aims_at_summit` pour ce qui compte comme croisement du sommet.
+            if self.summit == Summit::Hold || !aims_at_summit(catalog, &outlook) {
+                None
+            } else if self.summit == Summit::Duplicate {
+                Some(targets[0].color)
+            } else {
+                // `Target` : on ne retient que ce qui nomme la couleur pour laquelle
+                // l'échelle entière existe, et on rend **celle-là** plutôt que la plus
+                // probable — c'est ce que la tentative vise.
+                targets
+                    .iter()
+                    .find(|t| self.ladder.summit.contains(&t.color))
+                    .map(|t| t.color)
+            }
+        } else if !targets
+            .iter()
+            .all(|t| self.ladder.wanted.contains(&t.color))
         {
             None
         } else {
@@ -2342,6 +2393,24 @@ impl LadderPolicy {
         self.admissible.insert(key, answer);
         answer
     }
+}
+
+/// Un croisement du **sommet** : plafonné, et dont *toute* la cible est au plafond.
+///
+/// Le pendant exact de `aimsAtSummit` côté TypeScript, et il doit le rester : les
+/// deux portes décident du même espace de croisements, l'une pour l'écran, l'autre
+/// pour la recherche qui entraîne le champion.
+///
+/// « Toute la cible », et non « au moins une » : un couple dont une partie de la
+/// masse retombe plus bas n'est pas au sommet, c'est un croisement ordinaire que
+/// `climbs` a déjà jugé. Ce qui reste ici ne peut plus monter par construction.
+fn aims_at_summit(catalog: &Catalog, outlook: &crate::pairing::PairOutlook) -> bool {
+    let top = catalog.top_generation();
+    outlook.target_generation >= top
+        && outlook
+            .target_colors
+            .iter()
+            .all(|t| catalog.generation(t.color) == top)
 }
 
 impl Policy for LadderPolicy {

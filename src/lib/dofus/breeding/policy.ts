@@ -560,7 +560,15 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
       // en croisements qu'on jetait ensuite : 22 propositions écartées sur 26, et
       // une fournée retombée à 10 places sur 40. Ici, les places vont d'emblée à
       // ce qui peut payer.
-      admissible: (male, female) => aimsAt(male, female, input.colors, generations, ladder) !== null,
+      // `'target'` au sommet : la cible de l'éleveur est une gen 10, et une gen 10
+      // ne monte plus — `climbs` rend `false`, donc `aimsAt` refusait les seuls
+      // croisements qui savent la produire. Sur l'écurie qui l'a fait remonter, 26
+      // partenaires du coffre nommaient Azur-Doré avec ses gen 10 azurées, jusqu'à
+      // 13,95 %, et l'écran n'en proposait aucun. Ce n'est pas la boucle du forum,
+      // qui reste éteinte : seuls les croisements nommant `ladder.summit` passent.
+      // Voir `SummitRule`.
+      admissible: (male, female) =>
+        aimsAt(male, female, input.colors, generations, ladder, 'target') !== null,
       // La montée s'arrête dès que plus rien ne fait strictement mieux, et il lui
       // arrive de rendre la main à trente-neuf places sur quarante. L'éleveur
       // complétait alors au jugé, ce qui est le bon geste — la place est du
@@ -687,9 +695,21 @@ const readPlan = (
       strategy.level,
       strategy.optimakinaFrom
     );
-    // `climbs` et non `namesTarget` : au plafond la fenêtre est pleine et ne
-    // gagne rien, donc il n'y a rien à annoncer comme visé.
-    if (!delta?.climbs) return null;
+    if (!delta) return null;
+    // `climbs` et non `namesTarget` : hors du sommet, une fenêtre pleine ne gagne
+    // rien, donc il n'y a rien à annoncer comme visé.
+    //
+    // Au sommet, `climbs` est faux **par construction** — rien ne monte plus haut
+    // qu'une gen 10 — et ce n'est pourtant pas une recopie : c'est une tentative
+    // sur la couleur du projet. On redemande donc à `aimsAt`, avec le régime que
+    // la recherche a employé, et on annonce ce qu'il nomme. Sans ça les deux
+    // portes se contredisaient : `admissible` laissait composer le croisement et
+    // celle-ci le comptait « stérile » et le jetait de l'affichage.
+    if (!delta.climbs) {
+      const aim = aimsAt(maleMate, femaleMate, input.colors, generations, ladder, 'target');
+      if (!aim) return null;
+      return { generation: generations.get(aim) ?? delta.targetGeneration, colorId: aim };
+    }
     const best = delta.births
       .filter(([colorId]) => (generations.get(colorId) ?? 1) === delta.targetGeneration)
       .sort((a, b) => b[1] - a[1])[0];
@@ -759,7 +779,10 @@ const readPlan = (
         refused.barren += 1;
         continue;
       }
-      if (!aimsAt(maleMate, femaleMate, input.colors, generations, ladder)) {
+      // Le même régime qu'à la recherche, et il le faut : filtrer ici ce que
+      // `admissible` a laissé composer jetterait des couples déjà planifiés, et
+      // l'éleveur lirait une fournée amputée de ce que la politique a décidé.
+      if (!aimsAt(maleMate, femaleMate, input.colors, generations, ladder, 'target')) {
         refused.offPlan += 1;
         continue;
       }

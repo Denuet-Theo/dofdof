@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { ROOT, compile, load } from './lib/tsc.mjs';
 
 const out = compile('reconcile', ['src/lib/dofus/breeding/reconcile.ts'], { json: true });
-const { censusRoot, nextProbe, recordAnswer, pinned, NAME_THRESHOLD } = await load(
+const { censusRoot, nextProbe, recordAnswer, pinned, asked, NAME_THRESHOLD } = await load(
   out,
   'reconcile.js'
 );
@@ -193,6 +193,35 @@ const etat = scenario('4 fécondes devenues fertiles', bascule, []);
 // l'outil donne une fausse assurance, ce qui est pire que de ne rien dire.
 if (etat.cells.length === 0) {
   problems.push('4 fécondes saisies fertiles ne sont pas trouvées — le total les cache');
+}
+
+/*
+ * Le total dément, et toutes les colonnes d'accord : une réponse qui doit
+ * ressortir.
+ *
+ * Les scénarios ci-dessus répondent d'après une écurie simulée, donc leurs
+ * réponses sont cohérentes par construction : un écart au total s'y lit toujours
+ * aussi dans une colonne. Celui-là ne peut donc venir que d'une main — c'est
+ * l'éleveur qui dit « le jeu en montre un de moins » puis « les quatre colonnes
+ * collent ». Contradictoire, et c'est justement pour ça qu'il faut le dire :
+ * la version précédente prenait le chiffre et concluait que tout collait.
+ */
+{
+  let root = censusRoot(appEntries, nameOf);
+  const total = nextProbe(root, appEntries, nameOf);
+  root = recordAnswer(root, total, { ok: false, seen: [total.cells[0].held - 1] }, appEntries, nameOf);
+  for (let guard = 0; guard < 10; guard += 1) {
+    const probe = nextProbe(root, appEntries, nameOf);
+    if (!probe) break;
+    root = recordAnswer(root, probe, { ok: true }, appEntries, nameOf);
+  }
+  const cells = pinned(root, nameOf);
+  rows.push({ label: 'total démenti, colonnes d’accord', questions: asked(root), cells: cells.length, ecart: 1 });
+  if (cells.length !== 1 || cells[0].held - cells[0].seen !== 1) {
+    problems.push(
+      'un total démenti que rien ne confirme passe au vert — la réponse est prise puis perdue'
+    );
+  }
 }
 
 console.log('écurie du 15/08 · 203 montures suivies · seuil de lecture nominative :', NAME_THRESHOLD);

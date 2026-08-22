@@ -314,7 +314,7 @@ test.describe('descendre jusqu’aux noms', () => {
     // les lit sur sa liste d'écurie — mais leurs effectifs sont dans le panneau
     // comme tous les autres, en jaune, avec leur case.
     await answered(page, 5);
-    await expect(page.getByTestId('census-bar')).toContainText('nom par nom');
+    await expect(page.getByTestId('census-bar')).toContainText('la recherche de l’écurie');
     const noms = asked(page);
     await expect(noms).not.toHaveCount(0);
 
@@ -351,6 +351,95 @@ test.describe('descendre jusqu’aux noms', () => {
       .getByTestId('stock-mount')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-name')));
     expect(noms2.length).toBeGreaterThan(0);
-    expect(new Set(noms2), 'la liste ne doit porter que ce nom').toEqual(new Set([porte]));
+    for (const nom of noms2) {
+      expect(nom, 'la liste ne doit porter que ce début de nom').toMatch(
+        new RegExp('^' + porte + '($| )')
+      );
+    }
+  });
+});
+
+/**
+ * La passe des noms : le seul écart qu'aucun compte ne peut voir.
+ *
+ * Le 22/08, une fournée réclame `G3 AM M AM-EB`, l'éleveur ne la trouve pas en
+ * jeu, et le rapprochement venait de déclarer l'écurie saine. Elle l'était, au
+ * sens des comptes : la monture est là, même couleur, même sexe, même
+ * génération, même fertilité, même niveau — elle porte simplement un autre nom.
+ * Un nom faux ne bouge aucun compteur, et l'app ne peut pas le déduire toute
+ * seule : ses 220 noms étaient tous cohérents avec sa propre règle.
+ *
+ * D'où une seconde passe, sur la **recherche** de la liste d'écurie du jeu :
+ * `G1`, `G2`, `G3`… puis, sous celui qui cloche, `G3 AM`, `G3 EBAM`…
+ */
+test.describe('la passe des noms', () => {
+  test('les comptes déclarent l’écurie saine, les noms trouvent quand même', async ({ page }) => {
+    await start(page);
+
+    // Les cinq marges collent : c'est très exactement l'écran que l'éleveur
+    // avait devant lui avant de buter sur sa fournée.
+    for (let question = 0; question < 6; question += 1) {
+      const ok = page.getByTestId('census-ok');
+      if ((await ok.count()) === 0) break;
+      await ok.click();
+    }
+    await expect(page.getByTestId('census-bar')).toContainText('colle au jeu');
+    await answered(page, 5);
+    // Et l'écran le dit lui-même, avant qu'on croie avoir tout vérifié.
+    await expect(page.getByTestId('census-bar')).toContainText('ne voient pas un nom faux');
+
+    await page.getByTestId('census-names').click();
+
+    // La question porte sur des **débuts de nom**, pas sur des noms entiers :
+    // « G1 » se tape en deux caractères et coupe l'écurie en dix.
+    await expect(page.getByTestId('census-bar')).toContainText('la recherche de l’écurie');
+    await expect(asked(page)).not.toHaveCount(0);
+    // Un début de nom dicté, et non « Anonyme » : le jeu écrit le même nom sur
+    // toutes les non renommées, donc cette case-là ne se coupe pas. C'est le
+    // plancher de la passe, dit dans l'en-tête de `reconcile`.
+    const prefixes = asked(page).filter({ hasText: /^G\d/ });
+    const premier = (await prefixes.first().innerText()).split('\n')[0].trim();
+    expect(premier, 'un début de nom, pas un nom entier').toMatch(/^G\d+$/);
+
+    /*
+     * Le jeu en montre une de moins sous ce début-là : la monture qu'il connaît
+     * sous un autre nom. On replace l'écart à chaque marche — c'est ce que fait
+     * l'éleveur, qui retape un début de nom plus long et recompte.
+     *
+     * Sans ce placement, répondre « tout pareil » sous un écart déjà déclaré
+     * serait se contredire, et la recherche rendrait la cellule du dessus.
+     */
+    let dernier = premier;
+    for (let marche = 0; marche < 6; marche += 1) {
+      const lignes = asked(page).filter({ hasText: /^G\d/ });
+      if ((await lignes.count()) === 0) break;
+      dernier = (await lignes.first().innerText()).split('\n')[0].trim();
+      const combien = await heldOn(lignes.first());
+      expect(combien).toBeGreaterThan(0);
+      const ko = page.getByTestId('census-ko');
+      if ((await ko.count()) > 0) await ko.click();
+      await lignes.first().getByTestId('filter-seen').fill(String(combien - 1));
+      await page.getByTestId('census-submit').click();
+      if ((await page.getByTestId('census-submit').count()) === 0) break;
+    }
+
+    // Une cellule pointée, et elle porte un début de nom.
+    const trouve = page.getByTestId('census-pinned');
+    await expect(trouve).toHaveCount(1);
+    await expect(trouve).toContainText(dernier);
+    expect(Number(await trouve.getAttribute('data-held'))).toBeLessThanOrEqual(5);
+
+    // Elle s'ouvre sur la liste, et toutes les montures qu'elle rend portent ce
+    // début de nom — c'est là qu'on lit les cinq lignes en face de celles du jeu.
+    await trouve.getByTestId('census-focus').click();
+    const noms = await page
+      .getByTestId('stock-mount')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-name') ?? ''));
+    expect(noms.length).toBeGreaterThan(0);
+    for (const nom of noms) {
+      expect(nom, 'la liste ne doit porter que ce début de nom').toMatch(
+        new RegExp(`^${dernier}($| )`)
+      );
+    }
   });
 });

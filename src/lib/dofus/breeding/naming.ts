@@ -81,6 +81,33 @@ export const borneName = (mount: { name: string | null }): string =>
   mount.name ?? ANONYMOUS_NAME;
 
 /**
+ * Les `depth` premiers mots d'un nom, ou le nom entier s'il en a moins.
+ *
+ * Un nom dicté est fait de quatre mots — `G3 AM M AM-EB` — et chacun raconte
+ * quelque chose : la génération portée, la couleur, le sexe, les deux parents.
+ * Ses préfixes sont donc une **hiérarchie utile** et non un découpage
+ * arbitraire : `G3`, puis `G3 AM`, puis `G3 AM M`. C'est ce qui permet de
+ * confronter deux cents noms à la recherche de l'écurie du jeu en quelques
+ * questions au lieu de deux cents.
+ */
+export const namePrefixAt = (name: string, depth: number): string =>
+  name.split(' ').slice(0, Math.max(depth, 1)).join(' ');
+
+/** Combien de mots porte ce préfixe. Zéro pour la chaîne vide. */
+export const prefixDepth = (prefix: string): number =>
+  prefix === '' ? 0 : prefix.split(' ').length;
+
+/**
+ * Ce nom commence-t-il par ce préfixe, **mot à mot** ?
+ *
+ * Mot à mot et non caractère à caractère : `G1 DO F DO-IN` est le début de la
+ * chaîne `G1 DO F DO-INDI`, et compter la seconde dans la première ferait
+ * chercher un écart qui n'existe pas. Un préfixe complet vaut donc l'égalité.
+ */
+export const bornePrefixed = (name: string, prefix: string): boolean =>
+  prefix === '' || name === prefix || name.startsWith(`${prefix} `);
+
+/**
  * Les composants d'un nom de couleur, tirets internes recollés.
  *
  * « Aigue-marine-Dore » rend `['Aiguemarine', 'Dore']` : la minuscule de

@@ -172,7 +172,16 @@ test.describe('comparer avec le jeu', () => {
 
     const trouve = page.getByTestId('census-pinned');
     await expect(trouve).toHaveCount(1);
-    await expect(trouve).toContainText('Génération 10');
+    /*
+     * Le libellé porte **tous** les filtres de la cellule, et pas seulement le
+     * dernier axe coupé.
+     *
+     * « Génération 10 — l'app en tient 0, le jeu 1 » désignait en réalité les
+     * gen 10 *fertiles mâles*, pendant que le panneau, juste en dessous,
+     * affichait deux gen 10. Deux chiffres qui se contredisent et rien pour les
+     * concilier : c'est la ligne que l'éleveur a photographiée le 22/08.
+     */
+    await expect(trouve).toContainText('Fertile · Monture mâle · Génération 10');
     await expect(trouve).toHaveAttribute('data-held', '0');
     await expect(trouve).toHaveAttribute('data-seen', '1');
     // Rien à ouvrir : la liste filtrée serait vide, il n'y a que des montures à

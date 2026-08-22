@@ -3,6 +3,7 @@
 import { RotateCcw } from 'lucide-react';
 import {
   facetCounts,
+  facetLabel,
   gameGenerationOrder,
   isPristine,
   LEVEL_MAX,
@@ -11,11 +12,11 @@ import {
   countOf,
   unranked,
   NO_FILTERS,
-  type Facet,
+  type ValueFacet,
   type RosterEntry,
   type RosterFilters,
 } from '@/lib/dofus/breeding/roster';
-import { MOUNT_STATUS_LABEL, type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
+import { type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
 
 /**
  * Les filtres du jeu, dans l'ordre du jeu, avec les comptes du jeu.
@@ -72,7 +73,7 @@ type Props = {
  * en jaune ci-dessous » et n'en teintait aucun : l'éleveur avait à comparer un
  * nombre qu'on ne lui montrait pas.
  */
-export type ReviewFacet = Facet | 'total';
+export type ReviewFacet = ValueFacet | 'total';
 
 /**
  * Ce que le panneau devient pendant un rapprochement.
@@ -230,7 +231,6 @@ const toggled = <T,>(list: T[], value: T): T[] =>
   list.includes(value) ? list.filter((entry) => entry !== value) : [...list, value];
 
 const STATUS_ORDER: MountStatus[] = ['fertile', 'feconde', 'sterile'];
-const SEX_LABEL: Record<Sex, string> = { F: 'Monture femelle', M: 'Monture mâle' };
 
 const BreedingStockFilters = ({
   entries,
@@ -281,7 +281,11 @@ const BreedingStockFilters = ({
   // faire disparaître ferait lire « je n'en ai pas » là où il faut lire « pas de
   // celles-là ».
   const colorRows = [...new Set(entries.map((entry) => entry.colorId))]
-    .map((colorId) => ({ colorId, count: colors.get(colorId) ?? 0, label: nameOf(colorId) }))
+    .map((colorId) => ({
+      colorId,
+      count: colors.get(colorId) ?? 0,
+      label: facetLabel('color', colorId, nameOf),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
 
   const level = (value: number, key: 'levelMin' | 'levelMax') => (
@@ -365,7 +369,7 @@ const BreedingStockFilters = ({
             {gameGenerationOrder(entries.map((entry) => entry.generation)).map((generation) => (
               <CheckRow
                 key={generation}
-                label={`Génération ${generation}`}
+                label={facetLabel('generation', generation, nameOf)}
                 count={generations.get(generation) ?? 0}
                 checked={filters.generations.includes(generation)}
                 tone={toneOf('generation', generation)}
@@ -382,7 +386,7 @@ const BreedingStockFilters = ({
             {STATUS_ORDER.map((status) => (
               <CheckRow
                 key={status}
-                label={MOUNT_STATUS_LABEL[status]}
+                label={facetLabel('status', status, nameOf)}
                 count={statuses.get(status) ?? 0}
                 checked={filters.statuses.includes(status)}
                 tone={toneOf('status', status)}
@@ -412,7 +416,7 @@ const BreedingStockFilters = ({
             {(['F', 'M'] as Sex[]).map((sex) => (
               <CheckRow
                 key={sex}
-                label={SEX_LABEL[sex]}
+                label={facetLabel('sex', sex, nameOf)}
                 count={sexes.get(sex) ?? 0}
                 checked={filters.sexes.includes(sex)}
                 tone={toneOf('sex', sex)}

@@ -1,11 +1,14 @@
 import {
   countOf,
+  facetLabel,
   matches,
   NO_FILTERS,
+  valueOn,
   type RosterEntry,
   type RosterFilters,
+  type ValueFacet,
 } from './roster';
-import { MOUNT_STATUS_LABEL, type MountStatus, type Sex } from './stable';
+import { type MountStatus, type Sex } from './stable';
 
 /**
  * Trouver où l'app et le jeu ne disent pas la même chose, en le moins de
@@ -82,8 +85,14 @@ import { MOUNT_STATUS_LABEL, type MountStatus, type Sex } from './stable';
 /** Sous ce nombre de montures, on cesse de couper et on lit les noms. */
 export const NAME_THRESHOLD = 12;
 
+/**
+ * Un axe **est** une facette à valeurs du panneau : couper une cellule, c'est
+ * cocher une ligne. Les nommer deux fois laissait deux vocabulaires pour la
+ * même chose, et une traduction de l'un vers l'autre à tenir à jour.
+ */
+export type Axis = ValueFacet;
+
 /** Les axes, dans l'ordre du moins cher à lire en jeu au plus cher. */
-export type Axis = 'status' | 'sex' | 'generation' | 'color';
 const AXES: Axis[] = ['status', 'sex', 'generation', 'color'];
 
 /** Une colonne posée sur une cellule : l'axe, ses cases, et si on l'a demandée. */
@@ -241,16 +250,27 @@ const settled = (node: CensusNode): boolean => node.seen !== null && node.seen =
 const readable = (node: CensusNode): boolean =>
   node.seen !== null && !settled(node) && node.held <= NAME_THRESHOLD;
 
-/** Comment nommer une case, pour que l'éleveur sache quel filtre cocher. */
-export const cellLabel = (
-  axis: Axis,
-  cell: RosterFilters,
-  nameOf: (colorId: string) => string
-): string => {
-  if (axis === 'status') return MOUNT_STATUS_LABEL[cell.statuses[0]];
-  if (axis === 'sex') return cell.sexes[0] === 'M' ? 'Monture mâle' : 'Monture femelle';
-  if (axis === 'generation') return `Génération ${cell.generations[0]}`;
-  return nameOf(cell.colorIds[0]);
+/**
+ * Comment nommer une cellule : **tous** les filtres qui la définissent, dans
+ * l'ordre où la recherche les a posés.
+ *
+ * Elle ne nommait que le dernier axe coupé, et c'était l'axe le moins parlant
+ * des trois. « Génération 10 — l'app en tient 0, le jeu 1 » désignait en réalité
+ * les gen 10 *fertiles mâles* ; à côté, le panneau affichait deux gen 10, et
+ * l'éleveur avait devant lui deux chiffres qui se contredisent sans rien pour
+ * les concilier. Le libellé est la seule chose qui dise sous quels filtres se
+ * relire, donc il les porte tous.
+ *
+ * Il se lit de la cellule et non du chemin parcouru : une cellule *est* un jeu
+ * de filtres, et la dériver d'elle interdit de la nommer d'après autre chose
+ * que ce qu'elle retient.
+ */
+export const cellLabel = (cell: RosterFilters, nameOf: (colorId: string) => string): string => {
+  const parts = AXES.flatMap((axis) => {
+    const value = valueOn(cell, axis);
+    return value === null ? [] : [facetLabel(axis, value, nameOf)];
+  });
+  return parts.length > 0 ? parts.join(' · ') : 'Toute l’écurie';
 };
 
 /**
@@ -296,7 +316,7 @@ export const nextProbe = (
       path: [],
       axis: 'total',
       within: NO_FILTERS,
-      cells: [{ cell: root.cell, held: root.held, label: 'Toutes' }],
+      cells: [{ cell: root.cell, held: root.held, label: cellLabel(root.cell, nameOf) }],
       owed: null,
     };
   }
@@ -320,7 +340,7 @@ export const nextProbe = (
           cells: column.children.map((child) => ({
             cell: child.cell,
             held: child.held,
-            label: cellLabel(axis, child.cell, nameOf),
+            label: cellLabel(child.cell, nameOf),
           })),
           owed: node.seen === null || settled(node) ? null : node.seen - node.held,
         };
@@ -410,7 +430,12 @@ export type Pinned = { cell: RosterFilters; held: number; seen: number; label: s
  */
 export const pinned = (root: CensusNode, nameOf: (colorId: string) => string): Pinned[] => {
   const found: Pinned[] = [];
-  const walk = (node: CensusNode, label: string) => {
+  // Le libellé se lit de la cellule, et non de l'axe par lequel on y est
+  // descendu : c'est ce qui lui fait porter **tous** ses filtres. Voir
+  // `cellLabel`.
+  const pin = (node: CensusNode, seen: number) =>
+    found.push({ cell: node.cell, held: node.held, seen, label: cellLabel(node.cell, nameOf) });
+  const walk = (node: CensusNode) => {
     /*
      * Les colonnes explorées d'abord, **avant** de juger le nœud lui-même.
      *
@@ -423,13 +448,13 @@ export const pinned = (root: CensusNode, nameOf: (colorId: string) => string): P
     const explored = node.columns.filter((column) => column.answered);
     if (explored.length === 0) {
       if (node.seen === null || settled(node)) return;
-      found.push({ cell: node.cell, held: node.held, seen: node.seen, label });
+      pin(node, node.seen);
       return;
     }
     const before = found.length;
     for (const column of explored) {
       for (const child of column.children) {
-        walk(child, cellLabel(column.axis, child.cell, nameOf));
+        walk(child);
       }
     }
     /*
@@ -443,10 +468,10 @@ export const pinned = (root: CensusNode, nameOf: (colorId: string) => string): P
      * rien, ce qui est pire que ne pas la poser.
      */
     if (node.seen !== null && !settled(node) && found.length === before) {
-      found.push({ cell: node.cell, held: node.held, seen: node.seen, label });
+      pin(node, node.seen);
     }
   };
-  walk(root, 'Toute l’écurie');
+  walk(root);
   return found;
 };
 

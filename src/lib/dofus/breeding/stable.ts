@@ -265,6 +265,19 @@ export const MOUNT_STATUS_LABEL: Record<MountStatus, string> = {
   sterile: 'Stérile',
 };
 
+/**
+ * Les intitulés du jeu, et pas « Mâle » / « Femelle ».
+ *
+ * Ils s'écrivent comme le panneau FILTRES les écrit parce que tout l'écran
+ * d'écurie existe pour se lire en vis-à-vis du jeu. Ils étaient recopiés dans
+ * `BreedingStockFilters` et dans `reconcile`, ce qui laissait une cellule
+ * pointée se nommer autrement que la ligne qu'elle désigne — voir `facetLabel`.
+ */
+export const SEX_LABEL: Record<Sex, string> = {
+  M: 'Monture mâle',
+  F: 'Monture femelle',
+};
+
 export const mountStatus = (mount: Pick<Individual, 'fertile' | 'cycled'>): MountStatus =>
   mount.fertile ? (mount.cycled ? 'feconde' : 'fertile') : 'sterile';
 

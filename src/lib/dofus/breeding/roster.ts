@@ -2,6 +2,8 @@ import { ANONYMOUS_NAME } from './naming';
 import {
   cycledOf,
   mountStatus,
+  MOUNT_STATUS_LABEL,
+  SEX_LABEL,
   type BulkStock,
   type Individual,
   type MountStatus,
@@ -156,8 +158,49 @@ export const rosterOf = (
   return entries;
 };
 
+/**
+ * Les facettes qui classent une monture par **valeur** : celles qui ont des
+ * lignes dans le panneau, et donc celles qu'une question peut couper.
+ *
+ * La recherche et le texte n'en sont pas : on ne coche pas un niveau, on borne
+ * une plage, et rien ne s'y nomme.
+ */
+export type ValueFacet = 'generation' | 'status' | 'sex' | 'color';
+
 /** Les facettes, nommées, pour pouvoir en exclure une du compte qui la décore. */
-export type Facet = 'query' | 'level' | 'generation' | 'status' | 'sex' | 'color';
+export type Facet = 'query' | 'level' | ValueFacet;
+
+/**
+ * La valeur qu'une cellule fixe sur une facette, ou `null` si elle ne la fixe pas.
+ *
+ * Une cellule de rapprochement ne pose jamais qu'une valeur par facette — c'est
+ * ce qui en fait une case du panneau et non un filtre libre.
+ */
+export const valueOn = (cell: RosterFilters, facet: ValueFacet): string | number | null => {
+  if (facet === 'status') return cell.statuses[0] ?? null;
+  if (facet === 'sex') return cell.sexes[0] ?? null;
+  if (facet === 'generation') return cell.generations[0] ?? null;
+  return cell.colorIds[0] ?? null;
+};
+
+/**
+ * Le nom d'une valeur de facette, **tel que le panneau écrit sa ligne**.
+ *
+ * Une seule fonction pour les deux écrans, et c'est le point : le panneau nomme
+ * ses lignes avec, le rapprochement nomme ses cellules avec, donc une cellule
+ * pointée se retrouve dans le panneau mot pour mot. Les deux listes vivaient à
+ * deux endroits, et « Monture mâle » d'un côté n'engageait à rien de l'autre.
+ */
+export const facetLabel = (
+  facet: ValueFacet,
+  value: string | number,
+  nameOf: (colorId: string) => string
+): string => {
+  if (facet === 'status') return MOUNT_STATUS_LABEL[value as MountStatus];
+  if (facet === 'sex') return SEX_LABEL[value as Sex];
+  if (facet === 'generation') return `Génération ${value}`;
+  return nameOf(String(value));
+};
 
 /**
  * Une entrée passe-t-elle le filtre, à une facette près ?

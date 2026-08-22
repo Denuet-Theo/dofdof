@@ -60,6 +60,10 @@ const SECTION_LABEL: Record<Axis | 'total', string> = {
   sex: 'la colonne SEXE',
   generation: 'la colonne GÉNÉRATION',
   color: 'la colonne COULEURS',
+  // Le seul axe qui ne se lise pas dans le panneau du jeu : les noms sont sur
+  // la liste de l'écurie, une ligne par monture. C'est aussi la dernière
+  // question posable, donc la cellule tient déjà dans un écran.
+  name: 'la liste de l’écurie, nom par nom',
 };
 
 /** Un écart signé, dit dans le sens du jeu : « 2 de plus », « 1 de moins ». */
@@ -393,7 +397,8 @@ const useCensusBar = ({
                   onClick={() => onReveal(cell.cell)}
                   title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
                 >
-                  Voir ces {cell.held} montures
+                  {/* Une seule, depuis que l'axe des noms descend jusque-là. */}
+                  {cell.held === 1 ? 'Voir cette monture' : `Voir ces ${cell.held} montures`}
                 </Button>
               )}
             </div>

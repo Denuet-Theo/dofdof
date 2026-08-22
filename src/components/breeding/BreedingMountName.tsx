@@ -1,7 +1,7 @@
 'use client';
 
 import CopyableText from '@/components/ui/CopyableText';
-import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+import { ANONYMOUS_NAME, borneName } from '@/lib/dofus/breeding/naming';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 
 /**
@@ -18,7 +18,7 @@ import type { Individual } from '@/lib/dofus/breeding/stable';
  * mérite donc pas un nom à copier, seulement une puce mate.
  */
 export const mountNameOf = (individuals: Individual[]) => {
-  const names = new Map(individuals.map((mount) => [mount.id, mount.name ?? ANONYMOUS_NAME]));
+  const names = new Map(individuals.map((mount) => [mount.id, borneName(mount)]));
   return (mountId: string) => names.get(mountId) ?? ANONYMOUS_NAME;
 };
 

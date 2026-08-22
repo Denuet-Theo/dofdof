@@ -274,3 +274,83 @@ test.describe('ouvrir la cellule pointée', () => {
     await expect(liste).toBeInViewport();
   });
 });
+
+/**
+ * La descente jusqu'aux noms, quand les quatre facettes ne séparent plus rien.
+ *
+ * Le cas signalé le 22/08 : six Amande gen 3, mâles, fertiles, niveau 1. Le
+ * panneau du jeu ne les distingue par aucune de ses colonnes — la recherche
+ * s'arrêtait donc sur une cellule de six montures et rendait la main. Le nom est
+ * la seule chose qui les sépare encore, et le jeu l'écrit sur chaque ligne de
+ * son écurie ; c'est donc la dernière coupe, hors panneau, et le seuil de
+ * lecture nominative descend à cinq.
+ */
+test.describe('descendre jusqu’aux noms', () => {
+  test('les noms coupent ce que les quatre facettes ne coupent plus', async ({ page }) => {
+    await start(page);
+
+    /** Déclare un écart d'une monture sur une ligne de la colonne posée. */
+    const gapOn = async (ligne: string) => {
+      const row = asked(page).filter({ has: page.getByText(ligne, { exact: true }) });
+      const held = await heldOn(row);
+      const ko = page.getByTestId('census-ko');
+      if ((await ko.count()) > 0) await ko.click();
+      await row.getByTestId('filter-seen').fill(String(held + 1));
+      await page.getByTestId('census-submit').click();
+      return held;
+    };
+
+    // Le total colle, puis on descend les quatre colonnes du panneau jusqu'aux
+    // Dorées fécondes femelles de gen 1 — dix montures que rien d'autre ne
+    // sépare.
+    await page.getByTestId('census-ok').click();
+    await gapOn('Féconde');
+    await gapOn('Monture femelle');
+    await gapOn('Génération 1');
+    const held = await gapOn('Dore');
+    expect(held, 'la cellule doit dépasser le seuil, sans quoi rien ne se coupe').toBeGreaterThan(5);
+
+    // Cinquième question : les noms. Ils ne sont dans aucune colonne du jeu — on
+    // les lit sur sa liste d'écurie — mais leurs effectifs sont dans le panneau
+    // comme tous les autres, en jaune, avec leur case.
+    await answered(page, 5);
+    await expect(page.getByTestId('census-bar')).toContainText('nom par nom');
+    const noms = asked(page);
+    await expect(noms).not.toHaveCount(0);
+
+    // Une monture de plus sur un nom dicté — pas sur « Anonyme », que le jeu
+    // écrit sur toutes les non renommées et qui ne se départage donc pas.
+    const nomme = noms.filter({ hasText: /^G\d/ }).first();
+    const porte = (await nomme.innerText()).split('\n')[0].trim();
+    const combien = await heldOn(nomme);
+    await nomme.getByTestId('filter-seen').fill(String(combien + 1));
+    await page.getByTestId('census-submit').click();
+
+    for (let question = 0; question < 12; question += 1) {
+      if ((await page.getByTestId('census-ok').count()) > 0) {
+        await page.getByTestId('census-ok').click();
+        continue;
+      }
+      if ((await page.getByTestId('census-submit').count()) > 0) {
+        await page.getByTestId('census-submit').click();
+        continue;
+      }
+      break;
+    }
+
+    // La cellule pointée porte le nom, et tient sous le seuil : c'est la
+    // promesse — on ne rend jamais une liste que l'œil ne fait pas d'un coup.
+    const trouve = page.getByTestId('census-pinned').filter({ hasText: porte });
+    await expect(trouve).toHaveCount(1);
+    await expect(trouve).toContainText(`Féconde · Monture femelle · Génération 1 · Dore · ${porte}`);
+    expect(Number(await trouve.getAttribute('data-held'))).toBeLessThanOrEqual(5);
+
+    // Et elle s'ouvre sur la liste, filtrée sur ce seul nom.
+    await trouve.getByTestId('census-focus').click();
+    const noms2 = await page
+      .getByTestId('stock-mount')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-name')));
+    expect(noms2.length).toBeGreaterThan(0);
+    expect(new Set(noms2), 'la liste ne doit porter que ce nom').toEqual(new Set([porte]));
+  });
+});

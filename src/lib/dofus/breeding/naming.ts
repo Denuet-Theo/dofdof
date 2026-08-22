@@ -68,6 +68,19 @@ export const MOUNT_NAME_MAX_LENGTH = 20;
 export const ANONYMOUS_NAME = 'Anonyme';
 
 /**
+ * Le nom sous lequel une monture se lit — **celui de l'écran**, jamais `null`.
+ *
+ * Le jeu écrit « Anonyme » sur toute monture non renommée, et le vrac n'en porte
+ * aucun. Une monture sans nom se cherche, se compte et se range donc sous ce
+ * nom-là. C'était écrit `?? ANONYMOUS_NAME` à sept endroits — la recherche, le
+ * tri de l'écurie, le clonage, l'hôtel de vente, les puces de naissance — et
+ * chacun était une occasion d'en oublier un et de faire disparaître les
+ * anonymes d'un compte ou d'un tri.
+ */
+export const borneName = (mount: { name: string | null }): string =>
+  mount.name ?? ANONYMOUS_NAME;
+
+/**
  * Les composants d'un nom de couleur, tirets internes recollés.
  *
  * « Aigue-marine-Dore » rend `['Aiguemarine', 'Dore']` : la minuscule de

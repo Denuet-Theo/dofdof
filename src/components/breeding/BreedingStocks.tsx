@@ -21,6 +21,7 @@ import { lineageDistribution, lineagePurity } from '@/lib/dofus/breeding/lineage
 import type { DriftSignal } from '@/lib/dofus/breeding/drift';
 import {
   ANONYMOUS_NAME,
+  borneName,
   colorCoder,
   dictatedNameFor,
 } from '@/lib/dofus/breeding/naming';
@@ -259,9 +260,6 @@ const fuelRank = (info: GaugeInfo): FuelRank =>
  */
 const STATUS_TONE = 'bg-kamas/15 border-kamas/40 text-kamas';
 
-/** Les plus avancées d'abord : féconde, puis fertile, puis stérile. */
-const READINESS: Record<MountStatus, number> = { feconde: 2, fertile: 1, sterile: 0 };
-
 const BreedingStocks = ({
   colors,
   fuelItems,
@@ -376,12 +374,6 @@ const BreedingStocks = ({
     dictatedNameFor(mount, colors);
 
   /**
-   * L'écurie affichée : les fertiles devant, puis par couleur et par niveau.
-   *
-   * Les fertiles remontent parce que ce sont les seules qui décident de quelque
-   * chose — les autres attendent une naissance ou un clonage.
-   */
-  /**
    * L'écurie sous la forme que le jeu compte : suivies et vrac ensemble.
    *
    * Elle alimente les compteurs des filtres, et elle seule — un total qui
@@ -440,6 +432,23 @@ const BreedingStocks = ({
     [individuals]
   );
 
+  /**
+   * L'écurie affichée, **dans l'ordre du jeu** : par nom, comme l'ETABLE.
+   *
+   * Elle sortait les fécondes devant, puis par génération décroissante, par
+   * couleur, par niveau — et, à égalité, **par uuid**. Sur une cellule pointée
+   * les cinq premiers critères sont justement ceux que les filtres viennent de
+   * figer, si bien que l'ordre effectif était celui des identifiants : six
+   * Amande gen 3 mâles fertiles s'affichaient dans un ordre qui ne correspond à
+   * rien de lisible, et surtout pas à la liste du jeu posée à côté. Or c'est le
+   * seul geste qui ferme un écart — descendre les deux listes ligne à ligne.
+   *
+   * Trier par nom n'y perd rien : le nom dicté porte la génération, la couleur,
+   * le sexe et l'ascendance, donc il regroupe déjà ce que les anciens critères
+   * regroupaient. Les non renommées se rangent ensemble sous « Anonyme », qui
+   * est le nom que le jeu leur donne. L'uuid reste en dernier départage, pour
+   * que deux homonymes ne dansent pas d'un rendu à l'autre.
+   */
   const owned = useMemo(() => {
     return individuals
       .filter((mount) =>
@@ -460,10 +469,7 @@ const BreedingStocks = ({
       )
       .sort(
         (a, b) =>
-          READINESS[mountStatus(b)] - READINESS[mountStatus(a)] ||
-          generationOfColor(b.colorId) - generationOfColor(a.colorId) ||
-          nameOf(a.colorId).localeCompare(nameOf(b.colorId)) ||
-          a.level - b.level ||
+          borneName(a).localeCompare(borneName(b), 'fr') ||
           a.id.localeCompare(b.id)
       );
   }, [individuals, filters, nameOf, generationOfColor]);
@@ -848,13 +854,16 @@ const BreedingStocks = ({
               {owned.map((mount) => {
                 const status = mountStatus(mount);
                 const carried = mount.parents ? nameForIndividual(mount) : null;
-                const current = mount.name ?? ANONYMOUS_NAME;
+                const current = borneName(mount);
                 const purity = purityOf(mount);
 
                 return (
                   <div
                     key={mount.id}
                     data-testid="stock-mount"
+                    /* Le nom porté, celui qui range la liste et par lequel on la
+                       confronte à celle du jeu. */
+                    data-name={current}
                     /* Sans nom, pas d'ascendance — donc les états possibles ne
                        sont pas les mêmes, et ça se vérifie. Voir `phantoms`. */
                     data-anonymous={mount.name === null}

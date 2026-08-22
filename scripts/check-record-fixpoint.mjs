@@ -188,7 +188,7 @@ const recloneFor = (withClonings, tag, sink) =>
           console.log(`   [${tag}] ${options.length} clonage(s) : ${options.map(pairKey).join(', ') || '-'}`);
         }
         if (sink) sink.push(...options);
-        return afterClonings(working, options);
+        return { stable: afterClonings(working, options), clonings: options };
       }
     : null;
 
@@ -197,7 +197,15 @@ const residueOf = (withClonings) => {
   // L'écurie **brute** entre dans la boucle, comme sur l'écran : c'est `reclone`
   // qui pose les clonages, à l'entrée puis entre chaque passe.
   const assumed = [];
-  const promised = couplesToRecordAll(inputFor(stable, false), recloneFor(withClonings, 'boucle', assumed));
+  const plan = couplesToRecordAll(inputFor(stable, false), recloneFor(withClonings, 'boucle', assumed));
+  const promised = plan.couples;
+  // La fournée annonce désormais ce qu'elle suppose : les deux listes doivent donc
+  // coïncider, sans quoi l'écran en tairait une partie — le défaut qu'on corrige.
+  if (plan.clonings.length !== assumed.length) {
+    problems.push(
+      `la fournée suppose ${assumed.length} clonage(s) mais n'en annonce que ${plan.clonings.length}`
+    );
+  }
   // La saisie se fait sur l'écurie **d'après les clonages**, parce que c'est la
   // fournée que l'écran promet : « voici les clonages, voici les accouplements ».
   // Les mesurer sur une écurie où les clonages n'ont pas eu lieu demanderait à la
@@ -214,7 +222,7 @@ const residueOf = (withClonings) => {
   // divergent — une tranche vide peut cacher une liste pleine — et c'est la liste
   // entière que l'éleveur voit annoncée. Mesurée du même côté que l'entrée, donc
   // écurie brute plus `reclone`.
-  const left = couplesToRecordAll(inputFor(after, false), recloneFor(withClonings, 'replan', null));
+  const left = couplesToRecordAll(inputFor(after, false), recloneFor(withClonings, 'replan', null)).couples;
   if (process.env.DIAG) {
     for (const c of left) {
       console.log(`   RESTE ${c.male.colorId}(${c.male.mountId ?? 'vrac'}) x ${c.female.colorId}(${c.female.mountId ?? 'vrac'}) -> ${c.targetColorId}`);
@@ -223,13 +231,13 @@ const residueOf = (withClonings) => {
   return { promised: promised.length, left: left.length };
 };
 
+const problems = [];
+
 const plain = residueOf(false);
 const withClones = residueOf(true);
 
 console.log(`  sans clonages                  : ${plain.promised} proposés, ${plain.left} qui repoussent`);
 console.log(`  clonages projetés à l'entrée   : ${withClones.promised} proposés, ${withClones.left} qui repoussent`);
-
-const problems = [];
 
 // La moitié démontrable : à écurie qui ne change que par les naissances, le point
 // fixe est exact. C'est cette assertion que `projectBirths` fait tenir.

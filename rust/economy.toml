@@ -579,3 +579,75 @@ hausse_par_jour = 0.01
 #
 # Absent, on retrouve les cent millions et l'ordre lexicographique.
 poids_couronne = 5_000_000
+
+# ---------------------------------------------------------------------------
+[effort]
+# ---------------------------------------------------------------------------
+
+# Ce qu'un croisement coûte à **l'éleveur**, et non au jeu.
+#
+# Un croisement est un geste : on le lance à la main, monture par monture. Le
+# simulateur facturait la **fournée** — 150 000 le chargement — et jamais le
+# croisement. Deux politiques qui rapportent autant lui semblaient donc
+# équivalentes même si l'une demandait mille gestes de plus. Elles ne le sont pas
+# pour qui joue.
+#
+# ## Le point mort, mesuré
+#
+# Les deux champions, départ gen 1 à 600 heures, sur deux fenêtres de graines :
+#
+# | | croisements | chargements | score |
+# | --- | --- | --- | --- |
+# | champion embarqué | 2 600 | 144 | 43,24 M |
+# | champion du 21/08 | 1 556 | 102 | 39,05 M |
+#
+# Mille croisements de moins pour 4,19 M de moins. Le point mort est donc à
+# **4 004 kamas** le croisement sur cette fenêtre, 1 730 sur l'autre : au-dessus,
+# la politique qui en fait moins l'emporte. Rapporté au geste, le champion du
+# 21/08 rend 25 096 kamas par croisement contre 16 605 — **51 % de plus**.
+#
+# ## Le chiffre retenu
+#
+# Dix mille, chiffré par le mainteneur qui joue. Nettement au-dessus du point
+# mort, sans être écrasant : 2 600 croisements coûtent alors 26 M sur une partie
+# qui en vaut 40, ce qui laisse la place à une politique qui croise beaucoup
+# quand ça paie vraiment.
+#
+# Pour l'échelle : une fournée coûte 150 000, une gen 10 se liste à 600 000.
+#
+# ## Un terme de score, pas une dépense
+#
+# Le temps ne sort pas de la bourse : il ne touche ni la solvabilité ni ce que la
+# politique peut se permettre. Retiré une fois sur le total, comme le malus
+# stérile. Deux barèmes rejouent donc **exactement** la même partie ; seul le
+# réseau que l'évolution retient change.
+#
+# À zéro, la fitness d'avant, à l'identique.
+cout_par_croisement = 10_000
+
+# ## Et ce qu'une féconde laissée au repos coûte
+#
+# Une féconde est une place d'enclos **déjà payée** qui n'a rien produit : son
+# cycle est acquis, elle s'accouple d'un clic. La garder immobilise du capital, ce
+# que #227 a chiffré et corrigé — mais **côté application seulement**. Le score
+# n'a jamais porté le terme, donc la recherche ne pouvait pas l'apprendre.
+#
+# Mesuré le 21/08 sur l'écurie de `e2e/spend-fertility` — vingt fécondes, deux par
+# couleur et par sexe, aucune place à payer, aucune excuse :
+#
+# | politique | couples appariés sur 10 |
+# | --- | --- |
+# | champion embarqué | 4 |
+# | champion de la manche | **2** |
+# | ses 43 finalistes | **0 sur 43 passent** |
+#
+# Pas un génome malchanceux : mille générations entières, toutes aveugles au même
+# endroit. Trier après coup ne servait à rien, il n'y avait rien à choisir.
+#
+# Trente mille : trois fois le prix d'un croisement. Garder une féconde doit coûter
+# plus cher que la dépenser, sans quoi attendre reste une stratégie — mais pas au
+# point d'obliger à tout croiser à perte, ce que `cout_par_croisement` facture par
+# ailleurs. Les deux se répondent.
+#
+# À zéro, la fitness d'avant, à l'identique.
+malus_feconde_au_repos = 30_000

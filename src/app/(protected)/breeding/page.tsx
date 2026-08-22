@@ -35,6 +35,38 @@ const FAMILIES: { id: FamilyId; label: string }[] = [
   { id: 'volkorne', label: 'Volkornes' },
 ];
 
+/**
+ * Les deux endroits où un prix se saisit, et il faut le dire à chaque fois.
+ *
+ * L'app tient **deux** réservoirs de prix, et cette barre les mélange : les
+ * parchemins, l'ambre et les carburants sont des *items*, la cible est une
+ * *couleur*. Rien ne le disait, et les deux se saisissent sur des écrans
+ * différents.
+ *
+ * Le 22/08 : « il manque le prix de Azur-Dore » a envoyé saisir 600 000 kamas
+ * sur l'item « Muldo Azur » de la page Items & Prix — un prix bien enregistré,
+ * dans le réservoir que l'élevage ne lit pas, sur une couleur qui n'était même
+ * pas celle qu'on demandait. Un message qui nomme ce qui manque sans dire où
+ * l'écrire coûte plus cher que pas de message du tout : il fait travailler pour
+ * rien.
+ */
+const PRICE_PLACES = {
+  /** Les items : parchemins, ambre. La page de recherche d'items. */
+  items: 'Items & Prix',
+  /** Les carburants d'enclos, tarifés au fil de la liste de réserve. */
+  fuels: 'Mes stocks › Carburants d’enclos',
+  /** Les couleurs, à deux prix chacune — niveau 1 et niveau 200. */
+  colors: 'Mes stocks › Saisir les prix',
+} as const;
+
+/** Ce qui manque, suivi de l'écran où on le saisit. */
+const Missing = ({ what, where }: { what: string; where: string }) => (
+  <>
+    {what}
+    <span className="text-dark-500 font-normal"> · {where}</span>
+  </>
+);
+
 const BreedingPage = () => {
   const [family, setFamily] = useState<FamilyId>('muldo');
   /**
@@ -712,27 +744,33 @@ const BreedingPage = () => {
         <span className="text-dark-400">
           Généton :{' '}
           <strong className="text-dark-200">
-            {genetonValuation
-              ? `${Math.round(genetonValuation.valuePerGeneton).toLocaleString('fr-FR')} kamas`
-              : 'prix des parchemins manquants'}
+            {genetonValuation ? (
+              `${Math.round(genetonValuation.valuePerGeneton).toLocaleString('fr-FR')} kamas`
+            ) : (
+              <Missing what="prix des parchemins manquants" where={PRICE_PLACES.items} />
+            )}
           </strong>
         </span>
         {tree && (
           <span className="text-dark-400">
             {tree.sacrificeItem.name} :{' '}
             <strong className="text-dark-200">
-              {sacrificePrice > 0
-                ? `${sacrificePrice.toLocaleString('fr-FR')} kamas`
-                : 'prix manquant'}
+              {sacrificePrice > 0 ? (
+                `${sacrificePrice.toLocaleString('fr-FR')} kamas`
+              ) : (
+                <Missing what="prix manquant" where={PRICE_PLACES.items} />
+              )}
             </strong>
           </span>
         )}
         <span className="text-dark-400">
           Cycle de fécondité :{' '}
           <strong className="text-dark-200">
-            {supplies?.fuelCostPerCycle != null
-              ? `${Math.round(supplies.fuelCostPerCycle).toLocaleString('fr-FR')} kamas / monture`
-              : 'carburants non tarifés'}
+            {supplies?.fuelCostPerCycle != null ? (
+              `${Math.round(supplies.fuelCostPerCycle).toLocaleString('fr-FR')} kamas / monture`
+            ) : (
+              <Missing what="carburants non tarifés" where={PRICE_PLACES.fuels} />
+            )}
             {supplies?.cycleHours != null && ` · ${formatHours(supplies.cycleHours)} / enclos`}
           </strong>
         </span>
@@ -744,7 +782,7 @@ const BreedingPage = () => {
             Niveau conseillé :{' '}
             <strong className="text-dark-200">
               {advisedLevel.missing !== null ? (
-                `il manque ${advisedLevel.missing}`
+                <Missing what={`il manque ${advisedLevel.missing}`} where={PRICE_PLACES.colors} />
               ) : (
                 <>
                   {advisedLevel.level}

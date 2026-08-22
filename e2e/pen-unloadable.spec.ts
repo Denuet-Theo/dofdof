@@ -116,36 +116,80 @@ test.describe('monture inscrite à un enclos qu’elle ne peut plus rejoindre', 
      * c'est-à-dire presque toutes, et l'avertissement serait mort le jour de sa
      * naissance.
      *
-     * Sur cette fixture les achats commencent au **troisième** enclos : on en
-     * verrouille donc deux pour que celui en cours en porte. Le test affirme
-     * ensuite les deux moitiés d'un coup — sept fabriquées ignorées, une suivie
-     * cassée comptée — parce que « aucun avertissement » tout seul passerait au
-     * vert sur une règle qui ne marche pas du tout.
+     * ## L'enclos est **posé** ici, pas obtenu en verrouillant
+     *
+     * La version d'avant verrouillait deux enclos et fouillait le troisième en
+     * espérant y trouver les deux sortes. Elle mesurait donc ce que le champion
+     * embarqué **compose**, pas la règle : un champion qui remplit ses enclos de
+     * vrac ne lui en donne aucun de mixte, `suivies.length` tombe à zéro, et la
+     * spec rougit sur sa prémisse sans que rien ne soit cassé. C'est arrivé au
+     * premier champion entraîné depuis la gen 1.
+     *
+     * On écrit donc la fournée directement en base, avec exactement ce que la
+     * règle demande : des fabriquées, et **une** suivie qu'on cassera. Le test ne
+     * dépend plus d'aucune politique.
      */
     const mock = await mockSupabase(page);
+
+    // Une suivie qui existe vraiment : c'est la seule que la règle doit savoir
+    // confronter à l'écurie.
+    const suivie = mock.rows(individus).find((row) => row.fertile === true)!;
+    const unit = (id: string, colorId: string, sex: 'M' | 'F', name: string | null) => ({
+      id,
+      colorId,
+      sex,
+      name,
+      level: 1,
+      banked: false,
+      toBuy: id.includes('+'),
+    });
+
+    mock.tables['breeding_batch'] = [
+      {
+        id: '00000000-0000-0000-0000-0000000000b1',
+        user_id: '00000000-0000-0000-0000-0000000000e2',
+        family: 'muldo',
+        level: 1,
+        fertile: true,
+        cycled: false,
+        created_at: '2026-08-22T10:00:00.000Z',
+        updated_at: '2026-08-22T10:00:00.000Z',
+        pens: [
+          // Un enclos verrouillé devant, comme dans une vraie fournée.
+          { lockedAt: '2026-08-22T10:00:00.000Z', units: [unit('dore#M1', 'dore', 'M', null)] },
+          // Et celui en cours : sept fabriquées, une suivie.
+          {
+            lockedAt: null,
+            units: [
+              unit('dore#M2', 'dore', 'M', null),
+              unit('dore#F2', 'dore', 'F', null),
+              unit('ebene#M3', 'ebene', 'M', null),
+              unit('ebene#F3', 'ebene', 'F', null),
+              unit('dore+M4', 'dore', 'M', null),
+              unit('dore+F4', 'dore', 'F', null),
+              unit('indigo+M5', 'indigo', 'M', null),
+              unit(suivie.id as string, suivie.color_id as string, suivie.sex as 'M' | 'F', suivie.name as string),
+            ],
+          },
+        ],
+      },
+    ] as never;
+
     await openBreeding(page);
     await openLoadTab(page);
 
-    await page.getByTestId('lock-pen').click();
-    await expect(page.getByTestId('locked-pen').first()).toBeVisible();
-    await page.getByTestId('lock-pen').click();
-    await expect(page.getByTestId('locked-pen')).toHaveCount(2);
-
+    // La prémisse, désormais vraie par construction et non par chance.
     const pens = storedPens(mock);
     const at = pens.findIndex((pen) => pen.lockedAt === null);
     expect(at).toBeGreaterThanOrEqual(0);
-    const fabriques = pens[at].units.filter((unit) => !unit.id.includes('-'));
-    const suivies = pens[at].units.filter((unit) => unit.id.includes('-'));
-    expect(fabriques.length).toBeGreaterThan(0);
-    expect(suivies.length).toBeGreaterThan(0);
+    expect(pens[at].units.filter((u) => !u.id.includes('-')).length).toBeGreaterThan(0);
+    expect(pens[at].units.filter((u) => u.id.includes('-')).length).toBe(1);
 
     // Rien ne cloche encore : les fabriquées sont là et ne disent rien.
-    await page.reload();
-    await openLoadTab(page);
     await expect(page.getByTestId('pen-unloadable')).toHaveCount(0);
 
     // Une seule suivie cassée, au milieu des fabriquées : une seule signalée.
-    const ligne = mock.rows(individus).find((row) => row.id === suivies[0].id)!;
+    const ligne = mock.rows(individus).find((row) => row.id === suivie.id)!;
     ligne.fertile = false;
     ligne.cycled = false;
 

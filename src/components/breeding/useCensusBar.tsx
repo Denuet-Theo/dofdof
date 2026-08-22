@@ -15,7 +15,7 @@ import {
 } from '@/lib/dofus/breeding/reconcile';
 import {
   isPristine,
-  type Facet,
+  valueOn,
   type RosterEntry,
   type RosterFilters,
 } from '@/lib/dofus/breeding/roster';
@@ -48,14 +48,6 @@ import { TOTAL_VALUE, type Review } from '@/components/breeding/BreedingStockFil
  * que la conversation.
  */
 
-/** L'axe d'une question, traduit dans le vocabulaire des facettes du panneau. */
-const FACET_OF: Record<Axis, Facet> = {
-  status: 'status',
-  sex: 'sex',
-  generation: 'generation',
-  color: 'color',
-};
-
 /** Ce que le panneau doit teinter, et la barre à afficher. */
 export type CensusState = {
   review: Review | null;
@@ -73,15 +65,6 @@ const SECTION_LABEL: Record<Axis | 'total', string> = {
 /** Un écart signé, dit dans le sens du jeu : « 2 de plus », « 1 de moins ». */
 const gapPhrase = (gap: number): string => `${Math.abs(gap)} de ${gap > 0 ? 'plus' : 'moins'}`;
 
-/** La valeur qu'une cellule fixe sur une facette, ou `null` si elle ne la fixe pas. */
-const valueOn = (cell: RosterFilters, facet: Facet): string | number | null => {
-  if (facet === 'status') return cell.statuses[0] ?? null;
-  if (facet === 'sex') return cell.sexes[0] ?? null;
-  if (facet === 'generation') return cell.generations[0] ?? null;
-  if (facet === 'color') return cell.colorIds[0] ?? null;
-  return null;
-};
-
 /**
  * Un **hook** et non un composant, parce qu'il rend deux choses qui vivent à
  * deux endroits : la barre de question, et la teinture du panneau de filtres qui
@@ -91,11 +74,24 @@ const useCensusBar = ({
   entries,
   nameOf,
   onFocus,
+  onReveal,
 }: {
   entries: RosterEntry[];
   nameOf: (colorId: string) => string;
   /** Pose les filtres d'une cellule sur la liste, pour finir nom par nom. */
   onFocus: (cell: RosterFilters) => void;
+  /**
+   * Pose les filtres **et amène la liste sous les yeux**.
+   *
+   * Deux rappels et non un, parce que les deux gestes n'ont pas le même moment.
+   * Pendant les questions, `onFocus` recoche le panneau à chaque nouvelle
+   * question ; faire défiler là ferait sauter l'écran sous celui qui lit ses
+   * chiffres. À la fin, « Voir ces N montures » est une promesse d'aller
+   * quelque part : onze cellules pointées repoussent la liste de trois cents
+   * pixels sous la ligne de flottaison, et le bouton posait alors ses filtres
+   * dans un écran que personne ne voyait — un bouton qui « ne fait rien ».
+   */
+  onReveal: (cell: RosterFilters) => void;
 }): CensusState => {
   const [root, setRoot] = useState<CensusNode | null>(null);
   /** Les chiffres saisis après un KO, par case. `null` tant qu'on n'a pas dit KO. */
@@ -141,9 +137,7 @@ const useCensusBar = ({
 
   /** La clé de saisie d'une case : sa valeur de facette, ou le total. */
   const keyFor = (cell: RosterFilters): string =>
-    probe && probe.axis !== 'total'
-      ? keyOf(valueOn(cell, FACET_OF[probe.axis as Axis]) ?? '')
-      : TOTAL_VALUE;
+    probe && probe.axis !== 'total' ? keyOf(valueOn(cell, probe.axis) ?? '') : TOTAL_VALUE;
 
   /** Des cases vides pour toute la colonne : vide vaut « pareil ». */
   const blank = (current: Probe): Map<string, string> =>
@@ -226,8 +220,7 @@ const useCensusBar = ({
         asked: (facet, value) =>
           facet === 'total'
             ? probe.axis === 'total'
-            : probe.axis !== 'total' &&
-              FACET_OF[probe.axis as Axis] === facet &&
+            : probe.axis === facet &&
               probe.cells.some((cell) => valueOn(cell.cell, facet) === value),
         typed: fields ? (_facet, value) => fields.get(keyOf(value)) ?? '' : null,
         onType: (_facet, value, next) =>
@@ -397,7 +390,7 @@ const useCensusBar = ({
                   variant="secondary"
                   className="ml-auto"
                   data-testid="census-focus"
-                  onClick={() => onFocus(cell.cell)}
+                  onClick={() => onReveal(cell.cell)}
                   title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
                 >
                   Voir ces {cell.held} montures

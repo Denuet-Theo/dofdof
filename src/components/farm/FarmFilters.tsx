@@ -111,6 +111,26 @@ const FarmFilters = ({ filters, onChange, areas, open, onToggle }: Props) => {
 
   const advancedCount = countAdvanced(filters);
 
+  /**
+   * Les éléments par intitulé, et non dans l'ordre de la constante.
+   *
+   * `ELEMENTS` existe pour dériver les noms de colonnes — `res_earth_min` — et
+   * son ordre est celui de l'écriture, pas celui d'une convention du jeu : ni
+   * l'ordre des caractéristiques, ni l'alphabet. Il n'y a donc rien à préserver,
+   * et un filtre qui liste des noms les liste dans l'ordre où on les cherche.
+   */
+  const elements = [...ELEMENTS].sort((a, b) =>
+    ELEMENT_LABELS[a].localeCompare(ELEMENT_LABELS[b], 'fr')
+  );
+
+  /**
+   * Les zones arrivent déjà triées par la route, mais par la **collation de la
+   * base** : ce qu'elle fait des accents dépend de l'instance, et « Île de Grobe
+   * » n'a pas de raison de se ranger ailleurs qu'à I. Le tri français est refait
+   * ici, où il est vérifiable.
+   */
+  const zones = [...areas].sort((a, b) => a.name_fr.localeCompare(b.name_fr, 'fr'));
+
   return (
     <div className="glass rounded-2xl p-4 space-y-4">
       {/* Les trois réglages du farm quotidien, toujours visibles. */}
@@ -148,7 +168,7 @@ const FarmFilters = ({ filters, onChange, areas, open, onToggle }: Props) => {
             className={`${field} cursor-pointer`}
           >
             <option value="">Toutes les zones</option>
-            {areas.map((area) => (
+            {zones.map((area) => (
               <option key={area.id} value={area.id}>
                 {area.name_fr}
               </option>
@@ -238,7 +258,7 @@ const FarmFilters = ({ filters, onChange, areas, open, onToggle }: Props) => {
             </p>
 
             <div className="flex flex-wrap gap-2">
-              {ELEMENTS.map((element) => (
+              {elements.map((element) => (
                 <button
                   key={element}
                   type="button"

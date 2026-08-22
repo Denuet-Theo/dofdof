@@ -511,7 +511,10 @@ const BreedingStocks = ({
 
   /** Les jauges et les rangs réellement présents, pour ne proposer que du vivant. */
   const gaugesPresent = useMemo(
-    () => [...new Set(allFuels.map((fuel) => fuel.info.gaugeName))].sort((a, b) => a.localeCompare(b)),
+    () =>
+      [...new Set(allFuels.map((fuel) => fuel.info.gaugeName))].sort((a, b) =>
+        a.localeCompare(b, 'fr')
+      ),
     [allFuels]
   );
   const ranksPresent = useMemo(

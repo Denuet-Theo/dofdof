@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { mockSupabase } from './support/supabase';
 import { openBreeding } from './support/breeding';
 
+const individus = 'user_breeding_individuals';
+
 /**
  * « La fournée à charger » — la liste qu'on tient sous les yeux devant le jeu.
  *
@@ -77,35 +79,76 @@ test.describe('fournée à charger', () => {
   });
 
   test('nommées et anonymes ne se mélangent pas dans un enclos', async ({ page }) => {
-    await mockSupabase(page);
+    /*
+     * Un enclos qui porte les deux les **sépare** et met les nommées devant : ce
+     * sont elles qu'il faut aller chercher au coffre, une par une, tandis que le
+     * vrac se prend au tas.
+     *
+     * ## L'enclos est posé, pas espéré
+     *
+     * La version d'avant verrouillait tous les enclos de la fournée en comptant
+     * ceux qui portaient les deux sortes, puis exigeait `mixtes > 0`. Elle
+     * mesurait donc ce que le champion embarqué **compose** : un champion qui
+     * remplit ses enclos de vrac n'en produit aucun de mixte, le compteur reste à
+     * zéro, et la spec rougit sur sa prémisse alors que l'affichage est intact.
+     * C'est arrivé au premier champion entraîné depuis la gen 1.
+     *
+     * On écrit donc la fournée en base avec un enclos mixte, et on vérifie ce que
+     * l'écran en fait. La propriété testée est la même ; ce qui disparaît, c'est
+     * la dépendance à la politique.
+     */
+    const mock = await mockSupabase(page);
+
+    const nommee = mock.rows(individus).find((row) => row.name && row.fertile === true)!;
+    const unit = (id: string, colorId: string, sex: 'M' | 'F', name: string | null) => ({
+      id,
+      colorId,
+      sex,
+      name,
+      level: 1,
+      banked: false,
+      toBuy: false,
+    });
+
+    mock.tables['breeding_batch'] = [
+      {
+        id: '00000000-0000-0000-0000-0000000000b2',
+        user_id: '00000000-0000-0000-0000-0000000000e2',
+        family: 'muldo',
+        level: 1,
+        fertile: true,
+        cycled: false,
+        created_at: '2026-08-22T10:00:00.000Z',
+        updated_at: '2026-08-22T10:00:00.000Z',
+        pens: [
+          {
+            lockedAt: null,
+            units: [
+              // Volontairement le vrac d'abord : c'est l'écran qui doit remettre
+              // les nommées devant, pas l'ordre où on les lui donne.
+              unit('dore#M1', 'dore', 'M', null),
+              unit('dore#F1', 'dore', 'F', null),
+              unit(nommee.id as string, nommee.color_id as string, nommee.sex as 'M' | 'F', nommee.name as string),
+            ],
+          },
+        ],
+      },
+    ] as never;
+
     await openBreeding(page);
     await openLoadTab(page);
 
-    // Au moins un enclos porte les deux, sinon la propriété ne se teste pas.
-    let mixtes = 0;
-    const enclos = Number(
-      (await page.getByTestId('pane-load').innerText()).match(/(\d+) enclos/)![1]
-    );
+    const pen = page.getByTestId('current-pen');
+    // La prémisse, vraie par construction : l'enclos porte bien les deux sortes.
+    expect(await pen.getByTestId('load-named').count()).toBeGreaterThan(0);
+    expect(await pen.getByTestId('load-anonymous').count()).toBeGreaterThan(0);
 
-    for (let index = 0; index < enclos; index += 1) {
-      const pen = page.getByTestId('current-pen');
-      const nommees = await pen.getByTestId('load-named').count();
-      const anonymes = await pen.getByTestId('load-anonymous').count();
-
-      if (nommees > 0 && anonymes > 0) {
-        mixtes += 1;
-        // `innerText` rend le texte **tel qu'affiché** : les en-têtes portent
-        // `uppercase` en CSS, donc on compare sans la casse.
-        const texte = (await pen.innerText()).toLowerCase();
-        expect(texte).toContain('nommées');
-        expect(texte).toContain('anonymes');
-        expect(texte.indexOf('nommées')).toBeLessThan(texte.indexOf('anonymes'));
-      }
-
-      await page.getByTestId('lock-pen').click();
-      await expect(page.getByTestId('locked-pen')).toHaveCount(index + 1);
-    }
-    expect(mixtes).toBeGreaterThan(0);
+    // `innerText` rend le texte **tel qu'affiché** : les en-têtes portent
+    // `uppercase` en CSS, donc on compare sans la casse.
+    const texte = (await pen.innerText()).toLowerCase();
+    expect(texte).toContain('nommées');
+    expect(texte).toContain('anonymes');
+    expect(texte.indexOf('nommées')).toBeLessThan(texte.indexOf('anonymes'));
   });
 
   test('la liste « D’abord, sans enclos » a disparu', async ({ page }) => {

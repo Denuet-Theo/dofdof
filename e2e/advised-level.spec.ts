@@ -77,3 +77,61 @@ test.describe('niveau conseillé', () => {
     expect(level).toBeLessThan(200);
   });
 });
+
+/**
+ * Le prix de l'item du certificat vaut prix de couleur, faute de mieux.
+ *
+ * Chaque couleur porte l'item de son certificat — `azur_dore` → 33286, « Muldo
+ * Azur et Doré » — et cet item se tarifie déjà sur Items & Prix, avec les
+ * parchemins et les carburants. `breeding_color_prices` en tenait un autre,
+ * saisi ailleurs, et les deux ne se parlaient pas : le 22/08, un prix bien
+ * enregistré sur l'item laissait l'élevage annoncer « il manque le prix ».
+ *
+ * Une saisie que l'app a sous la main et refuse de lire n'est pas une donnée
+ * manquante.
+ */
+test.describe('le prix d’item comble le prix de couleur', () => {
+  /** « Muldo Azur et Doré » : l'item du certificat de la gen 10 visée. */
+  const CROWN_ITEM = {
+    item_id: 33286,
+    item_name: 'Muldo Azur et Doré',
+    icon_url: 'https://api.dofusdb.fr/img/items/97328.png',
+    price: '4000000',
+    updated_at: '2026-08-22T10:00:00Z',
+    updated_by: '00000000-0000-0000-0000-0000000000e2',
+  };
+
+  test('un prix d’item suffit au niveau conseillé', async ({ page }) => {
+    const mock = await mockSupabase(page);
+    // Aucun prix de couleur sur la cible — seulement celui de son item.
+    (mock.tables.item_prices as Record<string, unknown>[]).push(CROWN_ITEM);
+    await openBreeding(page);
+
+    const advised = page.getByTestId('advised-level');
+    await expect(advised).toBeVisible({ timeout: 30_000 });
+    await expect(advised).not.toContainText('il manque');
+    const level = Number((await advised.innerText()).match(/(\d+)/)?.[1] ?? 0);
+    expect(level).toBeGreaterThan(0);
+    expect(level).toBeLessThan(200);
+  });
+
+  test('le champ reste vide, et le prix hérité s’affiche en repère', async ({ page }) => {
+    const mock = await mockSupabase(page);
+    (mock.tables.item_prices as Record<string, unknown>[]).push(CROWN_ITEM);
+    await openBreeding(page);
+
+    await page.getByRole('button', { name: /montures ·/ }).click();
+    await page.getByRole('button', { name: 'Saisir les prix' }).click();
+    await page.getByPlaceholder('Filtrer par nom').fill('Azur-Dore');
+
+    // Rien n'est enregistré sur la couleur : le champ est vide. Le pré-remplir
+    // se lirait « c'est saisi », et l'éleveur ne saurait plus lequel des deux
+    // réservoirs il regarde.
+    const champ = page.locator('input[data-inherited]');
+    await expect(champ).toHaveCount(1);
+    await expect(champ).toHaveValue('');
+    // `\D` et non un espace : `toLocaleString('fr-FR')` sépare les milliers par
+    // une espace fine insécable, qu'on ne veut pas voir écrite dans un test.
+    await expect(champ).toHaveAttribute('placeholder', /4\D000\D000 · item/);
+  });
+});

@@ -22,6 +22,7 @@ import {
   type FamilyId,
 } from '@/lib/hooks/useBreeding';
 import { planWaves } from '@/lib/dofus/breeding/waves';
+import { MAX_MOUNT_LEVEL, mountXpForLevel } from '@/lib/dofus/breeding/costs';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { useBreedingProject } from '@/lib/hooks/useBreedingProject';
 import { useBreedingBatch } from '@/lib/hooks/useBreedingBatch';
@@ -301,6 +302,63 @@ const BreedingPage = () => {
    * relevé. Un niveau inventé affiché à côté de chiffres réels se lirait comme
    * une mesure.
    */
+  /**
+   * De quel niveau à quel niveau on monte, pour chiffrer la Mangeoire.
+   *
+   * Deux bornes plutôt qu'une : la ligne n'annonçait que le 1 → 200, c'est-à-dire
+   * le seul cas où il n'y a rien à calculer. Devant l'enclos la question est
+   * « mes muldos sont à 48, je les veux à 100 », et personne ne devrait faire
+   * cette soustraction de tête sur une loi de puissance.
+   *
+   * Pas de persistance : c'est une question qu'on se pose en chargeant la
+   * Mangeoire, pas un réglage de l'écurie. La ranger en base demanderait une
+   * migration pour une valeur qui change à chaque fournée.
+   */
+  const [fromLevel, setFromLevel] = useState(1);
+  const [toLevel, setToLevel] = useState(MAX_MOUNT_LEVEL);
+
+  /**
+   * Les points de Mangeoire d'une montée, et ce qu'ils coûtent en heures.
+   *
+   * `mountXpForLevel` est **cumulatif depuis le niveau 1** — voir sa
+   * définition — donc une montée est une différence, jamais une somme de
+   * paliers. Bornée à zéro : une cible sous le niveau actuel ne rend pas des
+   * points, elle n'en demande aucun.
+   *
+   * Le niveau 1 est le départ et ne coûte rien : la loi de puissance y rend 3,8
+   * points, qui sont un artefact d'ajustement. Les retrancher ferait dire 867 578
+   * points au 1 → 200 quand `supplies` en compte 867 582 pour la même montée, et
+   * deux nombres qui se contredisent de quatre points sur le même écran valent
+   * moins que l'un des deux.
+   */
+  const mangeoire = useMemo(() => {
+    const spent = (level: number) => (level <= 1 ? 0 : mountXpForLevel(level));
+    const points = Math.max(0, Math.round(spent(toLevel) - spent(fromLevel)));
+    const perHour = supplies?.mangeoirePointsPerHour ?? null;
+    return { points, hours: perHour && perHour > 0 ? points / perHour : null };
+  }, [fromLevel, toLevel, supplies]);
+
+  /** Une borne de niveau, bornée au barème du jeu. */
+  const levelInput = (
+    value: number,
+    onChange: (next: number) => void,
+    testId: string
+  ) => (
+    <input
+      type="number"
+      min={1}
+      max={MAX_MOUNT_LEVEL}
+      value={String(value)}
+      data-testid={testId}
+      onChange={(event) =>
+        onChange(Math.max(1, Math.min(MAX_MOUNT_LEVEL, Number(event.target.value) || 1)))
+      }
+      className="w-14 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border border-dark-600/50
+        text-dark-100 text-[11px] text-right transition-all hover:border-dark-500
+        focus:border-kamas/50"
+    />
+  );
+
   const advisedLevel = useMemo(() => {
     const colors = tree?.colors ?? [];
     const crown = colors.find((color) => color.id === selectedColorId);
@@ -793,12 +851,34 @@ const BreedingPage = () => {
           </span>
         )}
         {supplies?.levelUpHours != null && (
-          <span className="text-dark-400">
-            Montée au niveau 200 :{' '}
-            <strong className="text-dark-200">
-              {formatHours(supplies.levelUpHours)}
-              {supplies.mangeoireFuel && ` · ${supplies.mangeoireFuel}`}
+          /*
+           * La montée, de **où on en est** à **où on va**.
+           *
+           * Elle n'annonçait que le 1 → 200, c'est-à-dire le seul cas où
+           * l'éleveur n'a rien à calculer. Devant l'enclos la question est
+           * l'autre : « mes muldos sont à 48, je les veux à 100, combien de
+           * points de Mangeoire ? » — et `mountXpForLevel` est cumulatif depuis
+           * le niveau 1, donc la réponse est une soustraction que personne ne
+           * devrait avoir à faire de tête.
+           *
+           * Les bornes par défaut redonnent la ligne d'avant, à l'unité près :
+           * de 1 à 200, ce sont bien les heures et le carburant qui étaient
+           * affichés.
+           */
+          <span className="flex flex-wrap items-center gap-1.5 text-dark-400">
+            Montée : de
+            {levelInput(fromLevel, setFromLevel, 'mangeoire-from')}à
+            {levelInput(toLevel, setToLevel, 'mangeoire-to')}
+            <strong className="text-dark-200" data-testid="mangeoire-points">
+              {mangeoire.points.toLocaleString('fr-FR')} points
             </strong>
+            <span className="text-dark-500">de Mangeoire</span>
+            {mangeoire.hours !== null && (
+              <strong className="text-dark-200">· {formatHours(mangeoire.hours)}</strong>
+            )}
+            {supplies.mangeoireFuel && (
+              <span className="text-dark-500">· {supplies.mangeoireFuel}</span>
+            )}
           </span>
         )}
         <span className="text-dark-400">

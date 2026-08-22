@@ -44,6 +44,40 @@ comparison caught it.
 So: use the aggregates to find the shape of the problem, then **always** close
 with a per-name, per-state diff.
 
+## A wrong name moves no counter at all — 2026-08-22
+
+Worse than a compensating pair, and it took a whole evening to find: a mount can
+be **correctly counted under the wrong name**. On 2026-08-22 a batch asked for
+`G3 AM M AM-EB`; the breeder could not find it in game, and the census had just
+declared the stable clean. It was clean, by the counts — the mount was there,
+same colour, same sex, same generation, same fertility, same level. The game
+carried it as `G4 AM M AM-EB`.
+
+Two things follow, and both are worth having in mind before spending an hour:
+
+- **No column of the FILTRES panel can see this**, and no amount of cross-filtering
+  will. A name is not a facet, so the four margins stay green.
+- **The app cannot deduce it either.** Its 220 stored names all matched the name
+  its own rule dictates — checked one by one. The app is only ever consistent
+  with itself; the game's names are outside its knowledge.
+
+The only instrument that sees it is the **name pass** — « Vérifier les noms » at
+the end of the census. It cuts the stable by name prefix against the game's
+écurie **search box**: `G1`, `G2`, `G3`…, then `G3 AM`, `G3 EBAM`…, four steps at
+worst. It found this one in four questions.
+
+Its floor, and it is real: a mount whose name the app has never seen has a line
+in no column. The pass then reports the surplus one cut up — « G4 — the app
+holds 41, the game 42 » — and closing it means putting the two lists side by
+side, which is why both are sorted by name. Do not read that as a failure of the
+search; it is the honest limit of counting things you cannot name.
+
+When a name is wrong, prefer **renaming in game** over editing the app: the
+dictated name is derived from colour, sex and ancestry, so the app's copy is the
+one that is right by construction. Note the trap that produced this one — the
+mating panel shows **VISE GEN. 4** right next to the name to copy, and the name
+carries the *carried* generation, not the targeted one.
+
 ## Reading a single mount's state
 
 `STÉRILE` replaces the gauges and is unmistakable. **Féconde versus fertile is

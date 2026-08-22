@@ -50,6 +50,15 @@ test.describe('niveau conseillé', () => {
     // La fixture vise Azur-Doré et ne porte aucun prix de gen 10.
     await expect(advised).toContainText('il manque le prix de');
     await expect(advised).toContainText('Azur-Dore');
+    /*
+     * Et **où** l'écrire, parce que l'app tient deux réservoirs de prix.
+     *
+     * Le 22/08 : ce message a envoyé saisir 600 000 kamas sur l'item « Muldo
+     * Azur » de la page Items & Prix — un prix bien enregistré, dans le
+     * réservoir que l'élevage ne lit pas. Nommer ce qui manque sans dire où
+     * l'écrire coûte plus cher que se taire : ça fait travailler pour rien.
+     */
+    await expect(advised).toContainText('Saisir les prix');
   });
 
   test('avec le prix, il donne un niveau et non le plafond', async ({ page }) => {

@@ -6,7 +6,7 @@ import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import CopyableText from '@/components/ui/CopyableText';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
-import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+import { ANONYMOUS_NAME, borneName } from '@/lib/dofus/breeding/naming';
 import type { Individual } from '@/lib/dofus/breeding/stable';
 import { indistinguishablePair } from '@/lib/dofus/breeding/cloning';
 import type { CloningToRecord } from '@/lib/dofus/breeding/policy';
@@ -533,7 +533,7 @@ const BreedingCloneDialog = ({
                   afficher « Anonyme » à la place de chaque nom promis. Voir
                   `kept`. */}
               {kept.map((mount, index) => {
-                const name = mount.name ?? ANONYMOUS_NAME;
+                const name = borneName(mount);
 
                 return (
                   <span key={`${mount.id}-${index}`} className="flex items-center gap-1.5">

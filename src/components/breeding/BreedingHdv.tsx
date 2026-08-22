@@ -5,7 +5,7 @@ import { Store, TrendingDown, TrendingUp } from 'lucide-react';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingMountName from '@/components/breeding/BreedingMountName';
-import { ANONYMOUS_NAME, colorCoder } from '@/lib/dofus/breeding/naming';
+import { borneName, colorCoder } from '@/lib/dofus/breeding/naming';
 import {
   BUY_DISCOUNT,
   SELL_MARKUP,
@@ -169,7 +169,7 @@ const BreedingHdv = ({
 
       {entry.mount && (
         <div className="flex items-center gap-2 text-[11px] text-dark-400">
-          <BreedingMountName name={entry.mount.name ?? ANONYMOUS_NAME} />
+          <BreedingMountName name={borneName(entry.mount)} />
           <span>
             niv. {entry.mount.level} · né de {nameOf(entry.mount.parents![0])} +{' '}
             {nameOf(entry.mount.parents![1])}

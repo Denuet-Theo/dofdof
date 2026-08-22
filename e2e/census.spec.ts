@@ -443,3 +443,63 @@ test.describe('la passe des noms', () => {
     }
   });
 });
+
+/**
+ * Un surplus côté jeu ne se cherche pas dans l'app : il se compare.
+ *
+ * « G4 — l'app en tient 41, le jeu 42 », rendu tel quel le 22/08 avec un bouton
+ * « Voir ces 41 montures ». Exact, et inutilisable : la monture en trop porte un
+ * nom que l'app ne connaît pas, donc aucune colonne ne peut la désigner et
+ * ouvrir les 41 ne montre rien de neuf. Ce qui reste est un vis-à-vis — les deux
+ * listes sont rangées pareil, celle du jeu porte une ligne de plus — et la
+ * cellule doit le dire.
+ */
+test.describe('ce qu’un écart demande de faire', () => {
+  test('un surplus côté jeu se compare, un surplus côté app se retire', async ({ page }) => {
+    await start(page);
+
+    // Le total colle, puis le jeu porte un fertile de plus.
+    await page.getByTestId('census-ok').click();
+    const fertile = asked(page).filter({ has: page.getByText('Fertile', { exact: true }) });
+    const fertiles = await heldOn(fertile);
+    await page.getByTestId('census-ko').click();
+    await fertile.getByTestId('filter-seen').fill(String(fertiles + 1));
+    await page.getByTestId('census-submit').click();
+
+    // On place l'écart sur une cellule que l'app tient déjà : c'est le cas du
+    // 22/08, une monture de plus au milieu de celles qu'on connaît.
+    for (let question = 0; question < 8; question += 1) {
+      const lignes = asked(page);
+      if ((await page.getByTestId('census-submit').count()) === 0) break;
+      const garnie = lignes.filter({ hasText: /\d/ });
+      let posee = false;
+      for (let index = 0; index < (await garnie.count()); index += 1) {
+        const ligne = garnie.nth(index);
+        const held = await heldOn(ligne);
+        if (held <= 0) continue;
+        await ligne.getByTestId('filter-seen').fill(String(held + 1));
+        posee = true;
+        break;
+      }
+      await page.getByTestId('census-submit').click();
+      if (!posee) break;
+    }
+    for (let question = 0; question < 8; question += 1) {
+      const ok = page.getByTestId('census-ok');
+      if ((await ok.count()) === 0) break;
+      await ok.click();
+    }
+
+    // La cellule dit le geste, et le bouton avec : rien à « voir », deux listes
+    // à descendre.
+    const trouve = page.getByTestId('census-pinned').first();
+    await expect(trouve).toBeVisible();
+    const held = Number(await trouve.getAttribute('data-held'));
+    const seen = Number(await trouve.getAttribute('data-seen'));
+    expect(seen).toBeGreaterThan(held);
+    expect(held).toBeGreaterThan(0);
+    await expect(trouve).toContainText('que l’app ne connaît pas');
+    await expect(trouve).toContainText('la ligne en trop côté jeu est celle à ajouter');
+    await expect(trouve.getByTestId('census-focus')).toContainText(`Comparer ces ${held} noms`);
+  });
+});

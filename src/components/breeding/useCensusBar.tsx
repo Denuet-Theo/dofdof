@@ -483,6 +483,40 @@ const useCensusBar = ({
                 l’app en tient <strong className="text-dark-200">{cell.held}</strong>, le jeu{' '}
                 <strong className="text-loss-light">{cell.seen}</strong>
               </span>
+              {/*
+                Ce qu'il reste à faire, et il n'est pas le même dans les deux
+                sens.
+
+                « G4 — l'app en tient 41, le jeu 42 » a été rendu tel quel le
+                22/08, avec un bouton « Voir ces 41 montures » : exact, et
+                inutilisable. Le surplus est une monture que l'app **ne sait pas
+                nommer** — aucune colonne ne peut la désigner, puisqu'elle
+                n'existe dans aucun de ses comptes. Ce qui reste est un
+                vis-à-vis : les deux listes sont rangées pareil, celle du jeu
+                porte une ligne de plus, et c'est elle qu'on saisit.
+
+                Dans l'autre sens il n'y a rien à chercher côté jeu : l'app tient
+                des montures que le jeu n'a plus, et c'est dans sa liste à elle
+                que ça se corrige.
+              */}
+              {cell.held > 0 && (
+                <span className="text-[11px] text-dark-500 basis-full">
+                  {cell.seen > cell.held ? (
+                    <>
+                      Le jeu en porte {cell.seen - cell.held} que l’app ne connaît pas — elle ne
+                      peut donc pas {names ? 'les nommer' : 'les désigner'}. Ouvre les {cell.held}{' '}
+                      ci-dessous : elles sont rangées comme l’écurie du jeu, descends les deux
+                      listes, la ligne en trop côté jeu est celle à ajouter.
+                    </>
+                  ) : (
+                    <>
+                      L’app en tient {cell.held - cell.seen} que le jeu n’a plus : ouvre les{' '}
+                      {cell.held} ci-dessous et retire celle{cell.held - cell.seen > 1 ? 's' : ''}{' '}
+                      qui ne s’y retrouve{cell.held - cell.seen > 1 ? 'nt' : ''} pas.
+                    </>
+                  )}
+                </span>
+              )}
               {/* Rien à ouvrir quand l'app n'en tient aucune : il n'y a pas de
                   liste à comparer, seulement des montures à saisir. C'est le cas
                   d'une case que le croisement vide et que le jeu remplit. */}
@@ -499,8 +533,15 @@ const useCensusBar = ({
                   onClick={() => onReveal(cell.cell)}
                   title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
                 >
-                  {/* Une seule, depuis que l'axe des noms descend jusque-là. */}
-                  {cell.held === 1 ? 'Voir cette monture' : `Voir ces ${cell.held} montures`}
+                  {/* Le bouton dit le geste, pas seulement la destination : sur
+                      un surplus côté jeu, il n'y a rien à « voir » dans l'app —
+                      il y a deux listes à descendre en vis-à-vis. Une seule
+                      monture, depuis que l'axe des noms descend jusque-là. */}
+                  {cell.seen > cell.held
+                    ? `Comparer ces ${cell.held} noms`
+                    : cell.held === 1
+                      ? 'Voir cette monture'
+                      : `Voir ces ${cell.held} montures`}
                 </Button>
               )}
             </div>

@@ -5,6 +5,7 @@ import { Check, ScanSearch, X } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import {
   censusRoot,
+  namesRoot,
   nextProbe,
   pinned,
   recordAnswer,
@@ -60,10 +61,10 @@ const SECTION_LABEL: Record<Axis | 'total', string> = {
   sex: 'la colonne SEXE',
   generation: 'la colonne GÉNÉRATION',
   color: 'la colonne COULEURS',
-  // Le seul axe qui ne se lise pas dans le panneau du jeu : les noms sont sur
-  // la liste de l'écurie, une ligne par monture. C'est aussi la dernière
-  // question posable, donc la cellule tient déjà dans un écran.
-  name: 'la liste de l’écurie, nom par nom',
+  // Le seul axe qui ne se lise pas dans le panneau du jeu, mais dans la
+  // **recherche** de sa liste d'écurie : un début de nom tapé, des lignes à
+  // compter.
+  name: 'la recherche de l’écurie',
 };
 
 /** Un écart signé, dit dans le sens du jeu : « 2 de plus », « 1 de moins ». */
@@ -98,15 +99,33 @@ const useCensusBar = ({
   onReveal: (cell: RosterFilters) => void;
 }): CensusState => {
   const [root, setRoot] = useState<CensusNode | null>(null);
+  /**
+   * La seconde passe, celle des noms — `null` tant qu'on ne l'a pas demandée.
+   *
+   * Deux arbres et non un : ils coupent la même écurie sur deux choses qui n'ont
+   * rien à voir, les comptes et les noms, et une passe qui n'a pas été lancée ne
+   * doit rien pointer. Voir `namesRoot`.
+   */
+  const [names, setNames] = useState<CensusNode | null>(null);
   /** Les chiffres saisis après un KO, par case. `null` tant qu'on n'a pas dit KO. */
   const [typed, setTyped] = useState<Map<string, string> | null>(null);
   const [asked, setAsked] = useState(0);
 
+  /** L'arbre qui pose les questions : celui des noms dès qu'il existe. */
+  const current = names ?? root;
+  const setCurrent = names ? setNames : setRoot;
+
   const probe = useMemo(
-    () => (root ? nextProbe(root, entries, nameOf) : null),
-    [root, entries, nameOf]
+    () => (current ? nextProbe(current, entries, nameOf) : null),
+    [current, entries, nameOf]
   );
-  const found = useMemo(() => (root && !probe ? pinned(root, nameOf) : []), [root, probe, nameOf]);
+  const found = useMemo(
+    () =>
+      probe || !root
+        ? []
+        : [...pinned(root, nameOf), ...(names ? pinned(names, nameOf) : [])],
+    [root, names, probe, nameOf]
+  );
 
   /**
    * Le croisement de la question est **posé pour de vrai** sur le panneau.
@@ -144,10 +163,10 @@ const useCensusBar = ({
     probe && probe.axis !== 'total' ? keyOf(valueOn(cell, probe.axis) ?? '') : TOTAL_VALUE;
 
   /** Des cases vides pour toute la colonne : vide vaut « pareil ». */
-  const blank = (current: Probe): Map<string, string> =>
-    current.axis === 'total'
+  const blank = (question: Probe): Map<string, string> =>
+    question.axis === 'total'
       ? new Map([[TOTAL_VALUE, '']])
-      : new Map(current.cells.map((cell) => [keyFor(cell.cell), '']));
+      : new Map(question.cells.map((cell) => [keyFor(cell.cell), '']));
 
   /**
    * Les cases ouvertes : celles que le KO a ouvertes, ou celles qu'une colonne à
@@ -167,12 +186,12 @@ const useCensusBar = ({
   const fields = typed ?? (probe && probe.owed !== null ? blank(probe) : null);
 
   const answerOk = () => {
-    if (!root || !probe) return;
+    if (!current || !probe) return;
     // Un objet neuf : `recordAnswer` mute l'arbre en place — il porte des
     // colonnes construites paresseusement, et les recopier à chaque réponse
     // recalculerait tous les effectifs de la branche. Sans ce `{...}`, React
     // verrait la même référence et ne rendrait pas la question suivante.
-    setRoot({ ...recordAnswer(root, probe, { ok: true }, entries, nameOf) });
+    setCurrent({ ...recordAnswer(current, probe, { ok: true }, entries, nameOf) });
     setAsked((count) => count + 1);
     setTyped(null);
   };
@@ -203,7 +222,7 @@ const useCensusBar = ({
       : 0;
 
   const submit = () => {
-    if (!root || !probe || !fields) return;
+    if (!current || !probe || !fields) return;
     const seen = probe.cells.map((cell) => {
       const raw = fields.get(keyFor(cell.cell)) ?? '';
       const parsed = Number(raw);
@@ -212,7 +231,7 @@ const useCensusBar = ({
       // nombres justes pour en corriger un.
       return raw.trim() === '' || !Number.isFinite(parsed) ? cell.held : parsed;
     });
-    setRoot({ ...recordAnswer(root, probe, { ok: false, seen }, entries, nameOf) });
+    setCurrent({ ...recordAnswer(current, probe, { ok: false, seen }, entries, nameOf) });
     setAsked((count) => count + 1);
     setTyped(null);
   };
@@ -228,7 +247,34 @@ const useCensusBar = ({
               probe.cells.some((cell) => valueOn(cell.cell, facet) === value),
         typed: fields ? (_facet, value) => fields.get(keyOf(value)) ?? '' : null,
         onType: (_facet, value, next) =>
-          setTyped((current) => new Map(current ?? fields ?? []).set(keyOf(value), next)),
+          setTyped((entered) => new Map(entered ?? fields ?? []).set(keyOf(value), next)),
+        // Le panneau n'a pas de quoi énumérer des débuts de nom : c'est la
+        // question qui les porte, avec la profondeur qu'elle a choisie.
+        names:
+          probe.axis === 'name'
+            ? [
+                // Le préfixe déjà posé, en tête et en bleu. Il n'a de ligne
+                // nulle part ailleurs — les quatre facettes en ont une dans leur
+                // colonne, lui non — et la consigne annonce « le filtre bleu
+                // posé » : sans cette ligne elle désignait un chiffre que
+                // l'écran ne montrait pas. Son effectif est la somme de ses
+                // cases, qui le partitionnent.
+                ...(probe.within.namePrefix
+                  ? [
+                      {
+                        value: probe.within.namePrefix,
+                        count: probe.cells.reduce((sum, cell) => sum + cell.held, 0),
+                      },
+                    ]
+                  : []),
+                ...probe.cells.map((cell) => ({
+                  // Le préfixe seul, et non le libellé de la cellule : c'est ce
+                  // qu'on tape dans la recherche du jeu, pas ce qui la décrit.
+                  value: String(valueOn(cell.cell, 'name') ?? ''),
+                  count: cell.held,
+                })),
+              ]
+            : [],
       }
     : null;
 
@@ -252,6 +298,7 @@ const useCensusBar = ({
             data-testid="census-start"
             onClick={() => {
               setRoot(censusRoot(entries, nameOf));
+              setNames(null);
               setAsked(0);
               setTyped(null);
             }}
@@ -266,16 +313,40 @@ const useCensusBar = ({
           <div className="flex flex-wrap items-center gap-2">
             <ScanSearch size={13} className="text-kamas" />
             <span className="text-[11px] text-dark-300">
-              Question {asked + 1} — dans le jeu, lis{' '}
-              <strong className="text-kamas">{SECTION_LABEL[probe.axis]}</strong>
-              {/* Les quatre marges se lisent à l'ouverture, sans rien cocher :
-                  annoncer « le filtre bleu » quand il n'y en a aucun envoyait
-                  chercher une couleur absente de l'écran. */}
-              {isPristine(probe.within) ? (
-                ', sans aucun filtre.'
+              Question {asked + 1} —{' '}
+              {/* Les noms ne se lisent pas, ils se cherchent : la consigne dit le
+                  geste, qui n'est pas le même que devant une colonne. */}
+              {probe.axis === 'name' ? (
+                <>
+                  dans le jeu, tape chaque{' '}
+                  <strong className="text-kamas">début de nom en jaune</strong> dans{' '}
+                  <strong className="text-kamas">{SECTION_LABEL.name}</strong> et compte les
+                  lignes
+                  {/* La recherche du jeu porte sur l'écurie entière : sans les
+                      filtres posés à côté, elle rendrait des montures que la
+                      cellule n'a jamais comptées. */}
+                  {isPristine(probe.within) ? (
+                    '.'
+                  ) : (
+                    <>
+                      , <strong className="text-info">le filtre bleu</strong> posé.
+                    </>
+                  )}
+                </>
               ) : (
                 <>
-                  , avec <strong className="text-info">le filtre bleu</strong> posé.
+                  dans le jeu, lis{' '}
+                  <strong className="text-kamas">{SECTION_LABEL[probe.axis]}</strong>
+                  {/* Les quatre marges se lisent à l'ouverture, sans rien cocher :
+                      annoncer « le filtre bleu » quand il n'y en a aucun envoyait
+                      chercher une couleur absente de l'écran. */}
+                  {isPristine(probe.within) ? (
+                    ', sans aucun filtre.'
+                  ) : (
+                    <>
+                      , avec <strong className="text-info">le filtre bleu</strong> posé.
+                    </>
+                  )}
                 </>
               )}{' '}
               {probe.owed !== null ? (
@@ -357,15 +428,46 @@ const useCensusBar = ({
                     found.length > 1 ? 's' : ''
                   } en ${asked} question${asked > 1 ? 's' : ''}.`}
             </span>
+            {/* La seconde passe, proposée et jamais imposée : elle coûte une
+                recherche par ligne dans le jeu, là où une colonne coûte un coup
+                d'œil. Voir `namesRoot`. */}
+            {root && !names && (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="ml-auto"
+                data-testid="census-names"
+                onClick={() => setNames(namesRoot(root))}
+                title="Les comptes ne voient pas un nom faux : même couleur, même sexe, même génération, aucun compteur ne bouge. Cette passe confronte les noms par la recherche de l’écurie du jeu."
+              >
+                <ScanSearch size={13} />
+                Vérifier les noms
+              </Button>
+            )}
             <button
               type="button"
-              className="ml-auto text-[10px] text-dark-500 hover:text-dark-200 cursor-pointer"
+              className={`text-[10px] text-dark-500 hover:text-dark-200 cursor-pointer ${
+                root && !names ? '' : 'ml-auto'
+              }`}
               data-testid="census-restart"
-              onClick={() => setRoot(null)}
+              onClick={() => {
+                setRoot(null);
+                setNames(null);
+              }}
             >
               recommencer
             </button>
           </div>
+
+          {/* Ce qu'un compte ne peut pas voir, dit avant qu'on croie l'avoir
+              vérifié : c'est le cas du 22/08, une fournée qui réclame une
+              monture que le jeu connaît sous un autre nom. */}
+          {!names && (
+            <p className="text-[10px] text-dark-500">
+              Les comptes ne voient pas un nom faux : une monture bien comptée sous un mauvais nom
+              ne bouge aucun compteur, et c’est le nom qui sert à la retrouver devant l’enclos.
+            </p>
+          )}
 
           {found.map((cell) => (
             <div

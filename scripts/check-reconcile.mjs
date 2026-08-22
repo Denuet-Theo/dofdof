@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { ROOT, compile, load } from './lib/tsc.mjs';
 
 const out = compile('reconcile', ['src/lib/dofus/breeding/reconcile.ts'], { json: true });
-const { censusRoot, nextProbe, recordAnswer, pinned, asked, NAME_THRESHOLD } = await load(
+const { censusRoot, namesRoot, nextProbe, recordAnswer, pinned, asked, NAME_THRESHOLD } = await load(
   out,
   'reconcile.js'
 );
@@ -72,32 +72,38 @@ const bulk = new Map(
 
 const appEntries = rosterOf({ bulk, individuals }, generationOf);
 
-/** Joue la recherche jusqu'au bout contre une écurie de jeu donnée. */
-const play = (gameIndividuals) => {
-  const gameEntries = rosterOf({ bulk, individuals: gameIndividuals }, generationOf);
-  const countGame = (cell) =>
-    countOf(gameEntries.filter((entry) => matches(entry, cell, nameOf)));
-
-  let root = censusRoot(appEntries, nameOf);
+/** Joue une passe jusqu'au bout contre une écurie de jeu donnée. */
+const run = (root, countGame) => {
+  let tree = root;
   let questions = 0;
   // Borne dure : une recherche qui ne converge pas doit échouer bruyamment
   // plutôt que tourner. Deux cents questions, c'est déjà l'aveu.
   for (let guard = 0; guard < 200; guard += 1) {
-    const probe = nextProbe(root, appEntries, nameOf);
+    const probe = nextProbe(tree, appEntries, nameOf);
     if (!probe) break;
     // Une question = une colonne entière, telle que le panneau du jeu l'affiche.
     const seen = probe.cells.map((cell) => countGame(cell.cell));
     const colle = seen.every((count, index) => count === probe.cells[index].held);
     questions += 1;
-    root = recordAnswer(
-      root,
+    tree = recordAnswer(
+      tree,
       probe,
       colle ? { ok: true } : { ok: false, seen },
       appEntries,
       nameOf
     );
   }
-  return { questions, cells: pinned(root, nameOf) };
+  return { tree, questions, cells: pinned(tree, nameOf) };
+};
+
+/** Joue la recherche jusqu'au bout contre une écurie de jeu donnée. */
+const play = (gameIndividuals) => {
+  const gameEntries = rosterOf({ bulk, individuals: gameIndividuals }, generationOf);
+  const countGame = (cell) =>
+    countOf(gameEntries.filter((entry) => matches(entry, cell, nameOf)));
+
+  const { questions, cells } = run(censusRoot(appEntries, nameOf), countGame);
+  return { questions, cells };
 };
 
 /** Retire `n` montures qui partagent une facette, pour simuler un écart net. */
@@ -221,6 +227,81 @@ if (etat.cells.length === 0) {
     problems.push(
       'un total démenti que rien ne confirme passe au vert — la réponse est prise puis perdue'
     );
+  }
+}
+
+/*
+ * Une monture **mal nommée** : celle du 22/08, et le seul écart qu'aucun compte
+ * ne peut voir.
+ *
+ * L'éleveur monte une fournée, elle réclame `G3 AM M AM-EB`, il ne la trouve pas
+ * en jeu — et le rapprochement venait de déclarer l'écurie saine. Elle l'était,
+ * au sens des comptes : la monture est là, même couleur, même sexe, même
+ * génération, même fertilité, même niveau. Elle porte un autre nom, et un nom ne
+ * bouge aucun compteur.
+ *
+ * Le scénario mesure les deux choses : que les comptes ne trouvent **rien** —
+ * sans quoi la passe des noms n'aurait pas de raison d'être — et que la passe
+ * des noms tombe sur le nom exact.
+ */
+{
+  const cible = individuals.find((mount) => mount.name && mount.fertile);
+  const renommee = individuals.map((mount) =>
+    mount === cible ? { ...mount, name: `G9 ${mount.name.slice(3)}` } : mount
+  );
+  const gameEntries = rosterOf({ bulk, individuals: renommee }, generationOf);
+  const countGame = (cell) => countOf(gameEntries.filter((entry) => matches(entry, cell, nameOf)));
+
+  const comptes = run(censusRoot(appEntries, nameOf), countGame);
+  const noms = run(namesRoot(comptes.tree), countGame);
+  rows.push({
+    label: 'un nom faux · comptes',
+    questions: comptes.questions,
+    cells: comptes.cells.length,
+    ecart: 0,
+  });
+  rows.push({
+    label: 'un nom faux · noms',
+    questions: noms.questions,
+    cells: noms.cells.length,
+    ecart: 1,
+  });
+
+  if (comptes.cells.length > 0) {
+    problems.push('un nom faux se voit dans les comptes — le scénario ne mesure plus rien');
+  }
+  // La cellule doit **contenir** la mal nommée, pas forcément la nommer : sous
+  // le seuil de lecture, on rend les cinq noms plutôt que de payer une question
+  // pour en isoler un que l'œil sépare déjà.
+  const dedans = noms.cells.some((cell) =>
+    matches(
+      {
+        colorId: cible.colorId,
+        generation: generationOf(cible.colorId),
+        sex: cible.sex,
+        status: cible.fertile ? (cible.cycled ? 'feconde' : 'fertile') : 'sterile',
+        level: cible.level,
+        name: cible.name,
+        mount: cible,
+        count: 1,
+      },
+      cell.cell,
+      nameOf
+    )
+  );
+  if (!dedans) {
+    problems.push(`la passe des noms ne pointe pas « ${cible.name} » — un nom faux reste invisible`);
+  }
+
+  // Une écurie dont les noms collent doit coûter **une** question de plus, pas
+  // dix : c'est ce qui fait qu'on peut la proposer à la fin de chaque
+  // rapprochement plutôt que la réserver aux jours de doute.
+  const sains = run(namesRoot(censusRoot(appEntries, nameOf)), (cell) =>
+    countOf(rosterOf({ bulk, individuals }, generationOf).filter((e) => matches(e, cell, nameOf)))
+  );
+  rows.push({ label: 'des noms qui collent', questions: sains.questions, cells: 0, ecart: 0 });
+  if (sains.questions > 1) {
+    problems.push(`des noms qui collent coûtent ${sains.questions} questions — une seule suffit`);
   }
 }
 

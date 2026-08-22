@@ -1,4 +1,4 @@
-import { borneName } from './naming';
+import { borneName, bornePrefixed } from './naming';
 import {
   cycledOf,
   mountStatus,
@@ -81,19 +81,21 @@ export type RosterFilters = {
   sexes: Sex[];
   colorIds: string[];
   /**
-   * Les noms portés, en **exact** — et non la recherche libre de `query`.
+   * Un début de nom, **mot à mot** — et non la recherche libre de `query`.
    *
-   * Le jeu n'a pas de filtre par nom : c'est la liste de l'écurie qui les
-   * montre. Celui-ci n'existe donc pas pour imiter une case du panneau, mais
-   * pour désigner la dernière chose qui sépare deux montures quand les quatre
-   * facettes ne les séparent plus — six Amande gen 3 mâles fertiles ne diffèrent
-   * que par là. Voir l'axe `name` de `reconcile.ts`.
+   * Le jeu n'a pas de filtre par nom, mais il a une **recherche** dans sa liste
+   * d'écurie, et c'est elle qu'on vient imiter : `G3`, puis `G3 AM`, puis
+   * `G3 AM M`, puis le nom entier. C'est la seule chose qui sépare deux montures
+   * quand les quatre facettes ne les séparent plus — six Amande gen 3 mâles
+   * fertiles ne diffèrent que par là — et la seule qui voie une monture
+   * **mal nommée**, qui ne bouge aucun compteur.
    *
-   * Exact et pas « contient » : `query` retient `G1 DO F DO-IN` sur un
+   * Mot à mot, et non « contient » : `query` retient `G1 DO F DO-IN` sur un
    * `G1 DO F DO-INDI`, ce qui suffit à compter une monture de trop et à envoyer
-   * chercher un écart qui n'existe pas.
+   * chercher un écart qui n'existe pas. Un préfixe complet vaut l'égalité, donc
+   * la même facette sert la dichotomie et sa dernière marche.
    */
-  names: string[];
+  namePrefix: string;
 };
 
 export const NO_FILTERS: RosterFilters = {
@@ -104,7 +106,7 @@ export const NO_FILTERS: RosterFilters = {
   statuses: [],
   sexes: [],
   colorIds: [],
-  names: [],
+  namePrefix: '',
 };
 
 /** Un filtre à plage entière ne filtre rien — et laisse donc passer le vrac. */
@@ -118,7 +120,7 @@ export const isPristine = (filters: RosterFilters): boolean =>
   filters.statuses.length === 0 &&
   filters.sexes.length === 0 &&
   filters.colorIds.length === 0 &&
-  filters.names.length === 0;
+  filters.namePrefix === '';
 
 /**
  * Les quatre lignes qu'une couleur de vrac produit.
@@ -196,7 +198,7 @@ export const valueOn = (cell: RosterFilters, facet: ValueFacet): string | number
   if (facet === 'status') return cell.statuses[0] ?? null;
   if (facet === 'sex') return cell.sexes[0] ?? null;
   if (facet === 'generation') return cell.generations[0] ?? null;
-  if (facet === 'name') return cell.names[0] ?? null;
+  if (facet === 'name') return cell.namePrefix || null;
   return cell.colorIds[0] ?? null;
 };
 
@@ -280,8 +282,8 @@ export const matches = (
   }
 
   // Le vrac tombe sous « Anonyme » et c'est juste : le jeu l'y range aussi.
-  if (except !== 'name' && filters.names.length > 0) {
-    if (!filters.names.includes(borneName(entry))) return false;
+  if (except !== 'name' && filters.namePrefix !== '') {
+    if (!bornePrefixed(borneName(entry), filters.namePrefix)) return false;
   }
 
   return true;

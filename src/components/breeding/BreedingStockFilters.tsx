@@ -17,7 +17,6 @@ import {
   type RosterFilters,
 } from '@/lib/dofus/breeding/roster';
 import { type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
-import { borneName } from '@/lib/dofus/breeding/naming';
 
 /**
  * Les filtres du jeu, dans l'ordre du jeu, avec les comptes du jeu.
@@ -92,6 +91,15 @@ export type Review = {
   /** Non nul quand l'éleveur saisit : rend ce qu'il a tapé pour cette case. */
   typed: ((facet: ReviewFacet, value: string | number) => string) | null;
   onType: (facet: ReviewFacet, value: string | number, next: string) => void;
+  /**
+   * Les débuts de nom que la question demande, avec l'effectif de l'app.
+   *
+   * Vide dès que la question ne porte pas sur les noms. Ils viennent du
+   * rapprochement parce que lui seul sait à quelle profondeur il coupe — `G3`
+   * n'a pas de ligne dans le panneau, et un compte refait ici finirait par
+   * répondre à une autre question que celle qui est posée.
+   */
+  names: { value: string; count: number }[];
 };
 
 /** La valeur qui désigne la ligne du total : il n'en a aucune à lui. */
@@ -290,23 +298,33 @@ const BreedingStockFilters = ({
     .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
 
   /**
-   * Les noms, **et seulement quand ils sont en jeu**.
+   * Les débuts de nom, **et seulement quand ils sont en jeu**.
    *
-   * Le jeu n'a pas de colonne NOMS : c'est sa liste d'écurie qui les montre, une
-   * ligne par monture. Cette section n'imite donc rien — elle existe pour la
-   * dernière question du rapprochement, celle qui sépare des montures que les
-   * quatre facettes ne séparent plus. La montrer en permanence afficherait deux
-   * cents lignes sous un panneau qui en compte six.
+   * Le jeu n'a pas de colonne NOMS : c'est la **recherche** de sa liste d'écurie
+   * qui les rend. Cette section n'imite donc pas une colonne du panneau — elle
+   * porte les cases d'une question sur les noms, et la montrer en permanence
+   * afficherait deux cents lignes sous un panneau qui en compte six.
    *
-   * Elle reste visible quand un nom est **posé** en filtre, sans quoi « Voir ces
-   * N montures » sur une cellule de nom réduirait la liste sans qu'aucune case
-   * cochée ne dise pourquoi.
+   * Ses lignes viennent du rapprochement et non d'un compte refait ici : c'est
+   * lui qui décide à quelle profondeur couper — `G3`, puis `G3 AM` — et un
+   * second calcul à côté finirait par ne plus dire la même chose que la question
+   * posée. Voir `Review.names`.
+   *
+   * Elle reste visible quand un préfixe est **posé** en filtre, sans quoi « Voir
+   * ces N montures » sur une cellule de nom réduirait la liste sans qu'aucune
+   * case cochée ne dise pourquoi.
    */
-  const names = facetCounts(entries, filters, nameOf, 'name', borneName);
-  const nameRows = [...names.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .filter((row) => review?.asked('name', row.name) || filters.names.includes(row.name))
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const nameRows =
+    review && review.names.length > 0
+      ? review.names
+      : filters.namePrefix
+        ? [
+            {
+              value: filters.namePrefix,
+              count: countOf(entries.filter((entry) => matches(entry, filters, nameOf))),
+            },
+          ]
+        : [];
 
   const level = (value: number, key: 'levelMin' | 'levelMax') => (
     <input
@@ -468,22 +486,24 @@ const BreedingStockFilters = ({
           </div>
         </div>
 
-        {/* Les noms : la dernière coupe, et la seule qui ne se lise pas dans le
-            panneau du jeu mais dans sa liste d'écurie. Voir `nameRows`. */}
+        {/* Les noms : la coupe qui ne se lit pas dans le panneau du jeu mais
+            dans la recherche de sa liste d'écurie. Voir `nameRows`. */}
         {nameRows.length > 0 && (
           <div>
             <p className={SECTION}>Noms</p>
             <div className="space-y-0.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
               {nameRows.map((row) => (
                 <CheckRow
-                  key={row.name}
-                  label={row.name}
+                  key={row.value}
+                  label={row.value}
                   count={row.count}
-                  checked={filters.names.includes(row.name)}
-                  tone={toneOf('name', row.name)}
-                  typed={typedOf('name', row.name)}
-                  onToggle={() => patch({ names: toggled(filters.names, row.name) })}
-                  title="Le nom porté en jeu. Compte les lignes de l’écurie du jeu qui le portent."
+                  checked={filters.namePrefix === row.value}
+                  tone={toneOf('name', row.value)}
+                  typed={typedOf('name', row.value)}
+                  onToggle={() =>
+                    patch({ namePrefix: filters.namePrefix === row.value ? '' : row.value })
+                  }
+                  title="Tape ce début de nom dans la recherche de l’écurie du jeu, et compte les lignes."
                 />
               ))}
             </div>

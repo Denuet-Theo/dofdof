@@ -1,4 +1,4 @@
-import { borneName } from './naming';
+import { borneName, namePrefixAt, prefixDepth } from './naming';
 import {
   countOf,
   facetLabel,
@@ -207,11 +207,54 @@ export const censusRoot = (
   sweep: true,
 });
 
+/**
+ * La seconde passe : la même écurie, coupée par **débuts de nom**.
+ *
+ * ## Pourquoi les comptes ne suffisent pas, et ne suffiront jamais
+ *
+ * Le 22/08 : une fournée demande `G3 AM M AM-EB`, l'éleveur ne la trouve pas en
+ * jeu, et le rapprochement venait de déclarer l'écurie saine. Elle l'était, au
+ * sens des comptes : la monture est là, même couleur, même sexe, même
+ * génération, même fertilité, même niveau — elle porte simplement un autre nom.
+ * **Un nom faux ne bouge aucun compteur.** Aucune colonne du panneau ne peut le
+ * voir, et l'app ne peut pas le déduire : ses 220 noms étaient tous cohérents
+ * avec sa propre règle.
+ *
+ * ## Ce que la passe demande, et pourquoi c'est faisable
+ *
+ * Le jeu n'a pas de colonne NOMS, mais sa liste d'écurie a une **recherche**.
+ * Un nom dicté est fait de quatre mots — `G3 AM M AM-EB` —, donc ses préfixes
+ * forment une hiérarchie : on demande `G1`, `G2`, `G3`… puis, sous celui qui
+ * cloche, `G3 AM`, `G3 EBAM`… Quatre marches au pire, et chaque marche est une
+ * poignée de recherches dans le jeu au lieu de deux cents noms à lire.
+ *
+ * Sur le cas du 22/08 la première marche suffit : l'app compte un `G3` de plus
+ * et un `G4` de moins que le jeu.
+ *
+ * ## Elle ne se lance pas toute seule
+ *
+ * Elle coûte plus cher qu'une colonne du panneau — taper une recherche par
+ * ligne, contre un coup d'œil — donc elle est **proposée** à la fin des comptes
+ * et jamais imposée. Et elle garde le prix de l'élagage : une marche qui colle
+ * ne prouve rien de la marche d'en dessous, deux noms échangés sous le même
+ * préfixe passeraient au vert.
+ */
+export const namesRoot = (root: CensusNode): CensusNode => ({
+  cell: root.cell,
+  held: root.held,
+  // Le total a déjà été demandé par les comptes : le redemander serait une
+  // question dont on a la réponse.
+  seen: root.seen ?? root.held,
+  used: [...PANEL_AXES],
+  columns: [],
+  sweep: true,
+});
+
 const withAxis = (cell: RosterFilters, axis: Axis, value: string | number): RosterFilters => {
   if (axis === 'sex') return { ...cell, sexes: [value as Sex] };
   if (axis === 'status') return { ...cell, statuses: [value as MountStatus] };
   if (axis === 'generation') return { ...cell, generations: [value as number] };
-  if (axis === 'name') return { ...cell, names: [value as string] };
+  if (axis === 'name') return { ...cell, namePrefix: value as string };
   return { ...cell, colorIds: [value as string] };
 };
 
@@ -249,10 +292,32 @@ const valuesOn = (entries: RosterEntry[], axis: Axis): (string | number)[] => {
   const seen = new Set<string | number>();
   for (const entry of entries) {
     if (axis === 'generation') seen.add(entry.generation);
-    else if (axis === 'name') seen.add(borneName(entry));
     else seen.add(entry.colorId);
   }
   return [...seen];
+};
+
+/**
+ * Les débuts de nom qui coupent vraiment cette cellule, un mot plus loin que
+ * son préfixe.
+ *
+ * On approfondit tant que tous les noms partagent le même mot suivant : sous
+ * `G3`, si l'app ne tient que des Amande, demander « G3 AM » serait redemander
+ * « G3 » sous un autre nom. On s'arrête quand aucun nom n'a de mot de plus —
+ * c'est-à-dire quand le préfixe est un nom entier, et la cellule ne se coupe
+ * plus.
+ *
+ * Un dernier plancher, dit plutôt que tu : les non renommées portent toutes
+ * « Anonyme », en jeu comme ici. Elles forment une case d'un seul mot, qui ne se
+ * divise pas.
+ */
+const namePrefixesUnder = (names: string[], prefix: string): string[] => {
+  const longest = names.reduce((deep, name) => Math.max(deep, prefixDepth(name)), 0);
+  for (let depth = prefixDepth(prefix) + 1; depth <= longest; depth += 1) {
+    const seen = new Set(names.map((name) => namePrefixAt(name, depth)));
+    if (seen.size > 1) return [...seen];
+  }
+  return [];
 };
 
 /**
@@ -279,9 +344,15 @@ export const splitCell = (
   if (node.used.includes(axis)) return null;
   // Les noms s'énumèrent dans la cellule, tous les autres axes dans l'écurie
   // entière. Voir `valuesOn`, qui dit pourquoi et ce que ça coûte.
-  const within =
-    axis === 'name' ? entries.filter((entry) => matches(entry, node.cell, nameOf)) : entries;
-  const values = ordered(axis, valuesOn(within, axis));
+  const values =
+    axis === 'name'
+      ? namePrefixesUnder(
+          entries
+            .filter((entry) => matches(entry, node.cell, nameOf))
+            .map((entry) => borneName(entry)),
+          node.cell.namePrefix
+        ).sort((a, b) => a.localeCompare(b))
+      : ordered(axis, valuesOn(entries, axis));
   // Un axe qui ne porte qu'une valeur ne sépare rien : le demander serait une
   // question dont on connaît la réponse, et elle coûte autant qu'une vraie.
   if (values.length < 2) return null;
@@ -292,7 +363,10 @@ export const splitCell = (
       cell,
       held: countIn(entries, cell, nameOf),
       seen: null,
-      used: [...node.used, axis],
+      // L'axe des noms **ne se consomme pas** : sa progression est le préfixe
+      // lui-même, un mot de plus à chaque coupe. Le marquer utilisé arrêterait
+      // la dichotomie à sa première marche.
+      used: axis === 'name' ? node.used : [...node.used, axis],
       columns: [],
       sweep: false,
     };
@@ -341,7 +415,11 @@ export const cellLabel = (cell: RosterFilters, nameOf: (colorId: string) => stri
  */
 const axesFor = (node: CensusNode): Axis[] => {
   const left = AXES.filter((axis) => !node.used.includes(axis));
-  return node.sweep ? left.filter((axis) => PANEL_AXES.includes(axis)) : left.slice(0, 1);
+  if (!node.sweep) return left.slice(0, 1);
+  const panel = left.filter((axis) => PANEL_AXES.includes(axis));
+  // La racine des noms a les quatre colonnes derrière elle : il ne lui reste que
+  // les préfixes, et c'est tout son objet. Voir `namesRoot`.
+  return panel.length > 0 ? panel : left.slice(0, 1);
 };
 
 /** La colonne d'un axe, construite à la demande et mémorisée sur le nœud. */

@@ -74,11 +74,24 @@ const useCensusBar = ({
   entries,
   nameOf,
   onFocus,
+  onReveal,
 }: {
   entries: RosterEntry[];
   nameOf: (colorId: string) => string;
   /** Pose les filtres d'une cellule sur la liste, pour finir nom par nom. */
   onFocus: (cell: RosterFilters) => void;
+  /**
+   * Pose les filtres **et amène la liste sous les yeux**.
+   *
+   * Deux rappels et non un, parce que les deux gestes n'ont pas le même moment.
+   * Pendant les questions, `onFocus` recoche le panneau à chaque nouvelle
+   * question ; faire défiler là ferait sauter l'écran sous celui qui lit ses
+   * chiffres. À la fin, « Voir ces N montures » est une promesse d'aller
+   * quelque part : onze cellules pointées repoussent la liste de trois cents
+   * pixels sous la ligne de flottaison, et le bouton posait alors ses filtres
+   * dans un écran que personne ne voyait — un bouton qui « ne fait rien ».
+   */
+  onReveal: (cell: RosterFilters) => void;
 }): CensusState => {
   const [root, setRoot] = useState<CensusNode | null>(null);
   /** Les chiffres saisis après un KO, par case. `null` tant qu'on n'a pas dit KO. */
@@ -377,7 +390,7 @@ const useCensusBar = ({
                   variant="secondary"
                   className="ml-auto"
                   data-testid="census-focus"
-                  onClick={() => onFocus(cell.cell)}
+                  onClick={() => onReveal(cell.cell)}
                   title="Pose ces filtres sur la liste ci-dessous : c’est là qu’on finit, nom par nom."
                 >
                   Voir ces {cell.held} montures

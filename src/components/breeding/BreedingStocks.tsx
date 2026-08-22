@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Boxes, Check, Coins, Gauge, Plus, Search, Trash2, Upload, Warehouse } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
@@ -402,7 +402,26 @@ const BreedingStocks = ({
    * là qu'on finit, nom par nom, et c'est gratuit puisqu'une cellule **est** un
    * jeu de filtres.
    */
-  const census = useCensusBar({ entries: roster, nameOf, onFocus: setFilters });
+  /**
+   * La liste nominative, pour pouvoir l'amener sous les yeux.
+   *
+   * « Voir ces N montures » posait ses filtres et s'arrêtait là. Ça se voyait
+   * tant qu'il n'y avait qu'une cellule pointée ; à onze — le cas réel du
+   * 22/08 — la barre de résultats mesure trois cents pixels, la liste passe
+   * sous la ligne de flottaison, et le bouton ne montre les montures qu'à qui
+   * pense à faire défiler. Un bouton qui promet de montrer doit montrer.
+   */
+  const list = useRef<HTMLDivElement>(null);
+
+  const census = useCensusBar({
+    entries: roster,
+    nameOf,
+    onFocus: setFilters,
+    onReveal: (cell) => {
+      setFilters(cell);
+      list.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+  });
 
   /**
    * Les anonymes stériles, un état que le jeu ne rend pas.
@@ -821,7 +840,11 @@ const BreedingStocks = ({
               review={census.review}
             />
 
-            <div className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar">
+            <div
+              ref={list}
+              data-testid="stock-list"
+              className="space-y-1 max-h-96 overflow-y-auto pr-1 custom-scrollbar"
+            >
               {owned.map((mount) => {
                 const status = mountStatus(mount);
                 const carried = mount.parents ? nameForIndividual(mount) : null;

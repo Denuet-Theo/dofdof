@@ -190,3 +190,87 @@ test.describe('comparer avec le jeu', () => {
     await expect(trouve).toContainText('à ajouter');
   });
 });
+
+/**
+ * Le bout du travail : la cellule pointée, ouverte dans la liste.
+ *
+ * Une fenêtre courte, et ce n'est pas un artifice. C'est la géométrie du cas
+ * signalé : onze cellules pointées font une barre de résultats de trois cents
+ * pixels, la liste passe sous la ligne de flottaison, et « Voir ces N
+ * montures » posait alors ses filtres dans un écran que personne ne regardait.
+ * Une seule cellule sur une fenêtre de 1200 px laisse la liste juste visible —
+ * le test ne verrait rien et passerait au vert sur le défaut.
+ */
+test.describe('ouvrir la cellule pointée', () => {
+  test.use({ viewport: { width: 1500, height: 800 } });
+
+  /** Déclare un écart sur une ligne de la colonne posée, et enchaîne. */
+  const gapOn = async (page: Page, ligne: string, by: number): Promise<number> => {
+    const row = asked(page).filter({ has: page.getByText(ligne, { exact: true }) });
+    const held = await heldOn(row);
+    const ko = page.getByTestId('census-ko');
+    // Pas de KO à cliquer quand l'écart de la cellule est déjà déclaré : les
+    // cases sont ouvertes d'office.
+    if ((await ko.count()) > 0) await ko.click();
+    await row.getByTestId('filter-seen').fill(String(held + by));
+    await page.getByTestId('census-submit').click();
+    return held;
+  };
+
+  test('« Voir ces N montures » pose les filtres et amène la liste sous les yeux', async ({
+    page,
+  }) => {
+    await start(page);
+
+    // Le total colle, puis une fertile femelle de gen 1 de plus en jeu. Cette
+    // cellule-là tient sous le seuil de lecture nominative : c'est celle qu'on
+    // vient ouvrir, nom par nom.
+    await page.getByTestId('census-ok').click();
+    await gapOn(page, 'Fertile', 1);
+    await gapOn(page, 'Monture femelle', 1);
+    await gapOn(page, 'Génération 1', 1);
+    for (let question = 0; question < 12; question += 1) {
+      if ((await page.getByTestId('census-ok').count()) > 0) {
+        await page.getByTestId('census-ok').click();
+        continue;
+      }
+      if ((await page.getByTestId('census-submit').count()) > 0) {
+        await page.getByTestId('census-submit').click();
+        continue;
+      }
+      break;
+    }
+
+    const trouve = page.getByTestId('census-pinned');
+    await expect(trouve).toHaveCount(1);
+    await expect(trouve).toContainText('Fertile · Monture femelle · Génération 1');
+    const held = Number(await trouve.getAttribute('data-held'));
+    expect(held).toBeGreaterThan(0);
+
+    const panneau = page.getByText(/Filtres du jeu —/);
+    const liste = page.getByTestId('stock-list');
+
+    await page.getByTestId('census-focus').click();
+    // Les filtres de la cellule, posés — et la liste amenée là où on la lit.
+    await expect(panneau).toContainText(`${held} montures retenues`);
+    await expect(page.getByTestId('stock-mount')).toHaveCount(held);
+    await expect(liste).toBeInViewport();
+
+    /*
+     * Le deuxième clic, sur un écran qui a bougé entre les deux.
+     *
+     * Un bouton qui ne marche qu'une fois est le défaut d'à côté : une garde
+     * qui mémorise ce qu'elle a déjà posé — il y en a une pour les questions,
+     * juste au-dessus — avalerait le second appel sans rien dire. On remet donc
+     * les filtres à zéro, on remonte en haut de page, et on redemande.
+     */
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.getByRole('button', { name: 'Réinitialiser' }).click();
+    await expect(panneau).not.toContainText(`${held} montures retenues`);
+
+    await page.getByTestId('census-focus').click();
+    await expect(panneau).toContainText(`${held} montures retenues`);
+    await expect(page.getByTestId('stock-mount')).toHaveCount(held);
+    await expect(liste).toBeInViewport();
+  });
+});

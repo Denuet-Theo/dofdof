@@ -1,3 +1,4 @@
+import { borneName } from './naming';
 import {
   countOf,
   facetLabel,
@@ -55,8 +56,9 @@ import { type MountStatus, type Sex } from './stable';
  *
  * C'est celui qui minimise le travail **devant le jeu**. FERTILITÉ et SEXE sont
  * deux ou trois cases à lire au même endroit ; GÉNÉRATION en fait dix ; COULEURS
- * en fait trente et demande de faire défiler. On descend donc dans cet ordre, et
- * on s'arrête bien avant les couleurs dès que la cellule tient dans un écran.
+ * en fait trente et demande de faire défiler ; les NOMS se lisent sur la liste
+ * de l'écurie et pas dans le panneau du tout. On descend donc dans cet ordre, et
+ * on s'arrête dès que la cellule tient dans un coup d'œil.
  *
  * Un axe qui ne sépare rien est sauté : demander « les mâles ? » à une cellule
  * qui n'a que des mâles est une question dont on connaît la réponse, et elle
@@ -67,8 +69,18 @@ import { type MountStatus, type Sex } from './stable';
  * Dès qu'une cellule tient en `NAME_THRESHOLD` montures, on cesse de couper et
  * on rend la liste. C'est exactement la consigne de la compétence
  * `ecurie-en-jeu` : les agrégats donnent la **forme** du problème, le diff nom
- * par nom le **ferme**. Continuer sous ce seuil coûterait plus de questions que
- * de lire douze noms.
+ * par nom le **ferme**.
+ *
+ * Restait une manière de s'arrêter beaucoup trop tôt : une cellule que les
+ * quatre colonnes ne coupent plus. Six Amande gen 3, mâles, fertiles, niveau 1
+ * — le panneau du jeu n'a rien pour les départager, et la recherche rendait la
+ * main sur six montures. D'où le cinquième axe, **le nom**, qui n'est pas une
+ * colonne mais une ligne de la liste : c'est la dernière chose qui sépare deux
+ * montures, et c'est celle que le jeu écrit sur chacune.
+ *
+ * Il reste un plancher, et il est dit plutôt que tu : les non renommées portent
+ * toutes « Anonyme », en jeu comme ici. Une cellule d'anonymes ne se coupe pas,
+ * et la seule façon d'aller plus bas est de les nommer.
  *
  * ## Ce qu'un « OK » ne prouve pas, et il faut le dire
  *
@@ -82,8 +94,16 @@ import { type MountStatus, type Sex } from './stable';
  * rend N petit, et c'est son prix exact : on l'affiche plutôt que de le taire.
  */
 
-/** Sous ce nombre de montures, on cesse de couper et on lit les noms. */
-export const NAME_THRESHOLD = 12;
+/**
+ * Sous ce nombre de montures, on cesse de couper : la cellule se lit d'un coup
+ * d'œil, les deux listes côte à côte.
+ *
+ * Il valait douze, et douze était le compte au-delà duquel on ne compare plus
+ * deux listes de tête. Cinq, parce que l'axe des noms existe maintenant pour
+ * descendre jusque-là : couper coûtait une question et ne rapportait rien tant
+ * que la dernière coupe possible laissait douze montures indistinctes.
+ */
+export const NAME_THRESHOLD = 5;
 
 /**
  * Un axe **est** une facette à valeurs du panneau : couper une cellule, c'est
@@ -92,8 +112,27 @@ export const NAME_THRESHOLD = 12;
  */
 export type Axis = ValueFacet;
 
-/** Les axes, dans l'ordre du moins cher à lire en jeu au plus cher. */
-const AXES: Axis[] = ['status', 'sex', 'generation', 'color'];
+/**
+ * Les axes que le **panneau** porte : une colonne chacun, un coup d'œil chacun.
+ *
+ * Ce sont les quatre marges de l'écurie, et c'est ce que la racine balaie pour
+ * déclarer saine une écurie saine.
+ */
+const PANEL_AXES: Axis[] = ['status', 'sex', 'generation', 'color'];
+
+/**
+ * Les axes, dans l'ordre du moins cher à lire en jeu au plus cher — le nom en
+ * dernier, et hors du panneau.
+ *
+ * Le nom n'est pas une colonne du jeu : il se lit sur la **liste** de l'écurie,
+ * une ligne par monture, et confronter des noms coûte bien plus qu'un coup
+ * d'œil sur une colonne. Il n'entre donc jamais dans le balayage de validation
+ * — sans quoi une écurie saine demanderait de confronter deux cents noms — mais
+ * il est ce qui reste quand les quatre facettes ne séparent plus rien : six
+ * Amande gen 3 mâles fertiles sont indistinctes pour le panneau, et distinctes
+ * pour la liste.
+ */
+const AXES: Axis[] = [...PANEL_AXES, 'name'];
 
 /** Une colonne posée sur une cellule : l'axe, ses cases, et si on l'a demandée. */
 export type Column = { axis: Axis; children: CensusNode[]; answered: boolean };
@@ -172,6 +211,7 @@ const withAxis = (cell: RosterFilters, axis: Axis, value: string | number): Rost
   if (axis === 'sex') return { ...cell, sexes: [value as Sex] };
   if (axis === 'status') return { ...cell, statuses: [value as MountStatus] };
   if (axis === 'generation') return { ...cell, generations: [value as number] };
+  if (axis === 'name') return { ...cell, names: [value as string] };
   return { ...cell, colorIds: [value as string] };
 };
 
@@ -193,12 +233,25 @@ const STATUS_ORDER: MountStatus[] = ['fertile', 'feconde', 'sterile'];
  * générations et les couleurs celles de l'écurie entière. Un zéro qui colle ne
  * coûte rien : la case reste vide, ça vaut « pareil », et la cellule sort de la
  * recherche comme les autres.
+ *
+ * **Les noms font exception, et ils sont seuls à la faire** : `entries` est
+ * alors la cellule et non l'écurie. Il n'y a pas de colonne NOMS dans le
+ * panneau du jeu où un zéro pourrait se lire, les noms possibles ne sont pas
+ * une liste finie, et énumérer les deux cents noms de l'écurie sous chaque
+ * cellule donnerait une question illisible pour ne rien gagner. Le prix est
+ * dit : une monture dont l'app ignore jusqu'au nom ne se déclare pas sur cet
+ * axe-là — elle se déclare une coupe plus haut, où la cellule porte encore son
+ * écart.
  */
 const valuesOn = (entries: RosterEntry[], axis: Axis): (string | number)[] => {
   if (axis === 'status') return [...STATUS_ORDER];
   if (axis === 'sex') return ['M', 'F'];
   const seen = new Set<string | number>();
-  for (const entry of entries) seen.add(axis === 'generation' ? entry.generation : entry.colorId);
+  for (const entry of entries) {
+    if (axis === 'generation') seen.add(entry.generation);
+    else if (axis === 'name') seen.add(borneName(entry));
+    else seen.add(entry.colorId);
+  }
   return [...seen];
 };
 
@@ -224,7 +277,11 @@ export const splitCell = (
   nameOf: (colorId: string) => string
 ): Column | null => {
   if (node.used.includes(axis)) return null;
-  const values = ordered(axis, valuesOn(entries, axis));
+  // Les noms s'énumèrent dans la cellule, tous les autres axes dans l'écurie
+  // entière. Voir `valuesOn`, qui dit pourquoi et ce que ça coûte.
+  const within =
+    axis === 'name' ? entries.filter((entry) => matches(entry, node.cell, nameOf)) : entries;
+  const values = ordered(axis, valuesOn(within, axis));
   // Un axe qui ne porte qu'une valeur ne sépare rien : le demander serait une
   // question dont on connaît la réponse, et elle coûte autant qu'une vraie.
   if (values.length < 2) return null;
@@ -276,13 +333,15 @@ export const cellLabel = (cell: RosterFilters, nameOf: (colorId: string) => stri
 /**
  * Les axes qu'un nœud doit encore interroger.
  *
- * La racine les balaie tous — c'est la validation. En dessous on n'en prend
- * qu'un, le premier disponible : on sait déjà qu'il y a quelque chose à trouver,
- * et poser quatre colonnes dans chaque cellule ferait exploser N.
+ * La racine balaie les quatre colonnes du panneau — c'est la validation, et
+ * l'axe des noms n'en est pas : le balayer ferait confronter les deux cents
+ * noms de l'écurie pour déclarer saine une écurie saine. En dessous on n'en
+ * prend qu'un, le premier disponible : on sait déjà qu'il y a quelque chose à
+ * trouver, et poser cinq colonnes dans chaque cellule ferait exploser N.
  */
 const axesFor = (node: CensusNode): Axis[] => {
   const left = AXES.filter((axis) => !node.used.includes(axis));
-  return node.sweep ? left : left.slice(0, 1);
+  return node.sweep ? left.filter((axis) => PANEL_AXES.includes(axis)) : left.slice(0, 1);
 };
 
 /** La colonne d'un axe, construite à la demande et mémorisée sur le nœud. */

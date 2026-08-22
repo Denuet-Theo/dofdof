@@ -17,6 +17,7 @@ import {
   type RosterFilters,
 } from '@/lib/dofus/breeding/roster';
 import { type MountStatus, type Sex } from '@/lib/dofus/breeding/stable';
+import { borneName } from '@/lib/dofus/breeding/naming';
 
 /**
  * Les filtres du jeu, dans l'ordre du jeu, avec les comptes du jeu.
@@ -288,6 +289,25 @@ const BreedingStockFilters = ({
     }))
     .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
 
+  /**
+   * Les noms, **et seulement quand ils sont en jeu**.
+   *
+   * Le jeu n'a pas de colonne NOMS : c'est sa liste d'écurie qui les montre, une
+   * ligne par monture. Cette section n'imite donc rien — elle existe pour la
+   * dernière question du rapprochement, celle qui sépare des montures que les
+   * quatre facettes ne séparent plus. La montrer en permanence afficherait deux
+   * cents lignes sous un panneau qui en compte six.
+   *
+   * Elle reste visible quand un nom est **posé** en filtre, sans quoi « Voir ces
+   * N montures » sur une cellule de nom réduirait la liste sans qu'aucune case
+   * cochée ne dise pourquoi.
+   */
+  const names = facetCounts(entries, filters, nameOf, 'name', borneName);
+  const nameRows = [...names.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .filter((row) => review?.asked('name', row.name) || filters.names.includes(row.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+
   const level = (value: number, key: 'levelMin' | 'levelMax') => (
     <input
       type="number"
@@ -447,6 +467,28 @@ const BreedingStockFilters = ({
             )}
           </div>
         </div>
+
+        {/* Les noms : la dernière coupe, et la seule qui ne se lise pas dans le
+            panneau du jeu mais dans sa liste d'écurie. Voir `nameRows`. */}
+        {nameRows.length > 0 && (
+          <div>
+            <p className={SECTION}>Noms</p>
+            <div className="space-y-0.5 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+              {nameRows.map((row) => (
+                <CheckRow
+                  key={row.name}
+                  label={row.name}
+                  count={row.count}
+                  checked={filters.names.includes(row.name)}
+                  tone={toneOf('name', row.name)}
+                  typed={typedOf('name', row.name)}
+                  onToggle={() => patch({ names: toggled(filters.names, row.name) })}
+                  title="Le nom porté en jeu. Compte les lignes de l’écurie du jeu qui le portent."
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

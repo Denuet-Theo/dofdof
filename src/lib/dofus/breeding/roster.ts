@@ -1,4 +1,4 @@
-import { ANONYMOUS_NAME } from './naming';
+import { borneName } from './naming';
 import {
   cycledOf,
   mountStatus,
@@ -80,6 +80,20 @@ export type RosterFilters = {
   statuses: MountStatus[];
   sexes: Sex[];
   colorIds: string[];
+  /**
+   * Les noms portés, en **exact** — et non la recherche libre de `query`.
+   *
+   * Le jeu n'a pas de filtre par nom : c'est la liste de l'écurie qui les
+   * montre. Celui-ci n'existe donc pas pour imiter une case du panneau, mais
+   * pour désigner la dernière chose qui sépare deux montures quand les quatre
+   * facettes ne les séparent plus — six Amande gen 3 mâles fertiles ne diffèrent
+   * que par là. Voir l'axe `name` de `reconcile.ts`.
+   *
+   * Exact et pas « contient » : `query` retient `G1 DO F DO-IN` sur un
+   * `G1 DO F DO-INDI`, ce qui suffit à compter une monture de trop et à envoyer
+   * chercher un écart qui n'existe pas.
+   */
+  names: string[];
 };
 
 export const NO_FILTERS: RosterFilters = {
@@ -90,6 +104,7 @@ export const NO_FILTERS: RosterFilters = {
   statuses: [],
   sexes: [],
   colorIds: [],
+  names: [],
 };
 
 /** Un filtre à plage entière ne filtre rien — et laisse donc passer le vrac. */
@@ -102,7 +117,8 @@ export const isPristine = (filters: RosterFilters): boolean =>
   filters.generations.length === 0 &&
   filters.statuses.length === 0 &&
   filters.sexes.length === 0 &&
-  filters.colorIds.length === 0;
+  filters.colorIds.length === 0 &&
+  filters.names.length === 0;
 
 /**
  * Les quatre lignes qu'une couleur de vrac produit.
@@ -165,7 +181,7 @@ export const rosterOf = (
  * La recherche et le texte n'en sont pas : on ne coche pas un niveau, on borne
  * une plage, et rien ne s'y nomme.
  */
-export type ValueFacet = 'generation' | 'status' | 'sex' | 'color';
+export type ValueFacet = 'generation' | 'status' | 'sex' | 'color' | 'name';
 
 /** Les facettes, nommées, pour pouvoir en exclure une du compte qui la décore. */
 export type Facet = 'query' | 'level' | ValueFacet;
@@ -180,6 +196,7 @@ export const valueOn = (cell: RosterFilters, facet: ValueFacet): string | number
   if (facet === 'status') return cell.statuses[0] ?? null;
   if (facet === 'sex') return cell.sexes[0] ?? null;
   if (facet === 'generation') return cell.generations[0] ?? null;
+  if (facet === 'name') return cell.names[0] ?? null;
   return cell.colorIds[0] ?? null;
 };
 
@@ -199,6 +216,8 @@ export const facetLabel = (
   if (facet === 'status') return MOUNT_STATUS_LABEL[value as MountStatus];
   if (facet === 'sex') return SEX_LABEL[value as Sex];
   if (facet === 'generation') return `Génération ${value}`;
+  // Un nom se nomme lui-même : c'est celui que le jeu écrit sur la monture.
+  if (facet === 'name') return String(value);
   return nameOf(String(value));
 };
 
@@ -231,7 +250,7 @@ export const matches = (
       // jeu le montre lui aussi anonyme.
       const hit =
         nameOf(entry.colorId).toLowerCase().includes(needle) ||
-        (entry.name ?? ANONYMOUS_NAME).toLowerCase().includes(needle);
+        borneName(entry).toLowerCase().includes(needle);
       if (!hit) return false;
     }
   }
@@ -258,6 +277,11 @@ export const matches = (
 
   if (except !== 'color' && filters.colorIds.length > 0) {
     if (!filters.colorIds.includes(entry.colorId)) return false;
+  }
+
+  // Le vrac tombe sous « Anonyme » et c'est juste : le jeu l'y range aussi.
+  if (except !== 'name' && filters.names.length > 0) {
+    if (!filters.names.includes(borneName(entry))) return false;
   }
 
   return true;

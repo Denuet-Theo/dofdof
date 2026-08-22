@@ -380,6 +380,17 @@ export type BreedingRow = {
   source: 'game' | 'site' | null;
   estimate: BreedingEstimate;
   /**
+   * Le prix **saisi sur la couleur**, à distinguer de celui que l'estimation
+   * retient.
+   *
+   * L'estimation comble le niveau 1 avec le prix de l'item du certificat quand
+   * la couleur n'en a pas — voir `effectivePrices`. Les champs de saisie, eux,
+   * montrent ce qui est enregistré **ici** : un champ pré-rempli d'un prix
+   * hérité se lit « c'est saisi », et l'éleveur ne saurait plus lequel des deux
+   * réservoirs il regarde. Le prix hérité s'affiche en repère, pas en valeur.
+   */
+  own: ColorPrice;
+  /**
    * Le plan complet — étapes, durée, jauges, financement. `null` pour les
    * couleurs qu'il vaut mieux acheter ou capturer : il n'y a alors rien à
    * élever, donc pas de plan.
@@ -793,6 +804,47 @@ export const useBreeding = (
    * l'objectif 1, et en gagner 24 % à l'objectif 30. D'où l'essai des deux, et
    * non un plancher imposé.
    */
+  /**
+   * Les prix de couleurs, **complétés par les prix d'items**.
+   *
+   * ## Pourquoi une couleur avait deux prix à saisir
+   *
+   * Chaque couleur porte l'item de son certificat — `azur_dore` → 33286,
+   * « Muldo Azur et Doré » — et cet item se tarifie déjà sur Items & Prix, avec
+   * les parchemins et les carburants. `breeding_color_prices` en tient un autre,
+   * saisi ailleurs. Les deux disent la même chose et ne se parlaient pas : le
+   * 22/08, 600 000 kamas saisis sur « Muldo Azur » laissaient l'élevage annoncer
+   * « il manque le prix ». Une saisie que l'app avait sous la main et refusait
+   * de lire n'est pas une donnée manquante, c'est un bug.
+   *
+   * ## Le prix d'item alimente le **niveau 1**, et lui seul
+   *
+   * `item_prices` tient un nombre par item, quand une couleur en a deux : le
+   * poulain naît niveau 1, et le prix niveau 200 se paie en montée. L'item ne
+   * peut donc pas dire les deux — il n'a qu'un identifiant pour les deux états
+   * de la monture.
+   *
+   * On le range au niveau 1 parce que c'est **ce que l'élevage produit** : c'est
+   * lui qui valorise une naissance, une liquidation, un achat de gen 1. Le prix
+   * niveau 200 reste une saisie à part, celle de qui vend des montures montées.
+   *
+   * ## Le prix de couleur garde la main
+   *
+   * Il est plus précis — il sait de quel niveau il parle — donc il n'est jamais
+   * écrasé. Le prix d'item ne comble qu'un vide.
+   */
+  const effectivePrices = useMemo(() => {
+    const merged = new Map(prices);
+    for (const color of tree?.colors ?? []) {
+      if (color.itemId === null) continue;
+      const own = merged.get(color.id) ?? { level0: null, level200: null };
+      if (own.level0 !== null && own.level0 > 0) continue;
+      const item = priceOf(color.itemId);
+      if (item > 0) merged.set(color.id, { ...own, level0: item });
+    }
+    return merged;
+  }, [prices, tree, priceOf]);
+
   const estimateVariants = useMemo(() => {
     if (!tree) return [] as Map<string, BreedingEstimate>[];
 
@@ -800,7 +852,7 @@ export const useBreeding = (
     if (supplies?.freeXpPoints) floors.push(supplies.freeXpPoints);
 
     return floors.map((freeXpPoints) =>
-      computeBreedingCosts(tree.colors, prices, {
+      computeBreedingCosts(tree.colors, effectivePrices, {
         parentLevel: 'auto',
         // `null` signifie « prix manquants » et non « gratuit » : on retombe
         // alors sur zéro, ce que la page signale plutôt que de le taire.
@@ -823,7 +875,7 @@ export const useBreeding = (
     // Plus de `settings` ici : le seul réglage que ce calcul lisait était
     // `recycle_steriles`, qui est devenu une réponse figée. Le garder ferait
     // recalculer les 120 couleurs à chaque frappe dans « Kamas engageables ».
-  }, [tree, prices, supplies, genetonValuation, priceOf]);
+  }, [tree, effectivePrices, supplies, genetonValuation, priceOf]);
 
   /**
    * Le plan d'une couleur : étapes, durée, jauges à remplir et financement.
@@ -983,6 +1035,7 @@ export const useBreeding = (
           itemId: color.itemId,
           source: color.source,
           estimate,
+          own: prices.get(color.id) ?? { level0: null, level200: null },
           planned,
           planMargin,
           marginPerHour: planMargin !== null && hours > 0 ? planMargin / hours : null,
@@ -990,7 +1043,7 @@ export const useBreeding = (
         },
       ];
     });
-  }, [tree, estimateVariants, makePlan, targetCount]);
+  }, [tree, estimateVariants, makePlan, targetCount, prices]);
 
   /** Enregistre un prix et le reflète localement sans recharger toute la page. */
   const savePrice = useCallback(

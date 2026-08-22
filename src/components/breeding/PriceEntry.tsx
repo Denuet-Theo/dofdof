@@ -89,8 +89,12 @@ const PriceEntry = ({ rows, onSavePrice }: Props) => {
             <div className="flex-1 min-w-0">
               <ColorPriceInputs
                 colorId={row.colorId}
-                level0={row.estimate.priceLevel0}
-                level200={row.estimate.priceLevel200}
+                // Ce qui est saisi **sur la couleur**, et non ce que
+                // l'estimation retient : elle comble le niveau 1 avec le prix de
+                // l'item, qui s'affiche en repère sous le champ vide.
+                level0={row.own.level0}
+                level200={row.own.level200}
+                inheritedLevel0={row.own.level0 === null ? row.estimate.priceLevel0 : null}
                 onSave={onSavePrice}
                 compact
               />

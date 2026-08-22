@@ -14,7 +14,10 @@ import { computeCraftCost, unitCostOf, type UnitCost } from '@/lib/utils/recipes
 import { useCraftIndex } from '@/lib/hooks/useCraftIndex';
 
 // The 6 gauges fed by "Carburant d'enclos" items in the élevage profession
-const ELEVAGE_GAUGES = ['Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Abreuvoir', 'Mangeoire'];
+// Par ordre alphabétique, comme tous les filtres qui listent des noms : on y
+// cherche une jauge précise, et l'ordre des équipements d'enclos en jeu ne se
+// devine pas depuis cet écran.
+const ELEVAGE_GAUGES = ['Abreuvoir', 'Baffeur', 'Caresseur', 'Dragofesse', 'Foudroyeur', 'Mangeoire'];
 // Every item type across all jobs whose consumables restore PV or Énergie: Pain, Friandise,
 // Poisson comestible, Viande comestible, Boisson, Viande primitive — not just bread/Paysan.
 const FOOD_TYPE_IDS = '33,42,49,69,79,187';

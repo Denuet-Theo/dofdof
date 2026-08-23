@@ -106,6 +106,30 @@ export type BirthEntry = {
 };
 
 /**
+ * Combien d'identifiants tiennent dans un filtre `in.(…)`.
+ *
+ * Ils voyagent dans l'URL — `PATCH …?id=in.(uuid,uuid,…)` — et un uuid coûte 37
+ * caractères. Deux cents en font 7 500, et la ligne de requête passe alors sous
+ * le nez d'un proxy qui, par défaut, n'en accepte que 8 192 en tout. Le geste qui
+ * déclencherait ce refus est précisément celui de la reprise après incident :
+ * cocher toute l'écurie pour la remettre d'équerre.
+ *
+ * Cent tient large — 3 700 caractères, moins de la moitié du budget — et laisse
+ * la place au reste de l'URL et aux en-têtes. Le lot reste indivisible pour
+ * l'appelant : ce qui se découpe, c'est le transport, pas le geste.
+ */
+const ID_FILTER_CHUNK = 100;
+
+/** Le lot, découpé en tranches transportables. */
+const chunked = <T>(items: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(items.slice(index, index + size));
+  }
+  return out;
+};
+
+/**
  * Un parent tel qu'il était **avant** l'accouplement qui l'a consommé.
  *
  * C'est ce qui rend l'annulation possible. Une monture accouplée passe stérile
@@ -1627,29 +1651,50 @@ export const useBreeding = (
       }));
 
       const supabase = createClient();
-      const result = await supabase
-        .from('user_breeding_individuals')
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .in('id', [...wanted])
-        .select('id');
+      const stamp = new Date().toISOString();
+      const undo = () =>
+        setStable((current) => ({
+          ...current,
+          individuals: current.individuals.map((mount) => restore.get(mount.id) ?? mount),
+        }));
 
-      const { ok } = touchedRows(
-        `la correction de ${before.length} monture${before.length > 1 ? 's' : ''}`,
-        before.length,
-        result,
-        () =>
-          setStable((current) => ({
-            ...current,
-            individuals: current.individuals.map((mount) => restore.get(mount.id) ?? mount),
-          }))
-      );
+      let written = 0;
+      let failure: unknown = null;
+      for (const slice of chunked([...wanted], ID_FILTER_CHUNK)) {
+        const result = await supabase
+          .from('user_breeding_individuals')
+          .update({ ...patch, updated_at: stamp })
+          .in('id', slice)
+          .select('id');
 
-      if (!ok) {
+        const { ok, rows } = touchedRows(
+          `la correction de ${slice.length} monture${slice.length > 1 ? 's' : ''}`,
+          slice.length,
+          result,
+          // Le retour arrière est posé **une fois**, en sortie de boucle : il
+          // porte sur le lot entier, tranches déjà écrites comprises. Le laisser
+          // à `touchedRows` le rejouerait par tranche et ne rendrait que la
+          // dernière.
+          'rien-posé-en-avance'
+        );
+        written += rows.length;
+        if (!ok) {
+          failure = result.error;
+          break;
+        }
+      }
+
+      if (written < before.length) {
+        // Un lot à moitié écrit est un état que personne ne peut décrire :
+        // l'écran revient d'un bloc, et le compte de ce qui est passé se dit.
+        // Le découpage est une contrainte de transport, pas une permission de
+        // laisser le lot à mi-chemin.
+        undo();
         return {
           ok: false as const,
-          message: result.error
-            ? failureMessage(result.error)
-            : 'La base n’a pas trouvé toutes ces montures.',
+          message: failure
+            ? `${failureMessage(failure)} — ${written} monture(s) sur ${before.length} étaient déjà écrites : recharge la page avant de reprendre.`
+            : `La base n’a trouvé que ${written} de ces ${before.length} montures.`,
         };
       }
       return { ok: true as const };

@@ -1086,38 +1086,54 @@ export const useBreeding = (
   );
 
   /**
-   * Enregistre le nombre de montures d'une couleur en écurie.
+   * Enregistre l'effectif **de vrac** d'une couleur : ce qu'il reçoit, il l'écrit.
    *
-   * Le compteur saisi est un **total**, alors que la base ne stocke que le vrac.
-   * Les deux ne coïncidaient plus depuis qu'une gen 1 ou 2 peut être suivie
-   * individuellement — voir `tracksIndividually` : une couleur peut porter à la
-   * fois trois montures en vrac et une née d'un croisement haut. Écrire le total
-   * tel quel compterait cette dernière deux fois, une fois dans le vrac et une
-   * fois comme individu.
+   * ## Le compteur qui se vidait quand on retapait ce qu'il affichait
    *
-   * On retranche donc les individus avant d'écrire. Saisir moins que ce qu'ils
-   * représentent vide le vrac sans les toucher : une monture suivie se retire
-   * dans la liste de l'écurie, où on la voit, pas par un compteur qui ne dit pas
-   * laquelle.
+   * Il a longtemps reçu un **total** — vrac plus montures suivies — et
+   * retranchait les secondes avant d'écrire, pour ne pas compter deux fois une
+   * gen 1 ou 2 née d'un croisement haut et donc suivie une par une (voir
+   * `tracksIndividually`). C'était juste tant que le champ affichait ce total :
+   * il lisait `stockBySex` et s'appelait « Mâles X fertiles en écurie ».
    *
-   * L'état local part devant : le classement entier se recalcule à chaque
-   * saisie, et l'attendre du réseau rendrait la frappe poussive.
+   * #93 a remplacé les 120 compteurs par un assistant, et le champ survivant —
+   * « Vrac hérité » — s'est mis à lire `bulk`, l'effectif brut. Le libellé dit
+   * « en vrac », la valeur est le vrac, et la soustraction est restée. Le seul
+   * appelant de cette fonction lui passe donc du vrac là où elle attend un total,
+   * depuis ce jour-là.
+   *
+   * Ce que ça coûtait, mesuré sur la fixture du 15/08 — Doré, 7 en vrac, 13
+   * suivies fertiles :
+   *
+   * | saisi | attendu | écrit |
+   * | --- | --- | --- |
+   * | 47 | 47 | **34** |
+   * | 7 — le chiffre affiché, retapé | 7 | **0** |
+   *
+   * La seconde ligne est la mauvaise : recopier ce que le champ montre **vide le
+   * compteur**, en silence, et la politique planifie ensuite sans ce stock.
+   *
+   * ## Pourquoi la soustraction ne revient pas
+   *
+   * Le vrac et les suivies sont deux colonnes distinctes que `flatten` additionne
+   * déjà. Un champ qui écrit le vrac n'a donc rien à retrancher : le double
+   * comptage venait de l'unité du champ, pas de l'écriture. Les paramètres
+   * portent maintenant leur unité dans leur nom, pour qu'un futur appelant ne
+   * puisse plus se tromper en silence.
+   *
+   * L'état local part devant — le classement entier se recalcule à chaque saisie,
+   * et l'attendre du réseau rendrait la frappe poussive — mais il revient si la
+   * base refuse. Clause 2 de la règle d'or.
    */
   const saveBulkStock = useCallback(
     async (
       colorId: string,
-      totalMales: number,
-      totalFemales: number,
+      bulkMales: number,
+      bulkFemales: number,
       cycled?: { males: number; females: number }
     ) => {
-      const tracked = stable.individuals.filter(
-        (mount) => mount.colorId === colorId && mount.fertile
-      );
-      const trackedMales = tracked.filter((mount) => mount.sex === 'M').length;
-      const trackedFemales = tracked.length - trackedMales;
-
-      const males = Math.max(0, totalMales - trackedMales);
-      const females = Math.max(0, totalFemales - trackedFemales);
+      const males = Math.max(0, bulkMales);
+      const females = Math.max(0, bulkFemales);
 
       // Les fécondes sont un sous-ensemble : on ne peut pas en avoir plus que de
       // fertiles, et un appel qui ne les mentionne pas garde celles qui sont là.
@@ -1170,7 +1186,7 @@ export const useBreeding = (
         })
       );
     },
-    [family, stable.bulk, stable.individuals]
+    [family, stable.bulk]
   );
 
   /**

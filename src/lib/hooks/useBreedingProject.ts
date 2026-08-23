@@ -53,7 +53,10 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .limit(1);
 
       if (error) {
-        console.error('[breeding] projet illisible:', error);
+        // Sans projet, l'écran n'a plus de couleur visée : le classement, le
+        // planning et toute la politique tournent alors sur une cible absente,
+        // en silence. Une lecture ratée ne vaut pas « aucun projet ».
+        reportWriteFailure('le plan suivi, à relire', error);
         return;
       }
       setCurrent((data?.[0] as BreedingProject | undefined) ?? null);

@@ -41,6 +41,44 @@ ribbon (`timeline.ts`, `model-plans/`, `plan.rs`) and their guards. They were
 unreachable from the app while still being maintained and checked on every run —
 guards protecting code nobody executed.
 
+# The golden rule: the screen shows only what the base confirmed
+
+Everything below is one sentence:
+
+> **Never show, keep, or act on a state the database has not confirmed.**
+
+It has three clauses, and each one has already cost mounts on its own.
+
+**1. A write reports what it *changed*, not the absence of an error.**
+PostgREST answers a filtered `update … in(…)` or `delete … eq(…)` with success
+when it matches no row — zero rows changed is not an SQL error. On 23/08 six
+enclos were taken out at level 44, six successes came back, and ten rows out of
+sixty were written. Chain `.select()`, say how many rows you expected, and pass
+the result to `touchedRows`.
+
+**2. Anything put on screen ahead of the round trip comes back off if the base
+refuses it.** The optimistic write is the right default here — the whole ranking
+recomputes on every keystroke and waiting for the network would make typing
+crawl — but it is only half a mechanism without its undo. `touchedRows` and
+`revertOnFailure` both take a required `Undo`: a function, `'rien-posé-en-avance'`
+when the screen shows nothing unconfirmed, or `'gardé-exprès'` with the reason
+written next to it. There is no default. The question "what does the screen
+already show that the base has not taken?" must be *asked* at every write; it
+was answered "nothing" by omission about thirty times.
+
+**3. A state you could not *read* is never treated as a known state.**
+`useBreedingBatch` answered a failed read with `setPens([])`, so the screen fell
+back to a live proposal and the next lock overwrote the row describing what the
+enclos really held. Measured: one click replaced three real pens with five
+recomputed ones. An unread state disables the writes that depend on it, and says
+so.
+
+`npm run check:writes` holds all three. It is not a style check — run against the
+tree from before #271/#272 it reports thirteen silent writes, including the exact
+line that swallowed a batch. Adding a write that skips the door fails it; the
+only way through is to name the silence in its `ALLOWED` list, with a reason a
+reviewer can argue with.
+
 # A bug is never fixed in one place
 
 **Before fixing a bug, grep for every other place the same mistake can be made,

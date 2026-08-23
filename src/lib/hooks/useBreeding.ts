@@ -61,7 +61,12 @@ import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 import { unavailableFor } from '@/lib/dofus/breeding/batch';
 // Toute écriture qui échoue passe par là : voir l'en-tête du module sur
 // pourquoi un `console.error` ne compte pas comme un signalement.
-import { failureMessage, reportWriteFailure, touchedRows } from '@/lib/errors/write-failures';
+import {
+  failureMessage,
+  reportWriteFailure,
+  revertOnFailure,
+  touchedRows,
+} from '@/lib/errors/write-failures';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -1081,44 +1086,72 @@ export const useBreeding = (
   );
 
   /**
-   * Enregistre le nombre de montures d'une couleur en écurie.
+   * Enregistre l'effectif **de vrac** d'une couleur : ce qu'il reçoit, il l'écrit.
    *
-   * Le compteur saisi est un **total**, alors que la base ne stocke que le vrac.
-   * Les deux ne coïncidaient plus depuis qu'une gen 1 ou 2 peut être suivie
-   * individuellement — voir `tracksIndividually` : une couleur peut porter à la
-   * fois trois montures en vrac et une née d'un croisement haut. Écrire le total
-   * tel quel compterait cette dernière deux fois, une fois dans le vrac et une
-   * fois comme individu.
+   * ## Le compteur qui se vidait quand on retapait ce qu'il affichait
    *
-   * On retranche donc les individus avant d'écrire. Saisir moins que ce qu'ils
-   * représentent vide le vrac sans les toucher : une monture suivie se retire
-   * dans la liste de l'écurie, où on la voit, pas par un compteur qui ne dit pas
-   * laquelle.
+   * Il a longtemps reçu un **total** — vrac plus montures suivies — et
+   * retranchait les secondes avant d'écrire, pour ne pas compter deux fois une
+   * gen 1 ou 2 née d'un croisement haut et donc suivie une par une (voir
+   * `tracksIndividually`). C'était juste tant que le champ affichait ce total :
+   * il lisait `stockBySex` et s'appelait « Mâles X fertiles en écurie ».
    *
-   * L'état local part devant : le classement entier se recalcule à chaque
-   * saisie, et l'attendre du réseau rendrait la frappe poussive.
+   * #93 a remplacé les 120 compteurs par un assistant, et le champ survivant —
+   * « Vrac hérité » — s'est mis à lire `bulk`, l'effectif brut. Le libellé dit
+   * « en vrac », la valeur est le vrac, et la soustraction est restée. Le seul
+   * appelant de cette fonction lui passe donc du vrac là où elle attend un total,
+   * depuis ce jour-là.
+   *
+   * Ce que ça coûtait, mesuré sur la fixture du 15/08 — Doré, 7 en vrac, 13
+   * suivies fertiles :
+   *
+   * | saisi | attendu | écrit |
+   * | --- | --- | --- |
+   * | 47 | 47 | **34** |
+   * | 7 — le chiffre affiché, retapé | 7 | **0** |
+   *
+   * La seconde ligne est la mauvaise : recopier ce que le champ montre **vide le
+   * compteur**, en silence, et la politique planifie ensuite sans ce stock.
+   *
+   * ## Pourquoi la soustraction ne revient pas
+   *
+   * Le vrac et les suivies sont deux colonnes distinctes que `flatten` additionne
+   * déjà. Un champ qui écrit le vrac n'a donc rien à retrancher : le double
+   * comptage venait de l'unité du champ, pas de l'écriture. Les paramètres
+   * portent maintenant leur unité dans leur nom, pour qu'un futur appelant ne
+   * puisse plus se tromper en silence.
+   *
+   * L'état local part devant — le classement entier se recalcule à chaque saisie,
+   * et l'attendre du réseau rendrait la frappe poussive — mais il revient si la
+   * base refuse. Clause 2 de la règle d'or.
    */
   const saveBulkStock = useCallback(
     async (
       colorId: string,
-      totalMales: number,
-      totalFemales: number,
+      bulkMales: number,
+      bulkFemales: number,
       cycled?: { males: number; females: number }
     ) => {
-      const tracked = stable.individuals.filter(
-        (mount) => mount.colorId === colorId && mount.fertile
-      );
-      const trackedMales = tracked.filter((mount) => mount.sex === 'M').length;
-      const trackedFemales = tracked.length - trackedMales;
-
-      const males = Math.max(0, totalMales - trackedMales);
-      const females = Math.max(0, totalFemales - trackedFemales);
+      const males = Math.max(0, bulkMales);
+      const females = Math.max(0, bulkFemales);
 
       // Les fécondes sont un sous-ensemble : on ne peut pas en avoir plus que de
       // fertiles, et un appel qui ne les mentionne pas garde celles qui sont là.
       const kept = stable.bulk.get(colorId);
       const cycledMales = Math.min(cycled?.males ?? kept?.cycledMales ?? 0, males);
       const cycledFemales = Math.min(cycled?.females ?? kept?.cycledFemales ?? 0, females);
+
+      /**
+       * Le compteur d'avant, gardé de côté.
+       *
+       * L'état local part devant — tout le classement se recalcule à la frappe,
+       * et l'attendre du réseau rendrait la saisie poussive — mais il **revient**
+       * si la base refuse. Sans ça l'écran gardait le compteur saisi, la base
+       * l'ancien, et les deux ne se départageaient qu'au rechargement suivant :
+       * entre-temps la politique planifiait des fournées sur un stock qui
+       * n'existe pas. Clause 2 de la règle d'or.
+       */
+      const before = stable.bulk.get(colorId);
 
       setStable((current) => {
         const bulk = new Map(current.bulk);
@@ -1129,7 +1162,7 @@ export const useBreeding = (
       });
 
       const supabase = createClient();
-      const { error: saveError } = await supabase
+      const result = await supabase
         .from('user_breeding_mounts')
         .upsert(
           {
@@ -1144,13 +1177,16 @@ export const useBreeding = (
           { onConflict: 'user_id,family,color_id' }
         );
 
-      // L'état local est déjà parti devant — c'est voulu, le classement entier
-      // se recalcule à chaque frappe — donc l'écran montre le compteur saisi
-      // que la base l'ait pris ou non. D'où le signalement : sans lui, rien ne
-      // distingue les deux jusqu'au rechargement.
-      if (saveError) reportWriteFailure('le compteur de vrac de cette couleur', saveError);
+      revertOnFailure('le compteur de vrac de cette couleur', result, () =>
+        setStable((current) => {
+          const bulk = new Map(current.bulk);
+          if (before) bulk.set(colorId, before);
+          else bulk.delete(colorId);
+          return { ...current, bulk };
+        })
+      );
     },
-    [family, stable.bulk, stable.individuals]
+    [family, stable.bulk]
   );
 
   /**
@@ -1478,7 +1514,11 @@ export const useBreeding = (
         const { ok, rows } = touchedRows(
           `la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`,
           ids.length,
-          result
+          result,
+          // L'état local est posé **après** cette boucle, à partir de `cycled`,
+          // et `cycled` ne retient que les lignes revenues. Rien n'est parti
+          // devant, donc rien n'est à défaire.
+          'rien-posé-en-avance'
         );
         if (!ok) complete = false;
         // Seules celles que la base a réellement changées. Refléter les autres
@@ -1570,21 +1610,18 @@ export const useBreeding = (
         .update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id)
         .select('id');
-      // Une ligne absente rendait un succès : l'écran gardait la correction, la
-      // base gardait l'ancienne valeur, et rien ne les départageait avant le
-      // rechargement. C'est le retour arrière que cette fonction porte déjà pour
-      // un refus — il manquait pour un silence.
-      const { ok } = touchedRows('la correction de cette monture', 1, result);
+      // Le retour arrière passe par la porte : `touchedRows` le déclenche aussi
+      // bien sur un refus que sur un silence — une ligne absente rendait un
+      // succès, l'écran gardait la correction et la base l'ancienne valeur.
+      const { ok } = touchedRows('la correction de cette monture', 1, result, () => {
+        if (!before) return;
+        setStable((current) => ({
+          ...current,
+          individuals: current.individuals.map((mount) => (mount.id === id ? before : mount)),
+        }));
+      });
 
       if (!ok) {
-        if (before) {
-          setStable((current) => ({
-            ...current,
-            individuals: current.individuals.map((mount) =>
-              mount.id === id ? before : mount
-            ),
-          }));
-        }
         return {
           ok: false as const,
           message: result.error
@@ -1650,6 +1687,8 @@ export const useBreeding = (
        * seulement sa fertilité.
        */
       const consumedBy: ConsumedParent[][] = [];
+      /** Les parents que l'écurie ne porte plus : on ne les consomme pas. */
+      const orphans: string[] = [];
 
       for (const entry of entries) {
         const consumed: ConsumedParent[] = [];
@@ -1663,15 +1702,32 @@ export const useBreeding = (
           // Postgres refusait `dore#M0` sur une colonne `uuid`, la fournée
           // repartait en lecture, et les poulains étaient déjà insérés.
           if (side.mountId && parseCountedMountId(side.mountId) === null) {
-            steriles.add(side.mountId);
             const before = byId.get(side.mountId);
-            if (before) {
-              consumed.push({
-                id: before.id,
-                fertile: before.fertile,
-                cycled: before.cycled,
-              });
+            /*
+             * Un parent que l'écurie ne porte plus n'est **pas** stérilisé.
+             *
+             * Il l'était, et son état d'avant n'était alors retenu nulle part :
+             * `consumed` le sautait faute de savoir quoi y écrire. La
+             * stérilisation, elle, partait quand même — si bien qu'« annuler la
+             * dernière naissance » rendait moins qu'elle n'avait consommé, en
+             * silence, sur le chemin d'écriture qui a déjà coûté 22 montures.
+             *
+             * On ne consomme donc que ce qu'on sait défaire. La ligne existe
+             * peut-être encore en base — l'écurie locale et la base peuvent
+             * diverger — mais la stériliser sans pouvoir la rendre serait
+             * exactement le geste irrécupérable que l'ordre des écritures
+             * ci-dessous existe pour empêcher.
+             */
+            if (!before) {
+              orphans.push(side.mountId);
+              continue;
             }
+            steriles.add(side.mountId);
+            consumed.push({
+              id: before.id,
+              fertile: before.fertile,
+              cycled: before.cycled,
+            });
             continue;
           }
           const spent = bulkSpent.get(side.colorId) ?? { males: 0, females: 0 };
@@ -1679,6 +1735,18 @@ export const useBreeding = (
           else spent.females += 1;
           bulkSpent.set(side.colorId, spent);
         }
+      }
+
+      if (orphans.length > 0) {
+        reportWriteFailure(
+          orphans.length > 1
+            ? `${orphans.length} parents de cette fournée que l'écurie ne porte plus`
+            : 'un parent de cette fournée que l’écurie ne porte plus',
+          'Ils n’ont pas été passés stériles : sans leur état d’avant, « annuler ' +
+            'la dernière » ne saurait pas les rendre. Le poulain, lui, est ' +
+            'enregistré. Recharge la page, puis corrige leur fertilité à la main ' +
+            'dans « Mes stocks » si le jeu les a bien consommés.'
+        );
       }
 
       const bulkBorn = new Map<string, { males: number; females: number }>();
@@ -1852,7 +1920,11 @@ export const useBreeding = (
           !touchedRows(
             `les ${steriles.size} parents à passer stériles — le poulain, lui, est bien enregistré`,
             steriles.size,
-            sterileResult
+            sterileResult,
+            // L'écurie locale est posée plus bas, et `load()` la relit dès que
+            // `partial` est vrai : c'est le retour arrière, en plus complet
+            // qu'une remise en place ligne par ligne ne le serait ici.
+            'rien-posé-en-avance'
           ).ok
         ) {
           partial = true;
@@ -1861,7 +1933,7 @@ export const useBreeding = (
 
       const touched = [...new Set([...bulkSpent.keys(), ...bulkBorn.keys()])];
       if (touched.length > 0) {
-        const { error: bulkError } = await supabase.from('user_breeding_mounts').upsert(
+        const bulkResult = await supabase.from('user_breeding_mounts').upsert(
           touched.map((colorId) => ({
             family,
             color_id: colorId,
@@ -1873,9 +1945,13 @@ export const useBreeding = (
           })),
           { onConflict: 'user_id,family,color_id' }
         );
-        if (bulkError) {
+        // Rien d'inconfirmé n'est à l'écran à cet instant : `setStable` vient
+        // après, et `setHatched` plus haut n'a été posé qu'une fois sa propre
+        // écriture revenue. Le `load()` de fin de fonction, déclenché par
+        // `partial`, est le retour arrière — et il est plus complet qu'une
+        // remise en place couleur par couleur ne le serait ici.
+        if (!revertOnFailure('le compteur de vrac de la fournée', bulkResult, 'rien-posé-en-avance')) {
           partial = true;
-          reportWriteFailure('le compteur de vrac de la fournée', bulkError);
         }
       }
 
@@ -1941,7 +2017,10 @@ export const useBreeding = (
       // Zéro ligne supprimée n'est pas une annulation : le poulain est ailleurs
       // — déjà retiré, ou jamais écrit — et rendre `true` ferait rendre aux
       // parents leur fertilité pour rien.
-      if (!touchedRows(`l’annulation de « ${record.name} »`, 1, deleteResult).ok) {
+      if (
+        !touchedRows(`l’annulation de « ${record.name} »`, 1, deleteResult, 'rien-posé-en-avance')
+          .ok
+      ) {
         return false;
       }
 
@@ -1969,7 +2048,10 @@ export const useBreeding = (
           !touchedRows(
             'un parent à remettre dans son état d’avant l’accouplement',
             1,
-            restoreResult
+            restoreResult,
+            // L'écurie locale n'est touchée qu'après la boucle, et `load()` la
+            // relit si un parent a résisté.
+            'rien-posé-en-avance'
           ).ok
         ) {
           restored = false;
@@ -2124,7 +2206,10 @@ export const useBreeding = (
         !touchedRows(
           `les ${gone.length} stériles à retirer — le clone, lui, est bien enregistré`,
           gone.length,
-          dropResult
+          dropResult,
+          // L'écurie locale n'est posée qu'en sortie de cette branche, et
+          // `load()` la relit ici même.
+          'rien-posé-en-avance'
         ).ok
       ) {
         load();
@@ -2184,19 +2269,18 @@ export const useBreeding = (
 
       // Une suppression qui ne trouve rien laissait l'écran vide et la base
       // pleine : les montures revenaient au rechargement suivant sans que rien
-      // n'ait prévenu. Même remise en place que pour un refus.
-      if (
-        !touchedRows(
-          `le retrait de ${removed.length} monture${removed.length > 1 ? 's' : ''} de l’écurie`,
-          ids.length,
-          result
-        ).ok
-      ) {
-        setStable((current) => ({
-          ...current,
-          individuals: [...current.individuals, ...removed],
-        }));
-      }
+      // n'ait prévenu. La remise en place passe par la porte, donc elle vaut
+      // pour le refus **et** pour le silence.
+      touchedRows(
+        `le retrait de ${removed.length} monture${removed.length > 1 ? 's' : ''} de l’écurie`,
+        ids.length,
+        result,
+        () =>
+          setStable((current) => ({
+            ...current,
+            individuals: [...current.individuals, ...removed],
+          }))
+      );
     },
     [stable.individuals]
   );
@@ -2220,20 +2304,18 @@ export const useBreeding = (
         .eq('id', id)
         .select('id');
 
-      if (
-        !touchedRows(
-          `le retrait de « ${removed?.name ?? 'cette monture'} » de l’écurie`,
-          1,
-          result
-        ).ok
-      ) {
-        if (removed) {
+      touchedRows(
+        `le retrait de « ${removed?.name ?? 'cette monture'} » de l’écurie`,
+        1,
+        result,
+        () => {
+          if (!removed) return;
           setStable((current) => ({
             ...current,
             individuals: [...current.individuals, removed],
           }));
         }
-      }
+      );
     },
     [stable.individuals]
   );
@@ -2297,7 +2379,10 @@ export const useBreeding = (
 
   /** Idem pour un carburant en réserve. */
   const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
+    // La quantité d'avant, pour pouvoir la remettre : même règle que le vrac.
+    let before: number | undefined;
     setItemStock((current) => {
+      before = current.get(itemId);
       const next = new Map(current);
       if (quantity > 0) next.set(itemId, quantity);
       else next.delete(itemId);
@@ -2305,16 +2390,21 @@ export const useBreeding = (
     });
 
     const supabase = createClient();
-    const { error: saveError } = await supabase
+    const result = await supabase
       .from('user_item_stock')
       .upsert(
         { item_id: itemId, quantity, updated_at: new Date().toISOString() },
         { onConflict: 'user_id,item_id' }
       );
 
-    // Comme le compteur de vrac : l'état local est déjà parti devant, donc rien
-    // ne distingue à l'écran une réserve enregistrée d'une réserve perdue.
-    if (saveError) reportWriteFailure('la quantité en réserve de ce carburant', saveError);
+    revertOnFailure('la quantité en réserve de ce carburant', result, () =>
+      setItemStock((current) => {
+        const next = new Map(current);
+        if (before === undefined) next.delete(itemId);
+        else next.set(itemId, before);
+        return next;
+      })
+    );
   }, []);
 
   const saveSettings = useCallback(async (next: BreedingSettings) => {

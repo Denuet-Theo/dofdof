@@ -7,6 +7,7 @@ import Modal from '@/components/ui/Modal';
 import KamasDisplay from '@/components/ui/KamasDisplay';
 import ItemPreview from '@/components/items/ItemPreview';
 import { createClient } from '@/lib/supabase/client';
+import { revertOnFailure } from '@/lib/errors/write-failures';
 import { ShoppingCart } from 'lucide-react';
 import { HDV_TAX_RATE, computeMargin } from '@/lib/utils/recipes';
 
@@ -86,7 +87,7 @@ const SellForm = ({
     const supabase = createClient();
 
     try {
-      const { error: insertError } = await supabase.from('user_sales').insert({
+      const result = await supabase.from('user_sales').insert({
         item_id: item.id,
         item_name: item.name,
         icon_url: item.iconUrl,
@@ -100,7 +101,12 @@ const SellForm = ({
         is_resale: isResale,
       });
 
-      if (insertError) throw insertError;
+      // La bannière **en plus** du message local : celui-ci dit où, celle-là dit
+      // qu'il y a un problème et survit à la fermeture de la fenêtre. Rien n'est
+      // posé en avance — la liste est relue par `onSold` — donc rien à défaire.
+      if (!revertOnFailure('la mise en vente', result, 'rien-posé-en-avance')) {
+        throw result.error;
+      }
 
       onSold?.();
       onClose();

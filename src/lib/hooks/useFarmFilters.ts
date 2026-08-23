@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { reportWriteFailure } from '@/lib/errors/write-failures';
+import { revertOnFailure } from '@/lib/errors/write-failures';
 import {
   DEFAULT_FILTERS,
   countAdvanced,
@@ -128,15 +128,17 @@ export const useFarmFilters = () => {
 
     const timeout = setTimeout(async () => {
       const supabase = createClient();
-      const { error } = await supabase
+      const result = await supabase
         .from('user_farm_filters')
         .upsert({ filters, updated_at: new Date().toISOString() });
 
-      // On ne marque enregistré qu'en cas de succès : sinon le prochain
-      // changement repartira du dernier état réellement écrit.
-      if (error) {
-        reportWriteFailure('tes filtres de ferme', error);
-      } else {
+      // `'gardé-exprès'` : les filtres sont posés en avance et **y restent**.
+      // Les réécrire sous les doigts pendant qu'on tape serait hostile, et la
+      // valeur est de toute façon re-tentée à la frappe suivante — puisqu'on ne
+      // marque enregistré qu'en cas de succès, le prochain changement repart du
+      // dernier état réellement écrit. C'est la seule des quatre écritures
+      // optimistes où garder vaut mieux que défaire.
+      if (revertOnFailure('tes filtres de ferme', result, 'gardé-exprès')) {
         saved.current = payload;
         pending.current = null;
       }
@@ -158,7 +160,7 @@ export const useFarmFilters = () => {
         .from('user_farm_filters')
         .upsert({ filters: last, updated_at: new Date().toISOString() })
         .then(({ error }) => {
-          if (error) reportWriteFailure('tes filtres de ferme, en quittant l’écran', error);
+          revertOnFailure('tes filtres de ferme, en quittant l’écran', { error }, 'gardé-exprès');
         });
     },
     []

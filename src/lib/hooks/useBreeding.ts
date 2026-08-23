@@ -58,6 +58,7 @@ import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/n
 // Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
 // c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
 import { parseCountedMountId } from '@/lib/dofus/breeding/search';
+import { unavailableFor } from '@/lib/dofus/breeding/batch';
 // Toute écriture qui échoue passe par là : voir l'en-tête du module sur
 // pourquoi un `console.error` ne compte pas comme un signalement.
 import { reportWriteFailure } from '@/lib/errors/write-failures';
@@ -1261,6 +1262,19 @@ export const useBreeding = (
     async (entries: { id: string; level: number }[]) => {
       const known = new Map(stable.individuals.map((mount) => [mount.id, mount]));
 
+      /**
+       * Ce que la liste réclame et que l'écurie ne peut plus donner.
+       *
+       * La fournée se fige au premier verrou ; l'écurie, elle, continue de
+       * bouger. Une monture vendue, sacrifiée ou passée stérile entre le verrou
+       * et la sortie n'a plus de ligne à passer féconde — et c'est **la** chose
+       * que cette fonction ne doit pas traiter en silence. Voir `unavailableFor`.
+       */
+      const blocked = unavailableFor(
+        entries.map((entry) => entry.id),
+        stable.individuals
+      );
+
       /** Les suivies : un niveau et un drapeau, ligne par ligne. */
       const levelOf = new Map<number, string[]>();
       const levelById = new Map<string, number>();
@@ -1288,6 +1302,8 @@ export const useBreeding = (
        * même lecture généalogique qu'au compteur, et gagnent leur niveau.
        */
       const promoted: { colorId: string; sex: Sex; level: number }[] = [];
+      /** Leurs identifiants d'enclos, dans le même ordre : voir `settled`. */
+      const promotedIds: string[] = [];
 
       for (const entry of entries) {
         const counted = parseCountedMountId(entry.id);
@@ -1297,6 +1313,7 @@ export const useBreeding = (
             sex: counted.sex,
             level: Math.max(1, Math.min(200, entry.level)),
           });
+          promotedIds.push(entry.id);
           // Une monture procurée n'était pas au compteur : rien à en retirer.
           if (!counted.acquired) {
             const current = bulkExits.get(counted.colorId) ?? { males: 0, females: 0 };
@@ -1308,17 +1325,62 @@ export const useBreeding = (
         }
 
         // Une stérile qui traînerait dans la liste ne doit pas ressusciter en
-        // féconde, et la base refuse la combinaison de toute façon.
+        // féconde, et la base refuse la combinaison de toute façon. Une monture
+        // que l'écurie ne porte plus n'a pas davantage de ligne à écrire.
+        //
+        // Les deux se **comptent** au lieu de se sauter, et c'est le correctif :
+        // sauter en silence puis rendre `complete` faisait retirer l'enclos de
+        // la fournée sur des montures que rien n'avait enregistrées — encore en
+        // enclos dans le jeu, absentes de l'écurie et absentes de la fournée.
+        if (blocked.has(entry.id)) continue;
         const mount = known.get(entry.id);
-        if (!mount || !mount.fertile) continue;
+        // Inatteignable autrement que par `blocked` : la garde tient le type.
+        if (!mount) continue;
         const level = Math.max(1, Math.min(200, entry.level));
         levelById.set(entry.id, level);
         levelOf.set(level, [...(levelOf.get(level) ?? []), entry.id]);
       }
 
-      // Rien à écrire n'est pas un échec : la liste ne portait que des stériles,
-      // et l'enclos peut quitter la fournée sans laisser de dette.
-      if (levelById.size === 0 && promoted.length === 0) return { written: 0, complete: true };
+      /**
+       * Ce que la sortie n'a pas pu écrire, dit une fois pour toutes.
+       *
+       * Une bannière et non un `console.error` : c'est la seule chose qui reste à
+       * l'écran quand l'éleveur regarde le jeu à côté, et le seul endroit où il
+       * peut lire **quelles** montures corriger. Sans elle, la fenêtre annonçait
+       * « 10 montures sorties » sur un lot de quarante.
+       */
+      const barren = [...blocked].filter(([, why]) => why === 'barren');
+      const goneAway = [...blocked].filter(([, why]) => why === 'gone');
+      const nameOfId = (id: string) => known.get(id)?.name ?? 'une anonyme';
+      if (barren.length > 0) {
+        reportWriteFailure(
+          barren.length > 1
+            ? `${barren.length} montures de cet enclos que l'écurie dit stériles`
+            : 'une monture de cet enclos que l’écurie dit stérile',
+          `${barren.map(([id]) => nameOfId(id)).join(', ')} — une stérile ne peut pas être ` +
+            `féconde, ni à l'écurie ni en jeu. Corrige la fertilité dans « Mes stocks », ` +
+            'puis reclique la sortie. Rien ne se perd entre-temps : l’enclos les garde.'
+        );
+      }
+      if (goneAway.length > 0) {
+        reportWriteFailure(
+          goneAway.length > 1
+            ? `${goneAway.length} montures de cet enclos qui ne sont plus à l'écurie`
+            : 'une monture de cet enclos qui n’est plus à l’écurie',
+          'Vendues, sacrifiées ou retirées de l’écurie depuis que la fournée a été ' +
+            'figée. Rajoute-les à l’écurie puis reclique la sortie, ou ressors l’enclos ' +
+            'en fertiles si elles n’y étaient pas. Rien ne se perd entre-temps : ' +
+            'l’enclos les garde.'
+        );
+      }
+
+      // Rien à écrire **et** rien de sauté : la liste était vide de suivies
+      // écrivables sans que rien ne se perde, l'enclos peut quitter la fournée
+      // sans laisser de dette. Si quelque chose a été sauté, en revanche, il
+      // reste dû : c'est exactement ce que le retour `complete: true` cachait.
+      if (levelById.size === 0 && promoted.length === 0) {
+        return { written: 0, complete: blocked.size === 0, settled: [] };
+      }
 
       // Ce qui quitte le compteur en sort pour de bon. `cycledOf` borne déjà les
       // fécondes au stock, mais le plancher se reprend ici : la base refuse un
@@ -1357,11 +1419,13 @@ export const useBreeding = (
        * que seul le second permet de décider s'il reste quelque chose à
        * rattraper.
        */
-      let complete = true;
+      let complete = blocked.size === 0;
 
       // Les promues d'abord : leurs identifiants viennent de la base, et l'état
       // local doit porter les mêmes pour qu'un accouplement puisse les désigner.
       let inserted: Individual[] = [];
+      /** L'insertion des comptées est en bloc : elle passe ou elle ne passe pas. */
+      let promoteWritten = false;
       if (promoted.length > 0) {
         const { data, error: promoteError } = await supabase
           .from('user_breeding_individuals')
@@ -1389,7 +1453,7 @@ export const useBreeding = (
             promoteError
           );
           complete = false;
-        }
+        } else promoteWritten = true;
 
         // Sans ascendance : la promotion n'en insère aucune, donc la ligne
         // relue n'en porte pas — le `parents: null` qui était écrit ici en dur
@@ -1448,10 +1512,17 @@ export const useBreeding = (
         ],
       }));
 
-      // Ce qui est **écrit**, et non ce qui a été tenté. Le compte couvre les
-      // deux familles — suivies et comptées — sinon la sortie annoncerait moins
-      // de montures que la liste n'en portait.
-      return { written: cycled.size + inserted.length, complete };
+      /**
+       * Ce qui est **écrit**, et non ce qui a été tenté.
+       *
+       * `settled` porte les identifiants d'enclos — uuid pour une suivie,
+       * `couleur+F0` pour une procurée — et non ceux des lignes créées : c'est
+       * l'enclos qu'il faut alléger, et lui ne connaît que les siens. Sans ça, un
+       * reclic après une sortie partielle réinsérait les comptées déjà entrées,
+       * une monture achetée en devenant deux.
+       */
+      const settled = [...cycled.keys(), ...(promoteWritten ? promotedIds : [])];
+      return { written: cycled.size + inserted.length, complete, settled };
     },
     [family, stable.bulk, stable.individuals]
   );
@@ -1927,10 +1998,39 @@ export const useBreeding = (
          `cloneOptions` et `cloningsToRecord` n'apparient plus que des
          ascendances de même génération portée. Voir `cloning.ts`. */
 
-      const kept = entries
-        .map((entry) => byId.get(entry.keep))
-        .filter((mount): mount is Individual => mount !== undefined);
-      const gone = entries.flatMap((entry) => [entry.keep, entry.drop]);
+      /**
+       * Les clonages dont l'écurie porte **encore** la monture gardée.
+       *
+       * `kept` se contentait de filtrer les introuvables, et `gone` prenait les
+       * deux identifiants de **toutes** les lignes : un clonage dont la gardée
+       * avait disparu de l'écurie entre l'affichage et le clic supprimait donc sa
+       * jumelle sans rendre de clone — deux montures consommées pour rien,
+       * exactement ce que l'ordre des écritures ci-dessous existe pour empêcher.
+       * Même classe que la sortie d'enclos : une entrée qu'on ne sait pas
+       * résoudre se **dit**, elle ne se saute pas.
+       */
+      const writable = entries.filter((entry) => byId.has(entry.keep));
+      const orphans = entries.length - writable.length;
+      if (orphans > 0) {
+        reportWriteFailure(
+          orphans > 1
+            ? `${orphans} clonages dont la monture gardée n'est plus à l'écurie`
+            : 'un clonage dont la monture gardée n’est plus à l’écurie',
+          'Rien n’a été écrit pour ' +
+            (orphans > 1 ? 'ces clonages' : 'ce clonage') +
+            ' : sans elle, le clone n’a ni couleur ni ascendance à reprendre, et ' +
+            'supprimer sa jumelle coûterait deux montures pour rien. Recharge la ' +
+            'page, puis reprends-' +
+            (orphans > 1 ? 'les' : 'le') +
+            '.'
+        );
+      }
+      if (writable.length === 0) {
+        return { ok: false as const, message: 'Aucun de ces clonages n’est enregistrable.' };
+      }
+
+      const kept = writable.map((entry) => byId.get(entry.keep)!);
+      const gone = writable.flatMap((entry) => [entry.keep, entry.drop]);
 
       const supabase = createClient();
 
@@ -1978,7 +2078,7 @@ export const useBreeding = (
         return {
           ok: false as const,
           message: reportWriteFailure(
-            entries.length > 1 ? `les ${entries.length} clonages` : 'le clonage',
+            writable.length > 1 ? `les ${writable.length} clonages` : 'le clonage',
             insertResult.error
           ),
         };

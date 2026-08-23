@@ -49,6 +49,17 @@ export type BreedingBatchState = {
   unlock: () => Promise<void>;
   /** Retire un enclos de la fournée : il vient d'être vidé, dans un sens ou l'autre. */
   release: (index: number) => Promise<void>;
+  /**
+   * Retire d'un enclos **les seules montures qui ont été écrites**.
+   *
+   * Une sortie partielle laissait le choix entre deux mensonges : retirer
+   * l'enclos entier — les montures non écrites devenaient introuvables, ni en
+   * fournée ni à l'écurie — ou le garder tel quel, et le reclic réinsérait les
+   * comptées déjà entrées, une monture achetée en devenant deux. L'enclos se
+   * réduit donc à ce qu'il **doit encore**, et il disparaît quand il ne doit
+   * plus rien.
+   */
+  settle: (index: number, ids: readonly string[]) => Promise<void>;
   /** Abandonne la fournée entière sans rien écrire sur les montures. */
   discard: () => Promise<void>;
   /**
@@ -182,6 +193,24 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
     [commit, pens]
   );
 
+  const settle = useCallback(
+    async (index: number, ids: readonly string[]) => {
+      if (index < 0 || index >= pens.length || ids.length === 0) return;
+      const written = new Set(ids);
+      const next = pens
+        .map((pen, at) =>
+          at === index
+            ? { ...pen, units: pen.units.filter((unit) => !written.has(unit.id)) }
+            : pen
+        )
+        // Un enclos qui ne doit plus rien n'a plus de geste à offrir : le garder
+        // afficherait une carte vide qu'aucun bouton ne referme.
+        .filter((pen) => pen.units.length > 0);
+      await commit(pens, next);
+    },
+    [commit, pens]
+  );
+
   const discard = useCallback(async () => {
     if (pens.length === 0) return;
     await commit(pens, []);
@@ -201,5 +230,5 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
 
   const nextIndex = useMemo(() => nextPenIndex(pens), [pens]);
 
-  return { pens, loading, nextIndex, lock, unlock, release, discard, refresh };
+  return { pens, loading, nextIndex, lock, unlock, release, settle, discard, refresh };
 };

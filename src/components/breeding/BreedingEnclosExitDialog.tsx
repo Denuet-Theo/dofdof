@@ -62,7 +62,19 @@ import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
  * **et** de la fournée. `complete` est la seule chose qui distingue « c'est
  * fini » de « il reste à rattraper ».
  */
-export type EnclosExitResult = { written: number; complete: boolean };
+export type EnclosExitResult = {
+  written: number;
+  complete: boolean;
+  /**
+   * Les identifiants d'enclos réellement enregistrés.
+   *
+   * L'appelant en allège l'enclos plutôt que de le retirer entier : ce qui n'y
+   * est pas resté doit encore être écrit, et un reclic sur un enclos intact
+   * réinsérerait les comptées déjà entrées — une monture achetée en devenant
+   * deux.
+   */
+  settled: string[];
+};
 
 type Props = {
   isOpen: boolean;
@@ -73,6 +85,16 @@ type Props = {
   nameOf: (colorId: string) => string;
   /** Écrit les niveaux et passe tout le lot en fécondes. Rend le compte écrit. */
   onConfirm: (entries: { id: string; level: number }[]) => Promise<EnclosExitResult>;
+  /**
+   * Ce que l'écurie ne peut plus donner, et pourquoi — voir `unavailableFor`.
+   *
+   * Dit **avant** le clic et non après : une monture vendue ou passée stérile
+   * depuis que la fournée a été figée n'a plus de ligne à passer féconde, et
+   * l'apprendre une fois la fenêtre refermée est exactement ce qui a fait
+   * disparaître une fournée. La ligne reste affichée — la monture est bien dans
+   * l'enclos, en jeu — mais elle dit ce qu'elle bloque.
+   */
+  blocked?: Map<string, 'gone' | 'barren'>;
   /**
    * Rend le lot **fertile** : l'enclos n'a pas tourné, il n'y a rien à écrire.
    *
@@ -91,6 +113,7 @@ const BreedingEnclosExitDialog = ({
   nameOf,
   onConfirm,
   onRelease,
+  blocked = new Map(),
 }: Props) => {
   /**
    * Le brouillon de saisie, rattaché au lot qu'il décrit.
@@ -203,6 +226,13 @@ const BreedingEnclosExitDialog = ({
     (mount) => parseCountedMountId(mount.id) !== null && levels[mount.id] === undefined
   );
 
+  /** Celles du lot que l'écurie ne peut plus donner — voir `blocked`. */
+  const blockedHere = mounts.filter((mount) => blocked.has(mount.id));
+  const gone = blockedHere.filter((mount) => blocked.get(mount.id) === 'gone').length;
+  const barren = blockedHere.length - gone;
+  /** Ce que le bouton va réellement écrire — et il le dit. */
+  const writable = mounts.length - blockedHere.length;
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Sortir les montures de l'enclos" size="xl">
       <div className="space-y-4">
@@ -220,6 +250,33 @@ const BreedingEnclosExitDialog = ({
             <strong className="text-dark-200">fertiles</strong> : rien n&apos;est écrit sur les
             montures, elles redeviennent disponibles telles quelles.
           </p>
+        )}
+
+        {/* Ce que la sortie ne pourra pas enregistrer, dit avant le clic.
+            La fournée se fige au premier verrou ; l'écurie, elle, continue de
+            bouger. Une monture vendue ou passée stérile entre-temps n'a plus de
+            ligne à passer féconde — et l'apprendre après coup, sur une fenêtre
+            refermée en annonçant un succès, est la forme exacte qui a coûté une
+            fournée. */}
+        {blockedHere.length > 0 && (
+          <div
+            data-testid="exit-blocked"
+            data-count={blockedHere.length}
+            className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+              bg-loss/10 border border-loss/30"
+          >
+            <AlertTriangle size={13} className="text-loss-light shrink-0" />
+            <span className="text-[11px] text-dark-300">
+              <strong className="text-loss-light">{blockedHere.length}</strong> monture
+              {blockedHere.length > 1 ? 's' : ''}{' '}de cet enclos que l&apos;écurie ne peut plus
+              donner — {gone > 0 && <>{gone} retirée{gone > 1 ? 's' : ''} de l&apos;écurie</>}
+              {gone > 0 && barren > 0 && ', '}
+              {barren > 0 && <>{barren} passée{barren > 1 ? 's' : ''} stérile{barren > 1 ? 's' : ''}</>}
+              . La sortie enregistrera les autres et{' '}
+              <strong className="text-dark-200">gardera celles-ci en enclos</strong> : corrige-les
+              dans « Mes stocks », puis reclique. Rien ne les perdra entre-temps.
+            </span>
+          </div>
         )}
 
         {mounts.length > 1 && (
@@ -290,6 +347,13 @@ const BreedingEnclosExitDialog = ({
                 {levelOf(mount) !== mount.level && (
                   <span className="text-[10px] text-dark-600 tabular-nums">
                     était {mount.level}
+                  </span>
+                )}
+                {blocked.has(mount.id) && (
+                  <span data-testid="exit-blocked-row" className="text-[10px] text-loss-light">
+                    {blocked.get(mount.id) === 'gone'
+                      ? 'plus à l’écurie — reste en enclos'
+                      : 'stérile à l’écurie — reste en enclos'}
                   </span>
                 )}
               </div>
@@ -379,7 +443,12 @@ const BreedingEnclosExitDialog = ({
           <Button
             size="sm"
             data-testid="exit-cycled"
-            disabled={running || mounts.length === 0 || missing.length > 0}
+            disabled={
+              running ||
+              mounts.length === 0 ||
+              missing.length > 0 ||
+              writable === 0
+            }
             onClick={async () => {
               setRunning(true);
               const result = await onConfirm(
@@ -398,7 +467,9 @@ const BreedingEnclosExitDialog = ({
             <LogOut size={13} />
             {running
               ? 'Enregistrement…'
-              : `Sortir ${mounts.length} monture${mounts.length > 1 ? 's' : ''} — fécondes`}
+              : writable === 0
+                ? 'Rien à sortir — corrige-les d’abord'
+                : `Sortir ${writable} monture${writable > 1 ? 's' : ''} — fécondes`}
           </Button>
 
           {/* L'annulation. En teinte secondaire et non en danger : ce n'est pas

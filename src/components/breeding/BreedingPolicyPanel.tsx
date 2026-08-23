@@ -35,8 +35,9 @@ import {
   type BatchUnit,
 } from '@/lib/dofus/breeding/batch';
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
+import { unavailableFor } from '@/lib/dofus/breeding/batch';
 import { formatCountdown } from '@/lib/dofus/breeding/countdown';
-import { acquiredMountId, parseCountedMountId } from '@/lib/dofus/breeding/search';
+import { acquiredMountId } from '@/lib/dofus/breeding/search';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
@@ -409,12 +410,11 @@ const BreedingPolicyPanel = ({
    */
   const unloadable = useMemo(() => {
     if (current === null || batch.pens.length === 0) return [];
-    const byId = new Map(individuals.map((mount) => [mount.id, mount]));
-    return pens[current].units.filter((unit) => {
-      if (parseCountedMountId(unit.id)) return false;
-      const mount = byId.get(unit.id);
-      return !mount || !mount.fertile;
-    });
+    const out = unavailableFor(
+      pens[current].units.map((unit) => unit.id),
+      individuals
+    );
+    return pens[current].units.filter((unit) => out.has(unit.id));
   }, [batch.pens.length, current, individuals, pens]);
   const locked = pens
     .map((pen, index) => ({ pen, index }))
@@ -507,6 +507,20 @@ const BreedingPolicyPanel = ({
 
   /** L'enclos dont on est en train de sortir les montures. */
   const exiting = typeof open === 'object' && open !== null ? pens[open.exit] : undefined;
+
+  /**
+   * Ce que l'enclos qu'on sort réclame et que l'écurie ne peut plus donner.
+   *
+   * `unloadable` ne regarde que l'enclos **en cours de remplissage** : c'est là
+   * qu'on part chercher des montures dans le jeu, donc là qu'il faut dire de ne
+   * pas y aller. Mais un enclos verrouillé vieillit lui aussi, et la sortie
+   * sautait alors ses montures en silence tout en se déclarant complète. Voir
+   * `recordEnclosExit`.
+   */
+  const exitBlocked = useMemo(
+    () => unavailableFor((exiting?.units ?? []).map((unit) => unit.id), individuals),
+    [exiting, individuals]
+  );
 
   return (
     <div
@@ -1113,6 +1127,7 @@ const BreedingPolicyPanel = ({
           isOpen={exiting !== undefined}
           onClose={() => setOpen(null)}
           mounts={(exiting?.units ?? []).map(asIndividual)}
+          blocked={exitBlocked}
           colors={colors}
           nameOf={nameOf}
           onConfirm={async (entries) => {
@@ -1124,11 +1139,19 @@ const BreedingPolicyPanel = ({
             // nulle part dans l'app. Tant qu'il manque une écriture l'enclos
             // reste verrouillé à l'écran, ce qui est la vérité, et le geste se
             // reprend.
-            if (result.complete && typeof open === 'object' && open !== null) {
-              await batch.release(open.exit);
-              // Le cycle vient d'être payé : c'est exactement le moment où de
-              // nouveaux accouplements deviennent possibles.
-              setStep('mate');
+            if (typeof open === 'object' && open !== null) {
+              if (result.complete) {
+                await batch.release(open.exit);
+                // Le cycle vient d'être payé : c'est exactement le moment où de
+                // nouveaux accouplements deviennent possibles.
+                setStep('mate');
+              } else if (result.settled.length > 0) {
+                // Une sortie partielle allège l'enclos de ce qui est passé, et
+                // le laisse porter le reste. Le retirer entier rendrait les
+                // non-écrites introuvables ; le laisser intact ferait réinsérer
+                // les comptées au reclic, une monture achetée en devenant deux.
+                await batch.settle(open.exit, result.settled);
+              }
             }
             return result;
           }}

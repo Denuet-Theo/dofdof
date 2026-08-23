@@ -1,4 +1,4 @@
-import { cycledOf, type Sex, type Stable } from './stable';
+import { cycledOf, type Individual, type Sex, type Stable } from './stable';
 import { parseCountedMountId } from './search';
 
 /**
@@ -225,4 +225,50 @@ export const withoutPenned = (stable: Stable, pens: BatchPen[]): Stable => {
     bulk,
     individuals: stable.individuals.filter((mount) => !trackedOut.has(mount.id)),
   };
+};
+
+/**
+ * Pourquoi l'écurie ne peut plus donner une monture qu'un enclos réclame.
+ *
+ * `gone` : plus aucune ligne à ce nom — vendue, sacrifiée, retirée à la main.
+ * `barren` : stérile, donc la base refusera de la passer féconde (migration
+ * 20260809210000) et le jeu refusera de l'accoupler.
+ */
+export type Unavailable = 'gone' | 'barren';
+
+/**
+ * Ce qu'une liste d'enclos nomme et que l'écurie ne peut plus fournir.
+ *
+ * ## Pourquoi cette règle est ici, et une seule fois
+ *
+ * Trois écrans la posent : le bandeau « ne peut plus entrer en enclos » de
+ * l'enclos en cours (#251), la fenêtre de sortie qui doit dire ce qu'elle ne
+ * pourra pas écrire, et `recordEnclosExit` qui doit refuser d'annoncer une
+ * sortie complète sur une monture qu'elle a sautée. Les trois l'écrivaient — ou
+ * l'oubliaient — séparément, et c'est l'oubli du troisième qui a coûté une
+ * fournée : la sortie sautait la monture **en silence**, se déclarait complète,
+ * et l'enclos quittait la fournée. La monture restait alors en enclos dans le
+ * jeu, absente de l'écurie **et** de la fournée — introuvable des deux côtés.
+ *
+ * Une seule fonction, donc, que les trois traversent. Voir `AGENTS.md` :
+ * « rendre la classe irreprésentable » vaut mieux que trois appelants corrects
+ * et un quatrième qui ne le sera pas.
+ *
+ * Les identifiants **comptés** — vrac `couleur#M3`, à procurer `couleur+F0` —
+ * n'ont pas de ligne à confronter : ils décrivent une quantité ou un achat, pas
+ * une monture suivie. Les regarder ferait se signaler toute fournée qui achète.
+ */
+export const unavailableFor = (
+  ids: readonly string[],
+  individuals: readonly Individual[]
+): Map<string, Unavailable> => {
+  const byId = new Map(individuals.map((mount) => [mount.id, mount]));
+  const out = new Map<string, Unavailable>();
+  for (const id of ids) {
+    if (parseCountedMountId(id) !== null) continue;
+    const mount = byId.get(id);
+    if (!mount) out.set(id, 'gone');
+    else if (!mount.fertile) out.set(id, 'barren');
+  }
+  return out;
 };

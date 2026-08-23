@@ -169,7 +169,7 @@ for (const full of files) {
     if (excused) continue;
 
     const relayed =
-      /reportWriteFailure\s*\(|touchedRows\s*\(|throw\s/.test(around) ||
+      /reportWriteFailure\s*\(|touchedRows\s*\(|revertOnFailure\s*\(|throw\s/.test(around) ||
       // Une écriture rendue à l'appelant qui, lui, la relaie.
       /return\s+\{\s*ok:\s*false/.test(around);
     if (!relayed) {
@@ -178,8 +178,48 @@ for (const full of files) {
         line: index + 1,
         rule: 1,
         text: line.trim(),
-        say: 'l’échec ne va ni à `reportWriteFailure` ni à `touchedRows`',
+        say: 'l’échec ne va ni à `reportWriteFailure` ni à `touchedRows` ni à `revertOnFailure`',
       });
+    }
+
+    /**
+     * Clause 2 de la règle d'or : ce qui est posé en avance revient.
+     *
+     * On cherche un poseur d'état **avant** l'écriture — c'est ça, une écriture
+     * optimiste — et on exige alors que le résultat passe par une porte qui
+     * prend un `Undo`. Le type rend l'oubli impossible à compiler ; cette règle
+     * attrape l'autre moitié, celle où l'appelant a court-circuité la porte et
+     * s'est contenté d'un `reportWriteFailure`.
+     *
+     * Les poseurs de confort — `setLoading`, `setError`, `setSaving` — ne
+     * décrivent pas l'écurie : ils ne comptent pas.
+     */
+    // Bornée à la fonction englobante : une fenêtre de taille fixe traversait
+    // les frontières et accusait `saveSettings` du `setItemStock` de la fonction
+    // d'au-dessus. Une garde qui accuse à tort s'apprend à ignorer.
+    let start = index;
+    while (start > 0 && !/^\s{0,4}(const|function|export)\s+\w+/.test(lines[start - 1])) {
+      start -= 1;
+    }
+    const before = lines.slice(start, index).join('\n');
+    const posted = [...before.matchAll(/\bset([A-Z]\w*)\s*\(/g)]
+      .map((hit) => hit[1])
+      // Les poseurs de confort ne décrivent pas l'écurie : un spinner, un
+      // message, une fenêtre ouverte n'ont rien à défaire.
+      .filter((name) => !/Loading|Error|Saving|Running|Open|Busy|Pending|Modal|Dialog/.test(name));
+    if (posted.length > 0) {
+      const goesThroughDoor = /touchedRows\s*\(|revertOnFailure\s*\(/.test(context);
+      if (!goesThroughDoor) {
+        problems.push({
+          relative,
+          line: index + 1,
+          rule: 3,
+          text: line.trim(),
+          say:
+            `\`set${posted[0]}\` pose l’état avant l’écriture, et le résultat ne passe ` +
+            'pas par `touchedRows`/`revertOnFailure` : rien ne dit ce qu’il faut défaire',
+        });
+      }
     }
 
     if (!FILTERED.test(line)) continue;

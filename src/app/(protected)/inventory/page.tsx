@@ -152,7 +152,14 @@ const InventoryPage = () => {
         .eq('id', editingSale.id)
         .select('id');
 
-      if (!touchedRows('le nouveau prix de cette mise en vente', 1, saleResult).ok) return;
+      // La liste est relue par `onUpdate`/`loadData` après coup : rien n'est
+      // affiché en avance, il n'y a donc rien à défaire.
+      if (
+        !touchedRows('le nouveau prix de cette mise en vente', 1, saleResult, 'rien-posé-en-avance')
+          .ok
+      ) {
+        return;
+      }
 
       // 2. Update the global item_prices to benefit everyone
       const {

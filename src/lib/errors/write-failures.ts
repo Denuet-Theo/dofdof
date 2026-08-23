@@ -128,6 +128,58 @@ export const reportWriteFailure = (what: string, error: unknown): string => {
 };
 
 /**
+ * Ce qu'il faut **défaire** si la base n'a pas pris l'écriture.
+ *
+ * Une fonction, ou l'aveu explicite qu'il n'y a rien à défaire. Pas de valeur
+ * par défaut, et c'est tout l'objet du type : la question « qu'est-ce que
+ * l'écran montre déjà que la base n'a pas confirmé ? » doit être **posée** à
+ * chaque écriture. Elle ne l'était nulle part, et la réponse a été « rien » par
+ * omission une trentaine de fois.
+ *
+ * `'rien-posé-en-avance'` est un mot à écrire, pas un oubli à commettre : il se
+ * lit dans un diff, il se cherche en `grep`, et il se conteste en relecture.
+ */
+export type Undo =
+  | (() => void)
+  /** L'écran n'affiche rien que la base n'ait confirmé : il n'y a rien à défaire. */
+  | 'rien-posé-en-avance'
+  /**
+   * Posé en avance et **gardé volontairement**, la raison écrite juste à côté.
+   *
+   * Il y en a, et les nier serait pire que le trou d'origine : un panneau de
+   * filtres qui se réécrirait sous les doigts pendant qu'on tape est hostile, et
+   * la valeur y est de toute façon re-tentée à la frappe suivante. Ce que ce mot
+   * garantit, c'est que le cas a été **jugé** — pas qu'il a été oublié.
+   */
+  | 'gardé-exprès';
+
+/** Défait ce qui avait été posé en avance, s'il y avait quelque chose. */
+const revert = (undo: Undo) => {
+  if (typeof undo === 'function') undo();
+};
+
+/**
+ * Une écriture **non filtrée** — `insert`, `upsert`, `rpc` — et son retour arrière.
+ *
+ * Elle ne peut pas ne rien toucher : un `insert` insère, un `upsert` insère ou
+ * met à jour. Il n'y a donc rien à compter, seulement un refus à relayer et un
+ * état local à défaire. C'est la clause 2 de la règle d'or, celle qui manquait à
+ * `saveBulkStock`, `saveItemStock`, aux filtres de ferme et au projet : les
+ * quatre posaient la valeur à l'écran, signalaient le refus, et **gardaient la
+ * valeur refusée** jusqu'au rechargement suivant.
+ */
+export const revertOnFailure = <T>(
+  what: string,
+  result: { data?: T | null; error: unknown },
+  undo: Undo
+): boolean => {
+  if (!result.error) return true;
+  reportWriteFailure(what, result.error);
+  revert(undo);
+  return false;
+};
+
+/**
  * Une écriture filtrée qui **a réellement porté**, ou l'aveu qu'elle n'a rien
  * touché.
  *
@@ -162,10 +214,12 @@ export const reportWriteFailure = (what: string, error: unknown): string => {
 export const touchedRows = <T>(
   what: string,
   expected: number,
-  result: { data: T[] | null; error: unknown }
+  result: { data: T[] | null; error: unknown },
+  undo: Undo
 ): { ok: boolean; rows: T[] } => {
   if (result.error) {
     reportWriteFailure(what, result.error);
+    revert(undo);
     return { ok: false, rows: [] };
   }
 
@@ -179,6 +233,10 @@ export const touchedRows = <T>(
       'ou ne sont pas à toi — recharge la page pour voir ce qu’elle contient ' +
       'vraiment, le geste est à refaire.'
   );
+  // Une écriture partielle défait quand même : l'écran ne doit pas garder ce que
+  // la base n'a pas pris. L'appelant qui sait faire mieux — n'annuler que les
+  // lignes restées de côté — lit `rows` et passe `'rien-posé-en-avance'`.
+  revert(undo);
   return { ok: false, rows };
 };
 

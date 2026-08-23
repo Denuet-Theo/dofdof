@@ -137,6 +137,7 @@ const BreedingPage = () => {
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    updateIndividuals,
     recordEnclosExit,
     removeIndividual,
     removeIndividuals,
@@ -767,6 +768,9 @@ const BreedingPage = () => {
         onSaveBulk={saveBulkStock}
         onAddIndividual={addIndividual}
         onUpdateIndividual={updateIndividual}
+        // Le geste qui ramène une fournée entière quand la sortie d’enclos ne
+        // peut plus le faire : cocher un lot, poser « fécondes, niveau 44 ».
+        onUpdateIndividuals={updateIndividuals}
         onRemoveIndividual={removeIndividual}
         // Le purge des anonymes stériles part en une écriture : soixante-dix
         // suppressions séparées laisseraient un état que personne ne peut dire.

@@ -102,6 +102,16 @@ type Props = {
     parents?: [string, string] | null;
     status?: MountStatus;
   }) => Promise<AddResult>;
+  /**
+   * Corrige un lot de montures d'un coup.
+   *
+   * Absente, la sélection ne s'affiche pas : l'écran reste celui d'avant. C'est
+   * ce qui permet de tester la liste sans monter tout le parcours.
+   */
+  onUpdateIndividuals?: (
+    ids: string[],
+    patch: { level?: number; fertile?: boolean; cycled?: boolean }
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
   onUpdateIndividual: (
     id: string,
     patch: Partial<Pick<Individual, 'sex' | 'level' | 'fertile' | 'cycled' | 'name'>>
@@ -274,6 +284,7 @@ const BreedingStocks = ({
   onSaveBulk,
   onAddIndividual,
   onUpdateIndividual,
+  onUpdateIndividuals,
   onRemoveIndividual,
   onRemoveIndividuals,
   onSaveItem,
@@ -449,6 +460,54 @@ const BreedingStocks = ({
    * est le nom que le jeu leur donne. L'uuid reste en dernier départage, pour
    * que deux homonymes ne dansent pas d'un rendu à l'autre.
    */
+  /**
+   * Les montures cochées, par identifiant.
+   *
+   * Un `Set` et non un drapeau par ligne : la liste se refiltre en permanence,
+   * et une sélection portée par les lignes disparaîtrait au premier changement
+   * de filtre. Or c'est précisément l'usage — filtrer sur « Doré », tout cocher,
+   * filtrer autrement, continuer. La sélection survit donc au filtre, et le
+   * bandeau dit combien de cochées sont hors de vue.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkLevel, setBulkLevel] = useState('');
+  const [bulkStatus, setBulkStatus] = useState<MountStatus | ''>('');
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkError, setBulkError] = useState('');
+
+  /**
+   * La sélection, ramenée à ce qui existe encore.
+   *
+   * Une monture retirée de l'écurie pendant qu'elle est cochée laisserait un
+   * identifiant fantôme dans le lot, et l'écriture porterait sur une ligne
+   * absente — le silence que `touchedRows` attrape, mais qu'il vaut mieux ne pas
+   * fabriquer.
+   */
+  const selectedIds = useMemo(
+    () => individuals.filter((mount) => selected.has(mount.id)).map((mount) => mount.id),
+    [individuals, selected]
+  );
+  const selectedCount = selectedIds.length;
+
+  /**
+   * Ce que le bouton écrira, ou `null` s'il n'y a rien à écrire.
+   *
+   * Les deux champs sont facultatifs et indépendants : sortir un lot d'enclos
+   * demande les deux, corriger un niveau mal saisi n'en demande qu'un. Un patch
+   * vide désactive le bouton plutôt que d'envoyer une écriture qui ne changerait
+   * rien — laquelle passerait pour un succès et ne dirait rien de faux, mais
+   * ferait croire à un geste accompli.
+   */
+  const bulkPatch = useMemo(() => {
+    const level = Number(bulkLevel);
+    const patch: { level?: number; fertile?: boolean; cycled?: boolean } = {};
+    if (bulkLevel !== '' && Number.isFinite(level) && level >= 1 && level <= 200) {
+      patch.level = Math.round(level);
+    }
+    if (bulkStatus !== '') Object.assign(patch, statusFlags(bulkStatus));
+    return Object.keys(patch).length > 0 ? patch : null;
+  }, [bulkLevel, bulkStatus]);
+
   const owned = useMemo(() => {
     return individuals
       .filter((mount) =>
@@ -473,6 +532,12 @@ const BreedingStocks = ({
           a.id.localeCompare(b.id)
       );
   }, [individuals, filters, nameOf, generationOfColor]);
+
+  /** Cochées mais hors du filtre courant : on applique à ce qu'on ne voit pas. */
+  const hiddenCount = useMemo(() => {
+    const shown = new Set(owned.map((mount) => mount.id));
+    return selectedIds.filter((id) => !shown.has(id)).length;
+  }, [owned, selectedIds]);
 
   /**
    * Le vrac restant, couleurs vides exclues et filtres appliqués.
@@ -849,6 +914,150 @@ const BreedingStocks = ({
               review={census.review}
             />
 
+            {/* La correction en lot.
+                L'app sait mettre soixante montures en enclos en quelques clics ;
+                elle n'avait aucun geste pour les en ramener quand la fournée est
+                perdue. Cinquante montures à repasser fécondes **et** à reniveler
+                une par une font cent gestes, c'est-à-dire un travail qu'on ne
+                fait pas — donc une écurie qui reste fausse et une politique qui
+                planifie dessus. Voir `updateIndividuals`.
+
+                Le bandeau n'existe que quand quelque chose est coché : un écran
+                d'écurie sert d'abord à lire, et une barre d'outils permanente
+                ferait payer à la lecture le prix d'un geste rare. */}
+            {onUpdateIndividuals && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  data-testid="bulk-select-all"
+                  onClick={() =>
+                    setSelected((current) => {
+                      const next = new Set(current);
+                      const all = owned.every((mount) => next.has(mount.id));
+                      for (const mount of owned) {
+                        if (all) next.delete(mount.id);
+                        else next.add(mount.id);
+                      }
+                      return next;
+                    })
+                  }
+                  className="px-2 py-1 rounded-lg border border-dark-600/50 bg-dark-800/60
+                    text-dark-300 hover:text-dark-100 transition-colors cursor-pointer"
+                >
+                  {owned.length > 0 && owned.every((mount) => selected.has(mount.id))
+                    ? `Décocher les ${owned.length} affichées`
+                    : `Cocher les ${owned.length} affichées`}
+                </button>
+                {selected.size > 0 && (
+                  <span data-testid="bulk-count" data-count={selectedCount} className="text-dark-400">
+                    <strong className="text-kamas tabular-nums">{selectedCount}</strong>{' '}
+                    sélectionnée{selectedCount > 1 ? 's' : ''}
+                    {/* Cochées mais hors du filtre courant : sans ce compte, on
+                        applique à des montures qu'on ne voit pas. */}
+                    {hiddenCount > 0 && (
+                      <span className="text-loss-light">
+                        {' '}
+                        dont {hiddenCount} hors filtre
+                      </span>
+                    )}
+                  </span>
+                )}
+                {selected.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelected(new Set())}
+                    className="text-dark-500 hover:text-dark-300 transition-colors cursor-pointer"
+                  >
+                    tout décocher
+                  </button>
+                )}
+              </div>
+            )}
+
+            {onUpdateIndividuals && selected.size > 0 && (
+              <div
+                data-testid="bulk-bar"
+                className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
+                  bg-kamas/5 border border-kamas/30"
+              >
+                <span className="text-[11px] text-dark-300">Appliquer à la sélection</span>
+
+                <span className="flex items-center gap-1">
+                  {(['fertile', 'feconde', 'sterile'] as const).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      data-testid={`bulk-status-${value}`}
+                      onClick={() => setBulkStatus((current) => (current === value ? '' : value))}
+                      title={STATUS_HINT[value]}
+                      className={`px-1.5 py-0.5 rounded-lg border text-[10px] transition-all
+                        cursor-pointer ${
+                          bulkStatus === value
+                            ? STATUS_TONE
+                            : 'bg-dark-800/60 border-dark-700/50 text-dark-500 hover:text-dark-300'
+                        }`}
+                    >
+                      {MOUNT_STATUS_LABEL[value]}
+                    </button>
+                  ))}
+                </span>
+
+                <label className="flex items-center gap-1 text-[10px] text-dark-500">
+                  niv
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={bulkLevel}
+                    data-testid="bulk-level"
+                    placeholder="—"
+                    onChange={(event) => setBulkLevel(event.target.value)}
+                    className="w-16 px-1.5 py-0.5 rounded-lg bg-dark-800/80 border
+                      border-dark-600/50 text-dark-100 text-[11px] text-right
+                      transition-all hover:border-dark-500 focus:border-kamas/50"
+                  />
+                </label>
+
+                <Button
+                  size="sm"
+                  data-testid="bulk-apply"
+                  disabled={bulkRunning || !bulkPatch}
+                  onClick={async () => {
+                    if (!bulkPatch) return;
+                    setBulkRunning(true);
+                    setBulkError('');
+                    const result = await onUpdateIndividuals([...selected], bulkPatch);
+                    setBulkRunning(false);
+                    if (!result.ok) {
+                      setBulkError(result.message);
+                      return;
+                    }
+                    // Écrit : la sélection se vide et les champs se remettent à
+                    // zéro. Les garder ferait recliquer sur un lot déjà corrigé.
+                    setSelected(new Set());
+                    setBulkLevel('');
+                    setBulkStatus('');
+                  }}
+                >
+                  <Check size={13} />
+                  {bulkRunning
+                    ? 'Enregistrement…'
+                    : `Corriger ${selectedCount} monture${selectedCount > 1 ? 's' : ''}`}
+                </Button>
+
+                {!bulkPatch && (
+                  <span className="text-[10px] text-dark-600">
+                    choisis un état, un niveau, ou les deux
+                  </span>
+                )}
+                {bulkError && (
+                  <span data-testid="bulk-error" className="text-[11px] text-loss-light">
+                    {bulkError}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div
               ref={list}
               data-testid="stock-list"
@@ -873,6 +1082,23 @@ const BreedingStocks = ({
                     className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl
                       bg-dark-800/40 hover:bg-dark-800/60 transition-colors"
                   >
+                    {onUpdateIndividuals && (
+                      <input
+                        type="checkbox"
+                        data-testid="stock-select"
+                        checked={selected.has(mount.id)}
+                        onChange={() =>
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            if (next.has(mount.id)) next.delete(mount.id);
+                            else next.add(mount.id);
+                            return next;
+                          })
+                        }
+                        title={`Sélectionner ${current}`}
+                        className="accent-kamas cursor-pointer shrink-0"
+                      />
+                    )}
                     <ColorChip
                       name={nameOf(mount.colorId)}
                       code={codeOf(mount.colorId)}

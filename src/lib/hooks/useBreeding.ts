@@ -1576,6 +1576,88 @@ export const useBreeding = (
   );
 
   /**
+   * Corrige **un lot** de montures suivies en une seule écriture.
+   *
+   * ## Le geste qui manquait
+   *
+   * L'app sait mettre soixante montures en enclos en quelques clics. Elle
+   * n'avait aucun moyen de les en ramener : la sortie d'enclos suppose une
+   * fournée enregistrée, et quand celle-ci est perdue — le 23/08 — il reste
+   * cinquante montures à repasser fécondes **et** à reniveler une par une, soit
+   * cent gestes dans « Mes stocks ». C'est le genre de travail qu'on ne fait
+   * pas, donc l'écurie reste fausse, donc la politique planifie sur du vent.
+   *
+   * ## Une seule écriture, pas une boucle
+   *
+   * Cinquante `update` séparés, ce sont cinquante allers-retours dont chacun peut
+   * être refusé à part, donc un état final que personne ne peut décrire — ni
+   * « fait », ni « pas fait ». Un `.in()` passe ou échoue en bloc. Même
+   * raisonnement que `removeIndividuals`.
+   *
+   * Le lot partage forcément le même correctif : c'est ce qui le rend groupable.
+   * Un niveau par monture demanderait la fenêtre de sortie d'enclos, qui existe
+   * pour ça.
+   *
+   * ## Ce que la règle d'or impose ici
+   *
+   * L'écran part devant — la liste se refiltre, les compteurs se recalculent —
+   * et **revient** intégralement si la base refuse ou ne trouve rien. Les
+   * montures d'avant sont gardées entières, pas seulement les champs touchés :
+   * remettre un patch inverse supposerait de savoir ce qu'on a écrasé, ce qui
+   * est exactement la supposition qui a coûté des montures ailleurs.
+   */
+  const updateIndividuals = useCallback(
+    async (
+      ids: string[],
+      patch: Partial<Pick<Individual, 'level' | 'fertile' | 'cycled'>>
+    ): Promise<WriteResult> => {
+      const wanted = new Set(ids);
+      // Ce qu'on écrase, gardé entier pour pouvoir le remettre.
+      const before = stable.individuals.filter((mount) => wanted.has(mount.id));
+      if (before.length === 0) {
+        return { ok: false as const, message: 'Aucune de ces montures n’est à l’écurie.' };
+      }
+
+      const restore = new Map(before.map((mount) => [mount.id, mount]));
+      setStable((current) => ({
+        ...current,
+        individuals: current.individuals.map((mount) =>
+          wanted.has(mount.id) ? { ...mount, ...patch } : mount
+        ),
+      }));
+
+      const supabase = createClient();
+      const result = await supabase
+        .from('user_breeding_individuals')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .in('id', [...wanted])
+        .select('id');
+
+      const { ok } = touchedRows(
+        `la correction de ${before.length} monture${before.length > 1 ? 's' : ''}`,
+        before.length,
+        result,
+        () =>
+          setStable((current) => ({
+            ...current,
+            individuals: current.individuals.map((mount) => restore.get(mount.id) ?? mount),
+          }))
+      );
+
+      if (!ok) {
+        return {
+          ok: false as const,
+          message: result.error
+            ? failureMessage(result.error)
+            : 'La base n’a pas trouvé toutes ces montures.',
+        };
+      }
+      return { ok: true as const };
+    },
+    [stable.individuals]
+  );
+
+  /**
    * Corrige une monture suivie : niveau, sexe ou fertilité.
    *
    * L'écran part devant — la liste se refiltre à la frappe — mais un refus
@@ -2440,6 +2522,7 @@ export const useBreeding = (
     saveBulkStock,
     addIndividual,
     updateIndividual,
+    updateIndividuals,
     recordEnclosExit,
     removeIndividual,
     removeIndividuals,

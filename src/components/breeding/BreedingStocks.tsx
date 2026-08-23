@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import BreedingAddMount from '@/components/breeding/BreedingAddMount';
 import BreedingImportMounts from '@/components/breeding/BreedingImportMounts';
+import BreedingPickByName from '@/components/breeding/BreedingPickByName';
 import CopyableIcon from '@/components/ui/CopyableIcon';
 import { parseGaugeInfo, type GaugeInfo } from '@/lib/utils/gauges';
 import {
@@ -474,6 +475,7 @@ const BreedingStocks = ({
   const [bulkStatus, setBulkStatus] = useState<MountStatus | ''>('');
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkError, setBulkError] = useState('');
+  const [picking, setPicking] = useState(false);
 
   /**
    * La sélection, ramenée à ce qui existe encore.
@@ -962,6 +964,19 @@ const BreedingStocks = ({
                     )}
                   </span>
                 )}
+                {/* Cocher cinquante cases dans une liste de deux cents, avec
+                    des homonymes à départager à l'œil, est la tâche où l'on se
+                    trompe — et on ne s'en aperçoit qu'après. La désignation
+                    existe déjà : c'est la liste du jeu. */}
+                <button
+                  type="button"
+                  data-testid="pick-open"
+                  onClick={() => setPicking(true)}
+                  className="px-2 py-1 rounded-lg border border-dark-600/50 bg-dark-800/60
+                    text-dark-300 hover:text-dark-100 transition-colors cursor-pointer"
+                >
+                  Coller une liste du jeu
+                </button>
                 {selected.size > 0 && (
                   <button
                     type="button"
@@ -1542,6 +1557,13 @@ const BreedingStocks = ({
         onClose={() => setAdding(false)}
         colors={colors}
         onAdd={onAddIndividual}
+      />
+
+      <BreedingPickByName
+        isOpen={picking}
+        onClose={() => setPicking(false)}
+        individuals={individuals}
+        onPick={(ids) => setSelected(new Set(ids))}
       />
 
       <BreedingImportMounts

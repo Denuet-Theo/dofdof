@@ -61,7 +61,7 @@ import { parseCountedMountId } from '@/lib/dofus/breeding/search';
 import { unavailableFor } from '@/lib/dofus/breeding/batch';
 // Toute écriture qui échoue passe par là : voir l'en-tête du module sur
 // pourquoi un `console.error` ne compte pas comme un signalement.
-import { reportWriteFailure } from '@/lib/errors/write-failures';
+import { failureMessage, reportWriteFailure, touchedRows } from '@/lib/errors/write-failures';
 
 /**
  * Ce qu'une insertion de monture a donné.
@@ -1467,16 +1467,24 @@ export const useBreeding = (
       // reflète donc que ce que la base a pris.
       const cycled = new Map<string, number>();
       for (const [level, ids] of levelOf) {
-        const { error: saveError } = await supabase
+        // `.select()` et `touchedRows` : sans eux, un `PATCH` qui ne trouve
+        // **aucune** de ces lignes rend un succès, et la sortie annonçait dix
+        // montures fécondes en n'en ayant écrit aucune. Voir `touchedRows`.
+        const result = await supabase
           .from('user_breeding_individuals')
           .update({ cycled: true, level, updated_at: stamp })
-          .in('id', ids);
-        if (saveError) {
-          reportWriteFailure(`la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`, saveError);
-          complete = false;
-          continue;
-        }
-        for (const id of ids) cycled.set(id, level);
+          .in('id', ids)
+          .select('id');
+        const { ok, rows } = touchedRows(
+          `la sortie d’enclos de ${ids.length} monture(s) au niveau ${level}`,
+          ids.length,
+          result
+        );
+        if (!ok) complete = false;
+        // Seules celles que la base a réellement changées. Refléter les autres
+        // localement les afficherait fécondes jusqu'au rechargement suivant, qui
+        // les remettrait fertiles sans rien dire — le mensonge d'un cran plus loin.
+        for (const row of rows) cycled.set(row.id, level);
       }
 
       let bulkWritten = false;
@@ -1557,12 +1565,18 @@ export const useBreeding = (
       }));
 
       const supabase = createClient();
-      const { error: saveError } = await supabase
+      const result = await supabase
         .from('user_breeding_individuals')
         .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
+      // Une ligne absente rendait un succès : l'écran gardait la correction, la
+      // base gardait l'ancienne valeur, et rien ne les départageait avant le
+      // rechargement. C'est le retour arrière que cette fonction porte déjà pour
+      // un refus — il manquait pour un silence.
+      const { ok } = touchedRows('la correction de cette monture', 1, result);
 
-      if (saveError) {
+      if (!ok) {
         if (before) {
           setStable((current) => ({
             ...current,
@@ -1573,7 +1587,9 @@ export const useBreeding = (
         }
         return {
           ok: false as const,
-          message: reportWriteFailure('la correction de cette monture', saveError),
+          message: result.error
+            ? failureMessage(result.error)
+            : 'La base ne connaît plus cette monture.',
         };
       }
       return { ok: true as const };
@@ -1822,18 +1838,24 @@ export const useBreeding = (
        * entière et de réinsérer à l'annulation. C'est un changement à part.
        */
       if (steriles.size > 0) {
-        const { error: sterileError } = await supabase
+        const sterileResult = await supabase
           .from('user_breeding_individuals')
           // L'accouplement consomme les deux parents **et** leur cycle : une
           // stérile n'est plus cyclée, elle n'a plus de jauges à porter.
           .update({ fertile: false, cycled: false, updated_at: new Date().toISOString() })
-          .in('id', [...steriles]);
-        if (sterileError) {
-          partial = true;
-          reportWriteFailure(
+          .in('id', [...steriles])
+          .select('id');
+        // Un parent que la base ne stérilise pas se fait reproposer à la fournée
+        // suivante, et le jeu refuse alors le croisement devant l'éleveur. Le
+        // silence d'un `PATCH` sans ligne trouvée coûte donc un aller-retour.
+        if (
+          !touchedRows(
             `les ${steriles.size} parents à passer stériles — le poulain, lui, est bien enregistré`,
-            sterileError
-          );
+            steriles.size,
+            sterileResult
+          ).ok
+        ) {
+          partial = true;
         }
       }
 
@@ -1910,13 +1932,16 @@ export const useBreeding = (
     async (record: BirthRecord): Promise<boolean> => {
       const supabase = createClient();
 
-      const { error: deleteError } = await supabase
+      const deleteResult = await supabase
         .from('user_breeding_individuals')
         .delete()
-        .eq('id', record.id);
+        .eq('id', record.id)
+        .select('id');
 
-      if (deleteError) {
-        reportWriteFailure(`l’annulation de « ${record.name} »`, deleteError);
+      // Zéro ligne supprimée n'est pas une annulation : le poulain est ailleurs
+      // — déjà retiré, ou jamais écrit — et rendre `true` ferait rendre aux
+      // parents leur fertilité pour rien.
+      if (!touchedRows(`l’annulation de « ${record.name} »`, 1, deleteResult).ok) {
         return false;
       }
 
@@ -1931,20 +1956,23 @@ export const useBreeding = (
       // `update … in(…)` écrirait le même couple de booléens sur les deux.
       let restored = true;
       for (const parent of record.parents) {
-        const { error: restoreError } = await supabase
+        const restoreResult = await supabase
           .from('user_breeding_individuals')
           .update({
             fertile: parent.fertile,
             cycled: parent.cycled,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', parent.id);
-        if (restoreError) {
-          restored = false;
-          reportWriteFailure(
+          .eq('id', parent.id)
+          .select('id');
+        if (
+          !touchedRows(
             'un parent à remettre dans son état d’avant l’accouplement',
-            restoreError
-          );
+            1,
+            restoreResult
+          ).ok
+        ) {
+          restored = false;
         }
       }
 
@@ -2084,16 +2112,21 @@ export const useBreeding = (
         };
       }
 
-      const { error: dropError } = await supabase
+      const dropResult = await supabase
         .from('user_breeding_individuals')
         .delete()
-        .in('id', gone);
+        .in('id', gone)
+        .select('id');
 
-      if (dropError) {
-        reportWriteFailure(
+      // Une stérile qui reste en base revient au rechargement suivant, et
+      // l'écurie compte alors trois montures là où le jeu en a une.
+      if (
+        !touchedRows(
           `les ${gone.length} stériles à retirer — le clone, lui, est bien enregistré`,
-          dropError
-        );
+          gone.length,
+          dropResult
+        ).ok
+      ) {
         load();
         // Le clone **est** en base. L'appelant peut avancer : le rattrapage
         // porte sur les stériles restées, et la bannière le dit.
@@ -2143,16 +2176,22 @@ export const useBreeding = (
       }));
 
       const supabase = createClient();
-      const { error: saveError } = await supabase
+      const result = await supabase
         .from('user_breeding_individuals')
         .delete()
-        .in('id', ids);
+        .in('id', ids)
+        .select('id');
 
-      if (saveError) {
-        reportWriteFailure(
+      // Une suppression qui ne trouve rien laissait l'écran vide et la base
+      // pleine : les montures revenaient au rechargement suivant sans que rien
+      // n'ait prévenu. Même remise en place que pour un refus.
+      if (
+        !touchedRows(
           `le retrait de ${removed.length} monture${removed.length > 1 ? 's' : ''} de l’écurie`,
-          saveError
-        );
+          ids.length,
+          result
+        ).ok
+      ) {
         setStable((current) => ({
           ...current,
           individuals: [...current.individuals, ...removed],
@@ -2175,16 +2214,19 @@ export const useBreeding = (
       }));
 
       const supabase = createClient();
-      const { error: saveError } = await supabase
+      const result = await supabase
         .from('user_breeding_individuals')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
 
-      if (saveError) {
-        reportWriteFailure(
+      if (
+        !touchedRows(
           `le retrait de « ${removed?.name ?? 'cette monture'} » de l’écurie`,
-          saveError
-        );
+          1,
+          result
+        ).ok
+      ) {
         if (removed) {
           setStable((current) => ({
             ...current,

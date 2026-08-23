@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { reportWriteFailure } from '@/lib/errors/write-failures';
+import { reportWriteFailure, touchedRows } from '@/lib/errors/write-failures';
 import type { BreedingProject } from '@/lib/supabase/types';
 import type { FamilyId } from '@/lib/hooks/useBreeding';
 import type { ObjectiveId } from '@/lib/dofus/breeding/objectives';
@@ -100,12 +100,16 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
       setCurrent({ ...current, target_count: count });
 
       const supabase = createClient();
-      const { error } = await supabase
+      // Le projet décide de la couleur visée et de tout ce qui en découle : une
+      // ligne absente rendait un succès, l'écran gardait la nouvelle quantité et
+      // la base l'ancienne. Voir `touchedRows`.
+      const result = await supabase
         .from('breeding_projects')
         .update({ target_count: count, updated_at: new Date().toISOString() })
-        .eq('id', current.id);
+        .eq('id', current.id)
+        .select('id');
 
-      if (error) reportWriteFailure('la quantité visée par le projet', error);
+      touchedRows('la quantité visée par le projet', 1, result);
     },
     [current]
   );
@@ -116,12 +120,13 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
       setCurrent({ ...current, objective });
 
       const supabase = createClient();
-      const { error } = await supabase
+      const result = await supabase
         .from('breeding_projects')
         .update({ objective, updated_at: new Date().toISOString() })
-        .eq('id', current.id);
+        .eq('id', current.id)
+        .select('id');
 
-      if (error) reportWriteFailure('l’objectif du projet', error);
+      touchedRows('l’objectif du projet', 1, result);
     },
     [current]
   );
@@ -129,12 +134,15 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
   const abandon = useCallback(async () => {
     if (!current) return;
     const supabase = createClient();
-    const { error } = await supabase.from('breeding_projects').delete().eq('id', current.id);
+    const result = await supabase
+      .from('breeding_projects')
+      .delete()
+      .eq('id', current.id)
+      .select('id');
 
-    if (error) {
-      reportWriteFailure('l’abandon du plan', error);
-      return;
-    }
+    // Un abandon qui ne trouve rien laisse le plan en base : il revient au
+    // rechargement suivant, et l'éleveur croit avoir changé de cible.
+    if (!touchedRows('l’abandon du plan', 1, result).ok) return;
     setCurrent(null);
   }, [current]);
 

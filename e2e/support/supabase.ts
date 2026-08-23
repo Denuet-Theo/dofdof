@@ -338,15 +338,40 @@ export const mockSupabase = async (page: Page): Promise<SupabaseMock> => {
       return json(inserted, 201);
     }
 
+    /**
+     * Les lignes que l'écriture a **vraiment** touchées.
+     *
+     * PostgREST ne les rend que si l'appelant a chaîné `.select()`, ce que
+     * `supabase-js` traduit par `Prefer: return=representation`. Sans cet
+     * en-tête, un `PATCH` rend 204 et un corps vide.
+     *
+     * La distinction compte, et elle est tout le sujet de `touchedRows` : un
+     * `update … in(…)` qui ne trouve aucune ligne est un **succès** pour
+     * PostgREST. Un faux serveur qui rendrait toujours `[]` ferait croire à
+     * l'app que toute écriture filtrée ne touche jamais rien ; un qui rendrait
+     * toujours les lignes lui ferait croire l'inverse. On rend donc ce que le
+     * filtre a réellement attrapé — c'est la seule réponse qui permette de
+     * distinguer les deux, et donc de tester le défaut du 23/08.
+     */
+    const representing = (route.request().headers().prefer ?? '').includes(
+      'return=representation'
+    );
+
     if (method === 'PATCH') {
       const patch = route.request().postDataJSON() as Row;
-      for (const row of rows) if (match(row)) Object.assign(row, patch);
-      return json([]);
+      const hit: Row[] = [];
+      for (const row of rows) {
+        if (!match(row)) continue;
+        Object.assign(row, patch);
+        hit.push(row);
+      }
+      return json(representing ? hit : []);
     }
 
     if (method === 'DELETE') {
+      const hit = rows.filter((row) => match(row));
       tables[table] = rows.filter((row) => !match(row));
-      return json([]);
+      return json(representing ? hit : []);
     }
 
     return json([]);

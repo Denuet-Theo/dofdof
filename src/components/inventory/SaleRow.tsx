@@ -79,8 +79,11 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
         .select('id');
 
       // Zéro ligne supprimée n'est pas une suppression : la vente revient au
-      // rafraîchissement suivant, et la liste s'était déjà refermée dessus.
-      if (!touchedRows('la suppression de cette mise en vente', 1, result).ok) return;
+      // rafraîchissement suivant, et la liste s'était déjà refermée dessus. La
+      // liste n'est rafraîchie qu'après la réponse, donc rien à défaire.
+      if (!touchedRows('la suppression de cette mise en vente', 1, result, 'rien-posé-en-avance').ok) {
+        return;
+      }
       onUpdate();
     } catch (err) {
       reportWriteFailure('la suppression de cette mise en vente', err);

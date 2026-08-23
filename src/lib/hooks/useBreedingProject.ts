@@ -112,7 +112,11 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .eq('id', current.id)
         .select('id');
 
-      touchedRows('la quantité visée par le projet', 1, result);
+      // L'état local est parti devant — le classement entier se recalcule à la
+      // frappe — donc il doit revenir si la base ne l'a pas pris. La cible du
+      // projet décide de tout ce que l'écran propose ensuite : la garder fausse
+      // à l'écran ferait charger des enclos pour une couleur qu'on ne vise pas.
+      touchedRows('la quantité visée par le projet', 1, result, () => setCurrent(current));
     },
     [current]
   );
@@ -129,7 +133,7 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
         .eq('id', current.id)
         .select('id');
 
-      touchedRows('l’objectif du projet', 1, result);
+      touchedRows('l’objectif du projet', 1, result, () => setCurrent(current));
     },
     [current]
   );
@@ -144,8 +148,9 @@ export const useBreedingProject = (family: FamilyId): BreedingProjectState => {
       .select('id');
 
     // Un abandon qui ne trouve rien laisse le plan en base : il revient au
-    // rechargement suivant, et l'éleveur croit avoir changé de cible.
-    if (!touchedRows('l’abandon du plan', 1, result).ok) return;
+    // rechargement suivant, et l'éleveur croit avoir changé de cible. Rien n'est
+    // posé en avance ici — `setCurrent(null)` attend la réponse, exprès.
+    if (!touchedRows('l’abandon du plan', 1, result, 'rien-posé-en-avance').ok) return;
     setCurrent(null);
   }, [current]);
 

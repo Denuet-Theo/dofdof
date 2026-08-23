@@ -13,8 +13,12 @@ import { failureBanner } from './support/app';
  * et l'éleveur ne le découvre qu'après avoir tué quarante bestioles.
  *
  * D'où les trois refus joués ci-dessous — un total refusé, une pose refusée, une
- * suppression jouée jusqu'en base — plutôt qu'un parcours nominal qui serait
- * vert quoi qu'il arrive.
+ * suppression refusée — plutôt qu'un parcours nominal qui serait vert quoi qu'il
+ * arrive.
+ *
+ * Et un quatrième cas qui n'est pas un refus mais une perte tout aussi
+ * définitive : le ❌ voisine le 🔙, et un compteur supprimé emporte son total.
+ * Un seul clic ne doit donc rien supprimer.
  */
 
 /**
@@ -63,6 +67,18 @@ const bump = async (page: Page, times: number, slot = 0) => {
   for (let index = 0; index < times; index += 1) {
     await cell(page, slot).getByTestId('counter-bump').click();
   }
+};
+
+/**
+ * Supprime une case : le ❌ arme, le « Oui » tranche.
+ *
+ * Les deux clics sont dans le geste parce qu'ils sont dans l'écran — un
+ * compteur ne part qu'après confirmation, et un test qui n'en ferait qu'un ne
+ * supprimerait rien.
+ */
+const removeCounter = async (page: Page, slot = 0) => {
+  await cell(page, slot).getByTestId('counter-remove').click();
+  await cell(page, slot).getByTestId('counter-remove-confirm').click();
 };
 
 /** Le total tel que la base le porte, pour la case demandée. */
@@ -137,9 +153,38 @@ test.describe('les compteurs', () => {
     await expect(tallyOf(page)).toHaveText('1');
     await expect.poll(() => savedTally(mock.rows('user_counters'))).toBe(1);
 
-    await cell(page).getByTestId('counter-remove').click();
+    await removeCounter(page);
     await expect(cell(page).getByTestId('counter-search')).toBeVisible();
     await expect.poll(() => mock.rows('user_counters').length).toBe(0);
+  });
+
+  test('un seul clic sur ❌ ne supprime rien', async ({ page }) => {
+    const mock = await mockSupabase(page);
+    await openCounter(page);
+    await place(page, 'Bouftou');
+    await bump(page, 2);
+    await expect.poll(() => savedTally(mock.rows('user_counters'))).toBe(2);
+
+    await cell(page).getByTestId('counter-remove').click();
+
+    // Rien n'est parti : la case est toujours là, son total aussi, et la base
+    // n'a rien reçu. Un compteur à 200 est un après-midi de farm, et le ❌ est à
+    // deux centimètres du 🔙.
+    await expect(cell(page).getByTestId('counter-remove-confirm')).toBeVisible();
+    await expect(cell(page)).toHaveAttribute('data-label', 'Bouftou');
+    expect(mock.writes.filter((write) => write.method === 'DELETE')).toHaveLength(0);
+
+    // « Non » referme la question et rend la bande à ce qu'elle était.
+    await cell(page).getByTestId('counter-remove-cancel').click();
+    await expect(cell(page).getByTestId('counter-back')).toBeVisible();
+    expect(mock.rows('user_counters')).toHaveLength(1);
+
+    // Et la question ne suit pas la case : une fois le compteur supprimé et un
+    // autre posé au même endroit, la bande repart sur 🔙 et ❌.
+    await removeCounter(page);
+    await place(page, 'Peau de Bouftou');
+    await expect(cell(page).getByTestId('counter-back')).toBeVisible();
+    await expect(cell(page).getByTestId('counter-remove-confirm')).toHaveCount(0);
   });
 
   test('une suppression refusée rend la case', async ({ page }) => {
@@ -150,7 +195,7 @@ test.describe('les compteurs', () => {
     await expect.poll(() => savedTally(mock.rows('user_counters'))).toBe(2);
 
     mock.refuse({ table: 'user_counters', method: 'DELETE' });
-    await cell(page).getByTestId('counter-remove').click();
+    await removeCounter(page);
 
     await expect(failureBanner(page)).toBeVisible();
     // Le compteur existe encore en base : le faire disparaître de l'écran

@@ -26,7 +26,7 @@ const CounterPage = () => {
         </div>
         <p className="text-dark-500 text-sm">
           Douze cases à remplir d&apos;items, d&apos;ennemis ou de familles. Un clic sur
-          l&apos;icône ajoute un ; 🔙 en retire un ; ❌ vide la case.
+          l&apos;icône ajoute un ; 🔙 en retire un ; ❌ vide la case, après confirmation.
         </p>
       </div>
 

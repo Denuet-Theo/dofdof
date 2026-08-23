@@ -7,7 +7,7 @@ import { toNumber, UserSale } from '@/lib/supabase/types';
 import { getSaleValue, getSaleProfit } from '@/lib/utils/sales';
 import { PRICE_EDIT_TAX_RATE } from '@/lib/utils/recipes';
 import { useItemJobs } from '@/lib/hooks/useItemJobs';
-import { reportWriteFailure } from '@/lib/errors/write-failures';
+import { reportWriteFailure, touchedRows } from '@/lib/errors/write-failures';
 import { JOBS } from '@/lib/constants/jobs';
 import SaleRow from '@/components/inventory/SaleRow';
 import ItemPreview from '@/components/items/ItemPreview';
@@ -140,15 +140,19 @@ const InventoryPage = () => {
 
     try {
       // 1. Update the sale
-      const { error: saleError } = await supabase
+      // La taxe de modification est déjà payée en jeu : une correction que la
+      // base n'applique à aucune ligne laisse la vente à l'ancien prix et la
+      // taxe perdue, sans que rien ne le dise. Voir `touchedRows`.
+      const saleResult = await supabase
         .from('user_sales')
         .update({
           unit_price: newUnitPrice,
           tax_paid: newTaxPaid,
         })
-        .eq('id', editingSale.id);
+        .eq('id', editingSale.id)
+        .select('id');
 
-      if (saleError) throw saleError;
+      if (!touchedRows('le nouveau prix de cette mise en vente', 1, saleResult).ok) return;
 
       // 2. Update the global item_prices to benefit everyone
       const {

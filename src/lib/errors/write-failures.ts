@@ -127,6 +127,61 @@ export const reportWriteFailure = (what: string, error: unknown): string => {
   return message;
 };
 
+/**
+ * Une écriture filtrée qui **a réellement porté**, ou l'aveu qu'elle n'a rien
+ * touché.
+ *
+ * ## Le silence que ce garde-fou existe pour rompre
+ *
+ * PostgREST rend un succès quand un `update … in(…)` ou un `delete … eq(…)` ne
+ * trouve **aucune ligne**. Ce n'est pas une anomalie de sa part : zéro ligne
+ * modifiée n'est pas une erreur SQL. Mais côté app, `{ error: null }` recouvre
+ * alors deux états opposés — « les dix lignes sont écrites » et « aucune de ces
+ * dix lignes n'existe » — et tout le code lisait le second comme le premier.
+ *
+ * Le 23/08, une fournée sortie en fécondes a rendu six succès et écrit dix
+ * lignes sur soixante. Les cinquante suivies étaient dans l'écurie, fertiles,
+ * comptées juste : le `PATCH` est parti, la base a répondu sans erreur, et
+ * personne n'a demandé combien de lignes il avait changées. La fenêtre s'est
+ * refermée sur un message vert, l'enclos a quitté la fournée, et l'état local
+ * affichait les montures fécondes — jusqu'au rechargement suivant, qui les
+ * remettait fertiles sans rien dire. Le `reportWriteFailure` d'à côté ne pouvait
+ * pas aider : il n'y avait pas d'erreur à signaler.
+ *
+ * ## Le contrat
+ *
+ * L'appelant chaîne `.select()` — c'est ce qui fait rendre à PostgREST les
+ * lignes qu'il a touchées — et passe ici ce qu'il **attendait**. Un écart se
+ * signale comme une écriture perdue, parce que c'en est une : la ligne visée
+ * n'est pas dans l'état où l'écran la montre.
+ *
+ * Rend les lignes réellement touchées, pour que l'appelant ne reflète que
+ * celles-là dans son état local — c'est la seule façon de ne pas rejouer le
+ * mensonge d'un cran.
+ */
+export const touchedRows = <T>(
+  what: string,
+  expected: number,
+  result: { data: T[] | null; error: unknown }
+): { ok: boolean; rows: T[] } => {
+  if (result.error) {
+    reportWriteFailure(what, result.error);
+    return { ok: false, rows: [] };
+  }
+
+  const rows = result.data ?? [];
+  if (rows.length >= expected) return { ok: true, rows };
+
+  reportWriteFailure(
+    what,
+    `La base a accepté la requête mais n'a changé que ${rows.length} ligne` +
+      `${rows.length > 1 ? 's' : ''} sur ${expected}. Les autres n'existent plus, ` +
+      'ou ne sont pas à toi — recharge la page pour voir ce qu’elle contient ' +
+      'vraiment, le geste est à refaire.'
+  );
+  return { ok: false, rows };
+};
+
 export const dismissWriteFailure = (id: number) => {
   failures = failures.filter((failure) => failure.id !== id);
   emit();

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { toNumber, UserSale } from '@/lib/supabase/types';
 import { createClient } from '@/lib/supabase/client';
-import { reportWriteFailure } from '@/lib/errors/write-failures';
+import { reportWriteFailure, touchedRows } from '@/lib/errors/write-failures';
 import { getSaleProfit } from '@/lib/utils/sales';
 import ItemCard from '@/components/ui/ItemCard';
 import KamasDisplay from '@/components/ui/KamasDisplay';
@@ -72,12 +72,15 @@ const SaleRow = ({ sale, onUpdate, onEditPrice }: SaleRowProps) => {
     const supabase = createClient();
 
     try {
-      const { error } = await supabase
+      const result = await supabase
         .from('user_sales')
         .delete()
-        .eq('id', sale.id);
+        .eq('id', sale.id)
+        .select('id');
 
-      if (error) throw error;
+      // Zéro ligne supprimée n'est pas une suppression : la vente revient au
+      // rafraîchissement suivant, et la liste s'était déjà refermée dessus.
+      if (!touchedRows('la suppression de cette mise en vente', 1, result).ok) return;
       onUpdate();
     } catch (err) {
       reportWriteFailure('la suppression de cette mise en vente', err);

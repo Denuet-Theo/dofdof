@@ -92,6 +92,15 @@ export type BreedingBatchState = {
 export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
   const [pens, setPens] = useState<BatchPen[]>([]);
   const [loading, startLoading] = useTransition();
+  /**
+   * La fournée n'a **pas pu être lue**, ce qui n'est pas « il n'y en a pas ».
+   *
+   * Tant que ce drapeau est levé, aucune écriture ne part : verrouiller un
+   * enclos partirait de `proposed` — puisque `pens` est vide — et écraserait la
+   * ligne décrivant ce qui tourne vraiment dans les enclos. Une seconde de
+   * réseau ne doit pas coûter une fournée.
+   */
+  const [unreadable, setUnreadable] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -104,10 +113,28 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
         .maybeSingle();
 
       if (error) {
-        console.error('[breeding] fournée illisible:', error);
-        setPens([]);
+        /*
+         * Une lecture ratée ne vaut **pas** « aucune fournée en cours ».
+         *
+         * C'était pourtant ce qu'elle écrivait : `setPens([])`, un
+         * `console.error`, et l'écran repassait sur la proposition vivante — six
+         * enclos tout neufs, calculés sur l'écurie du jour, à la place de ceux
+         * qui tournent réellement dans le jeu. Le premier verrou posé là-dessus
+         * part alors de `proposed` (`pens.length === 0`) et **écrase la ligne**
+         * qui décrivait le vrai contenu des enclos. Une erreur réseau d'une
+         * seconde suffit donc à effacer ce qu'on a mis des jours à charger, sans
+         * que rien ne le dise.
+         *
+         * On garde donc l'état d'avant et on crie. `pens` reste vide au premier
+         * chargement — il n'y a rien d'autre à montrer — mais la bannière est là,
+         * et le verrou refuse de partir tant qu'on ne sait pas ce que la fournée
+         * contient vraiment.
+         */
+        reportWriteFailure('la fournée en cours, à relire', error);
+        setUnreadable(true);
         return;
       }
+      setUnreadable(false);
       setPens(parsePens((data as BreedingBatch | null)?.pens));
     });
   }, [family]);
@@ -158,6 +185,17 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
 
   const lock = useCallback(
     async (proposed: BatchPen[]) => {
+      // Sur une fournée qu'on n'a pas su lire, `pens` est vide sans que ça veuille
+      // dire quoi que ce soit : partir de `proposed` écraserait la vraie.
+      if (unreadable) {
+        reportWriteFailure(
+          'le verrou de cet enclos',
+          'La fournée en cours n’a pas pu être relue, donc on ne sait pas ce qu’il ' +
+            'y a déjà dans les enclos. Verrouiller maintenant écraserait cette ' +
+            'liste-là. Recharge la page.'
+        );
+        return;
+      }
       // Le premier verrou fige la fournée entière : voir `batch.ts`. Les suivants
       // ignorent `proposed`, qui décrit une écurie déjà entamée par le premier.
       const base = pens.length > 0 ? pens : proposed.map((pen) => ({ ...pen, lockedAt: null }));
@@ -170,7 +208,7 @@ export const useBreedingBatch = (family: FamilyId): BreedingBatchState => {
         base.map((pen, index) => (index === at ? { ...pen, lockedAt: stamp } : pen))
       );
     },
-    [commit, pens]
+    [commit, pens, unreadable]
   );
 
   const unlock = useCallback(async () => {

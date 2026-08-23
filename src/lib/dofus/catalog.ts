@@ -30,19 +30,28 @@ export const parseIdList = (raw: string): number[] =>
  * y vaut infiniment mieux qu'une page « aucun résultat » silencieuse.
  *
  * N'est appelé que lorsqu'une requête ne renvoie rien, donc jamais sur le chemin
- * chaud ; et `dofus_sync_state` fait deux lignes.
+ * chaud ; et `dofus_sync_state` fait cinq lignes.
  */
-const isMirrorEmpty = async (supabase: Client) => {
+export const mirrorEmpty = async (supabase: Client, resources: string[]) => {
   const { data, error } = await supabase
     .from('dofus_sync_state')
     .select('resource, row_count')
-    .in('resource', ['items', 'recipes']);
+    .in('resource', resources);
 
   if (error || !data) return false; // Dans le doute, ne pas transformer un vide légitime en panne.
-  return data.length < 2 || data.some((row) => row.row_count === 0);
+  return data.length < resources.length || data.some((row) => row.row_count === 0);
 };
 
-const catalogUnavailable = () =>
+/**
+ * Les deux ressources sans lesquelles le catalogue ne répond plus à rien.
+ *
+ * Prend une liste depuis que le compteur cherche aussi dans le bestiaire et les
+ * familles : une route qui interroge une table jamais synchronisée doit pouvoir
+ * le dire pour *cette* table, pas seulement pour les items.
+ */
+const isMirrorEmpty = (supabase: Client) => mirrorEmpty(supabase, ['items', 'recipes']);
+
+export const catalogUnavailable = () =>
   NextResponse.json(
     {
       error:
@@ -53,7 +62,7 @@ const catalogUnavailable = () =>
     { status: 503 }
   );
 
-const queryFailed = (scope: string, error: unknown) => {
+export const queryFailed = (scope: string, error: unknown) => {
   console.error(`[catalog] ${scope} query failed:`, error);
   return NextResponse.json(
     { error: 'Erreur lors de la lecture du catalogue', code: 'CATALOG_QUERY_FAILED' },
@@ -69,10 +78,12 @@ const queryFailed = (scope: string, error: unknown) => {
  * utilisateurs connectés, mais la route est derrière l'authentification : d'où
  * `private`, qui autorise le cache navigateur sans cache partagé.
  */
+export const CATALOG_CACHE_HEADERS = {
+  'Cache-Control': 'private, max-age=300, stale-while-revalidate=3600',
+};
+
 export const catalogResponse = <T>(body: DofusDBResponse<T>) =>
-  NextResponse.json(body, {
-    headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=3600' },
-  });
+  NextResponse.json(body, { headers: CATALOG_CACHE_HEADERS });
 
 /**
  * Traduit le résultat d'une requête catalogue en réponse HTTP.

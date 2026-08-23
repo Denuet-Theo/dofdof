@@ -78,6 +78,7 @@ const USER_TABLES = [
   { schema: 'public', table: 'user_sales' },
   { schema: 'public', table: 'user_item_stock' },
   { schema: 'public', table: 'user_farm_filters' },
+  { schema: 'public', table: 'user_counters' },
   { schema: 'public', table: 'user_breeding_settings' },
   { schema: 'public', table: 'user_breeding_mounts' },
   { schema: 'public', table: 'user_breeding_individuals' },
@@ -93,6 +94,7 @@ const CATALOG_TABLES = [
   'dofus_drops',
   'dofus_items',
   'dofus_monsters',
+  'dofus_monster_races',
   'dofus_recipes',
   'dofus_subareas',
   // L'état de fraîcheur du miroir. Reprendre ses horodatages sur une base dont

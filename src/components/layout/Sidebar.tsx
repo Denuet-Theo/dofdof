@@ -10,6 +10,7 @@ import {
   Gauge,
   Swords,
   Egg,
+  Tally5,
   LogOut,
   Sparkles,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ const navItems = [
   { href: '/farm', label: 'Farm', icon: Swords },
   { href: '/breeding', label: 'Élevage', icon: Egg },
   { href: '/inventory', label: 'Inventaire', icon: Package },
+  { href: '/counter', label: 'Compteur', icon: Tally5 },
 ];
 
 const Sidebar = () => {

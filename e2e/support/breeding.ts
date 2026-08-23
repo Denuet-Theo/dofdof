@@ -59,6 +59,7 @@ export const recordBirthOn = async (panel: Locator, sex: '♂' | '♀' = '♂') 
   await expect(panel.getByText('enregistrement…')).toHaveCount(0, { timeout: 20_000 });
 };
 
-/** La bannière d'écriture perdue, celle de `WriteFailureAlerts`. */
-export const failureBanner = (page: Page): Locator =>
-  page.locator('[role="alert"]').filter({ hasText: 'Pas enregistré' });
+// La bannière d'écriture perdue n'appartient pas à l'élevage : elle est posée
+// dans la mise en page protégée et sert au compteur comme ici. Réexportée pour
+// que les tests qui la nommaient déjà n'aient rien à changer.
+export { failureBanner } from './app';

@@ -36,7 +36,12 @@ const WEAPON_SUPER_TYPE_ID = 2;
 // partagée par classifyFreshness, les écritures d'état et le chemin d'erreur :
 // une ressource oubliée dans l'une des trois donnerait un miroir déclaré sain
 // alors qu'il lui manque une table.
-const MIRRORED_RESOURCES = ['items', 'recipes', 'monsters', 'drops'];
+// `races` en fait partie depuis l'écran /counter : une famille sans nom n'est
+// pas une gêne cosmétique, c'est un tiers de la recherche du compteur qui ne
+// répond jamais rien. Le prix à payer est qu'un miroir déployé avant cette
+// table est déclaré 'cold' au premier démarrage suivant, donc resynchronisé en
+// entier — ce qui est exactement ce qu'on veut voir arriver tout seul.
+const MIRRORED_RESOURCES = ['items', 'recipes', 'monsters', 'drops', 'races'];
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
@@ -127,6 +132,9 @@ const RECIPES_QUERY = '$sort[id]=1&$populate=false';
 // pèsent l'essentiel) et il ferait disparaître `img`, qui est un champ calculé.
 const MONSTERS_QUERY = '$sort[id]=1&$populate=false';
 const ZONES_QUERY = '$sort[id]=1&$populate=false';
+// Les familles de monstres : 264 lignes, six pages. `$populate=false` par
+// cohérence — il n'y a de toute façon rien à hydrater dans cette collection.
+const RACES_QUERY = '$sort[id]=1&$populate=false';
 // Ordre figé : il nomme les colonnes res_<element>_min/_max et les champs
 // <element>Resistance de DofusDB, qui coïncident. Changer l'ordre est sans effet,
 // changer un libellé casse les deux bouts à la fois.
@@ -249,6 +257,64 @@ export const toSubareaRow = (subarea) => ({
   level: subarea.level ?? 0,
 });
 
+/**
+ * Le slug d'une famille, calculé faute d'être fourni.
+ *
+ * Items et monstres arrivent avec leur `slug.fr` ; les familles, non. Ce calcul
+ * doit rester **identique** à `normalizeSearchTerms` (src/lib/dofus/search.ts),
+ * qui normalise le terme tapé avant de le comparer à cette colonne : une
+ * divergence ne casserait rien de visible, elle rendrait simplement la famille
+ * introuvable. Duplication assumée, comme ELEMENTS et pour la même raison — un
+ * script .mjs ne peut pas importer le module TypeScript de l'app.
+ */
+export const slugifyRace = (name) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s'-]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+/**
+ * Les familles de monstres, icône et effectif empruntés au bestiaire.
+ *
+ * DofusDB ne donne à une famille ni image ni effectif : elle porte un nom, un
+ * super-type et la liste de ses monstres. L'icône est donc celle d'un de ses
+ * membres — le plus bas en niveau, qui est l'archétype de la famille (le
+ * Bouftou pour les Bouftous, pas le Bouftou Royal) — et l'effectif est compté
+ * sur le miroir plutôt que sur `race.monsters`, qui référence aussi des
+ * monstres que la synchro n'a pas retenus.
+ *
+ * Départage par id à niveau égal : sans quoi l'icône d'une famille changerait
+ * d'une synchro à l'autre au gré de l'ordre d'arrivée des pages.
+ */
+export const toRaceRows = (races, monsters) => {
+  const byRace = new Map();
+  for (const monster of monsters) {
+    const members = byRace.get(monster.race);
+    if (members) members.push(monster);
+    else byRace.set(monster.race, [monster]);
+  }
+
+  return races.map((race) => {
+    const members = byRace.get(race.id) ?? [];
+    const emblem = members
+      .filter((monster) => monster.img)
+      .sort((a, b) => a.level_min - b.level_min || a.id - b.id)[0];
+    const name = race.name?.fr ?? '';
+
+    return {
+      id: race.id,
+      name_fr: name,
+      slug_fr: slugifyRace(name),
+      super_race_id: race.superRaceId ?? 0,
+      monster_count: members.length,
+      img: emblem?.img ?? '',
+    };
+  });
+};
+
 // -------------------------------------------------------------------- écriture
 
 const ITEM_COLUMNS =
@@ -297,6 +363,10 @@ const AREA_RECORDSET = 'id int, name_fr text';
 
 const SUBAREA_COLUMNS = 'id, area_id, name_fr, level';
 const SUBAREA_RECORDSET = 'id int, area_id int, name_fr text, level int';
+
+const RACE_COLUMNS = 'id, name_fr, slug_fr, super_race_id, monster_count, img';
+const RACE_RECORDSET =
+  'id int, name_fr text, slug_fr text, super_race_id int, monster_count int, img text';
 
 /**
  * Remplit une table de staging TEMP, puis upsert + purge les ids disparus.
@@ -487,6 +557,17 @@ async function main() {
   const monsters = rawMonsters.map(toMonsterRow);
   const drops = rawMonsters.flatMap(toDropRows);
 
+  // Les familles après les monstres, parce qu'elles leur empruntent leur icône.
+  const { rows: rawRaces, total: racesTotal } = await fetchAll(
+    'monster-races',
+    RACES_QUERY,
+    'monster-races'
+  );
+  const races = toRaceRows(rawRaces, monsters);
+  const nameless = races.filter((race) => !race.name_fr).length;
+  if (nameless > 0) warn(`${nameless} race(s) have no French name — unsearchable.`);
+  log(`races: ${races.length}, ${races.filter((race) => race.img).length} with an icon`);
+
   // Un objet droppé absent de dofus_items rendrait la ligne inexploitable côté
   // classement kamas (ni nom, ni prix). Pas de filtrage pour autant : la ligne
   // reste vraie, et un simple avertissement suffit à repérer une dérive entre
@@ -512,10 +593,12 @@ async function main() {
     log(`recipes:  ${recipes.length}/${recipesTotal}`);
     log(`monsters: ${monsters.length}/${monstersTotal}`);
     log(`drops:    ${drops.length}`);
+    log(`races:    ${races.length}/${racesTotal}`);
     log(`sample item:    ${JSON.stringify(items[0])}`);
     log(`sample recipe:  ${JSON.stringify(recipes[0])}`);
     log(`sample monster: ${JSON.stringify(monsters[0])}`);
     log(`sample drop:    ${JSON.stringify(drops[0])}`);
+    log(`sample race:    ${JSON.stringify(races[0])}`);
     log(`Done in ${seconds(Date.now() - startedAt)} (${retryCount} retries).`);
     return;
   }
@@ -541,18 +624,23 @@ async function main() {
     const dropStats = await swapTable(
       client, 'dofus_drops', DROP_COLUMNS, DROP_RECORDSET, drops, DROP_KEY
     );
+    const raceStats = await swapTable(
+      client, 'dofus_monster_races', RACE_COLUMNS, RACE_RECORDSET, races
+    );
     await recordState(client, 'items', items.length, itemsTotal);
     await recordState(client, 'recipes', recipes.length, recipesTotal);
     await recordState(client, 'monsters', monsters.length, monstersTotal);
     // Les drops n'ont pas de total amont propre : ils sont imbriqués dans les
     // monstres, donc le compte local est la seule mesure disponible.
     await recordState(client, 'drops', drops.length, null);
+    await recordState(client, 'races', races.length, racesTotal);
     await client.query('commit');
 
     log(`items:    ${itemStats.upserted} upserted, ${itemStats.pruned} pruned`);
     log(`recipes:  ${recipeStats.upserted} upserted, ${recipeStats.pruned} pruned`);
     log(`monsters: ${monsterStats.upserted} upserted, ${monsterStats.pruned} pruned`);
     log(`drops:    ${dropStats.upserted} upserted, ${dropStats.pruned} pruned`);
+    log(`races:    ${raceStats.upserted} upserted, ${raceStats.pruned} pruned`);
   } catch (err) {
     await client.query('rollback').catch(() => {});
     // Best-effort : si la table d'état est elle-même inaccessible, l'erreur

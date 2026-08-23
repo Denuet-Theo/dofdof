@@ -262,6 +262,24 @@ export type DofusSubareaRow = {
   synced_at: string;
 };
 
+/**
+ * Une famille de monstres (migration 20260823120000).
+ *
+ * `dofus_monsters.race` pointe ici. Le slug est calculé à l'ingestion — DofusDB
+ * n'en fournit pas pour les familles — et l'image est empruntée à l'archétype de
+ * la famille, cf. `toRaceRows` dans le script de synchro.
+ */
+export type DofusMonsterRaceRow = {
+  id: number;
+  name_fr: string;
+  slug_fr: string;
+  super_race_id: number;
+  /** Monstres de la famille présents dans le miroir. */
+  monster_count: number;
+  img: string;
+  synced_at: string;
+};
+
 /** Une ligne de drop telle que `farm_targets` la sérialise dans `top_drops`. */
 export type FarmDrop = {
   objectId: number;
@@ -583,6 +601,29 @@ export type UserFarmFilters = {
   updated_at: string;
 };
 
+/** Ce qu'un compteur compte : un item, un ennemi, une famille d'ennemis. */
+export type CounterKind = 'item' | 'monster' | 'race';
+
+/**
+ * Une case remplie de la grille de compteurs (migration 20260823120100).
+ *
+ * `label` et `img` sont recopiés du miroir au moment du choix : c'est ce qui
+ * permet à `target_id` de désigner trois tables différentes selon `kind` sans
+ * clé étrangère, et à un compteur de survivre à la disparition de sa cible.
+ */
+export type UserCounter = {
+  user_id: string;
+  /** La case dans la grille 4×3, de 0 à 11. */
+  slot: number;
+  kind: CounterKind;
+  target_id: number;
+  label: string;
+  img: string;
+  /** `tally` et non `count`, qui est un agrégat côté PostgREST. */
+  tally: number;
+  updated_at: string;
+};
+
 /**
  * Une couleur déjà née au moins une fois, pour le succès de collection
  * (migration 20260817160000).
@@ -639,6 +680,28 @@ export interface Database {
         };
         Update: {
           availability?: unknown;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_counters: {
+        Row: UserCounter;
+        Insert: {
+          user_id?: string;
+          slot: number;
+          kind: CounterKind;
+          target_id: number;
+          label?: string;
+          img?: string;
+          tally?: number;
+          updated_at?: string;
+        };
+        Update: {
+          kind?: CounterKind;
+          target_id?: number;
+          label?: string;
+          img?: string;
+          tally?: number;
           updated_at?: string;
         };
         Relationships: [];
@@ -915,6 +978,12 @@ export interface Database {
         Row: DofusMonsterRow;
         Insert: DofusMonsterRow;
         Update: Partial<DofusMonsterRow>;
+        Relationships: [];
+      };
+      dofus_monster_races: {
+        Row: DofusMonsterRaceRow;
+        Insert: DofusMonsterRaceRow;
+        Update: Partial<DofusMonsterRaceRow>;
         Relationships: [];
       };
       dofus_drops: {

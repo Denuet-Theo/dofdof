@@ -1409,6 +1409,25 @@ pub struct LadderPolicy {
     pub sex_blind_cloning: bool,
     /// Monnayer les montures hors plan. Exposé pour pouvoir isoler son effet.
     pub harvesting: bool,
+    /// Étendre la moisson aux couleurs **du plan qui ne le retiennent plus**.
+    ///
+    /// La moisson épargne tout ce que le plan réclame, au motif qu'une monture
+    /// au plan « garde sa fécondité pour la route ». Le motif tient tant que la
+    /// route la consomme. Il cesse de tenir en haut : rien n'absorbe une gen 9
+    /// sauf la couronne, qui n'en prend qu'une par tentative, si bien que les
+    /// gen 9 s'accumulent et que leur dernière fécondité n'est jamais dépensée.
+    ///
+    /// Le chiffrage : une Ambre gen 9 croisée avec un Doré gen 1 à 1 000 kamas
+    /// vise la gen 10 — 45 % à niveau 50, **251 génétons**, et 12,5 % des ratés
+    /// rendent une Ambre gen 9 neuve. C'est exactement le calcul que `harvest`
+    /// écrit déjà pour les montures hors plan (`9 × 1` à 318 156 contre `9 × 9`
+    /// à 192 637 par gen 9), appliqué au gisement qu'elle s'interdit.
+    ///
+    /// **Ce que le drapeau ne fait pas** : affamer le plan. Une couleur n'est
+    /// moissonnable que si elle n'est pas le goulot courant — voir `stocked`.
+    /// Au départ tout est à zéro, donc tout est goulot, donc le comportement est
+    /// inchangé et les mesures publiées restent valides.
+    pub harvest_stocked: bool,
     /// Ce qu'on fait d'une gen 10 une fois qu'on l'a. Voir `Summit`.
     pub summit: Summit,
     /// Laisser le cloneur refondre les montures du **plafond**.
@@ -1487,6 +1506,9 @@ impl LadderPolicy {
             sex_blind_cloning: false,
             clone_across_lineages: true,
             harvesting: true,
+            // Éteint : le drapeau change ce que la politique préfère, donc il
+            // doit se mesurer contre l'ancien comportement, pas le remplacer.
+            harvest_stocked: false,
             summit: Summit::default(),
             clone_top: true,
             next_starter: 0,
@@ -1717,6 +1739,7 @@ impl LadderPolicy {
         view: &UnitView<'_>,
         groups: &[crate::stable::MateGroup],
         free: &mut [Vec<usize>],
+        held: &HashMap<ColorId, f64>,
         batch: &mut Building,
     ) {
         let Building {
@@ -1744,8 +1767,40 @@ impl LadderPolicy {
                     .iter()
                     .any(|block| block.contains(&color))
         };
+
+        // Le goulot du plan : le plus petit rapport `tenu / demandé` parmi les
+        // couleurs voulues. C'est la même lecture que `compose`, qui fabrique en
+        // priorité ce qui est le plus en retard.
+        //
+        // Une couleur **stockée** est celle qui n'est pas ce goulot : la
+        // moissonner ne retarde donc rien de ce que le plan attend. Les gen 9 y
+        // tombent d'elles-mêmes dès que la couronne cesse de les absorber, et
+        // c'est le seul gisement que ce drapeau ouvre.
+        //
+        // Au premier chargement tout vaut zéro : le minimum est zéro, aucune
+        // couleur ne le dépasse, et la moisson reste exactement celle d'avant.
+        let ratio = |color: ColorId| {
+            let want = self.ladder.demand.get(&color).copied().unwrap_or(0.0);
+            if want <= 0.0 {
+                return f64::INFINITY;
+            }
+            held.get(&color).copied().unwrap_or(0.0) / want
+        };
+        let bottleneck = self
+            .ladder
+            .wanted
+            .iter()
+            .map(|&color| ratio(color))
+            .fold(f64::INFINITY, f64::min);
+        let stocked = |color: ColorId| {
+            self.harvest_stocked && ratio(color) > bottleneck && ratio(color) > 0.0
+        };
+
         let spare: Vec<usize> = (0..groups.len())
-            .filter(|&at| !plan_material(groups[at].sample.color))
+            .filter(|&at| {
+                let color = groups[at].sample.color;
+                !plan_material(color) || stocked(color)
+            })
             .collect();
         if spare.is_empty() {
             return;
@@ -2498,7 +2553,7 @@ impl Policy for LadderPolicy {
             };
             self.summit(view, &groups, &mut free, &mut batch);
             if self.harvesting {
-                self.harvest(view, &groups, &mut free, &mut batch);
+                self.harvest(view, &groups, &mut free, &held, &mut batch);
             }
             crossings = batch.crossings;
             purchases = batch.purchases;

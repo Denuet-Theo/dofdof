@@ -157,6 +157,28 @@ export type LadderPlanOptions = {
    * porte toujours des couleurs hors plan qui ne servent à rien d'autre.
    */
   harvest?: boolean;
+  /**
+   * Étendre la moisson aux couleurs **du plan qui ne le retiennent plus**.
+   *
+   * La moisson épargne tout ce que le plan réclame, au motif qu'une monture au
+   * plan garde sa fécondité pour la route. Le motif tient tant que la route la
+   * consomme ; il cesse de tenir en haut. Rien n'absorbe une gen 9 sauf la
+   * couronne, qui n'en prend qu'une par tentative — les gen 9 s'accumulent donc,
+   * et leur dernière fécondité n'est jamais dépensée.
+   *
+   * Une Ambre gen 9 croisée avec un Doré gen 1 à mille kamas vise la gen 10 :
+   * 45 % à niveau 50, **251 génétons**, et 12,5 % des ratés rendent une Ambre
+   * gen 9 neuve. C'est le calcul que la moisson écrit déjà pour le hors-plan,
+   * appliqué au gisement qu'elle s'interdisait.
+   *
+   * Faux par défaut, comme `harvest_stocked` côté Rust — la garde de parité
+   * compare les deux côtés à leurs défauts, et le drapeau change ce que la
+   * politique préfère, donc il se mesure au lieu de remplacer.
+   *
+   * **Les deux côtés doivent bouger ensemble** : voir `harvest_stocked` dans
+   * `ladder.rs`.
+   */
+  harvestStocked?: boolean;
 };
 
 /**
@@ -353,9 +375,36 @@ export const ladderPlan = (
   if (options.harvest !== false) {
     const planMaterial = (colorId: string) =>
       ladder.wanted.has(colorId) || ladder.blocks.some((block) => block.includes(colorId));
+
+    /**
+     * Le goulot du plan : la plus petite part `tenu / demandé` parmi les couleurs
+     * voulues. Même lecture que `mostBehind`, qui fabrique en priorité ce qui est
+     * le plus en retard.
+     *
+     * Une couleur **stockée** est celle qui n'est pas ce goulot : la moissonner ne
+     * retarde donc rien de ce que le plan attend. Les gen 9 y tombent d'elles-mêmes
+     * dès que la couronne cesse de les absorber.
+     *
+     * On lit `held` seul et non `held + made` — contrairement à `mostBehind` — parce
+     * que la décision porte sur le stock **debout** en début de fournée, et parce que
+     * c'est ce que fait le Rust : la parité se juge au plan près.
+     *
+     * Au premier chargement tout vaut zéro : le minimum est zéro, aucune couleur ne
+     * le dépasse, et la moisson reste exactement celle d'avant.
+     */
+    const ratio = (colorId: string): number => {
+      const want = ladder.demand.get(colorId) ?? 0;
+      if (want <= 0) return Number.POSITIVE_INFINITY;
+      return (held.get(colorId) ?? 0) / want;
+    };
+    let bottleneck = Number.POSITIVE_INFINITY;
+    for (const colorId of ladder.wanted) bottleneck = Math.min(bottleneck, ratio(colorId));
+    const stocked = (colorId: string) =>
+      options.harvestStocked === true && ratio(colorId) > bottleneck && ratio(colorId) > 0;
+
     const spare = groups
       .map((group, at) => at)
-      .filter((at) => !planMaterial(groups[at].colorId));
+      .filter((at) => !planMaterial(groups[at].colorId) || stocked(groups[at].colorId));
 
     if (spare.length > 0) {
       const weight = (at: number) => genetonWeight(generations.get(groups[at].colorId) ?? 1);

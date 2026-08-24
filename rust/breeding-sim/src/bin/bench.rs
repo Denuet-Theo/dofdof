@@ -155,6 +155,19 @@ fn main() {
                 )
             })
         },
+        {
+            // La dernière fécondité des couleurs que le plan ne retient plus.
+            // Voir `harvest_stocked` : c'est le seul écart avec la ligne
+            // au-dessus, donc l'écart de score lui est entièrement imputable.
+            let ladder = Ladder::of(&muldo(), Route::default());
+            measure("echelle / fécondité stockée", &economy, move || {
+                let mut policy = LadderPolicy::with_ladder(ladder.clone())
+                    .with_strategies([Strategy::default(); MAX_UNITS])
+                    .tuned_for(&economy);
+                policy.harvest_stocked = true;
+                Box::new(policy)
+            })
+        },
     ];
 
     println!(

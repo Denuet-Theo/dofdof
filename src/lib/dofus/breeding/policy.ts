@@ -529,7 +529,12 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
         // ce qu'il **devrait** valoir sur les prix de l'éleveur.
         { ...view, mountLevel: strategy.level },
         ladder,
-        { purchases: input.purchases ?? true }
+        // La dernière fécondité des couleurs que le plan ne retient plus. Mesuré
+        // sur 200 graines scellées, départ gen 1 : +90,9 M à 2 000 h (56,04 →
+        // 146,98 M) et une écurie **plus petite** au pic — 566 contre 690, parce
+        // que dépenser la fécondité sort la monture de l'écurie au lieu de l'y
+        // laisser dormir. Voir `harvestStocked`.
+        { purchases: input.purchases ?? true, harvestStocked: true }
       ),
       mounts,
       input,

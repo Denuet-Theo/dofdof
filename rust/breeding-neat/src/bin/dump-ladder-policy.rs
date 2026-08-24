@@ -97,7 +97,13 @@ fn main() {
             capacity,
         };
 
+        // Deux configurations par écurie, et c'est le point : l'app joue
+        // `harvest_stocked` **allumé**, donc une référence qui ne couvre que le
+        // défaut garderait la parité du chemin que personne n'exécute. Voir
+        // `harvest_stocked` dans `ladder.rs`.
+        for stocked in [false, true] {
         let mut policy = LadderPolicy::new(&catalog, Route::default());
+        policy.harvest_stocked = stocked;
         let plan = policy.plan(&view, &mut Rng::new(1));
 
         let mounts: Vec<serde_json::Value> = stable
@@ -116,6 +122,7 @@ fn main() {
             .collect();
 
         cases.push(serde_json::json!({
+            "harvestStocked": stocked,
             "kamas": kamas,
             "capacity": capacity,
             // Ce que la politique retire du solde pour ouvrir la fournée, et qui
@@ -139,14 +146,15 @@ fn main() {
             "crown": catalog.slug(
                 policy.ladder().summit.first().copied().unwrap_or_default()
             ),
-            "mounts": mounts,
+            "mounts": mounts.clone(),
             "plan": plan_json(&catalog, &plan),
         }));
+        }
     }
 
     let document = serde_json::json!({ "cases": cases });
     match std::fs::write(&target, serde_json::to_string(&document).unwrap_or_default()) {
-        Ok(()) => println!("{CASES} fournées écrites dans {target}"),
+        Ok(()) => println!("{} fournées écrites dans {target}", cases.len()),
         Err(error) => {
             eprintln!("{target} : {error}");
             std::process::exit(1);

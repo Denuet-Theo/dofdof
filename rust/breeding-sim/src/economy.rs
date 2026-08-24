@@ -368,6 +368,37 @@ pub struct Economy {
     ///
     /// Zéro par défaut : le barème d'avant, et les mesures publiées avec lui.
     pub crossing_effort: f64,
+    /// Places de l'**écurie**, celles où l'on filtre et où l'on retrouve une
+    /// monture. Au-delà, le reste vit en inventaire, havresac et coffre.
+    ///
+    /// ## Ce n'est pas un plafond de population
+    ///
+    /// Relevé auprès du mainteneur, qui joue : les jauges ne bougent **ni** en
+    /// écurie **ni** en inventaire — elles ne montent qu'en enclos — et l'on
+    /// achète à l'HDV des montures déjà montées en niveau. Ranger une monture ne
+    /// lui coûte donc rien : ni niveau, ni fécondité, ni généalogie. Le passage
+    /// est gratuit dans les deux sens.
+    ///
+    /// Ce que le rangement coûte, c'est de **retrouver** la monture ensuite :
+    /// l'écurie filtre, l'inventaire ne se fouille que par couleur. C'est une
+    /// gêne, pas une perte, et c'est pour ça que le modèle est un prix et non un
+    /// mur — une politique qui tient 566 montures reste jouable, elle est
+    /// seulement plus pénible.
+    ///
+    /// Zéro désactive la mesure.
+    pub stable_places: usize,
+    /// Ce que coûte de retrouver **une** monture au-delà des places d'écurie.
+    ///
+    /// Retiré du score et non de la bourse, comme `crossing_effort` et pour la
+    /// même raison : une dépense changerait la solvabilité, donc le déroulé, et
+    /// l'on ne saurait plus si un écart vient du prix posé ou du jeu différent
+    /// qu'il a provoqué. Retiré du score, le prix **re-classe** les politiques
+    /// sur des parties identiques.
+    ///
+    /// Zéro par défaut : `RunOutcome::retrievals` est compté de toute façon, seul
+    /// le prix est un choix — c'est la règle du malus stérile, et pour la même
+    /// raison. `bin/fetch` mesure ce qu'un prix non nul re-classe.
+    pub retrieval_price: f64,
     /// Ce qu'une monture de la couleur poursuivie pèse devant le score, en kamas.
     ///
     /// ## L'ordre lexicographique, et ce qu'il a coûté
@@ -507,6 +538,8 @@ impl Default for Economy {
             // L'ordre lexicographique d'avant : absent du fichier, rien ne bouge.
             idle_fertility_malus: 0.0,
             crossing_effort: 0.0,
+            stable_places: 0,
+            retrieval_price: 0.0,
             crown_weight: 100_000_000.0,
             sale_price_decay: 0.0,
             daily_price_recovery: 0.0,
@@ -1161,6 +1194,17 @@ pub struct RunOutcome {
     ///
     /// Mesuré au pic et non à la fin, parce que c'est le pic qui déborde.
     pub peak_stable: usize,
+    /// Montures qu'il a fallu aller chercher hors de l'écurie, sur toute la partie.
+    ///
+    /// Fractionnaire, et c'est voulu : on ne sait pas **laquelle** des montures
+    /// engagées était rangée, seulement quelle part de l'écurie déborde. Une
+    /// monture engagée est donc comptée pour `(tenu − places) / tenu`, la
+    /// probabilité qu'elle soit du mauvais côté si rien ne distingue les montures.
+    ///
+    /// À écurie sous le plafond, c'est zéro exactement.
+    pub retrievals: f64,
+    /// Les mêmes, au prix de `Economy::retrieval_price`. Nul tant que ce prix l'est.
+    pub retrievals_charged: i64,
     /// Fécondations posées **sans croisement** sur toute la partie.
     ///
     /// C'est la mesure qui dit si la politique banque sa fécondité ou si elle
@@ -1296,6 +1340,12 @@ struct Applied {
     /// Places d'enclos réellement occupées. C'est elle qui dit si l'unité a
     /// travaillé, et donc si elle doit un cycle de manipulation.
     places: usize,
+    /// Montures **déjà en écurie** que le chargement engage, tous usages
+    /// confondus. Les achats n'y sont pas : ils viennent de l'HDV et non du
+    /// coffre de l'éleveur, donc ils ne se cherchent pas.
+    ///
+    /// C'est le compteur des retraits d'inventaire : voir `Economy::stable_places`.
+    engaged: usize,
     best_generation: u8,
     /// Les bébés, qui naîtront à la **fin** du cycle et pas maintenant.
     births: Vec<Mount>,
@@ -1478,6 +1528,10 @@ fn apply(
         });
     }
 
+    // L'écurie **avant** les achats : c'est dans celle-là qu'on cherche une
+    // monture, et c'est donc elle qui décide de ce que le rangement coûte.
+    let held_before = stable.len();
+
     // --- les achats, pour que les indices virtuels deviennent réels --------
     for &(color, sex) in &plan.purchases {
         stable.push(Mount {
@@ -1656,8 +1710,16 @@ fn apply(
 
     stable.remove_all(&doomed);
 
+    // Les montures de l'écurie que ce chargement a fallu retrouver. Les achats
+    // sont exclus par construction : leurs indices sont au-delà de `held_before`.
+    let engaged = used[..held_before.min(used.len())]
+        .iter()
+        .filter(|claimed| **claimed)
+        .count();
+
     Ok(Applied {
         genetons,
+        engaged,
         crossings: plan.crossings.len(),
         barren,
         purchases: plan.purchases.len(),
@@ -1776,6 +1838,8 @@ fn run(
         cycles_by_unit: [0; MAX_UNITS],
         sacrifices: 0,
         peak_stable: stable.len(),
+        retrievals: 0.0,
+        retrievals_charged: 0,
         genetons: 0,
         loads_paid: 0,
         loads_by_unit: [0; MAX_UNITS],
@@ -1892,6 +1956,14 @@ fn run(
                 // retiré ses sacrifices, donc c'est là que l'écurie est la plus
                 // grande de ce tour.
                 outcome.peak_stable = outcome.peak_stable.max(stable.len());
+                // La part de l'écurie qui déborde, au moment de ce chargement.
+                // `held` est l'effectif d'avant les naissances : c'est dans
+                // celui-là qu'on a cherché.
+                let held = stable.len().saturating_sub(applied.births.len());
+                if economy.stable_places > 0 && held > economy.stable_places {
+                    let overflow = (held - economy.stable_places) as f64 / held as f64;
+                    outcome.retrievals += applied.engaged as f64 * overflow;
+                }
                 outcome.best_generation = outcome.best_generation.max(applied.best_generation);
 
                 if let Some(log) = record.as_deref_mut() {
@@ -2030,11 +2102,15 @@ fn run(
     outcome.idle_fertility = stable.mounts.iter().filter(|m| m.fertile && m.cycled).count();
     outcome.idle_fertility_charged =
         (economy.idle_fertility_malus * outcome.idle_fertility as f64) as i64;
+    // Le rangement ne coûte pas de kamas : il coûte de retrouver la monture.
+    // Voir `Economy::retrieval_price`.
+    outcome.retrievals_charged = (economy.retrieval_price * outcome.retrievals) as i64;
     outcome.score = kamas + outcome.liquidation
         - economy.barren_crossing_malus * outcome.barren_crossings as i64
         + outcome.collection_bonus
         - outcome.effort_charged
-        - outcome.idle_fertility_charged;
+        - outcome.idle_fertility_charged
+        - outcome.retrievals_charged;
     outcome
 }
 
@@ -2105,6 +2181,78 @@ mod tests {
             i64::from(catalog.generation(sous_plafond)) * economy.amber_per_generation,
             "sous le plafond, c'est de l'ambre et rien d'autre"
         );
+    }
+
+    /// Le rangement note sans rien détruire, et se tait sous le plafond.
+    ///
+    /// Trois choses à épingler, et la première est celle qui compte : ranger une
+    /// monture ne lui coûte **rien** — ni niveau, ni fécondité, ni généalogie —
+    /// puisque les jauges ne montent qu'en enclos. Le prix ne porte donc que sur le
+    /// fait de la **retrouver**, c'est un terme de score, et deux barèmes rejouent
+    /// la même partie.
+    ///
+    /// Ne pas confondre avec le clonage, qui lui détruit deux montures et remet le
+    /// niveau à 1.
+    #[test]
+    fn le_rangement_note_sans_detruire_et_se_tait_sous_le_plafond() {
+        let catalog = crate::trees::muldo();
+        let base = economy();
+
+        // Un plafond bas : le pool de départ le dépasse, donc les retraits
+        // existent et le test dit quelque chose.
+        let mut tight = base.clone();
+        tight.stable_places = 10;
+        tight.retrieval_price = 0.0;
+
+        let mut billed = tight.clone();
+        billed.retrieval_price = 1_000.0;
+
+        let make = || Box::new(crate::baseline::Greedy::new(crate::baseline::Objective::Gen10Balanced));
+
+        let plain = play(&catalog, &tight, make().as_mut(), 11);
+        let charged = play(&catalog, &billed, make().as_mut(), 11);
+
+        assert_eq!(
+            plain.crossings, charged.crossings,
+            "la partie doit être la même : le retrait est un terme de score"
+        );
+        assert_eq!(plain.liquidation, charged.liquidation, "et la liquidation aussi");
+        assert_eq!(
+            plain.peak_stable, charged.peak_stable,
+            "et l'écurie n'est pas plus petite parce qu'on la facture"
+        );
+
+        assert!(
+            plain.retrievals > 0.0,
+            "à dix places pour cent montures, il faut bien aller chercher"
+        );
+        assert_eq!(plain.retrievals_charged, 0, "sans barème, rien n'est facturé");
+        assert_eq!(
+            charged.retrievals_charged,
+            (1_000.0 * charged.retrievals) as i64
+        );
+        assert_eq!(
+            charged.score,
+            plain.score - charged.retrievals_charged,
+            "le score ne perd que ce terme, et rien d'autre"
+        );
+
+        // Sous le plafond, exactement zéro : une écurie qui rentre ne se fouille
+        // pas, et le terme ne doit pas grignoter les politiques sobres.
+        let mut roomy = base.clone();
+        roomy.stable_places = 100_000;
+        roomy.retrieval_price = 1_000.0;
+        let sober = play(&catalog, &roomy, make().as_mut(), 11);
+        assert_eq!(sober.retrievals, 0.0, "rien à chercher quand tout tient");
+        assert_eq!(sober.retrievals_charged, 0);
+
+        // Et zéro place éteint la mesure, pour que les mesures publiées d'avant
+        // ce réglage restent reproductibles.
+        let mut off = base.clone();
+        off.stable_places = 0;
+        off.retrieval_price = 1_000.0;
+        let before = play(&catalog, &off, make().as_mut(), 11);
+        assert_eq!(before.retrievals, 0.0, "zéro place = mesure éteinte");
     }
 
     /// Les deux termes que l'écran exigeait et que la fitness ne voyait pas.

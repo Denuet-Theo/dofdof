@@ -105,7 +105,11 @@ for (const [index, entry] of reference.cases.entries()) {
       loadKamas: entry.loadKamas,
       mountLevel: entry.mountLevel,
     },
-    ladder
+    ladder,
+    // La référence porte les deux configurations, une paire de cas par écurie :
+    // l'app joue la moisson stockée allumée, donc la garde doit couvrir ce
+    // chemin-là et pas seulement le défaut. Voir `harvestStocked`.
+    { harvestStocked: entry.harvestStocked === true }
   );
 
   if (!same(plan.crossings, entry.plan.crossings)) {

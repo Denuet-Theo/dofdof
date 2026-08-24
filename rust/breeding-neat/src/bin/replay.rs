@@ -18,10 +18,10 @@ use breeding_neat::champion;
 use breeding_neat::neat::Network;
 use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
-use breeding_sim::economy::{Economy, Policy, RunOutcome, play};
+use breeding_sim::economy::{Economy, MAX_UNITS, Policy, RunOutcome, Strategy, play};
 use breeding_sim::encode::Census;
 use breeding_sim::search::{Myopic, Searching, ValueFn};
-use breeding_sim::ladder::Route;
+use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
 use breeding_sim::trees::{Catalog, muldo};
 use rayon::prelude::*;
 
@@ -128,11 +128,37 @@ fn main() {
     };
     let network = Network::compile(&genome);
 
+    // L'échelle, avec et sans la dernière fécondité des couleurs stockées. Les
+    // deux lignes ne diffèrent que par ce drapeau, donc l'écart lui revient — et
+    // elles jouent les mêmes graines scellées que le champion, seule façon de les
+    // comparer à lui (le `bench` tourne sur 0..200, pas sur celles-ci).
+    let economy_for_ladder = Prices::load_default()
+        .map(|prices| prices.economy)
+        .unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        });
+    let ladder_plan = Ladder::of(&muldo(), Route::default());
+
     let mut reports = vec![
         run("glouton", || {
             Box::new(Greedy::new(Objective::Gen10Balanced))
         }),
         run("recherche / myope", || Box::new(Searching::new(Myopic))),
+        run("echelle / niveau réglé", || {
+            Box::new(
+                LadderPolicy::with_ladder(ladder_plan.clone())
+                    .with_strategies([Strategy::default(); MAX_UNITS])
+                    .tuned_for(&economy_for_ladder),
+            )
+        }),
+        run("echelle / fécondité stockée", || {
+            let mut policy = LadderPolicy::with_ladder(ladder_plan.clone())
+                .with_strategies([Strategy::default(); MAX_UNITS])
+                .tuned_for(&economy_for_ladder);
+            policy.harvest_stocked = true;
+            Box::new(policy)
+        }),
     ];
     // Le réseau ne traverse pas la frontière du `Box<dyn Policy>` sans emprunt,
     // donc on le joue à part.
@@ -179,14 +205,14 @@ fn main() {
 
     println!("{} parties par politique, graines {:?}\n", seeds().len(), seeds());
     println!(
-        "{:<20} {:>10} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9}",
-        "politique", "score méd.", "crois.", "achats", "sacrif.", "clones", "gen10", "charg."
+        "{:<20} {:>10} {:>9} {:>9} {:>9} {:>8} {:>8} {:>9} {:>11} {:>11}",
+        "politique", "score méd.", "crois.", "achats", "sacrif.", "clones", "gen10", "charg.", "écurie moy", "écurie max"
     );
-    println!("{}", "-".repeat(88));
+    println!("{}", "-".repeat(112));
     for (label, outcomes) in &reports {
         let mut scores: Vec<f64> = outcomes.iter().map(|o| o.score as f64).collect();
         println!(
-            "{label:<20} {:>10} {:>9.0} {:>9.0} {:>9.0} {:>8.0} {:>8.1} {:>9.0}",
+            "{label:<20} {:>10} {:>9.0} {:>9.0} {:>9.0} {:>8.0} {:>8.1} {:>9.0} {:>11.0} {:>11}",
             format!("{:.2} M", median(&mut scores) / 1e6),
             mean(outcomes.iter().map(|o| o.crossings as f64)),
             mean(outcomes.iter().map(|o| o.purchases as f64)),
@@ -194,6 +220,10 @@ fn main() {
             mean(outcomes.iter().map(|o| o.clonings as f64)),
             mean(outcomes.iter().map(|o| o.gen10_held as f64)),
             mean(outcomes.iter().map(|o| f64::from(o.loads_paid))),
+            // L'écurie du jeu a un plafond que le simulateur ignore : on publie
+            // donc la moyenne **et** le pire cas, c'est lui qui déborde.
+            mean(outcomes.iter().map(|o| o.peak_stable as f64)),
+            outcomes.iter().map(|o| o.peak_stable).max().unwrap_or(0),
         );
     }
 

@@ -651,3 +651,49 @@ cout_par_croisement = 10_000
 #
 # À zéro, la fitness d'avant, à l'identique.
 malus_feconde_au_repos = 30_000
+
+# ---------------------------------------------------------------------------
+[ecurie]
+# ---------------------------------------------------------------------------
+
+# Les places de l'**écurie**, celles où l'on filtre et où l'on retrouve une
+# monture. Au-delà, le reste vit en inventaire, havresac et coffre — dix mille
+# places, mais qui ne se fouillent que par couleur.
+#
+# ## Ce n'est pas un plafond de population, et c'est le point
+#
+# Relevé auprès du mainteneur, qui joue, le 24/08 : les jauges ne bougent **ni**
+# en écurie **ni** en inventaire — elles ne montent qu'en enclos — et l'on achète
+# à l'HDV des montures déjà montées en niveau. Ranger une monture ne lui coûte
+# donc rien : ni niveau, ni fécondité, ni généalogie, et le passage est gratuit
+# dans les deux sens.
+#
+# C'est ce qui distingue le rangement du **clonage**, et les confondre serait
+# grave : un clonage détruit deux montures pour rendre une fécondité et remet le
+# niveau à 1 (voir la compétence `ecurie-en-jeu`, relevé du 20/08). Ranger ne
+# détruit rien.
+#
+# Ce que le rangement coûte, c'est de retrouver la monture ensuite. Une gêne, pas
+# une perte — d'où un prix et non un mur. Une politique qui tient 566 montures
+# reste jouable ; elle est seulement plus pénible à jouer.
+places = 250
+
+# Ce que coûte de retrouver **une** monture au-delà des places ci-dessus.
+#
+# Retiré du score et non de la bourse, comme `cout_par_croisement` et pour la
+# même raison : une dépense changerait la solvabilité, donc le déroulé, et l'on
+# ne saurait plus si un écart vient du prix posé ou du jeu différent qu'il a
+# provoqué.
+#
+# ## Zéro par défaut, et le compte est tenu quand même
+#
+# C'est la règle de `malus_croisement_sterile` : `retrievals` est compté de toute
+# façon, seul le prix est un choix. À zéro, la fitness d'avant à l'identique, et
+# les mesures publiées restent valides.
+#
+# Pour l'échelle : un croisement est facturé 10 000. Un retrait est un geste bien
+# plus court qu'un accouplement — chercher une couleur dans le coffre contre
+# sortir, trier et réaccoupler — donc un prix du même ordre serait très cher.
+# `bin/fetch` mesure ce qu'un prix non nul re-classe, et c'est lui qui doit
+# trancher plutôt qu'une intuition.
+prix_du_retrait = 0

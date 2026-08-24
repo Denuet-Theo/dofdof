@@ -390,6 +390,11 @@ impl Prices {
         // barème d'avant, où seule la fournée était facturée.
         economy.crossing_effort = get(&["effort", "cout_par_croisement"], 0.0);
 
+        // L'écurie et ce qu'elle laisse déborder. Absente, la mesure est éteinte :
+        // zéro place veut dire « pas de plafond », comme avant ce réglage.
+        economy.stable_places = get(&["ecurie", "places"], 0.0).max(0.0) as usize;
+        economy.retrieval_price = get(&["ecurie", "prix_du_retrait"], 0.0);
+
         // Ce qu'une couronne pèse devant le score. Absent, l'ordre lexicographique
         // d'avant — cent millions, soit plus qu'une partie entière liquide.
         economy.crown_weight = get(&["projet", "poids_couronne"], 100_000_000.0);

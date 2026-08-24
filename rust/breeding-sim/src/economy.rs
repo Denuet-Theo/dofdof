@@ -1151,6 +1151,16 @@ pub struct RunOutcome {
     pub purchases: usize,
     pub clonings: usize,
     pub sacrifices: usize,
+    /// La plus grande écurie que la partie ait tenue, montures comprises quel
+    /// que soit leur état.
+    ///
+    /// C'est une **contrainte de jeu et non de modèle** : le simulateur n'a pas
+    /// de plafond, l'écurie du jeu en a un. Une politique qui gagne en tenant
+    /// mille montures à la fois n'est pas jouable, et rien d'autre dans
+    /// `RunOutcome` ne le dirait — le score final ne voit que ce qui reste.
+    ///
+    /// Mesuré au pic et non à la fin, parce que c'est le pic qui déborde.
+    pub peak_stable: usize,
     /// Fécondations posées **sans croisement** sur toute la partie.
     ///
     /// C'est la mesure qui dit si la politique banque sa fécondité ou si elle
@@ -1765,6 +1775,7 @@ fn run(
         cycles: 0,
         cycles_by_unit: [0; MAX_UNITS],
         sacrifices: 0,
+        peak_stable: stable.len(),
         genetons: 0,
         loads_paid: 0,
         loads_by_unit: [0; MAX_UNITS],
@@ -1877,6 +1888,10 @@ fn run(
                 outcome.cycles_by_unit[unit.min(MAX_UNITS - 1)] += applied.cycles;
                 outcome.sacrifices += applied.sacrifices;
                 outcome.genetons += applied.genetons;
+                // Après application : la fournée a inséré ses naissances et
+                // retiré ses sacrifices, donc c'est là que l'écurie est la plus
+                // grande de ce tour.
+                outcome.peak_stable = outcome.peak_stable.max(stable.len());
                 outcome.best_generation = outcome.best_generation.max(applied.best_generation);
 
                 if let Some(log) = record.as_deref_mut() {

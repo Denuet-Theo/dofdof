@@ -360,9 +360,25 @@ pub const TREES_PATH: &str = "../../src/lib/dofus/breeding/trees.json";
 /// Charge le muldo depuis l'emplacement par défaut. Utilisé par les tests et
 /// les binaires de mesure, qui tournent tous depuis `rust/breeding-sim`.
 pub fn muldo() -> Catalog {
+    family("muldo")
+}
+
+/// Charge **n'importe quelle** famille depuis l'emplacement par défaut.
+///
+/// `muldo()` reste la commodité des tests et des mesures publiées ; celle-ci existe
+/// pour comparer les familles sans coder un second helper par arbre, ce que la
+/// compétence `neat-training` demande explicitement.
+///
+/// ## Ce qu'elle ne rend pas comparable pour autant
+///
+/// Les prix d'`economy.toml` sont des **relevés muldo** : `ambre_par_rang`, la bande
+/// de prix gen 10 et les paliers de géneton. Un score mesuré sur une autre famille
+/// avec ces prix-là dit ce que la **structure** de l'arbre permet, pas ce que
+/// l'éleveur gagnerait. Les re-tarifer est une autre affaire.
+pub fn family(id: &str) -> Catalog {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Catalog::load(root.join("../../src/lib/dofus/breeding/trees.json"), "muldo")
-        .expect("le catalogue muldo doit se charger")
+    Catalog::load(root.join("../../src/lib/dofus/breeding/trees.json"), id)
+        .unwrap_or_else(|error| panic!("le catalogue {id} doit se charger : {error}"))
 }
 
 #[cfg(test)]

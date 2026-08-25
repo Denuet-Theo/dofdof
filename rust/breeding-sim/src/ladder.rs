@@ -977,6 +977,20 @@ pub const RUNG_THRESHOLD: usize = 10;
 /// Un dixième : assez pour qu'une monture déjà en écurie trouve où monter, assez
 /// peu pour que `compose` serve la route couronnée d'abord. Zéro rend la
 /// suppression d'avant, à l'identique.
+///
+/// ## Ce qu'elle vaut dépend de l'arbre, et ça a été mesuré
+///
+/// Isolée à zéro sur `bin/bench`, 200 graines :
+///
+/// | famille | à 0,1 | à 0 | écart |
+/// | --- | --- | --- | --- |
+/// | muldo | 84,02 M | 64,96 M | **+19,06 M** |
+/// | volkorne | 50,03 M | 47,49 M | +2,54 M |
+///
+/// Le gain est donc **largement muldo**, et le chiffre annoncé en #286 méritait
+/// cette nuance-là autant que celle de la moisson : à demande nulle, le muldo rend
+/// 64,96 M contre 64,18 au glouton — c'est cette constante qui nous met devant lui,
+/// et elle ne le fait que sur cet arbre.
 pub const SPARE_ROUTE_DEMAND: f64 = 0.1;
 
 /// Dans quel ordre les croisements entrent dans la fournée.

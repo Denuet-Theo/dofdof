@@ -542,6 +542,40 @@ const BreedingPolicyPanel = ({
         )}
       </div>
 
+      {/* ## La couronne retenue, dite en toutes lettres
+
+          Le plan vise **une** gen 10, et depuis que le projet pèse au lieu
+          d'imposer il lui arrive de céder à une couleur nettement mieux payée —
+          9 fois sur 10 il gagne, pas 10.
+
+          Le relevé du 14/08 se plaignait exactement de ce silence : le projet
+          demandait Azur-Doré depuis huit jours et le plan visait Ambre-Doré « sans
+          que rien ne le dise ». On ne force pas le choix pour autant : forcer coupait
+          le plan sur une seule route et rendait inemployable une gen 9 d'une autre
+          couleur. On l'affiche. */}
+      {fill?.crown && (
+        <p
+          data-testid="policy-crown"
+          className={`mb-3 text-[11px] ${
+            fill.crown.asked && fill.crown.asked !== fill.crown.colorId
+              ? 'text-amber-400'
+              : 'text-dark-500'
+          }`}
+        >
+          Le plan vise{' '}
+          <span className="font-medium text-dark-200">{nameOf(fill.crown.colorId)}</span>
+          {fill.crown.asked && fill.crown.asked !== fill.crown.colorId && (
+            <>
+              {' '}— tu demandais{' '}
+              <span className="font-medium">{nameOf(fill.crown.asked)}</span>, qui vaut
+              moins cher aujourd&apos;hui. Le projet pèse sur le choix, il ne l&apos;impose
+              plus.
+            </>
+          )}
+          {fill.crown.asked === fill.crown.colorId && ' , comme ton projet le demande.'}
+        </p>
+      )}
+
       {/* Ce que la politique **ne voit pas**, dit en toutes lettres.
           Les montures verrouillées sont retirées de tous les arbitrages — le jeu
           ne les laisse ni s'accoupler ni se faire cloner tant que leur cycle

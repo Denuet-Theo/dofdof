@@ -1759,14 +1759,7 @@ impl LadderPolicy {
         // matière première de l'étage 1. Les moissonner reviendrait à brûler la
         // base de l'échelle pour un géneton, et c'est mesuré : sans cette
         // exclusion, le départ de zéro perdait 1,5 M.
-        let plan_material = |color: ColorId| {
-            self.ladder.wanted.contains(&color)
-                || self
-                    .ladder
-                    .blocks
-                    .iter()
-                    .any(|block| block.contains(&color))
-        };
+        let plan_material = |color: ColorId| self.plan_material(color);
 
         // Le goulot du plan : le plus petit rapport `tenu / demandé` parmi les
         // couleurs voulues. C'est la même lecture que `compose`, qui fabrique en
@@ -2381,6 +2374,21 @@ impl LadderPolicy {
         self.ladder.crown_at(catalog, economy, choice);
         self.admissible.clear();
         self.crowned = true;
+    }
+
+    /// Ce que le plan réclame, comme matière ou comme ingrédient.
+    ///
+    /// `wanted` ne suffit pas : les gen 1 des blocs n'y figurent pas — on les
+    /// **achète** au lieu de les produire — mais elles sont la matière première de
+    /// l'étage 1. Une méthode et non deux closures, pour que la moisson et le
+    /// filtre ne puissent pas s'en faire deux lectures.
+    pub fn plan_material(&self, color: ColorId) -> bool {
+        self.ladder.wanted.contains(&color)
+            || self
+                .ladder
+                .blocks
+                .iter()
+                .any(|block| block.contains(&color))
     }
 
     /// Ce couple monte-t-il, et vers une couleur du plan ? Voir `aims_at`.

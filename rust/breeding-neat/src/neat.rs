@@ -246,6 +246,25 @@ fn nudge(value: i64, step: i64, low: i64, high: i64, rng: &mut Rng) -> i64 {
 pub struct Config {
     /// Probabilité de toucher à la bande, au niveau ou au seuil d'Optimakina.
     pub strategy_mutation: f64,
+    /// La stratégie **imposée** à toutes les unités, ou `None` pour la laisser
+    /// évoluer.
+    ///
+    /// ## Pourquoi la retirer de la recherche
+    ///
+    /// Le génome porte six bandes, un niveau et un seuil d'Optimakina **par
+    /// unité** : c'est trente-deux paramètres avant la moindre synapse, et ils se
+    /// mutent 35 % du temps. Sur un départ gen 1, où le gradient est déjà presque
+    /// plat — deux graines sur trois ne quittent pas le plancher — ce budget est
+    /// dépensé à retrouver un réglage que `bin/gauges` calcule exactement, sans
+    /// heuristique, en balayant les 4 096 combinaisons.
+    ///
+    /// Imposer le réglage rend donc la recherche à ce qu'elle seule sait faire :
+    /// la **fonction de valeur**. Le levier n'est pas perdu, il est déplacé de
+    /// l'évolution vers l'arithmétique.
+    ///
+    /// Posé, `strategy_mutation` est ignoré et le croisement n'a plus rien à
+    /// choisir : tous les génomes portent le même réglage.
+    pub fixed_strategy: Option<Strategy>,
     pub weight_mutation: f64,
     pub weight_perturbation: f64,
     pub perturbation_power: f64,
@@ -280,6 +299,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             strategy_mutation: 0.35,
+            fixed_strategy: None,
             weight_mutation: 0.8,
             weight_perturbation: 0.9,
             perturbation_power: 0.5,
@@ -306,7 +326,7 @@ impl Genome {
     /// NEAT part **minimal** et complexifie seulement quand la sélection le
     /// récompense. Démarrer avec une couche cachée reviendrait à choisir la
     /// forme de la fonction, ce qu'on refuse précisément de faire.
-    pub fn minimal(innovations: &mut Innovations, rng: &mut Rng) -> Self {
+    pub fn minimal(innovations: &mut Innovations, rng: &mut Rng, fixed: Option<Strategy>) -> Self {
         let connections = (0..=INPUTS)
             .map(|from| Connection {
                 from,
@@ -321,11 +341,15 @@ impl Genome {
             connections,
             // On part au milieu plutôt qu'à un extrême : l'évolution doit
             // pouvoir descendre comme monter dès la première génération.
-            strategies: std::array::from_fn(|_| Strategy {
-                bands: std::array::from_fn(|_| rng.range(4)),
-                level: 1 + rng.range(MAX_LEVEL as usize) as u16,
-                optimakina_from: 2 + rng.range(10) as u8,
-            }),
+            strategies: match fixed {
+                // Imposé : tout le monde part — et reste — au même réglage.
+                Some(strategy) => [strategy; MAX_UNITS],
+                None => std::array::from_fn(|_| Strategy {
+                    bands: std::array::from_fn(|_| rng.range(4)),
+                    level: 1 + rng.range(MAX_LEVEL as usize) as u16,
+                    optimakina_from: 2 + rng.range(10) as u8,
+                }),
+            },
         }
     }
 
@@ -333,7 +357,7 @@ impl Genome {
         // Les réglages stratégiques bougent par petits pas la plupart du temps,
         // et par saut de temps en temps : un optimum local sur la bande coûte
         // très cher, et un pas de un ne le franchit jamais.
-        if rng.f64() < config.strategy_mutation {
+        if config.fixed_strategy.is_none() && rng.f64() < config.strategy_mutation {
             let unit = rng.range(MAX_UNITS);
             let strategy = &mut self.strategies[unit];
             match rng.range(3) {
@@ -725,7 +749,7 @@ mod tests {
     fn le_genome_minimal_relie_toutes_les_entrees_a_la_sortie() {
         let mut innovations = Innovations::new();
         let mut rng = Rng::new(1);
-        let genome = Genome::minimal(&mut innovations, &mut rng);
+        let genome = Genome::minimal(&mut innovations, &mut rng, None);
         assert_eq!(genome.connections.len(), INPUTS + 1, "les entrées plus le biais");
         assert!(genome.hidden.is_empty());
 
@@ -742,7 +766,7 @@ mod tests {
         // pas sur le choc qu'elle inflige.
         let mut innovations = Innovations::new();
         let mut rng = Rng::new(7);
-        let mut genome = Genome::minimal(&mut innovations, &mut rng);
+        let mut genome = Genome::minimal(&mut innovations, &mut rng, None);
 
         let inputs = [0.3; FEATURES];
         let before = Network::compile(&genome).value(&inputs);
@@ -763,7 +787,7 @@ mod tests {
         let mut innovations = Innovations::new();
         let mut rng = Rng::new(11);
         let config = Config::default();
-        let mut genome = Genome::minimal(&mut innovations, &mut rng);
+        let mut genome = Genome::minimal(&mut innovations, &mut rng, None);
 
         for _ in 0..500 {
             genome.mutate(&config, &mut innovations, &mut rng);
@@ -783,11 +807,11 @@ mod tests {
         let mut rng = Rng::new(3);
         let config = Config::default();
 
-        let mut better = Genome::minimal(&mut innovations, &mut rng);
+        let mut better = Genome::minimal(&mut innovations, &mut rng, None);
         for _ in 0..50 {
             better.mutate(&config, &mut innovations, &mut rng);
         }
-        let mut worse = Genome::minimal(&mut innovations, &mut rng);
+        let mut worse = Genome::minimal(&mut innovations, &mut rng, None);
         for _ in 0..10 {
             worse.mutate(&config, &mut innovations, &mut rng);
         }
@@ -803,7 +827,7 @@ mod tests {
         let mut rng = Rng::new(5);
         let config = Config::default();
 
-        let base = Genome::minimal(&mut innovations, &mut rng);
+        let base = Genome::minimal(&mut innovations, &mut rng, None);
         assert_eq!(base.distance(&base, &config), 0.0);
 
         let mut far = base.clone();

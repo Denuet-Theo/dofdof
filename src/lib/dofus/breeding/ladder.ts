@@ -740,11 +740,50 @@ export const bestPartnerCrown = (
  * bloc, ou si la gen 9 visée ne se pose pas : un plan à moitié couronné serait
  * pire que le plan complet, et le Rust s'arrête au même endroit.
  */
+/**
+ * Ce qu'il reste de demande à une route que la couronne ne réclame plus.
+ *
+ * Un dixième : assez pour qu'une monture déjà en écurie trouve où monter, assez
+ * peu pour que la composition serve la route couronnée d'abord. Zéro rend la
+ * suppression d'avant. `SPARE_ROUTE_DEMAND` côté Rust.
+ */
+export const SPARE_ROUTE_DEMAND = 0.1;
+
+/**
+ * Ce que la couleur poursuivie gagne au **choix de la couronne**, en kamas.
+ *
+ * Miroir de `boost_couronne` dans `rust/economy.toml`, et les deux doivent bouger
+ * ensemble : `check-ladder-parity` compare les couronnes.
+ *
+ * 400 000, et c'est mesuré : `bin/crown` compte la couleur poursuivie couronnée
+ * **91,4 %** du temps à ce bonus, contre 40,6 % à 200 000 et 100 % à 800 000. Le
+ * premier n'est pas une préférence — on ne l'obtient pas six fois sur dix — et le
+ * dernier est l'imposition sous un autre nom.
+ *
+ * **Pourquoi pas `poids_couronne`** : il vaut cinq millions, quand tout l'écart de
+ * la bande gen 10 — 300 000 à 1 000 000 — fait 700 000. Sept fois l'écart qu'il
+ * devrait départager : la préférence gagnerait toujours, et ce serait l'imposition
+ * sous un autre nom.
+ */
+export const CROWN_PREFERENCE = 400_000;
+
 export const crownAt = (
   ladder: Ladder,
   colors: BreedingColor[],
   valueOf: (colorId: string) => number,
-  choice?: string
+  choice?: string,
+  /**
+   * La couleur poursuivie, et ce qu'elle gagne au **choix** de la couronne.
+   *
+   * `project` la nomme, `crownPreference` dit de combien de kamas elle passe
+   * devant. Elle l'emporte donc sauf si une autre gen 10 vaut plus qu'elle plus le
+   * bonus — préférer, et non imposer.
+   *
+   * Zéro rend le tri au prix seul, à l'identique. Côté Rust c'est
+   * `Economy::crown_preference`, et les deux doivent bouger ensemble.
+   */
+  project?: string | null,
+  crownPreference = 0
 ): void => {
   const index: Index = new Map(colors.map((color, position) => [color.id, position]));
   const byId = new Map(colors.map((color) => [color.id, color]));
@@ -761,7 +800,16 @@ export const crownAt = (
         ? [recipe[0], recipe[1]]
         : [recipe[1], recipe[0]];
     if (generationOf(high) !== top - 1 || generationOf(low) !== 1) continue;
-    candidates.push({ value: valueOf(color.id), crown: color.id, target: high, partner: low });
+    // La couleur poursuivie entre avec son bonus — **ici et pas dans `valueOf`**,
+    // qui chiffre aussi la liquidation. Préférer et non imposer : voir
+    // `Economy::crown_preference` côté Rust, et les deux côtés bougent ensemble.
+    const preference = project === color.id ? crownPreference : 0;
+    candidates.push({
+      value: valueOf(color.id) + preference,
+      crown: color.id,
+      target: high,
+      partner: low,
+    });
   }
   candidates.sort((a, b) => b.value - a.value || byCatalogOrder(index)(a.crown, b.crown));
 
@@ -777,29 +825,39 @@ export const crownAt = (
   if (!ladder.blocks.some((block) => block.includes(picked.partner))) return;
   if (!laySingle(ladder, colors, index, picked.target)) return;
 
+  // La demande d'avant la couronne : c'est elle qu'on réduit au lieu de la
+  // supprimer, voir plus bas.
+  const before = new Map(ladder.demand);
+
   ladder.wanted.add(picked.crown);
   ladder.recipeOf.set(picked.crown, [picked.target, picked.partner]);
   ladder.summit = [picked.crown];
   spreadDemand(ladder, colors);
 
-  // ## Tailler ce que la couronne ne réclame pas
+  // ## Réduire ce que la couronne ne réclame plus — sans le supprimer
   //
   // Les barreaux du dessous produisent **les deux** couleurs de leur étage, parce
-  // qu'on ne savait pas encore laquelle servirait. La couronne tranche : Corail
-  // ne se fait que par des gen 8 dérivées de Prune, donc Émeraude et ses gen 6
+  // qu'on ne savait pas encore laquelle servirait. La couronne tranche : Corail ne
+  // se fait que par des gen 8 dérivées de Prune, donc Émeraude et ses gen 6
   // tombent à une demande de zéro.
   //
-  // Les laisser dans le plan ne serait pas neutre : elles resteraient
-  // **admissibles**, donc un croisement pourrait les viser au lieu de servir la
-  // route. Un plan doit être exactement ce dont on a besoin — et sans cette
-  // taille, `aimsAt` admet ici ce que la politique mesurée refuse là-bas.
-  const dead = [...ladder.wanted].filter(
-    (colorId) => (ladder.demand.get(colorId) ?? 0) <= 0
-  );
-  for (const colorId of dead) {
-    ladder.wanted.delete(colorId);
-    ladder.recipeOf.delete(colorId);
-    ladder.demand.delete(colorId);
+  // On les **supprimait**, au motif qu'un plan doit être exactement ce dont on a
+  // besoin. Le motif tient pour les places et pas pour l'écurie : une gen 9 Corail
+  // qu'on possède déjà devenait inemployable, sa route n'existant plus dans le
+  // plan. On la garde donc à demande **réduite** — `SPARE_ROUTE_DEMAND` côté Rust,
+  // et les deux côtés doivent bouger ensemble.
+  const spare = [...ladder.wanted]
+    .filter((colorId) => (ladder.demand.get(colorId) ?? 0) <= 0)
+    .map((colorId) => [colorId, before.get(colorId) ?? 0] as const);
+  for (const [colorId, previous] of spare) {
+    if (previous > 0) {
+      ladder.demand.set(colorId, previous * SPARE_ROUTE_DEMAND);
+    } else {
+      // Rien à garder : personne ne demandait cette couleur même avant.
+      ladder.wanted.delete(colorId);
+      ladder.recipeOf.delete(colorId);
+      ladder.demand.delete(colorId);
+    }
   }
 };
 
@@ -888,8 +946,23 @@ export const crownedLadderOf = (
   //
   // **Les deux côtés doivent bouger ensemble** : `Crowning::PriceOnly` y est
   // désormais le défaut, et `check-ladder-parity` compare les couronnes.
-  const choice = crownable ? wanted : undefined;
-  crownAt(plan, colors, valueOf, choice);
+  //
+  // ## Et la cible **pèse** au lieu d'imposer, depuis le 25/08
+  //
+  // Elle passait en `choice`, donc elle **remplaçait** le choix : le plan était coupé
+  // sur elle quoi que valent les autres, et `crownAt` supprimait toutes les autres
+  // routes. Une gen 9 Corail qu'on possédait déjà devenait alors inemployable — sa
+  // route n'existait plus, donc aucun croisement ne pouvait la faire monter.
+  //
+  // Elle entre maintenant dans le tri avec `CROWN_PREFERENCE`, et les routes que la
+  // couronne ne réclame plus gardent un dixième de demande. Elle l'emporte donc sauf
+  // si une autre gen 10 vaut plus qu'elle plus le bonus.
+  //
+  // **Ce que ça peut faire, et qui doit se voir à l'écran** : la cible peut perdre.
+  // Le relevé du 14/08 se plaignait exactement de ça — le projet demandait Azur-Doré
+  // depuis huit jours et le plan visait Ambre-Doré « sans que rien ne le dise ». Le
+  // remède n'est pas de forcer, c'est de l'afficher.
+  crownAt(plan, colors, valueOf, undefined, crownable ? wanted : null, CROWN_PREFERENCE);
   return plan;
 };
 

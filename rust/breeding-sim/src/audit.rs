@@ -199,16 +199,118 @@ mod tests {
             capped_when_duplicating > 0,
             "la boucle du sommet n'a proposé aucun croisement plafonné : elle ne tourne pas"
         );
-        // `Target` est un **sous-ensemble strict** de `Duplicate` : elle ne retient
-        // que les croisements nommant une couleur de `ladder.summit`, là où la
-        // boucle du forum prend n'importe quelle gen 10. L'inégalité est ce qui
-        // distingue les deux réglages ; à égalité, `Target` n'aurait rien filtré et
-        // ouvrirait la boucle que #225 dit laisser éteinte.
         assert!(
-            capped_when_targeting <= capped_when_duplicating,
-            "le sommet ciblé ({capped_when_targeting}) doit rester sous la boucle \
-             entière ({capped_when_duplicating})"
+            capped_when_targeting > 0,
+            "le sommet ciblé n'a rien proposé de plafonné : il ne tourne pas"
         );
+    }
+
+    /// `Target` est un **sous-ensemble** de `Duplicate`, et ça se vérifie couple par
+    /// couple.
+    ///
+    /// La règle est pointwise : sur un même couple, `Target` ne retient que ce qui
+    /// nomme une couleur de `ladder.summit`, là où la boucle du forum prend n'importe
+    /// quelle gen 10. Donc « admis par Target » implique « admis par Duplicate ».
+    ///
+    /// ## Pourquoi ça ne se mesurait pas en cumulant des parties
+    ///
+    /// C'est ce que faisait le test au-dessus, et c'était invalide : `Duplicate`
+    /// **joue** la boucle du sommet, donc consomme ses gen 10 et visite d'autres
+    /// écuries que `Target`. Les deux totaux ne portent pas sur les mêmes états, et
+    /// l'inégalité qu'on en tirait était une coïncidence de population — elle a tenu
+    /// jusqu'à ce qu'un changement de plan la déplace (2 012 contre 1 879), sans que
+    /// la règle soit fausse pour autant.
+    ///
+    /// Ici les deux politiques lisent **le même** couple et **le même** plan.
+    #[test]
+    fn le_sommet_cible_est_un_sous_ensemble_de_la_boucle() {
+        let catalog = muldo();
+        let economy = Prices::load_default().expect("economy.toml").economy;
+
+        let mut targeting = LadderPolicy::new(&catalog, Route::default())
+            .with_summit(Summit::Target);
+        let mut duplicating = LadderPolicy::new(&catalog, Route::default())
+            .with_summit(Summit::Duplicate);
+        targeting.crown(&catalog, &economy);
+        duplicating.crown(&catalog, &economy);
+
+        // ## L'écurie doit porter des gen 10, sinon le test ne dit rien
+        //
+        // `Target` et `Duplicate` ne divergent que sur les croisements **plafonnés**,
+        // et un couple n'est plafonné que si l'ascendance atteint déjà le sommet. Une
+        // écurie tirée au hasard n'en porte aucune : les deux réglages y admettent
+        // exactement le même ensemble, et le test passe **dans les deux sens** —
+        // vérifié en inversant l'implication, qui restait verte.
+        //
+        // On pose donc la situation de la boucle : des gen 10 de couleurs
+        // différentes, et les gen 1 avec qui les réaccoupler.
+        let mut stable = crate::stable::Stable::new();
+        let tops: Vec<crate::trees::ColorId> = catalog
+            .ids_at_generation(catalog.top_generation())
+            .take(4)
+            .collect();
+        assert!(tops.len() >= 2, "il faut plusieurs gen 10 pour distinguer les deux");
+        for (at, color) in tops.iter().enumerate() {
+            for sex in [crate::stable::Sex::Male, crate::stable::Sex::Female] {
+                stable.push(crate::stable::Mount {
+                    color: *color,
+                    sex,
+                    level: 50,
+                    fertile: true,
+                    cycled: true,
+                    parents: catalog.color(*color).recipes.first().copied(),
+                });
+            }
+            let _ = at;
+        }
+        for color in catalog.ids_at_generation(1).take(3) {
+            for sex in [crate::stable::Sex::Male, crate::stable::Sex::Female] {
+                stable.push(crate::stable::Mount {
+                    color,
+                    sex,
+                    level: 50,
+                    fertile: true,
+                    cycled: true,
+                    parents: None,
+                });
+            }
+        }
+
+        let groups = stable.fertile_groups();
+        assert!(groups.len() > 1, "l'écurie doit porter de quoi apparier");
+
+        // Les deux réglages doivent différer **quelque part**, sinon l'implication
+        // est vraie pour de mauvaises raisons.
+        let mut admitted = 0;
+        let mut diverged = 0;
+        for male in &groups {
+            if male.sex != crate::stable::Sex::Male {
+                continue;
+            }
+            for female in &groups {
+                if female.sex != crate::stable::Sex::Female {
+                    continue;
+                }
+                let by_target = targeting.admits(&catalog, &male.sample, &female.sample);
+                let by_loop = duplicating.admits(&catalog, &male.sample, &female.sample);
+                if by_target {
+                    admitted += 1;
+                    assert!(
+                        by_loop,
+                        "{:?} × {:?} : admis en ciblé, refusé par la boucle entière",
+                        male.sample.color, female.sample.color
+                    );
+                }
+                if by_loop && !by_target {
+                    diverged += 1;
+                }
+            }
+        }
+        assert!(
+            diverged > 0,
+            "les deux réglages admettent le même ensemble : le test ne discrimine rien"
+        );
+        assert!(admitted > 0, "aucun couple admis : le test ne dit rien");
     }
 
     /// L'arithmétique sur laquelle repose la règle de moisson de `ladder.rs`.

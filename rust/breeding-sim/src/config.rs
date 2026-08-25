@@ -398,6 +398,9 @@ impl Prices {
         // Ce qu'une couronne pèse devant le score. Absent, l'ordre lexicographique
         // d'avant — cent millions, soit plus qu'une partie entière liquide.
         economy.crown_weight = get(&["projet", "poids_couronne"], 100_000_000.0);
+        // Ce que la couleur poursuivie gagne au **choix** de la couronne. Absent,
+        // zéro : le projet ne pèse alors que sur le score, comme avant.
+        economy.crown_preference = get(&["projet", "boost_couronne"], 0.0);
 
         // La profondeur de marché. Absente, elle vaut zéro et la liquidation reste
         // linéaire — le barème de toutes les mesures publiées avant elle.

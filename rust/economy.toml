@@ -697,3 +697,43 @@ places = 250
 # `bin/fetch` mesure ce qu'un prix non nul re-classe, et c'est lui qui doit
 # trancher plutôt qu'une intuition.
 prix_du_retrait = 0
+
+# Ce que la couleur poursuivie gagne au **choix de la couronne**, en kamas.
+#
+# ## Préférer, et non imposer
+#
+# Le projet passait par `with_forced_crown`, dont la doc dit pourtant qu'il est
+# « un instrument de mesure, pas un réglage de jeu » : il **remplace** le choix au
+# lieu de le peser, et la couronne imposée coupait alors le plan sur elle seule.
+#
+# Ici la couleur du projet entre dans le tri avec ce bonus. Elle gagne donc sauf si
+# une autre gen 10 vaut plus qu'elle plus le bonus.
+#
+# ## Pourquoi pas `poids_couronne`
+#
+# Parce que l'arithmétique l'interdit : les gen 10 se tirent entre 300 000 et
+# 1 000 000, donc tout l'écart de prix fait 700 000, quand `poids_couronne` vaut
+# cinq millions. Sept fois l'écart qu'il devrait départager — la préférence
+# gagnerait toujours, et ce serait l'imposition sous un autre nom.
+#
+# ## Le chiffre, mesuré
+#
+# `bin/crown` compte, sur 500 tirages de prix, combien de fois la couleur poursuivie
+# remporte la couronne :
+#
+#   bonus         couronnée
+#         0           5,8 %
+#   100 000          19,8 %
+#   200 000          40,6 %
+#   400 000          91,4 %   ← retenu
+#   800 000         100,0 %
+#
+# 200 000 ne donnait que 40,6 % : l'éleveur demande une couleur et ne l'obtient pas
+# six fois sur dix, ce qui n'est pas une préférence. À 800 000 elle gagne toujours, et
+# c'est l'imposition sous un autre nom — celle qu'on vient de retirer. 400 000 tient
+# les deux bouts : on obtient ce qu'on a demandé, sauf devant une rivale nettement
+# mieux payée.
+#
+# À zéro, le projet ne pèse plus que sur le score et la couronne se choisit au prix
+# seul — le comportement d'avant ce réglage, à l'identique.
+boost_couronne = 400_000

@@ -30,7 +30,7 @@
 //! question.
 
 use breeding_sim::config::Prices;
-use breeding_sim::economy::{Economy, MAX_UNITS, Strategy, play};
+use breeding_sim::economy::{Draws, Economy, MAX_UNITS, Strategy, play};
 use breeding_sim::ladder::{Crowning, Ladder, LadderPolicy, Route};
 use breeding_sim::trees::{Catalog, ColorId, muldo};
 
@@ -345,10 +345,58 @@ fn main() {
     // si ce que ça gagne en difficulté d'atteinte dépasse ce que ça abandonne en
     // prix — les gen 10 vont de 300 000 à 1 000 000, donc forcer le partenaire
     // coûte parfois cher.
+    preference_bites(&base);
+
     println!("\n=== le critère : « partenaire puis prix » − « prix seul » ===");
     duel("pool hérité, niveau réglé", &base, &ladder, true);
     duel("pool hérité, niveau défaut", &base, &ladder, false);
     duel("départ de zéro, niveau réglé", &scratch, &ladder, true);
+}
+
+/// La couleur poursuivie gagne-t-elle la couronne, et à quel bonus ?
+///
+/// `boost_couronne` ne vaut que s'il **mord** : trop petit il est inerte, trop grand
+/// il réimpose. Avec cinquante gen 10 tirées dans une cloche, le maximum des
+/// quarante-neuf autres est haut, donc un bonus modeste peut ne rien changer — c'est
+/// ce qu'on vient vérifier plutôt que de le supposer.
+///
+/// Le tirage des prix est celui de la partie (`for_run`), donc la réponse est une
+/// fréquence et non un oui-ou-non.
+fn preference_bites(base: &Economy) {
+    let catalog = muldo();
+    let ladder = Ladder::of(&catalog, Route::default());
+    // Une couleur poursuivie plausible : la première couronnable du catalogue.
+    let candidates: Vec<ColorId> = catalog
+        .ids_at_generation(catalog.top_generation())
+        .collect();
+    let Some(&project) = candidates.first() else {
+        return;
+    };
+
+    println!(
+        "\n=== le bonus de projet mord-il ? (couleur poursuivie : {}) ===",
+        catalog.slug(project)
+    );
+    println!("{:<14} {:>12} {:>14}", "bonus", "couronnée", "sur 500 tirages");
+    for boost in [0.0f64, 100_000.0, 200_000.0, 400_000.0, 800_000.0, 5_000_000.0] {
+        let mut won = 0;
+        for seed in 0..500u32 {
+            let mut economy = base.for_run(&catalog, &Draws::new(seed.wrapping_mul(2_246_822_519)));
+            economy.project = Some(project);
+            economy.crown_preference = boost;
+            let mut plan = ladder.clone();
+            plan.crown_at(&catalog, &economy, None);
+            if plan.summit.first() == Some(&project) {
+                won += 1;
+            }
+        }
+        println!(
+            "{:<14} {:>11.1} % {:>14}",
+            format!("{boost:.0}"),
+            won as f64 / 5.0,
+            won
+        );
+    }
 }
 
 /// Le critère contre le prix seul, sur graines appariées.

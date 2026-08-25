@@ -424,6 +424,57 @@ pub struct Economy {
     /// profondeur — mais il doit encore gagner sa place au lieu de rendre tout le
     /// reste indifférent.
     pub crown_weight: f64,
+    /// Ce que la couleur poursuivie gagne **au choix de la couronne**, en kamas.
+    ///
+    /// ## Préférer, et non imposer
+    ///
+    /// Le projet passait par `LadderPolicy::with_forced_crown`, dont la doc dit
+    /// pourtant qu'il est « un instrument de mesure, pas un réglage de jeu » : il
+    /// **remplace** le choix au lieu de le peser. Une couronne imposée coupe alors
+    /// le plan sur elle seule, quoi que valent les autres.
+    ///
+    /// Ici, la couleur du projet entre dans le tri de `crown_at` avec ce bonus. Elle
+    /// gagne donc **sauf** si une autre gen 10 vaut plus qu'elle plus le bonus — une
+    /// préférence dont la force est un nombre, pas un interrupteur. À bonus énorme
+    /// on retrouve l'ancien comportement, à zéro on retrouve l'absence de projet.
+    ///
+    /// ## Pourquoi pas `crown_weight`
+    ///
+    /// La tentation est d'employer `poids_couronne`, déjà documenté et mesuré. Elle
+    /// ne tient pas à l'arithmétique : les gen 10 se tirent entre 300 000 et
+    /// 1 000 000, donc tout l'écart de prix fait 700 000, quand `poids_couronne`
+    /// vaut **cinq millions**. Sept fois l'écart qu'il devrait départager : la
+    /// préférence gagnerait toujours, et on aurait réécrit l'imposition sous un
+    /// autre nom.
+    ///
+    /// Deux nombres, donc, et c'est ce que le projet est : une préférence sur ce
+    /// qu'on veut, distincte d'une affirmation sur ce que ça vaut.
+    ///
+    /// ## Le chiffre, mesuré
+    ///
+    /// `bin/crown` compte, sur 500 tirages de prix, combien de fois la couleur
+    /// poursuivie remporte la couronne :
+    ///
+    /// | bonus | couronnée |
+    /// | --- | --- |
+    /// | 0 | 5,8 % |
+    /// | 100 000 | 19,8 % |
+    /// | **400 000** | **91,4 %** |
+    /// | 800 000 | 100 % |
+    ///
+    /// 200 000 ne donnait que **40,6 %** : l'éleveur demande une couleur et ne
+    /// l'obtient pas six fois sur dix, ce qui n'est pas une préférence. À 800 000
+    /// elle gagne toujours, et c'est l'imposition sous un autre nom. 400 000 tient
+    /// les deux : on obtient ce qu'on a demandé, sauf devant une rivale nettement
+    /// mieux payée.
+    ///
+    /// ## Appliqué au tri, jamais à `value_of`
+    ///
+    /// `value_of` chiffre aussi la liquidation. Y verser le bonus ferait vendre la
+    /// couleur poursuivie plus cher qu'elle ne vaut et gonflerait le score
+    /// directement — un gain qui n'en est pas un, et invisible au score puisque
+    /// c'est le score qu'il fausse.
+    pub crown_preference: f64,
     /// Ce qu'une vente retire au prix de **sa** couleur, en part.
     ///
     /// ## Le trou que ça bouche
@@ -541,6 +592,7 @@ impl Default for Economy {
             stable_places: 0,
             retrieval_price: 0.0,
             crown_weight: 100_000_000.0,
+            crown_preference: 0.0,
             sale_price_decay: 0.0,
             daily_price_recovery: 0.0,
             collection_bonus: [0; 11],

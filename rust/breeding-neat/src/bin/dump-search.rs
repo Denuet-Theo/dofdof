@@ -51,6 +51,7 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{Draws, Economy, Rng, Strategy, UnitPlan, UnitView, starting_stable};
 use breeding_sim::encode::Census;
 use breeding_sim::sample::{SampleConfig, sample_stable};
+use breeding_sim::ladder::{LadderPolicy, Route, Summit};
 use breeding_sim::search::{Myopic, SearchConfig, Searcher, ValueFn};
 use breeding_sim::stable::Sex;
 use breeding_sim::trees::{Catalog, muldo};
@@ -171,13 +172,31 @@ fn main() {
             iterations: ITERATIONS,
             sacrifices,
         };
-        let plan = Searcher::new(config()).plan(&view, &mut Rng::new(seed), &value);
+        // **Le filtre d'admissibilité, un cas sur deux.**
+        //
+        // La référence ne le couvrait pas du tout : elle ne portait que
+        // `admissible: None`, si bien que le filtre de l'écran — celui qui décide
+        // ce que la recherche a le droit de composer — n'était vérifié d'aucun
+        // côté du portage. Une divergence là ne changeait aucun chiffre affiché et
+        // rien ne l'aurait dite.
+        let regime = if case % 2 == 0 { "aucun" } else { "strict" };
+        let searcher = || {
+            let mut searcher = Searcher::new(config());
+            if regime != "aucun" {
+                let mut policy = LadderPolicy::new(&catalog, Route::default());
+                policy = policy.with_summit(Summit::Target);
+                policy.crown(&catalog, &economy);
+                searcher.admissible = Some(policy);
+            }
+            searcher
+        };
+        let plan = searcher().plan(&view, &mut Rng::new(seed), &value);
         // Le même cas jugé par la valeur myope, qui est une somme de flottants et
         // rien d'autre : ni `log1p`, ni `tanh`, ni réseau. Voir l'en-tête.
-        let myopic = Searcher::new(config()).plan(&view, &mut Rng::new(seed), &Myopic);
+        let myopic = searcher().plan(&view, &mut Rng::new(seed), &Myopic);
         // Celle qui lit tout le recensement sans transcendante : c'est elle qui
         // verrouille l'algèbre champ par champ.
-        let probe = Searcher::new(config()).plan(&view, &mut Rng::new(seed), &Probe);
+        let probe = searcher().plan(&view, &mut Rng::new(seed), &Probe);
 
         let mounts: Vec<serde_json::Value> = stable
             .mounts
@@ -194,6 +213,7 @@ fn main() {
             .collect();
 
         cases.push(serde_json::json!({
+            "admissible": regime,
             "seed": seed,
             "kamas": kamas,
             "capacity": capacity,

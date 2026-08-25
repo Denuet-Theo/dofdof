@@ -83,6 +83,9 @@ execFileSync(
     // il faut le demander à part — c'est le même que celui de l'app, et c'est ce
     // qui rend la comparaison exacte plutôt qu'approchée.
     join(ROOT, 'src/lib/dofus/breeding/random.ts'),
+    // Le filtre d'admissibilité vient de l'échelle : sans elle la moitié des cas
+    // ne peut pas être rejouée.
+    join(ROOT, 'src/lib/dofus/breeding/ladder.ts'),
     '--outDir', out,
     '--module', 'commonjs',
     '--target', 'es2020',
@@ -98,6 +101,7 @@ execFileSync(
 const { planUnit, createSearcher, myopic, linearProbe } = await import(pathToFileURL(join(out, 'search.js')).href);
 const { censusOf, featuresOf, FEATURES } = await import(pathToFileURL(join(out, 'census.js')).href);
 const { seededRandom } = await import(pathToFileURL(join(out, 'random.js')).href);
+const { aimsAt, crownedLadderOf } = await import(pathToFileURL(join(out, 'ladder.js')).href);
 const { compile, evaluate } = await import(pathToFileURL(join(out, 'network.js')).href);
 
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
@@ -165,9 +169,26 @@ for (const [at, testCase] of fixture.cases.entries()) {
     loadKamas: testCase.loadKamas,
   };
 
+  // Le filtre, quand le cas le demande. C'est le prédicat de `policy.ts` :
+  // `aimsAt` contre l'échelle couronnée, en régime `'target'`.
+  //
+  // Sans cette dimension la référence ne couvrait que `admissible: undefined`, et
+  // le filtre qui décide ce que la recherche a le droit de composer n'était
+  // vérifié d'aucun côté du portage.
+  let admissible;
+  if (testCase.admissible !== 'aucun') {
+    const ladder = crownedLadderOf(colors, economy.valueOf);
+    admissible = (male, female) =>
+      aimsAt(male, female, colors, generations, ladder, 'target') !== null;
+  }
+
   const run = (value) =>
     planUnit(
-      createSearcher({ iterations: testCase.iterations, sacrifices: testCase.sacrifices }),
+      createSearcher({
+        iterations: testCase.iterations,
+        sacrifices: testCase.sacrifices,
+        admissible,
+      }),
       view,
       seededRandom(testCase.seed),
       value

@@ -105,7 +105,21 @@ fn plan_json(catalog: &Catalog, plan: &UnitPlan) -> serde_json::Value {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let champion_path = args.next().unwrap_or_else(|| "champion-t2.json".into());
+    // Le champion **embarqué**, et non `champion-t2.json` comme avant.
+    //
+    // Ce défaut-là était une archive du 10/08, restée à 74 entrées quand le
+    // simulateur en déclare 75. `champion::load` refuse alors le génome et le
+    // binaire **sort** — donc `search-parity.json` était irrégénérable, en silence,
+    // depuis que l'encodage a changé. La garde passait pendant ce temps contre la
+    // référence périmée, et une conclusion fausse a été tirée avant qu'on le voie.
+    //
+    // L'embarqué est le bon défaut pour un générateur de référence : il est
+    // **versionné**, donc présent sur un clone neuf, là où `rust/champion.json` est
+    // ignoré par git et peut ne pas exister. C'est aussi celui que `refresh-parity`
+    // passe sous `--check`.
+    let champion_path = args
+        .next()
+        .unwrap_or_else(|| "../src/lib/dofus/breeding/champion.json".into());
     let target = args
         .next()
         .unwrap_or_else(|| "../scripts/fixtures/search-parity.json".into());

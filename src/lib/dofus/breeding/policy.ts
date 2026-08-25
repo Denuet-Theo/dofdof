@@ -294,6 +294,19 @@ export type StablePlan = {
   purchases: { colorId: string; males: number; females: number }[];
   pull: PullLine[];
   /**
+   * La gen 10 que le plan a **retenue**, et celle que le projet demandait.
+   *
+   * Les deux peuvent différer depuis que le projet *pèse* au lieu d'imposer : il
+   * entre dans le tri avec `CROWN_PREFERENCE` et l'emporte 91,4 % du temps, donc il
+   * lui arrive de céder à une gen 10 nettement mieux payée.
+   *
+   * C'est exactement la plainte du relevé du 14/08 — le projet demandait Azur-Doré
+   * depuis huit jours et le plan visait Ambre-Doré, « **sans que rien ne le dise** ».
+   * Le remède n'est pas de forcer le choix, c'est de le **dire**, et il faut pour ça
+   * que la couronne sorte d'ici.
+   */
+  crown: { colorId: string; asked: string | null } | null;
+  /**
    * Les accouplements que la politique a proposés et que l'échelle a refusés.
    *
    * Ils ne sont pas silencieusement effacés : un plan amputé sans rien dire est
@@ -852,6 +865,11 @@ const readPlan = (
 
   return {
     refused,
+    // La couronne retenue, et celle qu'on avait demandée. Voir `crown` : le projet
+    // pèse au lieu d'imposer, donc les deux peuvent différer et l'écran doit le dire.
+    crown: ladder.summit.length > 0
+      ? { colorId: ladder.summit[0], asked: input.target ?? null }
+      : null,
     // Génération cible croissante, puis les immédiats devant à rang égal, puis
     // l'ordre de la recherche. Une recopie n'a pas de cible : elle finit la liste.
     // Voir le champ `couples` pour ce que cet ordre remplace.

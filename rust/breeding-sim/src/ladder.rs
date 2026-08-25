@@ -1142,33 +1142,72 @@ pub enum Tuning {
 /// mais elle reste à établir.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Crowning {
-    /// La gen 10 la mieux payée du jour, sans regarder son partenaire. Gardé pour
-    /// la mesure.
+    /// La gen 10 la mieux payée du jour, sans regarder son partenaire. **Le défaut
+    /// depuis le 24/08.**
+    ///
+    /// ## Le relevé qui l'avait écarté, et pourquoi il ne vaut plus
+    ///
+    /// Le 12/08 (#131), `PartnerThenPrice` gagnait franchement — mille graines
+    /// appariées, sur le harnais de `bin/crown` :
+    ///
+    /// | régime | écart au prix seul | t | gen 10 |
+    /// | --- | --- | --- | --- |
+    /// | pool hérité, niveau réglé | **+3,12 M ± 0,31** | 10,05 | 42,4 → 48,9 |
+    /// | pool hérité, niveau défaut | +2,98 M ± 0,28 | 10,67 | 38,2 → 43,9 |
+    /// | départ de zéro | +0,02 M ± 0,04 | 0,37 | 0,6 → 0,7 |
+    ///
+    /// Le gain portait sur les **gen 10 tenues**, +6,5 : une route plus facile à
+    /// monter faisait arriver plus de montures au sommet.
+    ///
+    /// Le même harnais, le 24/08, **inverse le signe** :
+    ///
+    /// | régime | écart au prix seul | t | gen 10 |
+    /// | --- | --- | --- | --- |
+    /// | moisson stockée, niveau réglé | **−6,00 M ± 0,33** | −18,11 | 113,4 → 121,0 |
+    /// | moisson éteinte, niveau réglé | −1,14 M ± 0,16 | −7,22 | 73,0 → 91,0 |
+    /// | moisson éteinte, niveau défaut | +0,47 M ± 0,12 | 3,99 | 33,1 → 37,8 |
+    /// | départ de zéro | −0,03 M ± 0,05 | −0,61 | 0,66 → 0,64 |
+    ///
+    /// ## Ce qui a bougé, et ce qui n'est pas en cause
+    ///
+    /// **Le mécanisme tient toujours** : `PartnerThenPrice` produit encore plus de
+    /// gen 10. Ce qui a disparu, c'est que ça paie. À la moisson allumée les deux
+    /// bras en tiennent 113,4 contre 121,0 — la quasi-parité — et le prix seul
+    /// gagne quand même six millions. L'avantage pour lequel le défaut avait été
+    /// acheté s'est évaporé ; son coût, abandonner la couleur la mieux payée, est
+    /// resté.
+    ///
+    /// Dix changements d'`economy.toml` séparent les deux relevés. Trois vont dans
+    /// le même sens et suffisent à l'expliquer : la **profondeur de marché** (#247)
+    /// plafonne ce qu'un stock d'une seule couleur rend, et c'est exactement ce
+    /// qu'une route concentrée fabrique ; la **prime de collection** (#241, #246) ne
+    /// paie qu'une fois par couleur, donc récompense l'étalement ; et les prix de
+    /// gen 10 tirés en **cloche** (#129) rendent « la mieux payée » plus précieuse
+    /// qu'un tirage uniforme ne le faisait.
+    ///
+    /// **Ce n'est pas le prix du retrait**, et ça a été isolé plutôt que supposé :
+    /// à `prix_du_retrait = 0` l'écart passe de −1,22 à −1,14 M en régime éteint et
+    /// de −5,98 à −6,00 M en régime allumé. Le terme compte pour 6 % de l'inversion
+    /// hors moisson et pour rien du tout avec.
+    ///
+    /// ## Ce que ça ne change pas
+    ///
+    /// Rien au **départ de zéro** — t = −0,61, et 332 nulles sur mille : quand rien
+    /// n'atteint la gen 10 dans l'horizon, le choix du sommet ne décide de rien.
+    /// Rien non plus sous `--project` : une couronne imposée court-circuite ce
+    /// critère, `crown` prenant `forced_crown` avant de consulter `crowning`.
+    ///
+    /// **Les nulles comptent** : 224 graines sur mille voient le prix tomber déjà
+    /// sur le bon partenaire, et les deux critères y jouent la même partie.
+    #[default]
     PriceOnly,
     /// D'abord le partenaire le plus employé par le plan, puis le mieux payé parmi
-    /// les candidates qui le portent. **Le défaut.**
+    /// les candidates qui le portent. **Le défaut jusqu'au 24/08** — voir
+    /// `PriceOnly` pour les deux relevés et ce qui a inversé le signe.
     ///
-    /// 1 000 graines appariées, écart au prix seul :
-    ///
-    /// | régime | écart | t | décidées | gen 10 |
-    /// | --- | --- | --- | --- | --- |
-    /// | pool hérité, niveau réglé | **+3,12 M ± 0,31** | 10,05 | 505/776 | 42,4 → **48,9** |
-    /// | pool hérité, niveau défaut | **+2,98 M ± 0,28** | 10,67 | 507/776 | 38,2 → 43,9 |
-    /// | départ de zéro, niveau réglé | +0,02 M ± 0,04 | 0,37 | 346/671 | 0,6 → 0,7 |
-    ///
-    /// Les **nulles** comptent : 224 graines sur mille voient le prix tomber déjà
-    /// sur le bon partenaire, et les deux critères y jouent la même partie. Les
-    /// confondre avec des défaites ferait lire « gagne la moitié du temps » là où le
-    /// critère gagne 65 % des parties où il change quelque chose.
-    ///
-    /// Le gain porte surtout sur les **gen 10 tenues** : +6,5 en moyenne. C'est ce
-    /// qu'on attend d'un choix de route plus facile à monter, et c'est ce qui
-    /// distingue ce levier des précédents — il ne grappille pas des kamas, il fait
-    /// arriver plus de montures au sommet.
-    ///
-    /// Neutre en partant de zéro, où rien n'atteint la gen 10 dans l'horizon : le
-    /// choix du sommet n'y décide de rien.
-    #[default]
+    /// Gardé, et pas seulement pour la mesure : c'est le critère qui produit le
+    /// plus de gen 10, et une économie qui cesserait de plafonner l'accumulation le
+    /// remettrait devant.
     PartnerThenPrice,
 }
 

@@ -872,9 +872,23 @@ export const crownedLadderOf = (
 ): Ladder => {
   const plan = copyOf(ladderOf(colors, route));
   const crownable = wanted !== null && wanted !== undefined && isCrownable(plan, colors, wanted);
-  // À défaut de cible : le partenaire d'abord, puis le prix — le défaut du Rust.
-  // Voir `bestPartnerCrown` pour ce que ça vaut.
-  const choice = crownable ? wanted : (bestPartnerCrown(plan, colors, valueOf) ?? undefined);
+  // À défaut de cible : **le prix seul**, et c'est un changement du 24/08.
+  //
+  // Le partenaire d'abord — `bestPartnerCrown` — était le défaut des deux côtés
+  // depuis le 12/08, sur un relevé franc : +3,12 M ± 0,31, t = 10,05, mille
+  // graines appariées. Le même harnais (`bin/crown`) inverse aujourd'hui le
+  // signe : **−6,00 M ± 0,33, t = −18,11** dans le régime livré.
+  //
+  // Le mécanisme tient — le partenaire produit encore plus de gen 10 — mais ça ne
+  // paie plus : à la moisson allumée les deux bras en tiennent 113,4 contre 121,0,
+  // et le prix seul gagne quand même. La profondeur de marché plafonne ce qu'un
+  // stock d'une seule couleur rend, la prime de collection ne paie qu'une fois par
+  // couleur, et les prix de gen 10 tirés en cloche rendent « la mieux payée » plus
+  // précieuse. Voir `Crowning` dans `ladder.rs` pour les deux tables.
+  //
+  // **Les deux côtés doivent bouger ensemble** : `Crowning::PriceOnly` y est
+  // désormais le défaut, et `check-ladder-parity` compare les couronnes.
+  const choice = crownable ? wanted : undefined;
   crownAt(plan, colors, valueOf, choice);
   return plan;
 };

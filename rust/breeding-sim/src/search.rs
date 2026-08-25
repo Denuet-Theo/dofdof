@@ -934,13 +934,11 @@ impl<V: ValueFn> Searching<V> {
     /// plan couronné, et la recherche n'a pas d'endroit où le faire plus tard.
     pub fn under_ladder(mut self, catalog: &Catalog, economy: &Economy, route: Route) -> Self {
         let mut policy = LadderPolicy::new(catalog, route);
-        // Le projet impose la couronne. Sans ça le filtre viserait la gen 10 la
-        // mieux payée pendant que la fitness compterait celle que l'éleveur
-        // poursuit : la recherche serait notée sur ce qu'on lui a interdit de
-        // fabriquer.
-        if let Some(project) = economy.project {
-            policy = policy.with_forced_crown(project);
-        }
+        // Le projet **pèse** sur la couronne au lieu de l'imposer : `crown_at` lit
+        // `economy.project` et `crown_preference`, donc le filtre et la fitness
+        // visent la même couleur sans qu'on force quoi que ce soit ici. C'est ce que
+        // `with_forced_crown` faisait, et sa propre doc dit qu'il est un instrument
+        // de mesure et non un réglage de jeu. Voir `Economy::crown_preference`.
         // Le sommet s'ouvre **ici aussi**, et pas seulement à l'écran.
         //
         // `SearchConfig.admissible` côté TypeScript filtre avec `'target'` : sans

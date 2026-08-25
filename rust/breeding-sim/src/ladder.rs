@@ -760,7 +760,20 @@ impl Ladder {
             if catalog.generation(high) != ninth || catalog.generation(low) != 1 {
                 continue;
             }
-            candidates.push((economy.value_of(catalog, color), color, high, low));
+            // La couleur poursuivie entre avec son bonus — **ici et pas dans
+            // `value_of`**, qui chiffre aussi la liquidation. Voir
+            // `Economy::crown_preference` : préférer, et non imposer.
+            let preference = if economy.project == Some(color) {
+                economy.crown_preference as i64
+            } else {
+                0
+            };
+            candidates.push((
+                economy.value_of(catalog, color) + preference,
+                color,
+                high,
+                low,
+            ));
         }
         candidates.sort_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
 
@@ -784,32 +797,57 @@ impl Ladder {
             return;
         }
 
+        // La demande d'avant la couronne : c'est elle qu'on réduit au lieu de la
+        // supprimer, voir plus bas.
+        let before = self.demand.clone();
+
         self.wanted.insert(crown);
         self.recipe_of.insert(crown, [target, partner]);
         self.summit = vec![crown];
         self.spread_demand(catalog);
         self.note_summit_generation(catalog);
 
-        // ## Tailler ce que la couronne ne réclame pas
+        // ## Réduire ce que la couronne ne réclame plus — sans le supprimer
         //
-        // Les barreaux du dessous produisent **les deux** couleurs de leur
-        // étage, parce qu'on ne savait pas encore laquelle servirait. La
-        // couronne tranche : Corail ne se fait que par des gen 8 dérivées de
-        // Prune, donc Émeraude et ses gen 6 tombent à une demande de zéro.
+        // Les barreaux du dessous produisent **les deux** couleurs de leur étage,
+        // parce qu'on ne savait pas encore laquelle servirait. La couronne tranche :
+        // Corail ne se fait que par des gen 8 dérivées de Prune, donc Émeraude et ses
+        // gen 6 tombent à une demande de zéro.
         //
-        // Les laisser dans le plan ne serait pas neutre : elles resteraient
-        // **admissibles**, donc un croisement pourrait les viser au lieu de
-        // servir la route. Un plan doit être exactement ce dont on a besoin.
-        let dead: Vec<ColorId> = self
+        // On les **supprimait**, au motif qu'un plan doit être exactement ce dont on
+        // a besoin, et qu'une couleur laissée dans `wanted` reste admissible — donc
+        // qu'un croisement pourrait la viser au lieu de servir la route.
+        //
+        // Le motif tient pour les places ; il ne tient pas pour l'écurie. Une gen 9
+        // Corail qu'on possède déjà devenait **inemployable** : sa route n'existait
+        // plus dans le plan, donc aucun croisement ne pouvait la faire monter, et
+        // elle attendait l'ambre.
+        //
+        // On garde donc la route à demande **réduite** plutôt que nulle. `compose`
+        // fabrique en priorité ce qui est le plus en retard, par le rapport
+        // `tenu / demandé` : une route à un dixième de demande perd donc presque
+        // toutes les égalités, et ne passe devant que si l'on tient déjà de quoi la
+        // servir — précisément le cas qu'on veut rattraper.
+        //
+        // Ce que ça expose, et qu'il faut mesurer : un croisement hors route peut
+        // consommer une place que la route couronnée attendait. `barren_crossings` et
+        // `peak_stable` le diraient.
+        let kept: Vec<(ColorId, f64)> = self
             .wanted
             .iter()
             .copied()
             .filter(|color| self.demand.get(color).copied().unwrap_or(0.0) <= 0.0)
+            .map(|color| (color, before.get(&color).copied().unwrap_or(0.0)))
             .collect();
-        for color in dead {
-            self.wanted.remove(&color);
-            self.recipe_of.remove(&color);
-            self.demand.remove(&color);
+        for (color, previous) in kept {
+            if previous > 0.0 {
+                self.demand.insert(color, previous * SPARE_ROUTE_DEMAND);
+            } else {
+                // Rien à garder : personne ne demandait cette couleur même avant.
+                self.wanted.remove(&color);
+                self.recipe_of.remove(&color);
+                self.demand.remove(&color);
+            }
         }
     }
 
@@ -933,6 +971,13 @@ impl Ladder {
 /// elle est ce qui rend la table ci-dessus rejouable, et elle n'a d'effet que si
 /// on redemande explicitement `OddOnly` ou `Everywhere`.
 pub const RUNG_THRESHOLD: usize = 10;
+
+/// Ce qu'il reste de demande à une route que la couronne ne réclame plus.
+///
+/// Un dixième : assez pour qu'une monture déjà en écurie trouve où monter, assez
+/// peu pour que `compose` serve la route couronnée d'abord. Zéro rend la
+/// suppression d'avant, à l'identique.
+pub const SPARE_ROUTE_DEMAND: f64 = 0.1;
 
 /// Dans quel ordre les croisements entrent dans la fournée.
 ///

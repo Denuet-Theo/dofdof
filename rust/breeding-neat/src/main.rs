@@ -91,6 +91,14 @@ struct Options {
     env: Env,
     /// Entraîner sous les contraintes de l'échelle. Voir `policy_of`.
     ladder: bool,
+    /// Retirer le réglage de la recherche et l'imposer, pris sur `tuned_for`.
+    ///
+    /// Trente-deux paramètres de moins à faire évoluer — six bandes, un niveau et
+    /// un seuil d'Optimakina par unité — au profit de la seule chose que la
+    /// recherche sache faire mieux que l'arithmétique : la fonction de valeur.
+    /// `bin/gauges` calcule le réglage exactement, en balayant les 4 096
+    /// combinaisons ; l'évolution ne fait que le retrouver, plus lentement.
+    fixed_strategy: bool,
     /// La couleur poursuivie. Voir `Economy::project`.
     project: Option<String>,
     /// Combien on en veut. Voir `Economy::project_count`.
@@ -121,6 +129,7 @@ impl Options {
             resume: None,
             env: Env::Economy,
             ladder: false,
+            fixed_strategy: false,
             project: None,
             project_count: None,
             cycles: 30,
@@ -155,6 +164,9 @@ impl Options {
                     }
                 }
                 "--ladder" => options.ladder = value != "off" && value != "0",
+                "--fixed-strategy" => {
+                    options.fixed_strategy = value != "off" && value != "0"
+                }
                 "--project" => options.project = Some(value.clone()),
                 "--project-count" => options.project_count = value.parse().ok(),
                 "--cycles" => options.cycles = value.parse().unwrap_or(options.cycles),
@@ -855,8 +867,31 @@ fn main() {
     }
     economy.project_count = options.project_count;
     let economy = economy;
+    // Le réglage imposé, quand on le demande : celui que l'échelle se donne sur
+    // cette économie-là. On le prend sur `tuned_for` plutôt que de le coder, pour
+    // qu'un changement de prix le déplace tout seul.
+    let fixed_strategy = options.fixed_strategy.then(|| {
+        let tuned = breeding_sim::ladder::LadderPolicy::new(&catalog, Route::default())
+            .with_strategies([breeding_sim::economy::Strategy::default();
+                breeding_sim::economy::MAX_UNITS])
+            .tuned_for(&economy);
+        breeding_sim::economy::Policy::strategy(&tuned, 0)
+    });
+    if let Some(strategy) = fixed_strategy {
+        println!(
+            "Réglage imposé : bandes {:?}, niveau {}, Optimakina depuis {}",
+            strategy.bands,
+            strategy.level,
+            if strategy.optimakina_from > 10 {
+                "jamais".to_string()
+            } else {
+                strategy.optimakina_from.to_string()
+            }
+        );
+    }
     let config = Config {
         population: options.population,
+        fixed_strategy,
         ..Config::default()
     };
 
@@ -916,7 +951,7 @@ fn main() {
             std::process::exit(1);
         }
         _ => (0..config.population)
-            .map(|_| Genome::minimal(&mut innovations, &mut rng))
+            .map(|_| Genome::minimal(&mut innovations, &mut rng, config.fixed_strategy))
             .collect(),
     };
     let mut species: Vec<Species> = Vec::new();
@@ -1106,7 +1141,7 @@ fn main() {
             let mut child = champion
                 .as_ref()
                 .map(|(genome, _)| genome.clone())
-                .unwrap_or_else(|| Genome::minimal(&mut innovations, &mut rng));
+                .unwrap_or_else(|| Genome::minimal(&mut innovations, &mut rng, config.fixed_strategy));
             child.mutate(&config, &mut innovations, &mut rng);
             next.push(child);
         }

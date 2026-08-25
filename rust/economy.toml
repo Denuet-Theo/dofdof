@@ -691,9 +691,27 @@ places = 250
 # façon, seul le prix est un choix. À zéro, la fitness d'avant à l'identique, et
 # les mesures publiées restent valides.
 #
-# Pour l'échelle : un croisement est facturé 10 000. Un retrait est un geste bien
-# plus court qu'un accouplement — chercher une couleur dans le coffre contre
-# sortir, trier et réaccoupler — donc un prix du même ordre serait très cher.
-# `bin/fetch` mesure ce qu'un prix non nul re-classe, et c'est lui qui doit
-# trancher plutôt qu'une intuition.
-prix_du_retrait = 0
+# ## Le chiffre retenu, et ce que la mesure a dit
+#
+# Deux mille, soit **un cinquième d'un croisement** (facturé 10 000). C'est à peu
+# près le rapport des deux gestes : chercher une couleur dans le coffre contre
+# sortir, trier et réaccoupler.
+#
+# `bin/fetch` a balayé 0, 500, 1 000, 2 000 et 5 000 sur 200 graines de
+# départage, et le résultat est qu'**aucun prix de cette bande ne re-classe quoi
+# que ce soit** — l'ordre à 5 000 est identique à celui à zéro :
+#
+#   glouton                63,36 M → 63,36 M   (0 retrait, il ne déborde jamais)
+#   échelle / fécondité     57,93 M → 57,90 M   (33 retraits)
+#   recherche / myope       43,27 M → 42,52 M   (147)
+#   recherche / NEAT        40,69 M → 37,27 M   (657)
+#   échelle / niveau réglé  32,13 M → 31,00 M   (172)
+#
+# C'est ce qui rend le choix peu risqué : le terme ne peut pas renverser en
+# silence une comparaison publiée. Sa valeur est ailleurs — c'est un **gradient
+# d'entraînement**. La fitness étant le score, un champion réentraîné avec ce prix
+# apprend à ne pas imposer 0,82 fouille du coffre par accouplement, ce que le
+# champion embarqué fait aujourd'hui et ce qui le rend pénible à jouer.
+#
+# À zéro, la fitness d'avant, à l'identique.
+prix_du_retrait = 2_000

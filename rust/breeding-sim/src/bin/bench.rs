@@ -79,14 +79,21 @@ fn measure(
     economy: &Economy,
     mut make: impl FnMut() -> Box<dyn Policy>,
 ) -> Report {
-    let catalog = catalog.clone();
+    // Le catalogue reste **emprunté**, et il n'y a rien à cloner : `Catalog` n'est
+    // pas `Clone` exprès, il est gros et partagé par référence partout. Le rendre
+    // clonable pour économiser un `&` échangerait une recopie de cent vingt
+    // couleurs contre rien.
+    //
+    // L'économie, elle, est `Copy` : on en prend une propre parce qu'on la reçoit
+    // par référence et que la fermeture ci-dessous ne doit pas dépendre de la durée
+    // de vie de l'appelant.
     let economy = *economy;
 
     let start = Instant::now();
     let outcomes: Vec<RunOutcome> = (0..SEEDS)
         .map(|seed| {
             let mut policy = make();
-            play(&catalog, &economy, policy.as_mut(), seed)
+            play(catalog, &economy, policy.as_mut(), seed)
         })
         .collect();
     let elapsed = start.elapsed().as_secs_f64();

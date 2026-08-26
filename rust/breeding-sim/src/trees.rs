@@ -371,10 +371,16 @@ pub fn muldo() -> Catalog {
 ///
 /// ## Ce qu'elle ne rend pas comparable pour autant
 ///
-/// Les prix d'`economy.toml` sont des **relevés muldo** : `ambre_par_rang`, la bande
-/// de prix gen 10 et les paliers de géneton. Un score mesuré sur une autre famille
-/// avec ces prix-là dit ce que la **structure** de l'arbre permet, pas ce que
-/// l'éleveur gagnerait. Les re-tarifer est une autre affaire.
+/// Le catalogue ne porte pas les prix, et charger un arbre ne re-tarife rien : c'est
+/// `Prices::for_family` qui pose le prix de la ressource d'extraction de la famille
+/// (relevés du 25/08, `[valeurs.ressource_par_famille]`). Ce qui reste muldo dans un
+/// score mesuré ailleurs : la bande de prix gen 10, et la largeur de la bande de
+/// ressource, déduite du prix ponctuel faute d'un relevé sur trente jours.
+///
+/// Ce qui n'est **pas** un écart entre familles, contrairement à ce que cette doc a
+/// affirmé un temps : les paliers de `GENETONS_BY_GENERATION`. Les rendements en
+/// génétons sont les mêmes pour toutes les montures — confirmé par l'éleveur le
+/// 25/08.
 pub fn family(id: &str) -> Catalog {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     Catalog::load(root.join("../../src/lib/dofus/breeding/trees.json"), id)

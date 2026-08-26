@@ -61,6 +61,20 @@ pub struct Prices {
     /// Kamas par point d'XP de Mangeoire. `None` tant qu'il n'est pas relevé.
     pub mangeoire_per_point: Option<f64>,
     pub fuel: Vec<FuelBand>,
+    /// Le prix de la ressource d'extraction, par famille (clés de `trees.json`).
+    ///
+    /// Elle n'est pas la même d'un arbre à l'autre — Ambre de muldo, Corne de
+    /// volkorne, Neurone de dragodinde — et l'HDV les cote séparément. Mesurer
+    /// trois familles au prix du muldo, ce que faisait `bench` jusqu'au 25/08,
+    /// compare des structures d'arbre sous un prix qui n'appartient qu'à l'une
+    /// d'elles.
+    ///
+    /// Elle vit **hors** d'`Economy` exprès : `Economy` est `Copy` et traversée
+    /// à chaque partie, donc y porter une table dont on ne lit qu'une entrée
+    /// coûterait à chaque copie. La famille est connue avant la première partie ;
+    /// `for_family` résout le prix une fois pour toutes et rend une `Economy`
+    /// ordinaire.
+    pub amber_by_family: BTreeMap<String, i64>,
     /// Ce qui manque, en clair, pour que l'appelant le dise.
     pub missing: Vec<String>,
 }
@@ -427,6 +441,30 @@ impl Prices {
             };
         }
 
+        // Les prix de ressource d'extraction relevés famille par famille. On lit
+        // la table telle qu'elle est écrite plutôt qu'une liste de familles
+        // connues : ajouter un arbre à `trees.json` ne doit pas demander de
+        // recompiler pour que son prix soit lu. Un prix négatif est le « INCONNU »
+        // du fichier et se lit donc comme une absence.
+        let mut amber_by_family = BTreeMap::new();
+        if let Some(table) = root
+            .get("valeurs")
+            .and_then(|valeurs| valeurs.get("ressource_par_famille"))
+            .and_then(toml::Value::as_table)
+        {
+            for (id, value) in table {
+                match value {
+                    toml::Value::Integer(price) if *price >= 0 => {
+                        amber_by_family.insert(id.clone(), *price);
+                    }
+                    toml::Value::Float(price) if *price >= 0.0 => {
+                        amber_by_family.insert(id.clone(), price.round() as i64);
+                    }
+                    _ => missing.push(format!("prix de la ressource d'extraction de {id}")),
+                }
+            }
+        }
+
         Ok(Self {
             economy,
             horizon,
@@ -436,8 +474,55 @@ impl Prices {
             optimakina_bonus: get(&["optimakina", "bonus"], 0.1),
             mangeoire_per_point: mangeoire,
             fuel,
+            amber_by_family,
             missing,
         })
+    }
+
+    /// Le prix relevé de la ressource d'extraction de cette famille, s'il l'est.
+    ///
+    /// `None` veut dire « le fichier ne nomme pas cette famille », et l'appelant
+    /// doit le **dire** : il mesurera alors sous le prix de référence, qui est
+    /// celui du muldo. C'est la même discipline que `report_gaps` — un chiffre
+    /// publié sur une économie qui n'est pas la sienne doit s'annoncer comme tel.
+    pub fn family_amber(&self, family: &str) -> Option<i64> {
+        self.amber_by_family.get(family).copied()
+    }
+
+    /// L'économie recalée sur la famille qu'on va mesurer.
+    ///
+    /// ## Pourquoi la bande bouge avec le prix
+    ///
+    /// Le prix du jour est **tiré** dans `amber_range` à chaque partie
+    /// (`Economy::for_run`), et non lu dans `amber_per_generation`. Poser le prix
+    /// ponctuel sans toucher aux bornes serait donc inerte : les trois familles
+    /// continueraient de tirer entre 11 000 et 30 000, c'est-à-dire au prix du
+    /// muldo, et la mesure ne dirait rien de plus qu'avant.
+    ///
+    /// La bande relevée sur trente jours est muldo. Faute d'un relevé équivalent
+    /// ailleurs, on lui applique la **même largeur relative** — 0,55 × et 1,50 ×
+    /// le prix ponctuel. C'est une hypothèse assumée, pas une mesure : rien ne
+    /// dit que la Corne de volkorne oscille autant que l'Ambre. Elle a le mérite
+    /// d'être neutre — elle ne favorise aucune famille — et d'être fausse d'une
+    /// manière qu'un relevé futur corrigera d'un chiffre dans le fichier.
+    ///
+    /// Le muldo retombe exactement sur 11 000 / 30 000, donc ses mesures publiées
+    /// restent comparables.
+    pub fn for_family(&self, family: &str) -> Economy {
+        let mut economy = self.economy;
+        let Some(price) = self.family_amber(family) else {
+            return economy;
+        };
+        let reference = economy.amber_per_generation;
+        economy.amber_per_generation = price;
+        if reference > 0 {
+            let scale = price as f64 / reference as f64;
+            economy.amber_range = (
+                (economy.amber_range.0 as f64 * scale).round() as i64,
+                (economy.amber_range.1 as f64 * scale).round() as i64,
+            );
+        }
+        economy
     }
 
     /// Ce que l'économie ne sait pas encore chiffrer, en une phrase par trou.
@@ -532,6 +617,64 @@ mod tests {
             }
         }
         assert_eq!(prices.economy.band_rates, [1.0, 2.0, 3.0, 4.0]);
+    }
+
+    /// Les trois relevés du 25/08, tels que l'éleveur les a donnés.
+    ///
+    /// Ils sont épinglés ici parce qu'une faute de frappe dans le fichier ne se
+    /// verrait nulle part ailleurs : un `18_000` devenu `1_800` ne fait pas planter
+    /// une mesure, il la rend fausse de 90 % en silence.
+    #[test]
+    fn les_trois_familles_ont_leur_prix_de_ressource() {
+        let prices = Prices::load_default().expect("chargement");
+        assert_eq!(prices.family_amber("muldo"), Some(20_000));
+        assert_eq!(prices.family_amber("volkorne"), Some(21_000));
+        assert_eq!(prices.family_amber("dragodinde"), Some(18_000));
+    }
+
+    /// Le muldo retombe exactement sur le barème d'avant, bande comprise.
+    ///
+    /// C'est ce qui rend ses mesures publiées encore comparables : si cette
+    /// égalité cassait, la table du 25/08 de `bin/knobs` deviendrait un chiffre
+    /// d'archive et plus une référence.
+    #[test]
+    fn le_muldo_ne_bouge_pas() {
+        let prices = Prices::load_default().expect("chargement");
+        let muldo = prices.for_family("muldo");
+        assert_eq!(muldo.amber_per_generation, prices.economy.amber_per_generation);
+        assert_eq!(muldo.amber_range, prices.economy.amber_range);
+        assert_eq!(muldo.amber_range, (11_000, 30_000));
+    }
+
+    /// La bande suit le prix ponctuel, sinon le prix par famille serait inerte.
+    ///
+    /// Le prix du jour est **tiré** dans `amber_range` (`Economy::for_run`) : poser
+    /// `amber_per_generation` sans toucher aux bornes laisserait les trois familles
+    /// tirer entre 11 000 et 30 000, c'est-à-dire au prix du muldo. Ce test est là
+    /// pour que cette inertie ne puisse pas revenir sans se faire voir.
+    #[test]
+    fn la_bande_suit_le_prix_de_la_famille() {
+        let prices = Prices::load_default().expect("chargement");
+
+        let volkorne = prices.for_family("volkorne");
+        assert_eq!(volkorne.amber_per_generation, 21_000);
+        // 0,55 × et 1,50 × — la largeur relative du muldo, hypothèse assumée.
+        assert_eq!(volkorne.amber_range, (11_550, 31_500));
+
+        let dragodinde = prices.for_family("dragodinde");
+        assert_eq!(dragodinde.amber_per_generation, 18_000);
+        assert_eq!(dragodinde.amber_range, (9_900, 27_000));
+    }
+
+    /// Une famille que le fichier ne nomme pas garde le prix de référence — et
+    /// `family_amber` permet au binaire de le dire au lieu de le taire.
+    #[test]
+    fn une_famille_inconnue_garde_le_prix_de_reference() {
+        let prices = Prices::load_default().expect("chargement");
+        assert_eq!(prices.family_amber("boufton"), None);
+        let inconnue = prices.for_family("boufton");
+        assert_eq!(inconnue.amber_per_generation, prices.economy.amber_per_generation);
+        assert_eq!(inconnue.amber_range, prices.economy.amber_range);
     }
 
     /// L'Abreuvoir est **moins cher en bande 1 qu'en bande 0** tout en allant

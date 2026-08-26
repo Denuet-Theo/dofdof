@@ -1,16 +1,23 @@
-# L'économie de l'élevage muldo, telle qu'on la simule.
+# L'économie de l'élevage, telle qu'on la simule.
 #
 # Ce fichier est fait pour être édité à la main : les prix de l'HDV bougent, et
 # une mesure ne vaut que si on peut la refaire avec les prix du jour. Rien ici
 # n'est dans le code.
 #
+# Les prix sont muldo sauf mention contraire, et la seule mention contraire à ce
+# jour est `[valeurs.ressource_par_famille]` : la ressource d'extraction n'est pas
+# la même d'une famille à l'autre, et l'HDV les cote séparément.
+#
 # ## Ce qui se passe quand un prix change
 #
 # Toutes les mesures publiées deviennent incomparables. C'est normal et c'est le
 # but — mais il faut alors rejouer la baseline avant de conclure quoi que ce
-# soit sur une politique :
+# soit sur une politique, **et une fois par famille** puisqu'elles ne paient plus
+# le même prix :
 #
-#   cargo run --release -p breeding-sim --bin bench
+#   cargo run --release -p breeding-sim --bin bench muldo
+#   cargo run --release -p breeding-sim --bin bench volkorne
+#   cargo run --release -p breeding-sim --bin bench dragodinde
 #
 # ## Les valeurs marquées « INCONNU »
 #
@@ -187,15 +194,28 @@ niveau = 67
 
 # Ce qu'une monture rend à la conversion.
 #
-# Une gen `g` rend `g` ambres. Une gen 1 ne s'extrait pas et ne rend donc rien —
-# ce n'est pas un arrondi mais la règle du jeu, et accessoirement ce qui empêche
-# d'acheter des gen 1 à 1 000 pour les revendre 20 000 à l'infini.
+# Une gen `g` rend `g` ressources d'extraction. Une gen 1 ne s'extrait pas et ne
+# rend donc rien — ce n'est pas un arrondi mais la règle du jeu, et accessoirement
+# ce qui empêche d'acheter des gen 1 à 1 000 pour les revendre 20 000 à l'infini.
+#
+# **Le prix dépend de la famille** : ce n'est pas la même ressource. Le muldo rend
+# de l'Ambre de muldo, le volkorne de la Corne de volkorne, la dragodinde du
+# Neurone de dragodinde, et l'HDV les cote séparément. Ce chiffre-ci est celui du
+# muldo, et il sert de **référence** : c'est lui que paie une famille que
+# `[valeurs.ressource_par_famille]` ne nomme pas.
 ambre_par_rang = 20_000
 gen1 = 0
 
 # L'ambre a oscillé entre 11 000 et 30 000 sur trente jours — un facteur 2,7,
 # plus large encore que le parchemin. Une monture gen 9 vaut donc entre 99 000 et
 # 270 000 selon la semaine. Chaque partie tire son prix dans ces bornes.
+#
+# **Cette bande est un relevé muldo, et le seul qu'on ait.** L'éleveur n'a donné
+# que des prix ponctuels pour les deux autres familles ; leur bande est donc
+# *déduite* — même largeur relative appliquée à leur prix ponctuel, soit 0,55 ×
+# et 1,50 ×. C'est une hypothèse assumée et non une mesure : rien ne dit que la
+# Corne bouge autant que l'Ambre. Le jour où l'une des deux est relevée sur
+# trente jours, elle prend sa place ici et cette phrase disparaît.
 ambre_min = 11_000
 ambre_max = 30_000
 
@@ -237,6 +257,34 @@ gen10_max = 1_000_000
 # Zéro par défaut : le compte est tenu de toute façon (`barren_crossings`), seul
 # le prix est un choix. `bin/barren` mesure ce qu'un prix non nul re-classe.
 malus_croisement_sterile = 0
+
+# ---------------------------------------------------------------------------
+[valeurs.ressource_par_famille]
+# ---------------------------------------------------------------------------
+#
+# Le prix de la ressource d'extraction, famille par famille — clés de
+# `trees.json`, champ `sacrificeItem`.
+#
+# ## Pourquoi ce n'est pas un détail de tarification
+#
+# L'extraction est la sortie de secours de toute la stratégie : ce que l'échelle
+# ne monte pas jusqu'à la gen 10, elle le convertit. Le rapport entre ce prix et
+# `gen10` décide donc s'il faut monter jusqu'au bout ou encaisser en gen 9 —
+# et jusqu'au 25/08 les trois familles étaient mesurées au prix du muldo, ce qui
+# rendait le classement des trois arbres muet sur les 5 % et 10 % d'écart qui les
+# séparent vraiment.
+#
+# Relevé de l'éleveur, le 25/08 :
+#
+#   muldo      Ambre de muldo          20 000  (inchangé, c'est la référence)
+#   volkorne   Corne de volkorne       21 000
+#   dragodinde Neurone de dragodinde   18 000
+#
+# Une famille absente d'ici paie `ambre_par_rang` — et le binaire le dit à haute
+# voix plutôt que de le laisser passer.
+muldo = 20_000
+volkorne = 21_000
+dragodinde = 18_000
 
 # ---------------------------------------------------------------------------
 [genetons]

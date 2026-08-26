@@ -31,13 +31,49 @@
 //!
 //! Ce que ça ne trouve pas : une interaction entre deux réglages. Si un levier
 //! ressort, le produit sur ce sous-ensemble-là devient abordable et vaut le coup.
+//!
+//! ## Une famille en argument
+//!
+//! ```sh
+//! cargo run --release -p breeding-sim --bin knobs volkorne
+//! ```
+//!
+//! `muldo` par défaut. **Les prix d'`economy.toml` sont des relevés muldo** — ambre
+//! par rang, bande de prix gen 10, paliers de géneton — et
+//! `GENETONS_BY_GENERATION` vit dans `economy.rs` et non dans le fichier. Un score
+//! sur une autre famille dit donc ce que la **structure de l'arbre** permet sous
+//! les prix muldo, jamais ce que l'éleveur y gagnerait.
+//!
+//! ## Ce que les trois familles ont dit, le 25/08
+//!
+//! | famille | glouton | échelle / fécondité stockée |
+//! | --- | --- | --- |
+//! | muldo | 64,18 M | **84,02 M** |
+//! | volkorne | 66,11 M | 50,03 M |
+//! | dragodinde | 42,78 M | 33,15 M |
+//!
+//! La stratégie ne bat le glouton **que sur le muldo**. Deux explications ont été
+//! proposées et réfutées, et c'est le plus utile à retenir :
+//!
+//! - « le dragodinde est trop étroit » — 2 gen 9 et 19 gen 10 contre 4 et 50. Réfuté
+//!   par le volkorne, qui a exactement la largeur du muldo et fait **pire** ;
+//! - « la demande de secours s'éparpille sur un arbre dont la gen 9 vaut 6 + 8 ».
+//!   Réfuté en l'isolant : à `SPARE_ROUTE_DEMAND = 0` le volkorne rend 47,49 M contre
+//!   50,03 — elle y est **légèrement positive**, pas nuisible.
+//!
+//! Ce qui est mesuré, et non raconté : **chaque composant transfère avec le même
+//! signe**. Sur volkorne, `harvest_stocked` vaut +26,98 M et la demande de secours
+//! +2,54 M. Le total perd quand même, parce que l'échelle y **convertit** mal —
+//! 1 047 croisements et 70 fournées pour 74,3 gen 10, là où le glouton en tient 62,2
+//! en 228 croisements et 28 fournées. Le défaut est dans le plan, pas dans la
+//! politique posée dessus, et personne ne l'a encore localisé.
 
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, RunOutcome, Strategy, play};
 use breeding_sim::ladder::{
     Crowning, Gating, LadderPolicy, Ordering, Purchasing, Route, Summit, Tuning,
 };
-use breeding_sim::trees::muldo;
+use breeding_sim::trees::{Catalog, family};
 
 /// Les graines de départage. Jamais les scellées : on compare des réglages.
 const SEEDS: std::ops::Range<u32> = 800_000..800_100;
@@ -53,9 +89,8 @@ fn mean(values: impl Iterator<Item = f64>) -> f64 {
 }
 
 /// La référence : la stratégie livrée. Tout le reste s'en écarte d'un cran.
-fn baseline(economy: &Economy) -> LadderPolicy {
-    let catalog = muldo();
-    let mut policy = LadderPolicy::new(&catalog, Route::default())
+fn baseline(catalog: &Catalog, economy: &Economy) -> LadderPolicy {
+    let mut policy = LadderPolicy::new(catalog, Route::default())
         .with_strategies([Strategy::default(); MAX_UNITS])
         .tuned_for(economy);
     // Ce qu'on a arrêté : la dernière fécondité des couleurs stockées.
@@ -71,12 +106,16 @@ struct Row {
     retrievals: f64,
 }
 
-fn measure(label: &str, economy: &Economy, make: impl Fn() -> LadderPolicy) -> Row {
-    let catalog = muldo();
+fn measure(
+    label: &str,
+    catalog: &Catalog,
+    economy: &Economy,
+    make: impl Fn() -> LadderPolicy,
+) -> Row {
     let outcomes: Vec<RunOutcome> = SEEDS
         .map(|seed| {
             let mut policy = make();
-            play(&catalog, economy, &mut policy, seed)
+            play(catalog, economy, &mut policy, seed)
         })
         .collect();
     let mut scores: Vec<f64> = outcomes.iter().map(|o| o.score as f64).collect();
@@ -97,6 +136,10 @@ fn main() {
             std::process::exit(1);
         });
 
+    let wanted = std::env::args().nth(1).unwrap_or_else(|| "muldo".to_string());
+    let catalog = family(&wanted);
+    println!("famille : {wanted}\n");
+
     if economy.stable_places == 0 {
         eprintln!("economy.toml ne pose aucune place d'écurie ([ecurie] places).");
         std::process::exit(1);
@@ -112,8 +155,8 @@ fn main() {
         economy.stable_places
     );
 
-    let mut rows = vec![measure("référence (la stratégie livrée)", &economy, || {
-        baseline(&economy)
+    let mut rows = vec![measure("référence (la stratégie livrée)", &catalog, &economy, || {
+        baseline(&catalog, &economy)
     })];
 
     // --- un réglage à la fois -----------------------------------------------
@@ -123,8 +166,8 @@ fn main() {
         ("ordre = BigToSmall", Ordering::BigToSmall),
         ("ordre = BigToSmallByRank", Ordering::BigToSmallByRank),
     ] {
-        rows.push(measure(label, &economy, || {
-            let base = baseline(&economy);
+        rows.push(measure(label, &catalog, &economy, || {
+            let base = baseline(&catalog, &economy);
             let gating = base.gating;
             base.with_ordering(ordering, gating)
         }));
@@ -133,8 +176,8 @@ fn main() {
         ("porte = Everywhere", Gating::Everywhere),
         ("porte = Off", Gating::Off),
     ] {
-        rows.push(measure(label, &economy, || {
-            let base = baseline(&economy);
+        rows.push(measure(label, &catalog, &economy, || {
+            let base = baseline(&catalog, &economy);
             let ordering = base.ordering;
             base.with_ordering(ordering, gating)
         }));
@@ -143,29 +186,32 @@ fn main() {
         ("sommet = Hold", Summit::Hold),
         ("sommet = Duplicate", Summit::Duplicate),
     ] {
-        rows.push(measure(label, &economy, || {
-            baseline(&economy).with_summit(summit)
+        rows.push(measure(label, &catalog, &economy, || {
+            baseline(&catalog, &economy).with_summit(summit)
         }));
     }
     for (label, threshold) in [("seuil = 0", 0usize), ("seuil = 5", 5), ("seuil = 20", 20)] {
-        rows.push(measure(label, &economy, || {
-            let mut base = baseline(&economy);
+        rows.push(measure(label, &catalog, &economy, || {
+            let mut base = baseline(&catalog, &economy);
             base.threshold = threshold;
             base
         }));
     }
-    rows.push(measure("achats = MostBehind", &economy, || {
-        let mut base = baseline(&economy);
+    rows.push(measure("achats = MostBehind", &catalog, &economy, || {
+        let mut base = baseline(&catalog, &economy);
         base.purchasing = Purchasing::MostBehind;
         base
     }));
-    rows.push(measure("couronne = PriceOnly", &economy, || {
-        let mut base = baseline(&economy);
-        base.crowning = Crowning::PriceOnly;
+    // `PriceOnly` est le **défaut** depuis #284 : le balayer comparerait la
+    // référence à elle-même et rendrait un « aucun effet » trompeur, ce qu'il a fait
+    // une fois. C'est l'autre critère qu'il faut varier maintenant.
+    rows.push(measure("couronne = PartnerThenPrice", &catalog, &economy, || {
+        let mut base = baseline(&catalog, &economy);
+        base.crowning = Crowning::PartnerThenPrice;
         base
     }));
-    rows.push(measure("réglage = BandAndLevel", &economy, || {
-        let mut base = baseline(&economy);
+    rows.push(measure("réglage = BandAndLevel", &catalog, &economy, || {
+        let mut base = baseline(&catalog, &economy);
         base.tuning = Tuning::BandAndLevel;
         base
     }));
@@ -176,8 +222,8 @@ fn main() {
         ("clone_top = off", 3),
         ("clone entre lignées = off", 4),
     ] {
-        rows.push(measure(label, &economy, || {
-            let mut base = baseline(&economy);
+        rows.push(measure(label, &catalog, &economy, || {
+            let mut base = baseline(&catalog, &economy);
             match set {
                 0 => base.harvesting = false,
                 1 => base.harvest_stocked = false,
@@ -234,8 +280,8 @@ fn main() {
             ] {
                 for (sname, blind) in [("sexé", false), ("aveugle", true)] {
                     let label = format!("{oname}/{gname}/{cname}/{sname}");
-                    combos.push(measure(&label, &economy, || {
-                        let mut base = baseline(&economy);
+                    combos.push(measure(&label, &catalog, &economy, || {
+                        let mut base = baseline(&catalog, &economy);
                         base.crowning = crowning;
                         base.sex_blind_cloning = blind;
                         base.with_ordering(ordering, gating)

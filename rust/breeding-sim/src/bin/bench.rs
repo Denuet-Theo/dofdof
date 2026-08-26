@@ -13,6 +13,17 @@
 //!
 //! Une médiane seule mentirait : quand un tirage peut raccourcir la route de
 //! plusieurs générations, la dispersion *est* l'information. D'où les déciles.
+//!
+//! ## Une famille en argument
+//!
+//! ```sh
+//! cargo run --release -p breeding-sim --bin bench volkorne
+//! ```
+//!
+//! `muldo` par défaut, et c'est la seule dont le score soit un **relevé** : les prix
+//! d'`economy.toml` sont muldo, et `GENETONS_BY_GENERATION` est dans le code. Sur une
+//! autre famille, ces chiffres comparent des **structures d'arbre** sous des prix qui
+//! ne sont pas les siens. Voir `bin/knobs` pour ce que les trois ont donné.
 
 use std::time::Instant;
 
@@ -21,7 +32,7 @@ use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, NeverBreeds, Policy, RunOutcome, Strategy, play};
 use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
 use breeding_sim::search::{Myopic, Searching};
-use breeding_sim::trees::muldo;
+use breeding_sim::trees::{Catalog, family};
 
 const SEEDS: u32 = 200;
 
@@ -56,8 +67,13 @@ struct Report {
     seconds_per_run: f64,
 }
 
-fn measure(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Policy>) -> Report {
-    let catalog = muldo();
+fn measure(
+    name: &str,
+    catalog: &Catalog,
+    economy: &Economy,
+    mut make: impl FnMut() -> Box<dyn Policy>,
+) -> Report {
+    let catalog = catalog.clone();
     let economy = *economy;
 
     let start = Instant::now();
@@ -77,6 +93,10 @@ fn measure(name: &str, economy: &Economy, mut make: impl FnMut() -> Box<dyn Poli
 }
 
 fn main() {
+    // La famille à mesurer. `muldo` par défaut : c'est elle qui porte les prix
+    // d'`economy.toml`, donc la seule dont le score soit un relevé.
+    let wanted = std::env::args().nth(1).unwrap_or_else(|| "muldo".to_string());
+    let catalog = family(&wanted);
     // Les prix viennent de `rust/economy.toml`, pas du code : ils bougent, et
     // une mesure ne vaut que si on peut la refaire avec ceux du jour.
     let prices = match Prices::load_default() {
@@ -113,17 +133,17 @@ fn main() {
     }
 
     let reports = vec![
-        measure("ne-rien-faire", &economy, || Box::new(NeverBreeds)),
-        measure("glouton / gen10_balanced", &economy, || {
+        measure("ne-rien-faire", &catalog, &economy, || Box::new(NeverBreeds)),
+        measure("glouton / gen10_balanced", &catalog, &economy, || {
             Box::new(Greedy::new(Objective::Gen10Balanced))
         }),
-        measure("glouton / gen10_profit", &economy, || {
+        measure("glouton / gen10_profit", &catalog, &economy, || {
             Box::new(Greedy::new(Objective::Gen10Profit))
         }),
-        measure("glouton / profit", &economy, || {
+        measure("glouton / profit", &catalog, &economy, || {
             Box::new(Greedy::new(Objective::Profit))
         }),
-        measure("recherche / valeur myope", &economy, || {
+        measure("recherche / valeur myope", &catalog, &economy, || {
             Box::new(Searching::new(Myopic))
         }),
         {
@@ -131,14 +151,14 @@ fn main() {
             // Ce qu'on lui demande ici, c'est autant de ne rien gâcher que de
             // marquer : elle ne propose **aucun** croisement sans cible, ce que
             // `rejected_loads` ne dit pas et que le binaire `audit` compte.
-            let shared = Ladder::of(&muldo(), Route::Shared);
-            measure("echelle / cas 1 (pivot)", &economy, move || {
+            let shared = Ladder::of(&family(&wanted), Route::Shared);
+            measure("echelle / cas 1 (pivot)", &catalog, &economy, move || {
                 Box::new(LadderPolicy::with_ladder(shared.clone()))
             })
         },
         {
-            let disjoint = Ladder::of(&muldo(), Route::Disjoint);
-            measure("echelle / cas 2 (disjoint)", &economy, move || {
+            let disjoint = Ladder::of(&family(&wanted), Route::Disjoint);
+            measure("echelle / cas 2 (disjoint)", &catalog, &economy, move || {
                 Box::new(LadderPolicy::with_ladder(disjoint.clone()))
             })
         },
@@ -146,8 +166,8 @@ fn main() {
             // Le niveau des montures se paie en points de jauge, donc en heures,
             // donc en fournées. `tuned_for` prend le dernier cran gratuit — voir
             // sa doc pour le balayage qui montre l'effondrement au-delà.
-            let ladder = Ladder::of(&muldo(), Route::default());
-            measure("echelle / niveau réglé", &economy, move || {
+            let ladder = Ladder::of(&family(&wanted), Route::default());
+            measure("echelle / niveau réglé", &catalog, &economy, move || {
                 Box::new(
                     LadderPolicy::with_ladder(ladder.clone())
                         .with_strategies([Strategy::default(); MAX_UNITS])
@@ -159,8 +179,8 @@ fn main() {
             // La dernière fécondité des couleurs que le plan ne retient plus.
             // Voir `harvest_stocked` : c'est le seul écart avec la ligne
             // au-dessus, donc l'écart de score lui est entièrement imputable.
-            let ladder = Ladder::of(&muldo(), Route::default());
-            measure("echelle / fécondité stockée", &economy, move || {
+            let ladder = Ladder::of(&family(&wanted), Route::default());
+            measure("echelle / fécondité stockée", &catalog, &economy, move || {
                 let mut policy = LadderPolicy::with_ladder(ladder.clone())
                     .with_strategies([Strategy::default(); MAX_UNITS])
                     .tuned_for(&economy);

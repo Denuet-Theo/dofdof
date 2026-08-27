@@ -35,7 +35,14 @@
 import type { BreedingColor } from './costs';
 import { genetonWeight, successRate, type EconomyView } from './census';
 import { aimsAt, type Ladder } from './ladder';
-import { canonicalParents, climbs, pairOutlook, type Mate } from './pairing';
+import { carriedGeneration } from './naming';
+import {
+  canonicalParents,
+  climbs,
+  pairOutlook,
+  topGenerationOf,
+  type Mate,
+} from './pairing';
 import { emptyPlan, type UnitPlan } from './search';
 import type { Individual, Sex } from './stable';
 
@@ -179,7 +186,212 @@ export type LadderPlanOptions = {
    * `ladder.rs`.
    */
   harvestStocked?: boolean;
+  /**
+   * Écouler le sommet, et les stériles que le clonage n'a pas appariées.
+   *
+   * **Vrai par défaut, comme `sell_top` côté Rust : c'est la référence.** Garder
+   * les gen 10 au bilan finissait la partie riche et illiquide — la boucle
+   * mourait faute de kamas sans avoir dépensé son horizon, à 174 fournées sur
+   * 200 pour le volkorne et 131 pour la dragodinde. Vendre les dépense toutes,
+   * pour le même argent, et fait tomber l'écurie de 521 à 163 places sur le
+   * muldo.
+   *
+   * **Les deux côtés doivent bouger ensemble** : voir `sell_top` dans
+   * `ladder.rs`.
+   */
+  sellTop?: boolean;
+  /**
+   * Apparier les stériles sans regarder leur sexe.
+   *
+   * Faux par défaut, comme `sex_blind_cloning` côté Rust : préférer le même sexe
+   * rend celui du clone certain et ne coûte rien.
+   */
+  sexBlindCloning?: boolean;
+  /**
+   * Refondre aussi les stériles **du sommet**.
+   *
+   * Vrai par défaut, comme `clone_top` côté Rust.
+   */
+  cloneTop?: boolean;
 };
+
+/**
+ * Ce qu'une monture **porte** : sa génération ou celle de son meilleur parent.
+ *
+ * Port de `Mount::carried_generation`. C'est la valeur d'une stérile aux yeux du
+ * clonage : une gen 8 née de deux gen 9 vaut mieux qu'une gen 8 née de gen 7,
+ * parce que le clone tire sa couleur d'un des deux parents.
+ */
+const carriedOf = (mount: Individual, generations: Map<string, number>): number =>
+  carriedGeneration(
+    generations.get(mount.colorId) ?? 0,
+    mount.parents
+      ? [generations.get(mount.parents[0]) ?? 0, generations.get(mount.parents[1]) ?? 0]
+      : null
+  );
+
+/** Une stérile se laisse-t-elle refondre ? Port de `clonable`. */
+const clonable = (
+  mount: Individual,
+  generations: Map<string, number>,
+  topGeneration: number,
+  cloneTop: boolean
+): boolean => cloneTop || (generations.get(mount.colorId) ?? 0) < topGeneration;
+
+/**
+ * Les stériles refondues **deux par deux, par génération**. Port de
+ * `clone_by_generation`, ordre d'appariement compris.
+ *
+ * Le clonage échange deux stériles contre une féconde de niveau 1 : il ne rend
+ * pas de kamas, il rend de la **fécondité**, et c'est pour ça qu'il passe avant
+ * l'extraction dans `ladderPlan` — une stérile appariée vaut mieux qu'une
+ * stérile vendue.
+ *
+ * L'ordre compte pour la parité, et il n'est pas intuitif :
+ *
+ * - le tri est **décroissant** sur `(porté, indice)`, donc la plus précieuse
+ *   devant et, à valeur égale, le plus grand indice d'abord ;
+ * - un effectif **impair** laisse tomber la dernière, c'est-à-dire la moins
+ *   précieuse — dépareiller une porteuse la réduirait à son extraction ;
+ * - on apparie la première restante avec la **moins précieuse**, en préférant
+ *   le même sexe parmi celles qui valent autant : le sexe du clone devient
+ *   certain et ça ne coûte rien.
+ */
+const cloneByGeneration = (
+  mounts: Individual[],
+  generations: Map<string, number>,
+  topGeneration: number,
+  sexBlind: boolean,
+  cloneTop: boolean
+): [number, number][] => {
+  const byGeneration = new Map<number, number[]>();
+  mounts.forEach((mount, index) => {
+    if (mount.fertile || !clonable(mount, generations, topGeneration, cloneTop)) return;
+    const generation = generations.get(mount.colorId) ?? 0;
+    const pool = byGeneration.get(generation);
+    if (pool) pool.push(index);
+    else byGeneration.set(generation, [index]);
+  });
+
+  const carried = new Map<number, number>();
+  for (const pool of byGeneration.values()) {
+    for (const index of pool) carried.set(index, carriedOf(mounts[index], generations));
+  }
+
+  const pairs: [number, number][] = [];
+  for (const generation of [...byGeneration.keys()].sort((a, b) => a - b)) {
+    const pool = byGeneration.get(generation)!;
+    // Décroissant sur le porté, puis sur l'indice — le `Reverse` du Rust porte
+    // sur le couple entier, donc il renverse aussi le départage.
+    pool.sort((a, b) => carried.get(b)! - carried.get(a)! || b - a);
+    if (pool.length % 2 === 1) pool.pop();
+
+    while (pool.length >= 2) {
+      const keep = pool.shift()!;
+      let at = pool.length - 1;
+      if (!sexBlind) {
+        const floor = carried.get(pool[at])!;
+        for (let candidate = pool.length - 1; candidate >= 0; candidate -= 1) {
+          if (carried.get(pool[candidate])! > floor) break;
+          if (mounts[pool[candidate]].sex === mounts[keep].sex) {
+            at = candidate;
+            break;
+          }
+        }
+      }
+      const [partner] = pool.splice(at, 1);
+      pairs.push([keep, partner]);
+    }
+  }
+
+  return pairs;
+};
+
+
+/**
+ * Le clonage, l'extraction, et le contrôle de solvabilité — la fin du plan.
+ *
+ * Port de la queue de `LadderPolicy::plan`. Trois choses dans cet ordre, et
+ * l'ordre est la règle :
+ *
+ * 1. **le clonage d'abord**, parce qu'une stérile appariée rend une fécondité et
+ *    qu'une stérile vendue ne rend que des kamas ;
+ * 2. **l'extraction ensuite**, sur ce que ni un croisement ni un clonage n'a
+ *    réclamé ;
+ * 3. **la solvabilité enfin** : si même en vendant tout on ne paie pas le
+ *    chargement, on ne garde que le clonage et l'extraction. Le chargement est
+ *    perdu, pas deviné.
+ *
+ * L'extraction du sommet (`sellTop`) est la référence depuis qu'on a mesuré
+ * l'inverse : garder les gen 10 finissait la partie riche et illiquide, à 131
+ * fournées sur 200 pour la dragodinde, en tenant des centaines de montures que
+ * rien ne convertissait.
+ */
+const settle = (
+  plan: UnitPlan,
+  view: LadderView,
+  ladder: Ladder,
+  topGeneration: number,
+  options: LadderPlanOptions
+): UnitPlan => {
+  const { mounts, generations, economy } = view;
+  const sellTop = options.sellTop ?? true;
+  const clonings = cloneByGeneration(
+    mounts,
+    generations,
+    topGeneration,
+    options.sexBlindCloning ?? false,
+    options.cloneTop ?? true
+  );
+
+  const claimed = new Set<number>();
+  for (const [male, female] of plan.crossings) {
+    claimed.add(male);
+    claimed.add(female);
+  }
+  for (const [keep, partner] of clonings) {
+    claimed.add(keep);
+    claimed.add(partner);
+  }
+
+  const sacrifices: number[] = [];
+  mounts.forEach((mount, index) => {
+    if (claimed.has(index)) return;
+    if (economy.valueOf(mount.colorId) === 0) return;
+    const generation = generations.get(mount.colorId) ?? 0;
+    if (sellTop) {
+      // Le sommet s'écoule : aucun croisement ne le fait plus monter.
+      if (generation >= topGeneration) {
+        sacrifices.push(index);
+        return;
+      }
+      // Une stérile que le clonage n'a pas appariée ne remontera plus l'échelle.
+      if (!mount.fertile && generation > 2) {
+        sacrifices.push(index);
+        return;
+      }
+    }
+    // La règle d'origine : ce qui est né hors plan, en bas de l'échelle.
+    if (!ladder.wanted.has(mount.colorId) && generation <= 2) sacrifices.push(index);
+  });
+
+  plan.clonings = clonings;
+  plan.sacrifices = sacrifices;
+
+  const needed =
+    (plan.crossings.length === 0 ? 0 : view.loadKamas) +
+    plan.purchases.length * economy.starterPrice;
+  const raised = sacrifices.reduce(
+    (sum, index) => sum + economy.valueOf(mounts[index].colorId),
+    0
+  );
+  if (view.kamas + raised < needed) {
+    return { ...emptyPlan(), clonings, sacrifices };
+  }
+
+  return plan;
+};
+
 
 /**
  * Compose la fournée que l'échelle veut, sur cette écurie-ci.
@@ -194,9 +406,12 @@ export const ladderPlan = (
   options: LadderPlanOptions = {}
 ): UnitPlan => {
   const plan = emptyPlan();
+  // Échelle vide : plan nul, et pas même un clonage. C'est ce que fait
+  // `LadderPolicy::plan` sur `self.ladder.is_empty()`.
   if (ladder.wanted.size === 0) return plan;
 
   const { mounts, colors, generations, economy } = view;
+  const topGeneration = topGenerationOf(colors);
   // L'ordre du catalogue, et non l'alphabet : côté Rust une couleur est un
   // **indice**, et c'est lui qui départage les égalités — de retard entre deux
   // couleurs d'un même étage, et de recette entre deux achats.
@@ -487,7 +702,7 @@ export const ladderPlan = (
     }
   }
 
-  if (options.purchases === false) return plan;
+  if (options.purchases === false) return settle(plan, view, ladder, topGeneration, options);
 
   /* ------------------------------------------------------------- les achats -- */
 
@@ -547,5 +762,5 @@ export const ladderPlan = (
     budget -= 2 * starter;
   }
 
-  return plan;
+  return settle(plan, view, ladder, topGeneration, options);
 };

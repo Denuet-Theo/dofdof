@@ -31,6 +31,26 @@ export type UnitPlan = {
   crossings: [number, number][];
   /** Une Optimakina par croisement, en regard de `crossings`. */
   optimakina: boolean[];
+  /**
+   * Ce croisement vient-il de la **moisson** ? En regard de `crossings`.
+   *
+   * La moisson compose **hors plan** par construction : c'est tout son objet,
+   * tirer des génétons de ce que l'échelle ne réclame pas. Or le filet
+   * d'affichage de `readPlan` refuse le hors plan, également par construction.
+   * Les deux se sont donc annulés en silence : la moisson dépensait ses places,
+   * l'écran jetait ses croisements, et la composition se croyait pleine — cinq
+   * places sur cinquante que rien n'occupait en jeu.
+   *
+   * Ce drapeau dit à l'affichage lesquels lui sont **délibérément** hors plan,
+   * pour qu'il les rende au lieu de les compter comme une divergence. Le filet
+   * garde tout son sens sur les autres, qui sont ceux qu'il surveille.
+   *
+   * **Pas de jumeau côté Rust, et c'est voulu** : le banc joue le plan tel quel,
+   * il n'a pas de filet d'affichage à informer. Le champ ne voyage donc pas dans
+   * la référence de parité, qui compare croisements, achats, clonages et
+   * sacrifices — voir `check-ladder-policy.mjs`.
+   */
+  harvested: boolean[];
   /** Créditées **avant** les dépenses, pour qu'un chargement se finance. */
   sacrifices: number[];
   /**
@@ -48,6 +68,7 @@ export const emptyPlan = (): UnitPlan => ({
   clonings: [],
   crossings: [],
   optimakina: [],
+  harvested: [],
   sacrifices: [],
   cycles: [],
 });

@@ -1442,8 +1442,11 @@ pub fn apply_plan(
     coord: u32,
 ) -> Result<AppliedSummary, Rejected> {
     let mut kamas = i64::MAX / 4;
+    // Un chargement isolé : rien n'a encore été écoulé.
+    // Un chargement isolé : le marché est neuf, rien n'a encore été écoulé.
     let applied = apply(
         catalog, economy, stable, &mut kamas, plan, strategy, 0, draws, coord,
+        &mut Market::new(), 0.0,
     )?;
     let births = applied.births.len();
     for baby in applied.births {
@@ -1491,6 +1494,16 @@ fn apply(
     unit: usize,
     draws: &Draws,
     coord: u32,
+    // Ce que la partie a déjà écoulé, par couleur. Vendre au sommet en cours de
+    // partie et liquider à la fin sont **le même marché** : sans compteur
+    // partagé, une gen 10 sortie en cours de route se paie plein tarif alors que
+    // la même monture gardée jusqu'à la liquidation subit `0,9ⁿ`. La politique
+    // gagnerait alors à tout vendre tôt, pour une raison qui n'existe que dans le
+    // modèle.
+    market: &mut Market,
+    // L'heure de la vente : la reprise se compte depuis la vente précédente de
+    // la même couleur.
+    hours: f64,
 ) -> Result<Applied, Rejected> {
     let level = economy.level_of(strategy);
     let base = stable.len();
@@ -1528,6 +1541,9 @@ fn apply(
 
     // --- l'argent, avant toute mutation -----------------------------------
     let mut credit = 0;
+    // Copie de travail : le crédit est calculé avant le contrôle de solvabilité,
+    // et l'appelant **réessaie** sur `Unaffordable` avec une bande plus basse.
+    let mut flowed = market.clone();
     for &index in &plan.sacrifices {
         check(index)?;
         let color = if index < base {
@@ -1535,7 +1551,20 @@ fn apply(
         } else {
             plan.purchases[index - base].0
         };
-        credit += economy.value_of(catalog, color);
+        let listed = economy.value_of(catalog, color);
+        // En dessous du sommet, `value_of` cote une **extraction** : une ressource,
+        // pas une vente, donc hors marché — c'est la règle de la liquidation
+        // (`la profondeur ne mord que sur le sommet`) et elle vaut ici mot pour
+        // mot. Au sommet, la vente s'écoule comme n'importe quelle autre.
+        //
+        if economy.sale_price_decay > 0.0
+            && catalog.generation(color) >= catalog.top_generation()
+        {
+            let factor = flowed.sell(economy, color, hours);
+            credit += (listed as f64 * factor) as i64;
+        } else {
+            credit += listed;
+        }
     }
 
     let mut debit = plan.purchases.len() as i64 * economy.starter_price;
@@ -1760,6 +1789,10 @@ fn apply(
     *kamas = *kamas + credit - debit + (genetons as f64 * economy.geneton_value) as i64;
     debug_assert!(*kamas >= 0, "le plancher est vérifié plus haut");
 
+    // Le chargement est acquis : l'écoulement peut être reporté. Tout retour en
+    // `Err` au-dessus laisse le compteur partagé intact.
+    *market = flowed;
+
     stable.remove_all(&doomed);
 
     // Les montures de l'écurie que ce chargement a fallu retrouver. Les achats
@@ -1860,6 +1893,9 @@ fn run(
     // l'en-tête refuse de déduire la collection de ce que l'écurie porte.
     let mut hatched = [false; MAX_COLORS];
     let mut kamas = economy.starting_kamas;
+    // L'écoulement du marché, porté par la partie entière : les ventes en cours de
+    // route et la liquidation finale puisent dans le même stock d'acheteurs.
+    let mut market = Market::new();
     // Décalée exprès : la politique ne doit pas pouvoir rejouer le flux des
     // naissances en devinant sa propre graine.
     let mut rng = Rng::new(seed ^ 0x5bf0_3635);
@@ -1987,7 +2023,17 @@ fn run(
         let mut strategy = strategy;
         let attempt = loop {
             let tried = apply(
-                catalog, economy, &mut stable, &mut kamas, &plan, strategy, unit, &draws, coord,
+                catalog,
+                economy,
+                &mut stable,
+                &mut kamas,
+                &plan,
+                strategy,
+                unit,
+                &draws,
+                coord,
+                &mut market,
+                now,
             );
             match tried {
                 Err(Rejected::Unaffordable { .. }) if lower_band(&mut strategy) => continue,
@@ -2093,12 +2139,6 @@ fn run(
     // bien qu'un stock, aussi gros soit-il, ne rapporte jamais plus de dix fois le
     // prix unitaire. L'ambre, lui, n'est pas une vente et ne baisse pas — voir
     // `sale_price_decay`.
-    let drift = if economy.daily_price_recovery > 0.0 {
-        (1.0 + economy.daily_price_recovery).powf(outcome.hours_used / 24.0)
-    } else {
-        1.0
-    };
-    let mut sold = [0u32; MAX_COLORS];
     let mut liquidation = 0i64;
     let mut at_list = 0i64;
     for mount in &stable.mounts {
@@ -2111,9 +2151,7 @@ fn run(
             liquidation += listed;
             continue;
         }
-        let slot = usize::from(mount.color).min(MAX_COLORS - 1);
-        let factor = drift * (1.0 - economy.sale_price_decay).powi(sold[slot] as i32);
-        sold[slot] += 1;
+        let factor = market.sell(economy, mount.color, outcome.hours_used);
         liquidation += (listed as f64 * factor) as i64;
     }
     outcome.liquidation = liquidation;
@@ -2166,6 +2204,65 @@ fn run(
     outcome
 }
 
+/// L'état du marché, **couleur par couleur** : ce que les ventes passées ont
+/// déprimé, et depuis quand.
+///
+/// Deux forces. La **profondeur** retire 10 % au prix d'une couleur à chaque
+/// vente ; la **reprise** lui rend 1 % par jour, sans jamais dépasser le pair —
+/// elle répare un prix cassé, elle n'enrichit pas une couleur intacte.
+///
+/// Ce qui compte ici est que la reprise se compte **depuis la vente précédente
+/// de cette couleur**, et non depuis le début de la partie. La nuance décide de
+/// tout : une liquidation finale écoule des dizaines d'exemplaires *au même
+/// instant*, donc sans une heure de reprise entre eux, et la profondeur mord
+/// pleinement. Comptée depuis l'heure zéro, elle offrait au contraire à une
+/// partie longue un facteur à deux chiffres qui annulait la profondeur sur les
+/// trente premiers exemplaires de chaque couleur — c'est-à-dire sur la totalité
+/// d'un stock réel.
+///
+/// Mesuré sur le muldo à 800 fournées, en gardant le sommet : 4 172 M avec la
+/// reprise sans plafond, 550 M avec un plafond mais l'horloge globale, et c'est
+/// seulement avec l'horloge par couleur que garder cesse de battre vendre.
+#[derive(Debug, Clone)]
+pub struct Market {
+    factor: [f64; MAX_COLORS],
+    last: [f64; MAX_COLORS],
+}
+
+impl Default for Market {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Market {
+    pub fn new() -> Self {
+        Self {
+            factor: [1.0; MAX_COLORS],
+            last: [0.0; MAX_COLORS],
+        }
+    }
+
+    /// Le prix effectif de cette vente, en fraction du prix affiché, et la
+    /// dépression qu'elle laisse derrière elle.
+    pub fn sell(&mut self, economy: &Economy, color: ColorId, hours: f64) -> f64 {
+        let slot = usize::from(color).min(MAX_COLORS - 1);
+        if economy.sale_price_decay <= 0.0 {
+            return 1.0;
+        }
+        let elapsed = (hours - self.last[slot]).max(0.0);
+        let recovery = if economy.daily_price_recovery > 0.0 {
+            (1.0 + economy.daily_price_recovery).powf(elapsed / 24.0)
+        } else {
+            1.0
+        };
+        let paid = (self.factor[slot] * recovery).min(1.0);
+        self.factor[slot] = paid * (1.0 - economy.sale_price_decay);
+        self.last[slot] = hours;
+        paid
+    }
+}
+
 /// Le plancher : ne rien faire, garder le capital et liquider le pool.
 ///
 /// Toute politique qui ne le bat pas détruit de la valeur.
@@ -2213,6 +2310,59 @@ mod tests {
         assert!(rendement(50) <= 10.0, "borné par dix quoi qu'il arrive");
         assert!(rendement(1_000) <= 10.0, "et le stock infini aussi");
         assert!(rendement(50) > 9.9, "mais on s'en approche vraiment");
+    }
+
+    /// La reprise répare, elle n'enrichit pas — et elle se compte par couleur.
+    ///
+    /// Deux garde-fous en un, parce que le premier seul ne suffisait pas.
+    ///
+    /// **Le pair.** Une couleur que personne n'a vendue n'a pas de prix à
+    /// regagner : elle se liquide à son prix affiché, quelle qu'ait été la durée
+    /// de la partie. Sans plafond, `1,01^(heures/24)` multipliait tout le bilan.
+    ///
+    /// **L'horloge par couleur.** Une liquidation écoule tout **au même
+    /// instant** : entre le premier et le trentième exemplaire d'une couleur il
+    /// ne s'écoule pas une heure, donc la profondeur mord pleinement. Comptée
+    /// depuis l'heure zéro, la reprise offrait à une partie de 800 fournées un
+    /// facteur d'environ 27, lequel maintenait `min(1, 27 × 0,9ⁿ)` collé à 1,0
+    /// jusqu'au trente-et-unième exemplaire — la profondeur annulée sur tout
+    /// stock réel, et garder le sommet battait le vendre pour cette seule raison.
+    #[test]
+    fn la_reprise_repare_sans_enrichir_et_se_compte_par_couleur() {
+        let mut economy = economy();
+        economy.sale_price_decay = 0.10;
+        economy.daily_price_recovery = 0.01;
+        let color: ColorId = 0;
+
+        // Jamais vendue : plein tarif, et la durée de la partie n'y change rien.
+        let mut market = Market::new();
+        assert!((market.sell(&economy, color, 10_000.0) - 1.0).abs() < 1e-9);
+
+        // Écoulée en bloc, comme dans une liquidation : aucune reprise entre les
+        // exemplaires, la profondeur s'applique pleinement.
+        let mut market = Market::new();
+        let heure = 20_000.0;
+        let paid: Vec<f64> = (0..4).map(|_| market.sell(&economy, color, heure)).collect();
+        assert!((paid[0] - 1.0).abs() < 1e-9, "le premier, plein tarif");
+        assert!((paid[1] - 0.9).abs() < 1e-9, "le deuxième, -10 %");
+        assert!((paid[2] - 0.81).abs() < 1e-9);
+        assert!(
+            (paid[3] - 0.729).abs() < 1e-9,
+            "une vente en bloc ne gagne aucune reprise : c'est le même instant"
+        );
+
+        // Espacée, en revanche, la couleur remonte — sans dépasser le pair.
+        let mut market = Market::new();
+        market.sell(&economy, color, 0.0);
+        let apres_un_jour = market.sell(&economy, color, 24.0);
+        assert!(apres_un_jour > 0.9, "un jour de reprise sur 0,9");
+        assert!(apres_un_jour < 1.0, "mais pas au-dessus du pair");
+        let mut market = Market::new();
+        market.sell(&economy, color, 0.0);
+        assert!(
+            (market.sell(&economy, color, 24.0 * 10_000.0) - 1.0).abs() < 1e-9,
+            "laissée assez longtemps, elle revient au pair et s'y arrête"
+        );
     }
 
     /// L'ambre n'est pas une vente. En dessous du plafond de l'arbre, `value_of`
@@ -2393,7 +2543,7 @@ mod tests {
         };
         let applied = apply(
             &catalog, &economy, &mut stable, &mut kamas, &plan,
-            Strategy::default(), 0, &Draws::new(1), 0,
+            Strategy::default(), 0, &Draws::new(1), 0, &mut Market::new(), 0.0,
         )
         .expect("vingt-six croisements de fécondes tiennent dans zéro place");
 
@@ -2428,7 +2578,7 @@ mod tests {
         };
         let applied = apply(
             &catalog, &economy, &mut stable, &mut kamas, &plan,
-            Strategy::default(), 0, &Draws::new(1), 0,
+            Strategy::default(), 0, &Draws::new(1), 0, &mut Market::new(), 0.0,
         )
         .expect("quatre places sur cinquante");
 
@@ -2462,7 +2612,7 @@ mod tests {
         assert!(
             apply(
                 &catalog, &economy, &mut stable, &mut kamas, &plan,
-                Strategy::default(), 0, &Draws::new(1), 0,
+                Strategy::default(), 0, &Draws::new(1), 0, &mut Market::new(), 0.0,
             )
             .is_err()
         );

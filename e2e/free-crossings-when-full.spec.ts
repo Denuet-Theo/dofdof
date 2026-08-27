@@ -23,34 +23,42 @@ import { openBreeding } from './support/breeding';
  *
  * ## L'invariant que ce fichier tient
  *
- * **Le nombre d'accouplements à saisir est le même, parc vide et parc plein.**
+ * **Remplir le parc n'enlève aucun accouplement.**
  *
- * Ce n'est pas un « au moins un » de confort : c'est vrai par construction, la
- * passe gratuite tournant avant la distribution des places et n'étant bornée par
- * aucune. Un « `> 0` » aurait laissé passer la version où la passe venait en
- * dernier, qui donne 21 parc vide et 24 parc plein sur cette fixture — deux
- * nombres, deux conseils, pour une écurie identique.
+ * Pas « le même nombre » : parc plein il peut y en avoir **plus**, et c'est
+ * normal — une féconde que la boucle d'étages aurait mariée à une fertile reste
+ * disponible pour une autre féconde quand il n'y a plus de place à dépenser. Ce
+ * qu'on interdit est la seule direction qui coûte à l'éleveur : en perdre.
  *
- * Et c'est l'invariant qui compte pour l'éleveur, parce qu'il accouple **avant**
- * de charger : un poulain né du croisement de ce matin doit pouvoir entrer dans
- * l'enclos de ce midi. Une gen 9 qui attend la fournée du lendemain, c'est une
- * journée perdue, et il n'y en a qu'une par jour.
+ * C'est ce qui compte pour lui, parce qu'il accouple **avant** de charger — un
+ * poulain né du croisement de ce matin doit pouvoir entrer dans l'enclos de ce
+ * midi, et une gen 9 qui attend la fournée du lendemain est une journée perdue.
  *
- * ## Comment ce test échoue sans le correctif
+ * ## Comment ce test échoue sans les correctifs
  *
- * Mesuré au navigateur, sur cette fixture — 75 fécondes, 5 enclos, la fournée
- * occupant 45 places sur 50 :
+ * Mesuré au navigateur sur cette fixture — 75 fécondes, 5 enclos :
  *
- * | | parc vide | parc plein |
- * | --- | --- | --- |
- * | sans la passe | 14 | **0** |
- * | passe en dernier | 21 | 24 |
- * | passe en tête | **24** | **24** |
+ * | | parc vide | parc plein | |
+ * | --- | --- | --- | --- |
+ * | sans rien | 14 | **0** | rouge |
+ * | passe du plan seule | 21 | 24 | passe |
+ * | passe du plan, moisson non corrigée | 25 | **24** | rouge |
+ * | les deux | 25 | 26 | vert |
  *
  * Sans la passe, le bouton « reproductions à faire » disparaît une fois les
- * enclos verrouillés et les deux tests échouent — `toBe(14)` reçoit `0`, puis
- * `toBeGreaterThan(2)` reçoit `0`. Avec la passe en dernier, le premier échoue
- * sur l'égalité : attendu 21, reçu 24.
+ * enclos verrouillés : `0 >= 14` échoue, puis `toBeGreaterThan(2)` reçoit `0`.
+ * Avec la passe du plan mais la moisson encore bornée par la capacité, il
+ * manque exactement le croisement gratuit que la moisson n'a pas pu composer :
+ * `24 >= 25` échoue.
+ *
+ * ## Ce que ce fichier ne couvre pas
+ *
+ * Que la passe tourne **avant** la distribution des places plutôt qu'après. La
+ * ligne 2 du tableau passe : parc plein 24, parc vide 21, l'invariant tient
+ * quand même. Le gain de l'ordre se lit sur le parc vide — 21 contre 25 — et
+ * l'épingler demanderait un compte absolu, ce que ce dépôt a déjà payé cher
+ * (voir `banked-mounts` : « 17 avant, 18 après » était le compte du champion).
+ * Il est donc mesuré dans le corps de la PR, pas ici.
  *
  * ## Pourquoi le second test saisit deux naissances
  *
@@ -107,8 +115,10 @@ test.describe('accoupler avant de charger', () => {
     expect(pens).toBeGreaterThan(0);
 
     // L'invariant : remplir le parc ne retire aucun accouplement, parce
-    // qu'aucun de ceux-là n'a jamais eu besoin d'une place.
-    expect(await matings(page)).toBe(empty);
+    // qu'aucun de ceux-là n'a jamais eu besoin d'une place. Il peut en ajouter,
+    // et c'est sain — les fécondes que la boucle d'étages n'a plus de place pour
+    // marier à une fertile se marient entre elles.
+    expect(await matings(page)).toBeGreaterThanOrEqual(empty);
   });
 
   test('et elle survit aux deux premières saisies', async ({ page }) => {

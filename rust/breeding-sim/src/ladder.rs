@@ -1925,7 +1925,7 @@ impl LadderPolicy {
             std::cmp::Reverse((weight(groups[at].sample.color), groups[at].sample.color))
         });
 
-        for subject in order {
+        for &subject in &order {
             while *places < view.capacity && !free[subject].is_empty() {
                 let sex = groups[subject].sex;
 
@@ -2022,6 +2022,63 @@ impl LadderPolicy {
                 free[other].pop();
                 crossings.push(pair);
                 *places += cost;
+            }
+        }
+
+        // La même moisson, sur ce qui ne coûte **aucune** place.
+        //
+        // Le jumeau de `compose_free`, et pour la même raison : deux fécondes
+        // s'accouplent sans enclos, donc la boucle bornée par la capacité les
+        // éteignait dès le parc plein. Mesuré au navigateur, la liste des
+        // accouplements immédiats tombait de 25 à 24 entre parc vide et parc
+        // plein — un de moins, et c'était celui-là.
+        //
+        // Aucun achat ici : une monture neuve arrive fertile, elle doit donc son
+        // cycle et ne peut pas être gratuite. Le reste est la boucle du dessus,
+        // à la prise près — on ne retient qu'une monture déjà féconde.
+        for &subject in &order {
+            loop {
+                let sex = groups[subject].sex;
+                let Some(subject_at) = cycled_at(view.stable, &free[subject]) else {
+                    break;
+                };
+
+                let mut best: Option<(i64, usize)> = None;
+                for &other in &spare {
+                    if other == subject || groups[other].sex == sex {
+                        continue;
+                    }
+                    if cycled_at(view.stable, &free[other]).is_none() {
+                        continue;
+                    }
+                    let (male, female) = if sex == Sex::Male {
+                        (&groups[subject].sample, &groups[other].sample)
+                    } else {
+                        (&groups[other].sample, &groups[subject].sample)
+                    };
+                    if !pair_outlook(catalog, male, female).climbs() {
+                        continue;
+                    }
+                    let cost = weight(groups[other].sample.color);
+                    if best.is_none_or(|(best_cost, _)| cost < best_cost) {
+                        best = Some((cost, other));
+                    }
+                }
+
+                let Some((_, other)) = best else { break };
+                let Some(other_at) = cycled_at(view.stable, &free[other]) else {
+                    break;
+                };
+                // Les deux groupes sont de sexes opposés, donc distincts : le
+                // retrait dans l'un ne décale pas l'indice calculé dans l'autre.
+                let subject_index = free[subject].remove(subject_at);
+                let other_index = free[other].remove(other_at);
+                let pair = if sex == Sex::Male {
+                    [subject_index, other_index]
+                } else {
+                    [other_index, subject_index]
+                };
+                crossings.push(pair);
             }
         }
     }

@@ -662,7 +662,7 @@ const readPlan = (
    */
   const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
 
-  for (const [maleIndex, femaleIndex] of plan.crossings) {
+  for (const [at, [maleIndex, femaleIndex]] of plan.crossings.entries()) {
     const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {
       const mount = mounts[index];
       if (mount) {
@@ -690,7 +690,26 @@ const readPlan = (
     // non vides et toutes dans le plan. » Les deux moitiés se comptent à part :
     // la première est une faute du couple, la seconde un désaccord avec la
     // route, et l'éleveur ne les corrige pas du même geste.
-    if (maleMate && femaleMate) {
+    /**
+     * La moisson passe outre le filet, et il le faut.
+     *
+     * Elle compose **hors plan** par construction — c'est son objet — et le
+     * filet refuse le hors plan, également par construction. Les deux
+     * s'annulaient en silence : elle dépensait ses places, on jetait ses
+     * croisements, la composition se croyait pleine, et cinq places sur
+     * cinquante restaient vides en jeu sans que rien ne le dise. Mesuré sur la
+     * fixture : moisson allumée, 54 croisements pour 50/50 places réelles dont 4
+     * jetés qui en mangeaient 5 ; moisson éteinte, 52 croisements, 49/50, aucun
+     * jeté.
+     *
+     * Le banc Rust, lui, joue le plan tel quel et n'a pas de filet : c'est lui la
+     * référence, et il chiffre la moisson à +90,9 M. L'écran doit donc rendre ce
+     * qu'elle compose, pas le refuser.
+     *
+     * Le filet garde tout son sens sur les autres croisements — ceux du plan,
+     * qu'il est là pour surveiller. Voir `UnitPlan.harvested`.
+     */
+    if (maleMate && femaleMate && plan.harvested[at] !== true) {
       if (!aimed) {
         refused.barren += 1;
         continue;

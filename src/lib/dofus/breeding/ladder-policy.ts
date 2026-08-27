@@ -558,6 +558,7 @@ export const ladderPlan = (
     places += cost;
     plan.crossings.push([maleIndex, femaleIndex]);
     plan.optimakina.push(false);
+    plan.harvested.push(false);
     return 'yes';
   };
 
@@ -640,6 +641,7 @@ export const ladderPlan = (
       }
       plan.crossings.push([maleIndex, femaleIndex]);
       plan.optimakina.push(false);
+      plan.harvested.push(false);
       made.set(color, (made.get(color) ?? 0) + 1);
     }
   }
@@ -803,6 +805,7 @@ export const ladderPlan = (
             plan.purchases.push([bought!, sex === 'M' ? 'F' : 'M']);
             plan.crossings.push(pair);
             plan.optimakina.push(false);
+            plan.harvested.push(true);
             places += cost;
             budget -= starter;
             continue;
@@ -821,7 +824,57 @@ export const ladderPlan = (
           free[other].pop();
           plan.crossings.push(pair);
           plan.optimakina.push(false);
+          plan.harvested.push(true);
           places += cost;
+        }
+      }
+
+      // La même moisson, sur ce qui ne coûte **aucune** place.
+      //
+      // Le jumeau de `compose_free`, et pour la même raison : deux fécondes
+      // s'accouplent sans enclos, donc la boucle bornée par la capacité les
+      // éteignait dès le parc plein. Mesuré au navigateur, la liste des
+      // accouplements immédiats tombait de 25 à 24 entre parc vide et parc
+      // plein — un de moins, et c'était celui-là.
+      //
+      // Aucun achat ici : une monture neuve arrive fertile, elle doit donc son
+      // cycle et ne peut pas être gratuite. Le reste est la boucle du dessus,
+      // à la prise près — on ne retient qu'une monture déjà féconde.
+      for (const subject of order) {
+        for (;;) {
+          const sex = groups[subject].sex;
+          if (!hasCycled(subject)) break;
+
+          let best: [number, number] | null = null;
+          for (const other of spare) {
+            if (other === subject || groups[other].sex === sex) continue;
+            if (!hasCycled(other)) continue;
+            const [male, female] =
+              sex === 'M'
+                ? [groups[subject].sample, groups[other].sample]
+                : [groups[other].sample, groups[subject].sample];
+            const outlook = pairOutlook(male, female, colors, generations);
+            if (!outlook || !climbs(outlook)) continue;
+            const cost = weight(other);
+            if (best === null || cost < best[0]) best = [cost, other];
+          }
+
+          if (best === null) break;
+          const other = best[1];
+          // Les deux groupes sont de sexes opposés, donc distincts : le retrait
+          // dans l'un ne décale pas l'autre.
+          const subjectIndex = takeCycled(subject);
+          if (subjectIndex === null) break;
+          const otherIndex = takeCycled(other);
+          if (otherIndex === null) {
+            free[subject].push(subjectIndex);
+            break;
+          }
+          const pair: [number, number] =
+            sex === 'M' ? [subjectIndex, otherIndex] : [otherIndex, subjectIndex];
+          plan.crossings.push(pair);
+          plan.optimakina.push(false);
+          plan.harvested.push(true);
         }
       }
     }
@@ -883,6 +936,7 @@ export const ladderPlan = (
     plan.purchases.push([recipe[0], 'M'], [recipe[1], 'F']);
     plan.crossings.push([base, base + 1]);
     plan.optimakina.push(false);
+    plan.harvested.push(false);
     places += 2;
     budget -= 2 * starter;
   }

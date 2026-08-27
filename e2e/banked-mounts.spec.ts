@@ -154,13 +154,30 @@ test.describe('fécondations sans croisement', () => {
 
     expect(await bankedTotal(page)).toBeLessThanOrEqual(2);
 
-    // La contrepartie, et c'est elle qui dit que le correctif ne se contente pas
-    // de retirer une action : les places rendues repartent en croisements. 17
-    // accouplements avant, 18 après.
+    /*
+     * La contrepartie : les places rendues **repartent en croisements** au lieu
+     * d'être mises en banque.
+     *
+     * Le compte absolu — « 17 avant, 18 après » — était celui du champion, et il
+     * est tombé à 14 quand l'écran est passé à l'échelle. Ce n'était pas une
+     * régression : la garde du dessus (`bankedTotal <= 2`) dit déjà que rien ne
+     * part en fécondation, et une politique a le droit de composer une fournée
+     * autrement.
+     *
+     * On épingle donc la **relation** et non le nombre : la fournée remplit le
+     * parc, et elle le remplit d'accouplements. Ça tient quelle que soit la
+     * politique, là où un total ne survit pas au premier changement d'avis.
+     */
     await page.getByTestId('step-mate').click();
     const mate = await page.getByTestId('pane-mate').innerText();
     const count = Number(mate.match(/(\d+)\s+reproductions? à faire/)?.[1] ?? 0);
-    expect(count).toBeGreaterThanOrEqual(18);
+    expect(count).toBeGreaterThan(0);
+
+    const summary = await page.getByTestId('policy-summary').innerText();
+    const [, used, free] = summary.match(/(\d+)\/(\d+) places/)!;
+    // Le parc est employé, à deux places près : c'est ce que « dépenser ses
+    // places » veut dire.
+    expect(Number(used)).toBeGreaterThanOrEqual(Number(free) - 2);
   });
 
   /**

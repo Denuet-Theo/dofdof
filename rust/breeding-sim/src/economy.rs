@@ -1287,6 +1287,26 @@ pub struct RunOutcome {
     pub loads_by_unit: [u32; MAX_UNITS],
     pub best_generation: u8,
     pub gen10_held: usize,
+    /// L'écurie **finale**, par génération, et combien de chaque le plan voulait.
+    ///
+    /// Un diagnostic et non un terme de score : sur le volkorne et la dragodinde,
+    /// jouer plus longtemps **appauvrit** — l'écurie double en quatre mois et le
+    /// gain baisse de 4 à 8 M par mois. Le compte par génération, comparé à la
+    /// demande du plan, dit si ce qui s'entasse est du **hors-plan** que la
+    /// moisson devrait écouler, ou du **sur-plan** que la route ne consomme pas.
+    /// Les deux se corrigent, mais pas au même endroit.
+    ///
+    /// La demande, elle, appartient à la politique et non au moteur : c'est
+    /// l'appelant qui la croise (voir le binaire `table`).
+    pub held_by_generation: [u32; 11],
+    /// L'écurie finale **couleur par couleur**.
+    ///
+    /// Le compte par génération dit qu'un rang déborde ; celui-ci dit **laquelle**
+    /// déborde, ce qui n'est pas la même question quand une seule couleur du rang
+    /// mène quelque part. Sur la dragodinde, la gen 4 monte de 33 à 195 en quatre
+    /// mois pendant que la gen 5 reste à 4,8 sur 20 demandés — reste à savoir si
+    /// ce qui s'entasse est l'Ébène-Indigo qui compose, ou les six autres.
+    pub held_by_color: [u32; MAX_COLORS],
     /// Combien la partie finit avec de la couleur du projet. Voir `Economy::project`.
     pub crown_held: usize,
     /// Chargements refusés. Doit rester à zéro.
@@ -1960,6 +1980,8 @@ fn run(
         loads_by_unit: [0; MAX_UNITS],
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
+        held_by_generation: [0; 11],
+        held_by_color: [0; MAX_COLORS],
         crown_held: 0,
         rejected_loads: 0,
         rejected_by_reason: [0; Rejected::REASONS],
@@ -2196,6 +2218,11 @@ fn run(
         .iter()
         .filter(|m| catalog.generation(m.color) >= catalog.top_generation())
         .count();
+    for mount in &stable.mounts {
+        let slot = usize::from(catalog.generation(mount.color)).min(10);
+        outcome.held_by_generation[slot] += 1;
+        outcome.held_by_color[usize::from(mount.color).min(MAX_COLORS - 1)] += 1;
+    }
     outcome.crown_held = match economy.project {
         Some(project) => stable.mounts.iter().filter(|m| m.color == project).count(),
         None => 0,

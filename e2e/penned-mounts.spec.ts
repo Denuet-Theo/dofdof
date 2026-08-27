@@ -136,9 +136,24 @@ test.describe('montures en enclos', () => {
 
     await lockAll(page, enclos);
 
-    // Cinquante places occupées, zéro libre — et la politique ne charge donc
-    // plus rien. C'est le comportement juste, pas un cas dégradé.
-    await expect(page.getByTestId('policy-summary')).toContainText('0/0 places');
+    /*
+     * L'invariant, et non le compte.
+     *
+     * L'assertion disait « 0/0 places », ce qui était vrai **du champion** :
+     * il remplissait les cinquante places, donc verrouiller tout n'en laissait
+     * aucune. L'échelle emploie des fécondes, qui n'occupent pas de place, si
+     * bien qu'après le même verrouillage il en reste réellement de libres — et
+     * charger dedans est juste, pas une violation.
+     *
+     * Ce que la garde doit dire est donc la règle : **jamais plus de places que
+     * de libres**. Elle tient quelle que soit la politique, là où le compte
+     * n'épinglait qu'une composition de fournée.
+     */
+    const summary = await page.getByTestId('policy-summary').innerText();
+    const [, used, free] = summary.match(/(\d+)\/(\d+) places/)!;
+    expect(Number(used)).toBeLessThanOrEqual(Number(free));
+    // Et s'il n'en reste aucune, la politique ne charge rien.
+    if (Number(free) === 0) expect(Number(used)).toBe(0);
   });
 
   test('l’écurie affichée, elle, ne rétrécit pas', async ({ page }) => {

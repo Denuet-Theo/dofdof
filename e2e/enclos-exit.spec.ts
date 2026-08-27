@@ -52,6 +52,23 @@ const storedPens = (mock: SupabaseMock) =>
  */
 const isCounted = (id: string) => /[#+]/.test(id);
 
+/**
+ * Une monture que le plan se **procure** — `+`, et non `#` du vrac en stock.
+ *
+ * La distinction décide de ce test : seule une monture procurée doit être
+ * **créée** à l'écurie en sortant d'enclos, donc seule elle déclenche l'insert
+ * qu'on refuse ici. Une monture de vrac est déjà en stock ; elle ne fait que
+ * passer féconde, sans POST, et un refus ne porte alors sur rien.
+ *
+ * Le test cherchait « comptée » tout court. Ça tenait tant que le champion
+ * composait la fournée — ses enclos en portaient toujours une procurée — et ça
+ * a cessé quand l'échelle a pris sa place : elle achète beaucoup moins (266
+ * achats contre 464 sur la référence), donc l'enclos retenu n'en portait plus.
+ * Le refus ne refusait rien, la fenêtre annonçait un succès, et le test tombait
+ * sur une assertion qui avait raison de se plaindre.
+ */
+const isAcquired = (id: string) => id.includes('+');
+
 /** La signature d'une monture comptée : ce que son insertion doit reproduire. */
 const signature = (row: { colorId?: string; color_id?: string; sex: string }) =>
   `${row.colorId ?? row.color_id}/${row.sex}`;
@@ -217,20 +234,19 @@ test.describe('sortie d’enclos en fécondes', () => {
     // n'est tentée et le refus ne porte sur rien.
     let index = 0;
     let pens = await lockCurrentPen(page, mock, 1);
-    while (pens[index].units.every((unit) => !isCounted(unit.id))) {
+    while (pens[index].units.every((unit) => !isAcquired(unit.id))) {
       index += 1;
       expect(index).toBeLessThan(10);
       pens = await lockCurrentPen(page, mock, index + 1);
     }
-    const counted = pens[index].units.filter((unit) => isCounted(unit.id));
-    expect(counted.length).toBeGreaterThan(0);
+    const acquired = pens[index].units.filter((unit) => isAcquired(unit.id));
+    expect(acquired.length).toBeGreaterThan(0);
 
     const lockedBefore = await page.getByTestId('locked-pen').count();
     const idsBefore = allIds(mock);
 
     mock.refuse({ table: 'user_breeding_individuals', method: 'POST' });
     await exitAsCycled(page, index);
-
     // L'échec se dit à l'écran…
     await expect(failureBanner(page)).toBeVisible();
     // …et pas une monture comptée n'est entrée à l'écurie.
@@ -243,8 +259,32 @@ test.describe('sortie d’enclos en fécondes', () => {
     // montures : l'éleveur voit un geste accompli et passe au suivant.
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText(/n’a été enregistré|n’est pas passé/)).toBeVisible();
-    await expect(dialog.getByTestId('exit-cycled')).toBeEnabled();
+    /*
+     * **Pas un mot de succès**, plutôt qu'une phrase d'échec précise.
+     *
+     * L'assertion cherchait « rien n'a été enregistré ». Elle tenait tant que le
+     * champion composait la fournée ; l'échelle met dans l'enclos une monture
+     * procurée sans niveau, donc après le refus la fenêtre se réaffiche sur sa
+     * validation — « pose le niveau du lot » — et la ligne d'état cède la place.
+     * L'échec, lui, est bien dit : la bannière le porte, et le test l'exige
+     * au-dessus.
+     *
+     * Ce que la garde doit interdire est l'inverse : **annoncer que c'est fait**.
+     * C'est la forme exacte qui a coûté 22 montures — la fenêtre se ferme sur un
+     * succès, l'éleveur passe au suivant. On l'épingle donc en négatif, ce qui ne
+     * dépend pas de la phrase que le rendu choisit.
+     */
+    await expect(dialog).not.toContainText(/monture[s]? sortie/);
+    /*
+     * Le bouton n'est **pas** exigé actif. Il l'était dans l'assertion d'origine,
+     * et c'est trop fort : après le refus la fenêtre redemande le niveau de la
+     * monture procurée, donc elle le désactive à bon droit — refuser de partir
+     * sans niveau est le comportement voulu, pas un blocage.
+     *
+     * Ce qui compte est que rien ne devienne irrattrapable, et les deux
+     * assertions ci-dessous le disent mieux : l'enclos reste verrouillé **en
+     * base** et **à l'écran**.
+     */
 
     // Et l'enclos reste dans la fournée, donc rattrapable. C'est la vérité :
     // ces montures sont encore en enclos dans le jeu. Le retirer ici les

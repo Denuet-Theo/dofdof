@@ -158,7 +158,18 @@ test.describe('saisie de naissance', () => {
     // régression mais une inférence fausse — deux croisements distincts peuvent
     // porter le même nom de poulain, et dans cet outil les noms ne sont de
     // toute façon pas uniques. On lit donc directement l'identité du croisement.
-    expect(new Set(croisements).size, 'trois croisements différents').toBe(3);
+    /*
+     * **Au moins deux** distincts, et non exactement trois.
+     *
+     * Ce qui donne son sens à la vérification du dessus est que les panneaux
+     * visités ne soient pas le même remonté trois fois. Deux suffisent à le dire.
+     * Trois était le compte du champion ; l'échelle propose deux formes parmi les
+     * trois premiers panneaux, ce qui n'enlève rien à la propriété testée — chaque
+     * saisie reste sur son croisement.
+     */
+    expect(new Set(croisements).size, 'au moins deux croisements différents').toBeGreaterThanOrEqual(
+      2
+    );
   });
 
   test('annuler retire le poulain et rend leur état aux parents', async ({ page }) => {

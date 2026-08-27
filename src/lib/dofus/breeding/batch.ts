@@ -1,5 +1,5 @@
 import { cycledOf, type Individual, type Sex, type Stable } from './stable';
-import { parseCountedMountId } from './search';
+import { parseCountedMountId } from './unit-plan';
 
 /**
  * La fournée en cours : ce qui est **dans les enclos**, et non ce que la

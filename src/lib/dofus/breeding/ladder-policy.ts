@@ -43,7 +43,7 @@ import {
   topGenerationOf,
   type Mate,
 } from './pairing';
-import { emptyPlan, type UnitPlan } from './search';
+import { emptyPlan, type UnitPlan } from './unit-plan';
 import type { Individual, Sex } from './stable';
 
 /** Ce que la composition a besoin de savoir. Un sous-ensemble de `SearchView`. */

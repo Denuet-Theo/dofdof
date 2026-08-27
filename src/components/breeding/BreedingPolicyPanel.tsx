@@ -37,7 +37,7 @@ import {
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { unavailableFor } from '@/lib/dofus/breeding/batch';
 import { formatCountdown } from '@/lib/dofus/breeding/countdown';
-import { acquiredMountId } from '@/lib/dofus/breeding/search';
+import { acquiredMountId } from '@/lib/dofus/breeding/unit-plan';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';

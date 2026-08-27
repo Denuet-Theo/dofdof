@@ -57,7 +57,7 @@ import {
 import { carriedGeneration, colorCoder, mountName } from '@/lib/dofus/breeding/naming';
 // Le vrac n'a pas de ligne en base : son identité est fabriquée par `flatten`, et
 // c'est elle qui dit dans quelle table une sortie d'enclos doit s'écrire.
-import { parseCountedMountId } from '@/lib/dofus/breeding/search';
+import { parseCountedMountId } from '@/lib/dofus/breeding/unit-plan';
 import { unavailableFor } from '@/lib/dofus/breeding/batch';
 // Toute écriture qui échoue passe par là : voir l'en-tête du module sur
 // pourquoi un `console.error` ne compte pas comme un signalement.

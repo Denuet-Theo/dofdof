@@ -16,16 +16,25 @@
 //!
 //! ## Ce qui n'est pas porté, et pourquoi
 //!
-//! - **Les génétons.** L'économie visée (10 M de départ, fournée à 150 000,
-//!   ambre à 20 000 par génération) ne les monnaie pas. `pairShape` les calcule
-//!   côté TS ; ici la valeur serait morte, et une valeur morte finit par être
-//!   crue.
 //! - **Tout `costs.ts`** — mangeoire, optimakina, carburant, taxe HDV. Remplacé
 //!   intégralement par `economy.rs`.
-//! - **Le niveau comme variable.** Il reste porté sur la monture, mais toutes
-//!   les montures sont niveau 67 dans l'économie visée, donc le taux vaut
-//!   50,1 % partout. On garde le champ pour que rendre le prix fonction du
-//!   niveau ne demande qu'une ligne plus tard.
+//! - **Le niveau *par monture*.** Le TypeScript en porte un par ligne d'écurie ;
+//!   ici il est celui de la **fournée**, un seul pour le lot, parce que la
+//!   Mangeoire monte les dix places d'un bloc. C'est `Strategy::level`, et non une
+//!   constante : `--niveau`, `AtLevel` et `tuned_for` le balayent, et le prix du
+//!   chargement en dépend par `schedule` et `mount_xp_for_level`.
+//!
+//! Deux entrées ont quitté cette liste parce qu'elles avaient cessé d'être vraies,
+//! et une liste de « pas porté » qui se périme envoie reporter ce qui existe :
+//!
+//! - **Les génétons** y étaient, au motif que « l'économie visée ne les monnaie
+//!   pas » et qu'« ici la valeur serait morte ». Elle ne l'est plus :
+//!   `economy.rs` crédite `génétons × geneton_value` à chaque fournée, et le prix
+//!   est tiré par partie.
+//! - **Le niveau** y était comme « pas une variable, 67 partout, le rendre
+//!   fonction du prix ne demandera qu'une ligne ». Les 67 sont le **défaut**
+//!   d'`economy.toml`, la ligne est écrite, et les mesures de niveau balayent de 1
+//!   à 120.
 
 pub mod audit;
 pub mod baseline;

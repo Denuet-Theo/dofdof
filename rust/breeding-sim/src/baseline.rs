@@ -139,10 +139,14 @@ pub struct FrontierNeeds {
 /// la chaîne en compte deux : mesuré, la montée calait sur un Turquoise-Ivoire
 /// qui n'était pas fabricable non plus, faute de *ses* composants.
 ///
-/// > `reserved` n'est pas porté. Le TypeScript le calcule, le fait transiter
-/// > par la signature de `scoreOf`… et ne le lit jamais. La pénalité de réserve
-/// > que les commentaires décrivent n'est donc pas implémentée là-bas non plus,
-/// > et la porter ici aurait changé la baseline au lieu de la reproduire.
+/// > `reserved` n'est pas porté, et la raison vaut toujours : la pénalité de
+/// > réserve que les commentaires décrivent n'était **implémentée nulle part**, et
+/// > la porter ici aurait changé la baseline au lieu de la reproduire.
+/// >
+/// > La preuve citée, elle, a disparu : elle disait « le TypeScript le calcule, le
+/// > fait transiter par la signature de `scoreOf`… et ne le lit jamais ». `scoreOf`
+/// > est parti avec `search.ts` le 27/08, donc il n'y a plus rien à aller voir —
+/// > le TypeScript ne calcule plus `reserved` du tout.
 pub fn frontier_needs(catalog: &Catalog, stable: &Stable) -> FrontierNeeds {
     let mut held: Vec<bool> = vec![false; catalog.len()];
     let mut frontier = 0u8;

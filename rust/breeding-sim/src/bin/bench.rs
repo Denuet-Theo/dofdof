@@ -20,10 +20,16 @@
 //! cargo run --release -p breeding-sim --bin bench volkorne
 //! ```
 //!
-//! `muldo` par défaut, et c'est la seule dont le score soit un **relevé** : les prix
-//! d'`economy.toml` sont muldo, et `GENETONS_BY_GENERATION` est dans le code. Sur une
-//! autre famille, ces chiffres comparent des **structures d'arbre** sous des prix qui
-//! ne sont pas les siens. Voir `bin/knobs` pour ce que les trois ont donné.
+//! `muldo` par défaut. La famille choisie décide **du prix de sa ressource
+//! d'extraction** : `[valeurs.ressource_par_famille]` d'`economy.toml` porte les
+//! trois relevés du 25/08, et le binaire dit lequel il a pris.
+//!
+//! Ce qui reste muldo dans les chiffres d'une autre famille : la bande de prix
+//! gen 10, et la largeur de bande de la ressource, déduite du prix ponctuel faute
+//! d'un relevé sur trente jours ailleurs (voir `Prices::for_family`). En revanche
+//! `GENETONS_BY_GENERATION` n'est **pas** un terme muldo : les rendements en
+//! génétons sont les mêmes pour toutes les montures, confirmé par l'éleveur le
+//! 25/08. Voir `bin/knobs` pour ce que les trois familles ont donné.
 
 use std::time::Instant;
 
@@ -73,14 +79,21 @@ fn measure(
     economy: &Economy,
     mut make: impl FnMut() -> Box<dyn Policy>,
 ) -> Report {
-    let catalog = catalog.clone();
+    // Le catalogue reste **emprunté**, et il n'y a rien à cloner : `Catalog` n'est
+    // pas `Clone` exprès, il est gros et partagé par référence partout. Le rendre
+    // clonable pour économiser un `&` échangerait une recopie de cent vingt
+    // couleurs contre rien.
+    //
+    // L'économie, elle, est `Copy` : on en prend une propre parce qu'on la reçoit
+    // par référence et que la fermeture ci-dessous ne doit pas dépendre de la durée
+    // de vie de l'appelant.
     let economy = *economy;
 
     let start = Instant::now();
     let outcomes: Vec<RunOutcome> = (0..SEEDS)
         .map(|seed| {
             let mut policy = make();
-            play(&catalog, &economy, policy.as_mut(), seed)
+            play(catalog, &economy, policy.as_mut(), seed)
         })
         .collect();
     let elapsed = start.elapsed().as_secs_f64();
@@ -93,8 +106,8 @@ fn measure(
 }
 
 fn main() {
-    // La famille à mesurer. `muldo` par défaut : c'est elle qui porte les prix
-    // d'`economy.toml`, donc la seule dont le score soit un relevé.
+    // La famille à mesurer. `muldo` par défaut : c'est elle qui porte la plupart
+    // des relevés d'`economy.toml`.
     let wanted = std::env::args().nth(1).unwrap_or_else(|| "muldo".to_string());
     let catalog = family(&wanted);
     // Les prix viennent de `rust/economy.toml`, pas du code : ils bougent, et
@@ -106,7 +119,9 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let economy = prices.economy;
+    // La ressource d'extraction n'est pas la même d'une famille à l'autre, donc
+    // son prix non plus. Résolu ici, une fois, avant la première partie.
+    let economy = prices.for_family(&wanted);
 
     println!(
         "Économie ({}) : {} M de départ, {} h de jeu, chargements à ~{} kamas, {} croisements de parc,",
@@ -117,14 +132,25 @@ fn main() {
         economy.total_crossings()
     );
     println!(
-        "  pool de {} muldos gen {} à {}, gen 1 à {}, ambre à {}/rang, gen 10 à {}.",
+        "  pool de {} {wanted}s gen {} à {}, gen 1 à {}, ressource à {}/rang ({} à {}), gen 10 à {}.",
         economy.starting_pool,
         economy.pool_generations.0,
         economy.pool_generations.1,
         economy.starter_price,
         economy.amber_per_generation,
+        economy.amber_range.0,
+        economy.amber_range.1,
         economy.top_value
     );
+    // Un prix qu'on n'a pas ne se remplace pas en silence : la mesure tournerait
+    // sous le prix du muldo sans que la ligne du dessus laisse voir lequel.
+    if prices.family_amber(&wanted).is_none() {
+        println!(
+            "  ⚠ economy.toml ne relève aucun prix de ressource pour « {wanted} » \
+             ([valeurs.ressource_par_famille]) : ce score est celui de son arbre sous le \
+             prix de référence, pas ce que l'éleveur y gagnerait."
+        );
+    }
     println!("  {SEEDS} graines, identiques pour toutes les politiques.\n");
 
     // Un chiffre publié sur une économie incomplète doit le dire lui-même.

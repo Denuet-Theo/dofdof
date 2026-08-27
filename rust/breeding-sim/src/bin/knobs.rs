@@ -38,35 +38,59 @@
 //! cargo run --release -p breeding-sim --bin knobs volkorne
 //! ```
 //!
-//! `muldo` par défaut. **Les prix d'`economy.toml` sont des relevés muldo** — ambre
-//! par rang, bande de prix gen 10, paliers de géneton — et
-//! `GENETONS_BY_GENERATION` vit dans `economy.rs` et non dans le fichier. Un score
-//! sur une autre famille dit donc ce que la **structure de l'arbre** permet sous
-//! les prix muldo, jamais ce que l'éleveur y gagnerait.
+//! `muldo` par défaut. La famille choisie décide du **prix de sa ressource
+//! d'extraction** : `[valeurs.ressource_par_famille]` porte les trois relevés du
+//! 25/08 — Ambre de muldo 20 000, Corne de volkorne 21 000, Neurone de dragodinde
+//! 18 000 — et le binaire annonce celui qu'il a pris.
 //!
-//! ## Ce que les trois familles ont dit, le 25/08
+//! Ce qui reste muldo : la bande de prix gen 10, et la largeur de bande de la
+//! ressource, déduite du prix ponctuel faute d'un relevé sur trente jours ailleurs.
+//! En revanche `GENETONS_BY_GENERATION` (dans `economy.rs`, et non dans le fichier)
+//! n'est **pas** un terme par famille : les rendements en génétons sont les mêmes
+//! pour toutes les montures, confirmé par l'éleveur le 25/08.
 //!
-//! | famille | glouton | échelle / fécondité stockée |
-//! | --- | --- | --- |
-//! | muldo | 64,18 M | **84,02 M** |
-//! | volkorne | 66,11 M | 50,03 M |
-//! | dragodinde | 42,78 M | 33,15 M |
+//! ## Ce que les trois familles ont dit, chacune à son prix
 //!
-//! La stratégie ne bat le glouton **que sur le muldo**. Deux explications ont été
-//! proposées et réfutées, et c'est le plus utile à retenir :
+//! Médianes de `bin/bench`, 200 graines. La colonne « avant » est la même mesure
+//! quand les trois payaient 20 000 la ressource, faute d'avoir les deux autres
+//! relevés — c'est l'écart entre les deux colonnes qui dit ce que la re-tarification
+//! a changé, et la réponse est : rien de qualitatif.
+//!
+//! | famille | ressource | glouton | échelle / fécondité stockée | (avant : 20 000) |
+//! | --- | --- | --- | --- | --- |
+//! | muldo | 20 000 | 64,18 M | **84,02 M** | 64,18 / 84,02 — identique |
+//! | volkorne | 21 000 | 66,31 M | 50,94 M | 66,11 / 50,03 |
+//! | dragodinde | 18 000 | 41,55 M | 31,44 M | 42,78 / 33,15 |
+//!
+//! La stratégie ne bat le glouton **que sur le muldo**, et le bon prix ne renverse
+//! rien : à ±5 et ±10 % de prix, le volkorne reste 23 % sous son glouton et le
+//! dragodinde 24 %. Il faudrait un facteur, pas un pourcent.
+//!
+//! Le seul enseignement chiffré de la re-tarification : **l'échelle est environ deux
+//! fois plus élastique au prix de la ressource que le glouton**. +5 % sur le volkorne
+//! lui rend +1,8 % quand le glouton prend +0,3 % ; −10 % sur le dragodinde lui coûte
+//! −5,2 % contre −2,9 %. C'est cohérent avec ce qu'elle fait — elle *convertit* ce
+//! qu'elle ne monte pas — mais deux familles ne font pas une loi, et les élasticités
+//! du glouton (0,06 et 0,29) ne se ressemblent pas assez pour qu'on lise mieux qu'un
+//! ordre de grandeur.
+//!
+//! Deux explications de l'écart ont été proposées et réfutées, et c'est le plus utile
+//! à retenir :
 //!
 //! - « le dragodinde est trop étroit » — 2 gen 9 et 19 gen 10 contre 4 et 50. Réfuté
 //!   par le volkorne, qui a exactement la largeur du muldo et fait **pire** ;
 //! - « la demande de secours s'éparpille sur un arbre dont la gen 9 vaut 6 + 8 ».
 //!   Réfuté en l'isolant : à `SPARE_ROUTE_DEMAND = 0` le volkorne rend 47,49 M contre
-//!   50,03 — elle y est **légèrement positive**, pas nuisible.
+//!   50,03 — elle y est **légèrement positive**, pas nuisible. (Mesuré au prix muldo ;
+//!   le signe ne dépend pas de 5 % de prix.)
 //!
 //! Ce qui est mesuré, et non raconté : **chaque composant transfère avec le même
 //! signe**. Sur volkorne, `harvest_stocked` vaut +26,98 M et la demande de secours
-//! +2,54 M. Le total perd quand même, parce que l'échelle y **convertit** mal —
-//! 1 047 croisements et 70 fournées pour 74,3 gen 10, là où le glouton en tient 62,2
-//! en 228 croisements et 28 fournées. Le défaut est dans le plan, pas dans la
-//! politique posée dessus, et personne ne l'a encore localisé.
+//! +2,54 M — au prix muldo, les deux. Le total perd quand même, parce que l'échelle y
+//! **convertit** mal : à son vrai prix, 1 017 croisements et 68 fournées pour 69,6
+//! gen 10, là où le glouton en tient 62,2 en 228 croisements et 28 fournées. Le défaut
+//! est dans le plan, pas dans la politique posée dessus, et personne ne l'a encore
+//! localisé.
 
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{Economy, MAX_UNITS, RunOutcome, Strategy, play};
@@ -129,16 +153,28 @@ fn measure(
 }
 
 fn main() {
-    let economy = Prices::load_default()
-        .map(|prices| prices.economy)
-        .unwrap_or_else(|error| {
-            eprintln!("{error}");
-            std::process::exit(1);
-        });
+    let prices = Prices::load_default().unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(1);
+    });
 
     let wanted = std::env::args().nth(1).unwrap_or_else(|| "muldo".to_string());
     let catalog = family(&wanted);
-    println!("famille : {wanted}\n");
+    // Le prix de la ressource d'extraction suit la famille : c'est le seul terme
+    // de l'économie qui la connaisse, et il se résout ici une fois pour toutes.
+    let economy = prices.for_family(&wanted);
+    println!(
+        "famille : {wanted} — ressource à {}/rang ({} à {})",
+        economy.amber_per_generation, economy.amber_range.0, economy.amber_range.1
+    );
+    // Le même silence que dans `bench` : un prix qu'on n'a pas se dit.
+    if prices.family_amber(&wanted).is_none() {
+        println!(
+            "⚠ economy.toml ne relève aucun prix de ressource pour « {wanted} » \
+             ([valeurs.ressource_par_famille]) : prix de référence appliqué."
+        );
+    }
+    println!();
 
     if economy.stable_places == 0 {
         eprintln!("economy.toml ne pose aucune place d'écurie ([ecurie] places).");

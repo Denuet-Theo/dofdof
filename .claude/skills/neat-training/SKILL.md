@@ -228,8 +228,13 @@ Before trusting any number on a new family:
    and run `cargo test -p breeding-sim`. The shipped fixtures are muldo-only.
    This gate compares 29 126 outcomes at 1e-9 and it does fail when the port
    drifts — it was verified to fail under a perturbation of 1/90000.
-2. Re-price `economy.toml`. Amber per rank, the generation-10 price band and
-   the geneton yields are all muldo values.
+2. Re-price `economy.toml`. The **extraction resource** price is already per
+   family — `[valeurs.ressource_par_famille]`, the maintainer's relevés of
+   25/08, resolved by `Prices::for_family` — and `bench`/`knobs` pick it up from
+   their family argument. What is still muldo: the generation-10 price band, and
+   the *width* of the resource band, scaled from the muldo thirty-day band
+   because no other family has one. The geneton yields are **not** a per-family
+   term: they are the same for every mount (maintainer, 25/08).
 3. Re-run `--bin bench` for the new floor and the new greedy number to beat.
 
 ## Changing the economy
@@ -246,9 +251,16 @@ what the neuroevolution *should* find — which is the only way to judge whether
 it got there.
 
 One inconsistency to know about: `GENETONS_BY_GENERATION` lives in
-`economy.rs:95`, not in the TOML. If a family or a patch changes those yields,
-it is a code edit. Genetons drop **only on a successful birth**, never on a
-failed one.
+`economy.rs:95`, not in the TOML. It is universal across families — only a game
+patch would move it, and that is a code edit. Genetons drop **only on a
+successful birth**, never on a failed one.
+
+The one price that is **not** a single global: the extraction resource. Three
+families, three items, three HDV quotes. `Prices::for_family(id)` resolves it
+once from `[valeurs.ressource_par_famille]` and returns a plain `Economy`; a
+family the file does not name pays the reference price and the binary says so out
+loud. A price change there makes each family's published bench incomparable
+separately — replay all three.
 
 **Any new binary must read prices through `Prices::load_default()`.** A run was
 once voided because a binary used `Economy::default()` instead: the levers were

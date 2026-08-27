@@ -579,6 +579,71 @@ export const ladderPlan = (
     here.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
   }
 
+  /**
+   * Les croisements qui n'occupent **aucune** place : deux fécondes.
+   *
+   * ## Ce que cette passe répare
+   *
+   * La boucle d'étages s'arrête sur la capacité, et c'est juste pour tout ce qui
+   * doit encore un cycle : ces montures-là passent par l'enclos, et l'enclos se
+   * compte. Mais un couple dont les **deux** parents ont déjà cyclé ne passe par
+   * aucun enclos — c'est un clic en jeu, `placesFor` le chiffre à zéro — donc la
+   * capacité n'a rien à en dire. Elle le bornait quand même.
+   *
+   * Le prix se lit sur l'écurie de l'éleveur, export du 27/08 : 74 fécondes,
+   * **34 accouplements admissibles et gratuits**, quatre proposés. Et parc plein,
+   * la boucle d'étages ne tournant pas du tout, l'écran n'annonçait plus **aucun**
+   * accouplement pendant toute la durée du cycle — alors que les fécondes du
+   * coffre n'attendaient rien.
+   *
+   * ## Pourquoi elle vient en premier
+   *
+   * Elle a d'abord été posée en dernier, après tout ce qui se dispute une place,
+   * au motif qu'elle ne leur retirait rien. C'était le mauvais bout : ce ne sont
+   * pas les places qu'elle leur prend, c'est **l'ordre du geste**.
+   *
+   * L'éleveur accouple avant de charger, et il n'a pas le choix — un poulain né
+   * du croisement de ce matin doit pouvoir entrer dans l'enclos de ce midi. Une
+   * gen 9 qui sort d'un accouplement et qui attend la fournée du lendemain, c'est
+   * une journée perdue, et il n'y en a qu'une par jour. Composer les gratuits en
+   * dernier, c'était les annoncer après avoir distribué les soixante places, donc
+   * après que le geste soit joué.
+   *
+   * Et le parc y gagne deux fois. Passée en dernier, une féconde que la boucle
+   * d'étages avait déjà mariée à une fertile coûtait **une place** ; passée
+   * devant, elle se marie à une autre féconde et n'en coûte aucune. La place
+   * ainsi rendue va à une monture qui, elle, doit vraiment son cycle.
+   *
+   * ## Les étages sont ceux d'au-dessus
+   *
+   * Le même `tiers`, donc le même ordre : génération la plus haute d'abord,
+   * couleurs dans l'ordre du catalogue. Côté Rust c'est `free_tiers`, qui le
+   * reconstruit — la passe n'y suit pas les cinq `Ordering`, et n'a pas à le
+   * faire : ils n'existent que pour arbitrer une place entre deux étages, et ici
+   * aucun couple n'en prive un autre.
+   */
+  for (const [, here] of tiers) {
+    for (;;) {
+      const next = mostBehind(here, hasCycled);
+      if (!next) break;
+      const [color, position] = next;
+      const [male, female] = byTarget.get(color)![position];
+      // `mostBehind` vient de garantir les deux ; on relit quand même, plutôt
+      // que d'écrire un `!` qui tomberait le jour où le prédicat et la prise
+      // cesseraient de s'accorder.
+      const maleIndex = takeCycled(male);
+      if (maleIndex === null) break;
+      const femaleIndex = takeCycled(female);
+      if (femaleIndex === null) {
+        free[male].push(maleIndex);
+        break;
+      }
+      plan.crossings.push([maleIndex, femaleIndex]);
+      plan.optimakina.push(false);
+      made.set(color, (made.get(color) ?? 0) + 1);
+    }
+  }
+
   for (const [, here] of tiers) {
     while (places < view.capacity) {
       const next = mostBehind(here);
@@ -822,60 +887,6 @@ export const ladderPlan = (
     budget -= 2 * starter;
   }
 
-  /**
-   * Les croisements qui n'occupent **aucune** place : deux fécondes.
-   *
-   * ## Ce que cette passe répare
-   *
-   * La boucle d'étages s'arrête sur la capacité, et c'est juste pour tout ce qui
-   * doit encore un cycle : ces montures-là passent par l'enclos, et l'enclos se
-   * compte. Mais un couple dont les **deux** parents ont déjà cyclé ne passe par
-   * aucun enclos — c'est un clic en jeu, `placesFor` le chiffre à zéro — donc la
-   * capacité n'a rien à en dire. Elle le bornait quand même.
-   *
-   * Le prix se lit sur l'écurie de l'éleveur, export du 27/08 : 74 fécondes,
-   * **34 accouplements admissibles et gratuits**, quatre proposés. Et parc plein,
-   * la boucle d'étages ne tournant pas du tout, l'écran n'annonçait plus **aucun**
-   * accouplement pendant toute la durée du cycle — alors que les fécondes du
-   * coffre n'attendaient rien.
-   *
-   * ## Pourquoi elle vient en dernier
-   *
-   * Après le sommet, la moisson et les achats, donc après tout ce qui se dispute
-   * une place. Elle ne leur retire rien : ce qu'elle prend ne coûtait de place à
-   * personne. L'inverse était faux — passer devant leur aurait pris des fécondes
-   * qu'ils apparient parfois à une fertile, et déplacé une fournée que la mesure
-   * connaît.
-   *
-   * ## Les étages sont ceux d'au-dessus
-   *
-   * Le même `tiers`, donc le même ordre : génération la plus haute d'abord,
-   * couleurs dans l'ordre du catalogue. Côté Rust c'est `free_tiers`, qui le
-   * reconstruit — la passe n'y suit pas les cinq `Ordering`, et n'a pas à le
-   * faire : ils n'existent que pour arbitrer une place entre deux étages, et ici
-   * aucun couple n'en prive un autre.
-   */
-  for (const [, here] of tiers) {
-    for (;;) {
-      const next = mostBehind(here, hasCycled);
-      if (!next) break;
-      const [color, position] = next;
-      const [male, female] = byTarget.get(color)![position];
-      // `mostBehind` vient de garantir les deux ; on relit quand même, plutôt
-      // que d'écrire un `!` qui tomberait le jour où le prédicat et la prise
-      // cesseraient de s'accorder.
-      const maleIndex = takeCycled(male);
-      if (maleIndex === null) break;
-      const femaleIndex = takeCycled(female);
-      if (femaleIndex === null) {
-        free[male].push(maleIndex);
-        break;
-      }
-      plan.crossings.push([maleIndex, femaleIndex]);
-      plan.optimakina.push(false);
-      made.set(color, (made.get(color) ?? 0) + 1);
-    }
-  }
 
   return settle(plan, view, ladder, topGeneration, options);
 };

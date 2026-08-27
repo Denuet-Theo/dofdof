@@ -28,4 +28,24 @@ exclude_re = [
     # Cinq mutants y survivaient à chaque passage. Les exclure rend les
     # survivants restants lisibles.
     "clone_same_lineage",
+    # `LadderPolicy::summit` et `summit_partner` composent la boucle du forum —
+    # accumuler des gen 10 pour les vendre — et `summit` **sort au premier test**
+    # si le régime n'est pas `Summit::Duplicate`. Or le défaut est
+    # `Summit::Target` des deux côtés depuis le 27/08, et rien n'allume
+    # `Duplicate` : ni l'app, ni le dumper de référence, ni `bench`.
+    #
+    # Aucun cas de parité ne peut donc les atteindre, et en ajouter un
+    # n'aiderait pas : il n'y a **rien à comparer**. Le TypeScript ne porte pas
+    # cette composition, et ne doit pas la porter — la boucle est mesurée à
+    # **−1,43 M** sur le parc de l'éleveur, dont le seul sommet porteur de gen 9
+    # est stérile et sans jumelle à cloner.
+    #
+    # Ce sont les deux fonctions, et pas le mot « summit » : `Summit::Target`
+    # agit par l'admissibilité, qui est portée et dont les mutants doivent
+    # continuer à mourir.
+    #
+    # Quatorze mutants y survivaient à chaque passage, dont douze dans
+    # `summit_partner` seule.
+    "LadderPolicy::summit_partner",
+    "LadderPolicy::summit\\b",
 ]

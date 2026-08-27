@@ -28,8 +28,19 @@
  * donc au Rust configuré `harvesting: false`, sans quoi la garde comparerait
  * deux politiques différentes et rougirait pour la mauvaise raison.
  *
- * Le **sommet** n'est pas porté non plus, et c'est sans effet : `Summit::Hold`
- * est le défaut des deux côtés, donc la branche ne s'exécute jamais.
+ * Le **sommet**, lui, demande une distinction que ce commentaire a eue fausse.
+ * Il disait « pas porté, et sans effet : `Summit::Hold` est le défaut des deux
+ * côtés, donc la branche ne s'exécute jamais ». Le défaut est `Summit::Target`
+ * depuis le 27/08 — c'est ce que `summit-target.spec.ts` a exigé — donc la
+ * première moitié de la phrase était périmée et la seconde fausse.
+ *
+ * Ce qui est vrai : `Target` agit par l'**admissibilité**, `aimsAt(…, 'target')`,
+ * et ça, c'est porté — un croisement qui nomme une couleur du sommet entre dans la
+ * fournée des deux côtés. Ce qui n'est pas porté est la **composition** de
+ * `Summit::Duplicate` : `LadderPolicy::summit` et `summit_partner`, la boucle du
+ * forum qui accumule des gen 10 pour les vendre. Elle sort au premier test si le
+ * régime n'est pas `Duplicate`, donc elle ne s'exécute jamais ici — et elle a été
+ * mesurée à **−1,43 M** sur le parc de l'éleveur, ce pour quoi elle reste éteinte.
  */
 
 import type { BreedingColor } from './costs';

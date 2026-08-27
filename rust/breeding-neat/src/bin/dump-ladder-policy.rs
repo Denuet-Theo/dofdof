@@ -21,9 +21,16 @@
 //!
 //! ## Ce que la référence n'inclut pas
 //!
-//! Le sommet reste à `Summit::Hold`, son défaut des deux côtés : la branche ne
-//! s'exécute donc jamais et son absence du portage est sans effet. La moisson,
-//! elle, est **allumée** — elle l'est par défaut, et le portage l'a maintenant.
+//! Le sommet est à `Summit::Target`, son défaut des deux côtés depuis le 27/08.
+//! Ce régime-là agit par l'**admissibilité** — `aims_at` contre la couronne — et il
+//! est porté, donc la référence le couvre. Ce qu'elle ne couvre pas est la
+//! composition de `Summit::Duplicate` : `LadderPolicy::summit` sort au premier test
+//! hors de ce régime, donc ni elle ni `summit_partner` ne s'exécutent, et aucun cas
+//! de référence ne peut les atteindre. C'est écrit dans `.cargo/mutants.toml`, où
+//! leurs mutants sont exclus pour cette raison.
+//!
+//! La moisson, elle, est **allumée** — elle l'est par défaut, et le portage l'a
+//! maintenant.
 //!
 //! Les **clonages** et les **sacrifices** sont comparés depuis que
 //! `clone_by_generation` est porté. Ils ne l'étaient pas, et cette exemption

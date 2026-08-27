@@ -1536,6 +1536,20 @@ pub struct LadderPolicy {
     /// donc le cloneur ne la voit pas. Les deux s'allument ensemble ou pas du
     /// tout. Voir `clonable` et `Summit`.
     pub clone_top: bool,
+    /// Écouler le sommet et les stériles dépareillées, au lieu de les garder au
+    /// bilan jusqu'à la liquidation.
+    ///
+    /// **Allumé par défaut : c'est la référence.** Garder le sommet finissait la
+    /// partie riche et illiquide — la boucle mourait de `kamas insuffisants` en
+    /// tenant des centaines de gen 10 au bilan, à 174 fournées sur 200 pour le
+    /// volkorne et 131 pour la dragodinde. Vendre dépense les 200, pour le même
+    /// argent (muldo +1 %, volkorne −3 %) et une écurie qui tombe de 521 à 163
+    /// places sur le muldo.
+    ///
+    /// Ce que ce drapeau ne dit pas tout seul : le classement entre garder et
+    /// vendre a changé **trois fois** pendant qu'on corrigeait le marché, et
+    /// garder ne gagnait que par le défaut de la reprise. Voir `Market`.
+    pub sell_top: bool,
     /// Cloner entre lignées différentes, à la seule condition que le jeu pose —
     /// la même génération affichée. Sinon on n'apparie qu'à signature égale, ce
     /// qui rend le tirage sans enjeu mais ne se déclenche presque jamais.
@@ -1609,6 +1623,7 @@ impl LadderPolicy {
             harvest_stocked: false,
             summit: Summit::default(),
             clone_top: true,
+            sell_top: true,
             next_starter: 0,
             crowned: false,
             forced_crown: None,
@@ -2755,10 +2770,31 @@ impl Policy for LadderPolicy {
             .iter()
             .enumerate()
             .filter(|(index, mount)| {
-                !claimed.contains(index)
-                    && !self.ladder.wanted.contains(&mount.color)
-                    && view.economy.value_of(catalog, mount.color) > 0
-                    && catalog.generation(mount.color) <= 2
+                if claimed.contains(index)
+                    || view.economy.value_of(catalog, mount.color) == 0
+                {
+                    return false;
+                }
+                let generation = catalog.generation(mount.color);
+                if self.sell_top {
+                    // Le sommet **s'écoule**. Le garder ne finance rien : une
+                    // gen 10 n'a plus de croisement qui la fasse monter.
+                    // `claimed` protège déjà celles que le clonage a prises.
+                    if generation >= catalog.top_generation() {
+                        return true;
+                    }
+                    // Une stérile que le clonage n'a pas appariée : elle ne
+                    // remontera plus l'échelle et ne vaut plus que son
+                    // extraction. Le clonage passe d'abord — il est gratuit et
+                    // rend une fertile — donc seules les dépareillées arrivent
+                    // ici.
+                    if !mount.fertile && generation > 2 {
+                        return true;
+                    }
+                }
+                // La règle d'origine : ce qui est né hors plan, en bas de
+                // l'échelle.
+                !self.ladder.wanted.contains(&mount.color) && generation <= 2
             })
             .map(|(index, _)| index)
             .collect();

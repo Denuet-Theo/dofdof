@@ -214,6 +214,27 @@ fn main() {
                 Box::new(policy)
             })
         },
+        {
+            // Le sommet **gardé** : l'ancienne référence, pour mesurer ce que
+            // vendre a changé. `sell_top` est allumé partout ailleurs, donc
+            // c'est le seul écart avec la ligne au-dessus.
+            //
+            // Garder finissait la partie riche et illiquide : la boucle mourait
+            // de `kamas insuffisants` sans avoir dépensé son horizon, en tenant
+            // des centaines de gen 10 que rien ne convertissait. Attention en
+            // relisant l'historique : le classement entre les deux lignes s'est
+            // inversé trois fois pendant la correction de `Market`, et garder ne
+            // gagnait que par la reprise non plafonnée.
+            let ladder = Ladder::of(&family(&wanted), Route::default());
+            measure("echelle / sommet gardé", &catalog, &economy, move || {
+                let mut policy = LadderPolicy::with_ladder(ladder.clone())
+                    .with_strategies([Strategy::default(); MAX_UNITS])
+                    .tuned_for(&economy);
+                policy.harvest_stocked = true;
+                policy.sell_top = false;
+                Box::new(policy)
+            })
+        },
     ];
 
     println!(

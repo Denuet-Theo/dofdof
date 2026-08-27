@@ -1,5 +1,40 @@
 # Les mutants que `cargo mutants` doit laisser tranquilles, et pourquoi.
 #
+# ## La commande, parce qu'elle n'était écrite nulle part
+#
+#   export DOFDOF_TREES="$PWD/../src/lib/dofus/breeding/trees.json"
+#   export DOFDOF_FIXTURES="$PWD/../scripts/fixtures"
+#   cargo mutants --file breeding-sim/src/ladder.rs --profile release -j 12
+#
+# Les deux variables : `CARGO_MANIFEST_DIR` est figé à la compilation, et un chemin
+# qui remonte au-dessus de `rust/` sort de la copie que `cargo mutants` bâtit. Sans
+# elles, le **baseline échoue** et la commande annonce « Found 404 mutants to test »
+# puis s'arrête sans en jouer un seul. C'est arrivé jusqu'au 27/08 :
+# `breeding-sim/tests/parity.rs` bâtissait son chemin à la main, donc la couverture
+# de mutation de `ladder.rs` ne mesurait rien. Garde :
+# `breeding-sim/tests/sandbox_paths.rs`.
+#
+# `--profile release` : les tests de mesure de `ladder.rs` jouent des parties
+# entières. En debug, une passe demandait dix-sept heures ; en release, environ huit
+# à `-j 12`. Le temps reste dominé par les mutants qui **ralentissent** la
+# simulation sans la casser — 850 s de test pour 3 s de compilation, contre 44 s
+# pour l'arbre sain — et ceux-là sont de vrais survivants, pas des délais.
+#
+# ## Ce que la mesure ne juge PAS, et c'est un trou
+#
+# `cargo mutants` ne joue que les tests du paquet muté. Le contrat de référence de
+# la fournée — `breeding-neat/tests/ladder_policy_parity.rs`, celui sur lequel tout
+# le raisonnement ci-dessous repose — vit dans l'autre paquet et **ne tourne pas**.
+# Ni `--test-package breeding-sim,breeding-neat` ni `--test-workspace true` ne l'ont
+# fait entrer : vérifié, `ladder_policy_parity` n'apparaît dans aucun journal de
+# baseline.
+#
+# Conséquence à garder en tête en lisant `missed.txt` : les survivants sont mesurés
+# contre les seuls tests de `breeding-sim`, donc leur nombre est une **borne
+# supérieure**. Certains mourraient sous le contrat de fournée. Le résoudre demande
+# soit de déplacer le contrat dans `breeding-sim`, soit de trouver comment faire
+# tester les deux paquets — et pas de faire taire les survivants ici.
+#
 # ## À quoi sert ce fichier
 #
 # La garde de parité (`scripts/check-ladder-policy.mjs` d'un côté,

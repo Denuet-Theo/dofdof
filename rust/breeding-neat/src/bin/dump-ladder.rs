@@ -101,8 +101,10 @@ fn main() {
     let target = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "../scripts/fixtures/ladder-parity.json".into());
-    let trees = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/lib/dofus/breeding/trees.json");
+    // Même raison que dans `trees_path` : un chemin qui remonte au-dessus de la
+    // racine du workspace sort de toute copie du dépôt, et `DOFDOF_TREES` est la
+    // porte prévue pour le dire.
+    let trees = breeding_sim::trees::trees_path();
 
     let mut families = Vec::with_capacity(FAMILIES.len());
     let mut plans = 0;

@@ -101,8 +101,11 @@ fn le_portage_rejoue_le_typescript_au_milliardieme() {
 
     let family = root["family"].as_str().expect("`family` manquant");
     let catalog = {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/lib/dofus/breeding/trees.json");
-        Catalog::load(path, family).expect("le catalogue doit se charger")
+        // `trees_path()` et non un chemin bâti ici : voir son en-tête. Un chemin
+        // qui remonte **au-dessus** de la racine du workspace sort de la copie que
+        // `cargo mutants` bâtit, et le test échouait alors sur un catalogue absent.
+        Catalog::load(breeding_sim::trees::trees_path(), family)
+            .expect("le catalogue doit se charger")
     };
 
     let cases = root["cases"].as_array().expect("`cases` manquant");
@@ -298,8 +301,11 @@ fn le_catalogue_connait_toutes_les_couleurs_de_la_fixture() {
     let json = std::fs::read_to_string(&fixture).expect("fixture illisible");
     let root: Value = serde_json::from_str(&json).expect("JSON invalide");
     let catalog = {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/lib/dofus/breeding/trees.json");
-        Catalog::load(path, root["family"].as_str().expect("`family`")).expect("catalogue")
+        Catalog::load(
+            breeding_sim::trees::trees_path(),
+            root["family"].as_str().expect("`family`"),
+        )
+        .expect("catalogue")
     };
 
     let mut seen: Vec<ColorId> = Vec::new();

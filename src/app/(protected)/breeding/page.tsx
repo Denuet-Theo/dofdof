@@ -424,6 +424,7 @@ const BreedingPage = () => {
       levelUpHours: supplies.levelUpHours ?? 0,
       valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
       hoursBetweenLoads: HOURS_BETWEEN_LOADS,
+      pointsCap: supplies.mangeoirePointsCap ?? undefined,
     });
     // Le prix de la Mangeoire manque : `tunedLevel` refuse plutôt que de rendre
     // le plafond, qui est ce qu'un niveau gratuit donne toujours.

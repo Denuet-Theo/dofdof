@@ -108,6 +108,33 @@ test.describe('niveau conseillé', () => {
 
     expect(level).toBeGreaterThanOrEqual(50);
   });
+
+  /**
+   * Le conseil tient dans **un remplissage** de Mangeoire.
+   *
+   * Les carburants portent leur plafond dans leur description — 40 000, 70 000,
+   * 90 000 ou le maximum — et un niveau qui demande plus de points réclame un
+   * second passage devant l'enclos. Pour un éleveur qui vient une fois par jour,
+   * ce n'est pas un conseil cher, c'est un conseil faux : le niveau 100 veut
+   * 172 668 points, soit trois remplissages à 70 000.
+   *
+   * Relevé de l'éleveur, qui l'a vu avant le calcul : « 172 000 points, ça va
+   * prendre 2 jours ». Sans ce plafond, `tunedLevel` proposait des paliers qu'une
+   * nuit ne peut pas payer.
+   */
+  test('le niveau conseillé tient dans un remplissage', async ({ page }) => {
+    const mock = await mockSupabase(page);
+    (mock.tables.breeding_color_prices as Record<string, unknown>[]).push(CROWN_PRICE);
+    await openBreeding(page);
+
+    const advised = page.getByTestId('advised-level');
+    await expect(advised).toBeVisible({ timeout: 30_000 });
+    const level = Number((await advised.innerText()).match(/(\d+)/)?.[1] ?? 0);
+
+    // `mountXpForLevel(67)` vaut 67 942 points : c'est le dernier palier qu'un
+    // plafond de 70 000 paie. Le suivant, 85, en demande 118 215.
+    expect(level).toBeLessThanOrEqual(67);
+  });
 });
 
 /**

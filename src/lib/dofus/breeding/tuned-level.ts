@@ -104,6 +104,19 @@ export type TunedLevelInput = {
    * comptent.
    */
   hoursBetweenLoads?: number;
+  /**
+   * Points qu'un **seul remplissage** de Mangeoire peut porter.
+   *
+   * Le plafond du carburant tenu — 40 000, 70 000, 90 000 ou le maximum — et
+   * c'est une borne **dure**, pas un coût. Le niveau 100 demande 172 668 points :
+   * à 70 000 il faut trois remplissages, donc trois passages devant l'enclos. Un
+   * niveau qu'on ne peut pas atteindre en une visite n'est pas un conseil cher,
+   * c'est un conseil faux.
+   *
+   * Relevé de l'éleveur, qui l'a dit avant que le calcul ne le sache : « 172 000
+   * points, ça va prendre 2 jours ». Absent, aucun plafond n'est appliqué.
+   */
+  pointsCap?: number;
 };
 
 export type TunedLevel = {
@@ -144,6 +157,9 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
 
   let best: TunedLevel | null = null;
   for (const level of STEPS) {
+    // Le plafond d'un remplissage : au-delà, le niveau demande un second passage
+    // que l'éleveur ne fera pas dans la même fournée. Voir `pointsCap`.
+    if (input.pointsCap && mountXpForLevel(level) > input.pointsCap) continue;
     // Le temps de la montée, au prorata des points : `levelUpHours` est relevé
     // pour le plafond, et la Mangeoire transfère à débit constant.
     const climbHours =

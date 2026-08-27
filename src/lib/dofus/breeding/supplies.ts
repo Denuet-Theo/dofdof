@@ -224,6 +224,21 @@ export type SupplyCosts = {
    * quel pour un niveau intermédiaire.
    */
   mangeoirePointsPerHour: number | null;
+  /**
+   * Le **plafond d'un remplissage** de Mangeoire, lu sur le carburant retenu.
+   *
+   * Les carburants portent leur plafond dans leur description — « sans dépasser
+   * 90 000 » — et ces plafonds sont exactement les paliers de `GAUGE_BANDS` :
+   * 40 000, 70 000, 90 000, puis le maximum. Ce n'est donc pas un réglage libre
+   * mais le rang du carburant qu'on tient.
+   *
+   * **C'est une contrainte dure sur le niveau atteignable en une visite.** Le
+   * niveau 100 réclame 172 668 points : à un plafond de 70 000 il faut trois
+   * remplissages, donc trois passages. Pour un éleveur qui vient une fois par
+   * jour, ça n'est pas « le niveau 100 coûte plus cher », c'est « le niveau 100
+   * n'existe pas dans une fournée ».
+   */
+  mangeoirePointsCap: number | null;
   /** Le carburant de Mangeoire retenu, pour dire lequel acheter. */
   mangeoireFuel: string | null;
   /**
@@ -414,6 +429,7 @@ export const computeSupplyCosts = (
     cycleFreeSlotHours: complete ? cycleFreeSlotHours : null,
     levelUpHours: mangeoirePlan?.hours ?? null,
     mangeoirePointsPerHour: mangeoirePlan?.pointsPerHour ?? null,
+    mangeoirePointsCap: mangeoirePlan?.fuel.cap ?? null,
     mangeoireFuel: mangeoirePlan?.fuel.name ?? null,
     // Les heures libres du cycle, converties au débit de la Mangeoire.
     freeXpPoints:

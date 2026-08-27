@@ -31,6 +31,7 @@ pub mod audit;
 pub mod baseline;
 pub mod config;
 pub mod economy;
+pub mod import;
 pub mod encode;
 pub mod ladder;
 pub mod lineage;

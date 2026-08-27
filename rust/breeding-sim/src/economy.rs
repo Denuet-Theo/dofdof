@@ -513,6 +513,8 @@ pub struct Economy {
     ///
     /// Zéro par défaut, comme au-dessus.
     pub daily_price_recovery: f64,
+    /// Ce qu'on solde à la fin. Voir `Liquidation`.
+    pub liquidation_rule: Liquidation,
     /// La prime du **succès de collection**, par génération, indexée 1..=10.
     ///
     /// Le succès demande d'avoir fait naître chaque couleur de la famille **au
@@ -561,6 +563,7 @@ impl Default for Economy {
             availability: [[(0.0, 0.0); MAX_WINDOWS_PER_DAY]; DAYS_PER_WEEK],
             batches: 100,
             barren_crossing_malus: 0,
+            liquidation_rule: Liquidation::default(),
             value_per_success: 3_000_000,
             batch_cost: 150_000,
             starter_price: 1_000,
@@ -1844,8 +1847,27 @@ pub struct Batch {
     pub births: usize,
 }
 
+/// Jouer **depuis une écurie donnée** au lieu de celle que la graine tire.
+///
+/// Ce que ça sert à mesurer : ce que les politiques feraient de l'écurie réelle de
+/// l'éleveur, et non d'un échantillon. Les deux ne se ressemblent pas — un vrai
+/// parc porte des gen 10 obtenues, des niveaux hétérogènes et une généalogie
+/// complète, là où `starting_stable` pose cent gen 1 anonymes.
+///
+/// Le reste de la partie est inchangé : même marché tiré par la graine, même
+/// horizon, même économie. Seul le point de départ bouge.
+pub fn play_from(
+    catalog: &Catalog,
+    economy: &Economy,
+    policy: &mut dyn Policy,
+    seed: u32,
+    start: &Stable,
+) -> RunOutcome {
+    run(catalog, economy, policy, seed, None, Some(start))
+}
+
 pub fn play(catalog: &Catalog, economy: &Economy, policy: &mut dyn Policy, seed: u32) -> RunOutcome {
-    run(catalog, economy, policy, seed, None)
+    run(catalog, economy, policy, seed, None, None)
 }
 
 /// La même partie, en gardant le déroulé fournée par fournée.
@@ -1859,7 +1881,7 @@ pub fn play_recorded(
     seed: u32,
 ) -> (RunOutcome, Vec<Batch>) {
     let mut log = Vec::new();
-    let outcome = run(catalog, economy, policy, seed, Some(&mut log));
+    let outcome = run(catalog, economy, policy, seed, Some(&mut log), None);
     (outcome, log)
 }
 
@@ -1882,12 +1904,17 @@ fn run(
     policy: &mut dyn Policy,
     seed: u32,
     mut record: Option<&mut Vec<Batch>>,
+    start: Option<&Stable>,
 ) -> RunOutcome {
     let draws = Draws::new(seed);
     // Le marché du jour, tiré avec la graine : il fait partie du monde.
     let drawn = economy.for_run(catalog, &draws);
     let economy = &drawn;
-    let mut stable = starting_stable(catalog, economy, &draws);
+    // L'écurie fournie prime sur celle que la graine tire : voir `play_from`.
+    let mut stable = match start {
+        Some(held) => held.clone(),
+        None => starting_stable(catalog, economy, &draws),
+    };
     // La collection ne compte que ce qui **naît**. L'écurie de départ est achetée,
     // pas élevée, donc elle n'y entre pas — même lecture que `success.ts`, dont
     // l'en-tête refuse de déduire la collection de ce que l'écurie porte.
@@ -2141,11 +2168,19 @@ fn run(
     // `sale_price_decay`.
     let mut liquidation = 0i64;
     let mut at_list = 0i64;
+    let top = catalog.top_generation();
     for mount in &stable.mounts {
+        // La règle uniforme : sous `SterileSummit`, seules les stériles du sommet
+        // et du rang juste en dessous passent en caisse. Voir `Liquidation`.
+        if economy.liquidation_rule == Liquidation::SterileSummit
+            && (mount.fertile || catalog.generation(mount.color) + 1 < top)
+        {
+            continue;
+        }
         let listed = economy.value_of(catalog, mount.color);
         at_list += listed;
         if economy.sale_price_decay <= 0.0
-            || catalog.generation(mount.color) < catalog.top_generation()
+            || catalog.generation(mount.color) < top
         {
             // En dessous du plafond, `value_of` cote de l'ambre : hors marché.
             liquidation += listed;
@@ -2261,6 +2296,41 @@ impl Market {
         self.last[slot] = hours;
         paid
     }
+}
+
+/// Ce qu'on solde à la fin de la partie.
+///
+/// ## Pourquoi c'est un choix et pas une évidence
+///
+/// `Everything` vend le parc entier au dernier instant. Aucun éleveur ne le fait,
+/// et le terme est loin d'être neutre : il **crédite le stock** au prix du marché,
+/// gratuitement, si bien qu'une politique qui accumule sans jamais vendre se voit
+/// payer comme si elle avait vendu. C'est ce qui faisait passer le glouton pour
+/// rentable alors qu'il finit avec moins de kamas qu'il n'en avait reçu.
+///
+/// Mais l'inverse est un piège symétrique. Ne rien solder du tout compare une
+/// politique qui écoule ses stériles en cours de route à une politique qui les
+/// garde — et la seconde perd pour une raison qui n'existe que dans la mesure,
+/// puisque l'éleveur les vendrait. On ne compare alors plus deux stratégies mais
+/// deux conventions comptables.
+///
+/// `SterileSummit` est la règle **uniforme** : tout le monde solde ce que
+/// l'éleveur solde vraiment — ses gen 9 et gen 10 **stériles**, qui ne remonteront
+/// plus l'échelle et valent le même prix stériles que fécondes. Rien d'autre.
+///
+/// Une gen 10 **féconde mais épuisée** — sans teinte gen 9 à recombiner, donc
+/// incapable de nommer une autre gen 10 — appartient au même lot : sa fécondité
+/// ne vaut rien. La règle ne la distingue pas ici faute d'avoir la vue du
+/// catalogue sous la main à cet endroit ; les politiques, elles, l'écoulent en
+/// cours de partie (voir `baseline::summit_is_spent`), donc elle est déjà passée
+/// en caisse avant la fin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Liquidation {
+    /// Le parc entier. Le régime historique, et celui des mesures publiées.
+    #[default]
+    Everything,
+    /// Les stériles du sommet et du rang juste en dessous, et elles seules.
+    SterileSummit,
 }
 
 /// Le plancher : ne rien faire, garder le capital et liquider le pool.

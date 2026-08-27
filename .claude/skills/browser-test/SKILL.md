@@ -197,3 +197,22 @@ taskkill //PID <pid> //F
 ```
 
 Only commit/push the actual feature files — never the bypass.
+
+## Le faux serveur **doit** honorer `offset` et `limit`
+
+Un gestionnaire qui ignore la pagination convient pour `item_prices` seul et
+**casse toutes les tables que `fetchAllRows` lit** : il reçoit une page pleine à
+chaque fois, redemande l'offset suivant sans fin, et
+`src/lib/supabase/pagination.ts` finit par abandonner —
+
+> Pagination interrompue après 500 requêtes (470000 lignes) : le serveur ne semble
+> pas honorer les bornes de pagination.
+
+**L'échec est muet à l'écran.** La page s'affiche quand même : elle montre
+`DEFAULT_SETTINGS` — 6 enclos, 0 monture — comme si l'utilisateur n'avait aucune
+donnée, ce qui se lit comme un problème d'authentification mockée et non de
+pagination. On cherche alors très loin de la cause.
+
+Même famille que l'`order` oublié dans `NOT_A_FILTER` (voir AGENTS.md) : **un faux
+serveur qui ignore une partie de la requête verdit exactement ce qu'on lui
+demandait de surveiller.** Servir la tranche demandée, toujours.

@@ -70,13 +70,54 @@ Everything follows from that:
 - **The 300 h / 600 h horizons are a NEAT tractability parameter and nothing
   else.** Do not present one as a play budget, and do not re-derive one.
 
-The counterweight, found on 2026-08-27 and not yet resolved: **levelling costs
-real days**, because a filling of the Mangeoire is capped. Level 100 wants 172 668
-points against 52 544 for level 60 — 3,3× — so at a 70 000 cap it needs three
-fillings, three visits, three days. A sweep run in *fournée* mode gives that level
-its feeding for free and will tell you higher is better; on a calendar it very
-likely inverts. `tunedLevel` handles the cap (`pointsCap`); the level *optimum*
-has not been re-measured on a calendar, so treat any figure near 100 as suspect.
+### The level: measure in fournées, and the cap is what makes that legal
+
+The counterweight is that **levelling costs real days**, because a filling of the
+Mangeoire is capped. Level 100 wants 172 668 points against 52 544 for level 60 —
+3,3× — so at a 70 000 cap it needs three fillings, three visits, three days.
+
+That worry has an answer now, and it is the opposite of what it looked like. The
+cap does not make the fournée-mode sweep wrong; **it is what makes it right.**
+Level 67 wants 67 942 points and level 68 wants 70 327, so at a 70 000 cap every
+level `tunedLevel` can advise fits **one** filling — one visit, one day. On a
+calendar all candidate levels therefore cost the same number of days, and counting
+fournées *is* counting days. `pointsCap` already excludes everything above.
+
+The two modes disagree, and only one of them is his calendar:
+
+| mode | what bounds the run | level 50 vs 67, his stable |
+| --- | --- | --- |
+| `mode = "heures"` (`economy.toml`'s default) | simulated hours | 50 wins, because 67 plays **28** fournées to 50's **36** |
+| fournée count (`table <famille> <n>`) | gestures | **67 wins**, at 30, 60, 100 and 150 fournées |
+
+Hours mode charges the climb in *time*, so a higher level plays fewer batches on
+the same horizon — measured at 480 h, level 36 plays 58 and level 120 plays 14, a
+factor of four. That is a real effect in the simulator and a false one for him: he
+plays one fournée a day whether the Mangeoire took two hours or twenty. **Never
+compare levels on an hours budget.**
+
+Measured in fournée mode on his export of 2026-08-27, 200 seeds, paired against
+level 67, kamas cashed:
+
+| horizon | 36 | 50 | 60 | 67 |
+| --- | --- | --- | --- | --- |
+| 30 fournées | −2,66 M | −1,35 M | −0,66 M | best |
+| 60 fournées | −11,20 M | −5,39 M | −1,99 M | best |
+| 150 fournées | −15,38 M | −8,40 M | −3,94 M | best |
+
+**Open, and it is a decision about his money:** `tunedLevel` advises **50** on his
+data, which the table above prices at −1,35 M a month. The two calculations do not
+use the same prices — the Rust charges `economy.toml`'s Mangeoire at 0,5640 kamas
+a point, the app charges what he has entered — and the app's advice is very
+sensitive to that number: 0,1 kamas a point advises 67, 0,5 advises 36. Do not
+"fix" `tunedLevel` toward 67 without settling which Mangeoire price is his.
+
+**`table`'s printed fournée count was a budget, not a measurement**, until
+2026-08-27: it printed `economy.batches`, which only bounds the run in fournée
+mode. Four horizons from 48 h to 2 160 h all announced "100 fournees" while the
+crossings went from 90 to 3 660 — and that is what made the hours-mode level
+ranking look like a comparison at equal effort. Guard:
+`rust/breeding-neat/tests/loads_played.rs`.
 
 ## A gen 10 without a gen 9 in its genealogy is spent — sell it even fertile
 

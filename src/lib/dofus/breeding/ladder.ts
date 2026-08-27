@@ -39,12 +39,18 @@ import type { BreedingColor } from './costs';
  * n'est plus le cas depuis #185 : au sommet la fenêtre est pleine et ne gagne
  * rien. Voir `aimsAt`, et `climbs` dans `pairing.ts`.
  *
- * ## Ce qui n'est pas porté
+ * ## Ce que ce module porte, et où vit le reste
  *
- * La politique complète — l'ordonnancement des fournées, la moisson, le clonage.
- * Ici on porte le **plan**, la **couronne** et l'**admissibilité**, parce que
- * c'est ce qui répond à la question posée à l'écran : « celui-ci, faut-il le
- * proposer ? ». Le reste continue de venir du champion entraîné.
+ * Ici : le **plan**, la **couronne** et l'**admissibilité** — ce qui répond à la
+ * question posée à l'écran, « celui-ci, faut-il le proposer ? ».
+ *
+ * Le reste — composer la fournée, les achats, les clonages, les sacrifices, la
+ * moisson — est dans `ladder-policy.ts`, porté et comparé au Rust coup pour coup.
+ *
+ * Ce paragraphe disait « le reste continue de venir du champion entraîné », et
+ * c'est faux depuis le 27/08 : le champion a quitté le TypeScript avec
+ * `search.ts`, `network.ts` et `champion.json`. Une phrase qui envoie le lecteur
+ * vers un module supprimé coûte plus qu'un paragraphe absent.
  *
  * La couronne a longtemps manqué, et son absence n'était pas neutre : sans elle
  * `summit` gardait **toutes** les couleurs du dernier rang impair, `wanted` était

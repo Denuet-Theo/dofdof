@@ -18,15 +18,35 @@
  * l'échelle réclame quatre unités et qui n'en tient qu'une passe avant une
  * couleur plus chère déjà servie.
  *
- * ## Ce qui n'est pas encore porté
+ * ## Ce qui est porté, et ce qui ne l'est pas
  *
- * La **moisson** — extraire des génétons de ce qui est hors plan — et le
- * **réglage du niveau** (`tuned_for`). Les deux comptent : le banc mesure
- * l'échelle à +36 M sans le réglage et +70 M avec. Ce module rend donc la
- * composition, qui est déjà le double du champion, et les deux morceaux
- * suivants ont leur propre mesure à faire. `check-ladder-policy.mjs` compare
- * donc au Rust configuré `harvesting: false`, sans quoi la garde comparerait
- * deux politiques différentes et rougirait pour la mauvaise raison.
+ * Ce paragraphe a été faux pendant plusieurs jours, et faux dans le sens le plus
+ * coûteux : il annonçait l'app **plus faible qu'elle n'est**, ce qui invite à
+ * reporter du code qui existe déjà.
+ *
+ * Il disait « la moisson n'est pas portée » et « `check-ladder-policy.mjs` compare
+ * donc au Rust configuré `harvesting: false` ». Les deux sont faux : `harvest` et
+ * `harvestStocked` sont des options de ce module, et les cas de référence balayent
+ * **les deux régimes** — `for stocked in [false, true]` dans `parity.rs`, et la
+ * garde relit `harvestStocked` cas par cas. Elle compare donc la moisson allumée
+ * aussi, et elle passe coup pour coup sur les trois familles.
+ *
+ * Sont portés et comparés : la composition de la fournée, les achats, les
+ * clonages, les sacrifices, l'extraction, la moisson dans ses deux régimes, et
+ * l'admissibilité du sommet (`Summit::Target`, le défaut des deux côtés).
+ *
+ * **N'est pas porté : le réglage du niveau** (`tuned_for`). Ce n'est pas un oubli,
+ * c'est un choix — `tuned_for` maximise `nombre de fournées × (valeur − carburant)`
+ * sur un horizon d'heures, et ce terme est **constant à un** pour un éleveur qui
+ * fait une fournée par jour. Voir `AGENTS.md`. L'app choisit son niveau avec
+ * `tunedLevel`, sur les prix saisis, et son en-tête dit pourquoi ce n'est pas un
+ * portage et n'aura pas de garde de parité.
+ *
+ * Le seul écart mesuré qui reste, donc, est **ce niveau-là** : `tunedLevel`
+ * conseille 50 sur le parc de l'éleveur, et le banc en mode fournées — le seul qui
+ * corresponde à son calendrier — donne 67 gagnant à 30, 60, 100 et 150 fournées,
+ * l'écart valant 1,35 M par mois. Les deux ne facturent pas la même Mangeoire, et
+ * lequel des deux prix est le sien n'est pas tranché.
  *
  * Le **sommet**, lui, demande une distinction que ce commentaire a eue fausse.
  * Il disait « pas porté, et sans effet : `Summit::Hold` est le défaut des deux

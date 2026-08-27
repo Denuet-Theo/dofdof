@@ -162,4 +162,11 @@ console.log(
   `\nsur ${plan.raw.crossings.length} accouplements, ${recopies} ne montent d'aucun rang ` +
     `(${Math.round((recopies / Math.max(plan.raw.crossings.length, 1)) * 100)} %)`
 );
+const kamas = (value) => `${(value / 1e6).toFixed(2)} M`;
+console.log(
+  `\nfournée : ${kamas(plan.earnings.genetons)} de génétons · ` +
+    `${kamas(plan.earnings.sales)} de ventes · ` +
+    `-${kamas(plan.earnings.loadKamas + plan.earnings.purchases + plan.earnings.optimakina)} de frais ` +
+    `→ ${kamas(plan.earnings.net)} net, soit ${kamas(plan.earnings.perMonth)} par mois`
+);
 console.log('\nla politique accouple, et ses croisements montent — l’écran a de quoi afficher');

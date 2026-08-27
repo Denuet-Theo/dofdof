@@ -42,7 +42,8 @@
  * n'a jamais rencontrée. Voir `SearchConfig.sacrifices`.
  */
 
-import { pairDelta, type EconomyView } from './census';
+import { pairDelta, type EconomyView, type PairDelta } from './census';
+import { batchEarnings, type BatchEarnings } from './earnings';
 import { ascendanceKey, BULK_MATE_LEVEL, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
 import { ladderPlan } from './ladder-policy';
@@ -309,6 +310,13 @@ export type StablePlan = {
    * exactement ce qui rend un outil impossible à croire. Le compte se rend à
    * l'écran, séparé par motif — voir `ladder.ts` pour la règle.
    */
+  /**
+   * Ce que la fournée rapporte, et le rythme mensuel que ça fait.
+   *
+   * Un **rythme** et non une prévision : voir `earnings.ts`, qui dit les trois
+   * raisons de ne pas le lire comme un horizon.
+   */
+  earnings: BatchEarnings;
   refused: {
     /** Ne nomme aucune couleur : recopie de l'ascendance, zéro géneton. */
     barren: number;
@@ -579,18 +587,25 @@ const readPlan = (
    * viser. La couleur n'est pas une promesse : le croisement rend une distribution,
    * et c'est la saisie de naissance qui propose toutes les issues.
    */
-  const aimedAt = (maleMate: Mate | null, femaleMate: Mate | null) => {
-    if (!maleMate || !femaleMate) return null;
-    const delta = pairDelta(
-      maleMate,
-      femaleMate,
-      input.colors,
-      generations,
-      economy,
-      strategy.level,
-      strategy.optimakinaFrom
-    );
-    if (!delta) return null;
+  const deltaOf = (maleMate: Mate | null, femaleMate: Mate | null) =>
+    maleMate && femaleMate
+      ? pairDelta(
+          maleMate,
+          femaleMate,
+          input.colors,
+          generations,
+          economy,
+          strategy.level,
+          strategy.optimakinaFrom
+        )
+      : null;
+
+  const aimedAt = (
+    maleMate: Mate | null,
+    femaleMate: Mate | null,
+    delta: PairDelta | null
+  ) => {
+    if (!maleMate || !femaleMate || !delta) return null;
     // `climbs` et non `namesTarget` : hors du sommet, une fenêtre pleine ne gagne
     // rien, donc il n'y a rien à annoncer comme visé.
     //
@@ -614,6 +629,11 @@ const readPlan = (
   const couples = new Map<string, CoupleLine>();
   const refused = { barren: 0, offPlan: 0 };
   let places = 0;
+  // Les recettes et les dépenses de la fournée, cumulées sur les croisements
+  // **retenus** : un couple refusé ne rapporte pas de génétons et ne coûte pas
+  // d'Optimakina, donc le cumul se fait après les deux portes.
+  let genetons = 0;
+  let optimakina = 0;
 
   /**
    * La règle de l'échelle, appliquée à ce que la politique entraînée propose.
@@ -663,7 +683,8 @@ const readPlan = (
 
     const [male, maleMate, maleCycled] = side(maleIndex, 'M');
     const [female, femaleMate, femaleCycled] = side(femaleIndex, 'F');
-    const aimed = aimedAt(maleMate, femaleMate);
+    const delta = deltaOf(maleMate, femaleMate);
+    const aimed = aimedAt(maleMate, femaleMate, delta);
 
     // « Un croisement est admissible si et seulement si ses couleurs cibles sont
     // non vides et toutes dans le plan. » Les deux moitiés se comptent à part :
@@ -685,6 +706,13 @@ const readPlan = (
 
     const cost = (maleCycled ? 0 : 1) + (femaleCycled ? 0 : 1);
     places += cost;
+    // Le même delta que `aimedAt` a lu, et pas un second appel : il porte le taux,
+    // les génétons et le prix de l'Optimakina, et `pairDelta` n'est pas mémoïsé —
+    // le redemander par croisement doublait `matingOutcomes` pour rien.
+    if (delta) {
+      genetons += delta.genetonKamas;
+      optimakina += delta.optimakinaCost;
+    }
 
     const key = `${signatureOf({ colorId: male.colorId, parents: mounts[maleIndex]?.parents ?? null, cycled: male.cycled })}/${signatureOf({ colorId: female.colorId, parents: mounts[femaleIndex]?.parents ?? null, cycled: female.cycled })}`;
     const line = couples.get(key);
@@ -739,8 +767,30 @@ const readPlan = (
     purchases.set(colorId, row);
   }
 
+  /**
+   * Ce que la fournée déplace en kamas.
+   *
+   * Les sacrifices sont la recette : `plan.sacrifices` porte des index d'écurie, et
+   * `valueOf` dit ce que chacun rend — vente ou extraction, au mieux des deux. Le
+   * chargement se paie une fois, et seulement si la fournée croise : c'est la même
+   * condition que `settle` applique à son test de solvabilité, et les deux doivent
+   * s'accorder ou le chiffre affiché contredirait le refus.
+   */
+  const earnings = batchEarnings({
+    genetons,
+    sales: plan.sacrifices.reduce(
+      (sum, index) => sum + (mounts[index] ? economy.valueOf(mounts[index].colorId) : 0),
+      0
+    ),
+    loadKamas: plan.crossings.length === 0 ? 0 : input.loadKamas,
+    purchases: plan.purchases.length * economy.starterPrice,
+    optimakina,
+    genetonValue: economy.genetonValue,
+  });
+
   return {
     refused,
+    earnings,
     // La couronne retenue, et celle qu'on avait demandée. Voir `crown` : le projet
     // pèse au lieu d'imposer, donc les deux peuvent différer et l'écran doit le dire.
     crown: ladder.summit.length > 0

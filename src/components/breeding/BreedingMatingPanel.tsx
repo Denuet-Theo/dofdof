@@ -169,6 +169,23 @@ type Props = {
   /** Génétons rendus par une réussite. Zéro quand aucune couleur ne nomme la cible. */
   genetons: number;
   successRate: number;
+  /**
+   * L'Optimakina conseillée pour ce croisement, ou `null` s'il n'y en a pas qui
+   * se rembourse.
+   *
+   * Elle vit entre les deux montures parce que c'est sa place dans la fenêtre du
+   * jeu, et parce que le taux qu'elle change est affiché juste à côté. Le prix
+   * porte déjà la source la moins chère — voir `worthwhileOptimakina`.
+   */
+  optimakina?: {
+    name: string;
+    price: number;
+    source: 'achat' | 'fabrication';
+    /** Le taux **avec** elle, plafonné à 1. */
+    rateWith: number;
+    /** Le prix au-delà duquel elle ne se rembourserait plus. */
+    ceiling: number;
+  } | null;
   /** Accouplements de cette forme dans la fournée. */
   total: number;
   nameOf: (colorId: string) => string;
@@ -214,6 +231,7 @@ const BreedingMatingPanel = ({
   targetGeneration,
   genetons,
   successRate,
+  optimakina,
   total,
   nameOf,
   generationOf,
@@ -409,6 +427,26 @@ const BreedingMatingPanel = ({
               <span className="text-[10px] text-dark-500 tabular-nums whitespace-nowrap">
                 {(successRate * 100).toFixed(1)} %
               </span>
+              {/* L'Optimakina se pose **ici**, entre les deux montures, parce que
+                  c'est là qu'elle se pose dans le jeu et parce que c'est le taux
+                  juste au-dessus qu'elle change. La montrer dans un panneau à
+                  part demanderait de retenir « laquelle, pour ce couple-là ». */}
+              {optimakina && (
+                <span
+                  data-testid="mate-optimakina"
+                  className="flex flex-col items-center gap-0.5 text-[10px] leading-tight
+                    text-kamas border border-kamas/30 bg-kamas/5 rounded-lg px-1.5 py-1
+                    whitespace-nowrap"
+                  title={`Optimakina ${optimakina.name} : ${optimakina.price.toLocaleString('fr-FR')} kamas ${optimakina.source === 'fabrication' ? 'à fabriquer' : 'à l’hôtel de vente'}, pour ${((optimakina.rateWith - successRate) * 100).toFixed(1)} points de réussite en plus. Elle se rembourse jusqu’à ${Math.round(optimakina.ceiling).toLocaleString('fr-FR')} kamas.`}
+                >
+                  <span className="font-semibold tabular-nums">
+                    +{((optimakina.rateWith - successRate) * 100).toFixed(1)} pts
+                  </span>
+                  <span className="text-dark-500">
+                    {optimakina.source === 'fabrication' ? 'à fabriquer' : 'à acheter'}
+                  </span>
+                </span>
+              )}
             </>
           ) : (
             <span

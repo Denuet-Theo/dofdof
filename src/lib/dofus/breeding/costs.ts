@@ -234,7 +234,7 @@ export const levelForMountXp = (points: number) => {
 };
 
 /** Ce qu'une Optimakina ajoute à la probabilité d'obtenir la génération cible. */
-const OPTIMAKINA_BONUS = 0.1;
+export const OPTIMAKINA_BONUS = 0.1;
 
 export type ParentLevelChoice = {
   level: number;

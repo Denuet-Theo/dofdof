@@ -96,6 +96,20 @@ type Props = {
   individuals: Individual[];
   colors: BreedingColor[];
   nameOf: (colorId: string) => string;
+  /**
+   * L'Optimakina conseillée pour un croisement visant cette génération, ou
+   * `null` si aucune ne se rembourse.
+   *
+   * Une fonction et non une table : la décision dépend des prix du jour et de ce
+   * qu'un succès rapporte, que la page sait et que ce dialogue n'a pas à savoir.
+   */
+  optimakinaFor?: (generation: number) => {
+    name: string;
+    price: number;
+    source: 'achat' | 'fabrication';
+    rateWith: number;
+    ceiling: number;
+  } | null;
   onRecord: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   /** Défait une naissance déjà écrite — voir `undoBirth` dans `useBreeding`. */
   onUndo: (record: BirthRecord) => Promise<boolean>;
@@ -123,6 +137,7 @@ const BreedingBirthDialog = ({
   individuals,
   colors,
   nameOf,
+  optimakinaFor,
   onRecord,
   onUndo,
 }: Props) => {
@@ -558,6 +573,11 @@ const BreedingBirthDialog = ({
             targetGeneration={group.targetGeneration}
             genetons={group.genetons}
             successRate={group.successRate}
+            optimakina={
+              group.targetGeneration !== null
+                ? optimakinaFor?.(group.targetGeneration) ?? null
+                : null
+            }
             total={group.indices.length}
             nameOf={nameOf}
             generationOf={generationOf}

@@ -136,6 +136,23 @@ type Props = {
   /** Ambre, neurone ou corne : ce que l'extraction rend dans cette famille. */
   sacrificeName?: string;
   nameOf: (colorId: string) => string;
+  /**
+   * Les Optimakina qui se remboursent, et par quelle source les avoir.
+   *
+   * Deux usages, et c'est pour ça qu'elles arrivent en liste plutôt qu'en
+   * fonction : au-dessus du bouton d'accouplement pour savoir **quoi préparer
+   * avant** la fournée, et entre les deux montures au moment d'accoupler pour
+   * savoir laquelle poser **maintenant**. Voir `worthwhileOptimakina`.
+   */
+  optimakina?: {
+    generation: number;
+    name: string;
+    source: 'achat' | 'fabrication';
+    price: number;
+    ceiling: number;
+    /** Le taux avec elle, pour le croisement de cette génération. */
+    rateWith: number;
+  }[];
   individuals?: Individual[];
   colors?: BreedingColor[];
   /** Les coûts de revient par couleur, pour l'onglet « HDV ». */
@@ -192,6 +209,7 @@ const BreedingPolicyPanel = ({
   extraction = [],
   sacrificeName = 'ambre',
   nameOf,
+  optimakina = [],
   individuals = [],
   colors,
   rows,
@@ -674,6 +692,43 @@ const BreedingPolicyPanel = ({
       {/* ------------------------------------------------------ accouplement -- */}
       {step === 'mate' && (
         <div data-testid="pane-mate" className="space-y-2">
+          {/* Les Optimakina **avant** le bouton, parce qu'il faut les avoir en
+              poche quand on ouvre la fenêtre du jeu : une fois devant l'enclos,
+              partir en acheter coûte le geste qu'on venait faire.
+
+              Deux listes plutôt qu'une, et une génération ne paraît que dans la
+              moins chère des deux : se voir proposer la même à l'achat et à la
+              fabrication ne dit pas quoi faire. Voir `worthwhileOptimakina`. */}
+          {optimakina.length > 0 && (
+            <div data-testid="optimakina-advice" className="space-y-1.5">
+              {(['achat', 'fabrication'] as const).map((source) => {
+                const list = optimakina.filter((offer) => offer.source === source);
+                if (list.length === 0) return null;
+                return (
+                  <div key={source} className="text-[11px] leading-snug">
+                    <span className="text-dark-500">
+                      {source === 'achat' ? 'À acheter' : 'À fabriquer'} :{' '}
+                    </span>
+                    {list.map((offer, at) => (
+                      <span key={offer.generation}>
+                        {at > 0 && <span className="text-dark-600">· </span>}
+                        <span
+                          className="text-kamas"
+                          title={`${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas, et elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.`}
+                        >
+                          gen {offer.generation}
+                        </span>
+                        <span className="text-dark-500 tabular-nums">
+                          {' '}
+                          {offer.price.toLocaleString('fr-FR')}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {toRecord.length > 0 ? (
             <>
               <Button size="md" variant="primary" onClick={() => setOpen('mate')}>
@@ -1125,6 +1180,9 @@ const BreedingPolicyPanel = ({
           individuals={individuals}
           colors={colors}
           nameOf={nameOf}
+          optimakinaFor={(generation) =>
+            optimakina.find((offer) => offer.generation === generation) ?? null
+          }
           onRecord={async (entries) => {
             const result = await onRecordBirths(entries);
             if (result.ok && result.born.length > 0) birthsWritten.current = true;

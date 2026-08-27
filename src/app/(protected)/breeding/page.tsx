@@ -7,6 +7,12 @@ import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { tunedLevel, valuePerSuccessToward } from '@/lib/dofus/breeding/tuned-level';
+import {
+  worthwhileOptimakina,
+  rateWithOptimakina,
+} from '@/lib/dofus/breeding/optimakina';
+import { genetonsForCrossing } from '@/lib/dofus/breeding/mating';
+import { useOptimakinaCraft } from '@/lib/hooks/useOptimakinaCraft';
 
 /**
  * Heures entre deux fournées que l'éleveur **lance vraiment** : une par jour.
@@ -429,8 +435,84 @@ const BreedingPage = () => {
     // Le prix de la Mangeoire manque : `tunedLevel` refuse plutôt que de rendre
     // le plafond, qui est ce qu'un niveau gratuit donne toujours.
     if (tuned === null) return { missing: 'le carburant de Mangeoire' } as const;
-    return { ...tuned, missing: null } as const;
+    return {
+      ...tuned,
+      // Ce qu'un succès rapporte, gardé à côté du niveau : c'est la même entrée,
+      // et l'Optimakina s'y adosse. Voir `optimakinaCeiling`.
+      valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
+      missing: null,
+    } as const;
   }, [tree, supplies, selectedColorId, rows, available]);
+
+  /** Les items des Optimakina, pour en charger les recettes une fois. */
+  const optimakinaItemIds = useMemo(
+    () =>
+      Object.values(tree?.optimakinaByGeneration ?? {})
+        .map((item) => item.id)
+        .sort((a, b) => a - b),
+    [tree]
+  );
+  const optimakinaCraft = useOptimakinaCraft(optimakinaItemIds, itemPrices);
+
+  /**
+   * Les Optimakina qui se remboursent, et par quelle source les avoir.
+   *
+   * Le plafond vient de ce qu'un succès rapporte sur **les prix de l'éleveur** —
+   * et non d'une constante. Une génération sans prix relevé est absente plutôt
+   * que gratuite.
+   *
+   * Ce qu'un succès rapporte compte **deux** termes, et il fallait les deux :
+   *
+   * - l'**avancement**, `valuePerSuccessToward` : le prix de la couronne amorti
+   *   sur les barreaux qui restent, puisqu'un succès ne livre pas la gen 10 mais
+   *   rapproche d'elle ;
+   * - les **génétons**, qui tombent au succès et suivent la génération des deux
+   *   parents — 250 chacun pour deux gen 9, soit la moitié de ce qu'une tentative
+   *   au sommet rapporte. Les omettre rejetait des Optimakina qui se
+   *   remboursent : sur le relevé de l'éleveur, le plafond de la gen 6 passe de
+   *   ~12 000 à 14 940 une fois les 30 génétons comptés, et sa fabrication à
+   *   11 000 tombe du bon côté.
+   *
+   * Les parents d'un croisement visant la génération `g` sont pris à `g - 1` :
+   * c'est la recette normale de l'échelle, et `genetonsForCrossing` ne rend rien
+   * si l'ascendance atteint déjà la cible.
+   *
+   * La fabrication vient de `useOptimakinaCraft`, qui rend `null` dès qu'un
+   * ingrédient n'a pas de prix : un craft sous-évalué gagnerait la comparaison en
+   * paraissant offert.
+   */
+  const optimakina = useMemo(() => {
+    // Le niveau conseillé porte aussi ce qu'un succès rapporte ; sans lui il n'y
+    // a pas de plafond, donc rien à conseiller.
+    if (!tree || advisedLevel === null || advisedLevel.missing !== null) return [];
+    const { level, valuePerSuccess } = advisedLevel;
+    const offers = Object.entries(tree.optimakinaByGeneration).flatMap(
+      ([generation, item]) => {
+        const target = Number(generation);
+        if (!Number.isFinite(target)) return [];
+        const buy = toNumber(itemPrices.get(item.id)?.price);
+        return [
+          {
+            generation: target,
+            itemId: item.id,
+            name: item.name,
+            buy: buy > 0 ? buy : null,
+            craft: optimakinaCraft.get(item.id) ?? null,
+          },
+        ];
+      }
+    );
+    const perGeneton = genetonValuation?.valuePerGeneton ?? 0;
+    const valueOfSuccess = (generation: number) => {
+      const parent = Math.max(1, generation - 1);
+      const genetons = genetonsForCrossing(generation, [parent, parent]);
+      return valuePerSuccess + genetons * perGeneton;
+    };
+    return worthwhileOptimakina(offers, valueOfSuccess).map((advice) => ({
+      ...advice,
+      rateWith: rateWithOptimakina(level),
+    }));
+  }, [tree, advisedLevel, itemPrices, genetonValuation, optimakinaCraft]);
 
   const policyInput = useMemo(() => {
     const colors = tree?.colors ?? [];
@@ -716,6 +798,9 @@ const BreedingPage = () => {
           monture à la fois, et que quatre consignes simultanées font perdre les
           quatre. Voir `BreedingPolicyPanel`. */}
       <BreedingPolicyPanel
+        // Les Optimakina qui se remboursent : au-dessus du bouton pour savoir
+        // quoi préparer, et entre les deux montures au moment d'accoupler.
+        optimakina={optimakina}
         fill={policyFill}
         // Ce qui est réellement en enclos, par opposition à ce que la politique
         // proposerait maintenant : c'est la distinction que le verrou introduit.

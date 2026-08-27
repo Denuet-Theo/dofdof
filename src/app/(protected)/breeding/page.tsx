@@ -7,6 +7,27 @@ import BreedingPolicyPanel from '@/components/breeding/BreedingPolicyPanel';
 import { couplesToRecordAll, stablePlan } from '@/lib/dofus/breeding/policy';
 import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { tunedLevel, valuePerSuccessToward } from '@/lib/dofus/breeding/tuned-level';
+
+/**
+ * Heures entre deux fournées que l'éleveur **lance vraiment** : une par jour.
+ *
+ * Relevé de l'éleveur, répété plusieurs fois : il dort et il travaille, donc il
+ * lance une fournée par jour. Ce n'est pas la durée d'un cycle d'enclos, et
+ * confondre les deux faisait conseiller le **niveau 23** — le calcul divisait par
+ * les heures d'enclos, donc il fuyait une montée longue comme si elle coûtait des
+ * fournées. À une par jour, la Mangeoire tourne pendant qu'il n'est pas là : elle
+ * ne coûte rien.
+ *
+ * Mesuré sur son écurie réelle, 90 fournées, comparaison appariée sur 200
+ * marchés : l'optimum est **autour de 100**, plateau de 80 à 105, et le niveau 60
+ * coûte déjà 4,7 M sur un trimestre (t = −6,06). Voir `hoursBetweenLoads`.
+ *
+ * **Dette assumée** : c'est une constante et ça devrait être un réglage.
+ * `user_breeding_settings` n'a pas de champ pour le rythme de jeu, et en ajouter
+ * un demande une migration et un écran ; la valeur juste pour l'unique éleveur de
+ * cette app est 24, alors qu'un défaut faux serait pire qu'une constante nommée.
+ */
+const HOURS_BETWEEN_LOADS = 24;
 import { driftSignals } from '@/lib/dofus/breeding/drift';
 import {
   afterClonings,
@@ -402,6 +423,7 @@ const BreedingPage = () => {
       mangeoireCostPerMountPoint: supplies.mangeoireCostPerMountPoint ?? 0,
       levelUpHours: supplies.levelUpHours ?? 0,
       valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
+      hoursBetweenLoads: HOURS_BETWEEN_LOADS,
     });
     // Le prix de la Mangeoire manque : `tunedLevel` refuse plutôt que de rendre
     // le plafond, qui est ce qu'un niveau gratuit donne toujours.

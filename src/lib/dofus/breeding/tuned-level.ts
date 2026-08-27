@@ -70,11 +70,49 @@ export type TunedLevelInput = {
   levelUpHours: number;
   /** Ce qu'une réussite rapporte, amortie sur les barreaux qui restent. */
   valuePerSuccess: number;
+  /**
+   * Heures entre deux fournées que l'éleveur **lance vraiment**.
+   *
+   * ## Le terme qui manquait, et ce qu'il corrige
+   *
+   * Le calcul divisait par `cycleHours + climbHours` : il supposait que les
+   * heures d'enclos sont la rareté, donc qu'une montée qui prend du temps retire
+   * des fournées. Vrai pour qui enchaîne les fournées ; **faux pour cet
+   * éleveur-ci, qui en lance une par jour** — il dort et il travaille, et la
+   * Mangeoire tourne pendant ce temps-là sans lui coûter une seule fournée.
+   *
+   * Sous cette hypothèse, le conseil sortait **niveau 23**. Mesuré sur son écurie
+   * réelle, 240 montures, 90 fournées, comparaison appariée sur 200 marchés :
+   *
+   * | niveau | encaissé | écart contre 100 | t |
+   * | --- | --- | --- | --- |
+   * | 60 | 82,78 M | −4,73 M | −6,06 |
+   * | 80 | 86,31 M | −1,20 M | −1,46 |
+   * | **100** | **87,51 M** | — | — |
+   * | 120 | 84,91 M | −2,59 M | −2,94 |
+   * | 140 | 76,82 M | −10,68 M | −11,81 |
+   *
+   * L'optimum est **autour de 100**, avec un plateau de 80 à 105 où rien ne se
+   * distingue à 200 graines — un pas de niveau vaut 0,2 M contre une erreur type
+   * de 0,85 M, donc chercher 99 contre 101 n'a pas de sens ici. Au-delà de 120 la
+   * facture de Mangeoire, en `niveau^2,329`, dépasse le taux qu'elle achète.
+   *
+   * **24 pour une fournée par jour.** Le diviseur devient
+   * `max(cycle + montée, cet intervalle)` : tant que la montée tient dans la
+   * journée, elle est gratuite et le niveau grimpe jusqu'à ce que les kamas
+   * cessent de payer. Absent, on retrouve le régime d'avant, où les heures
+   * comptent.
+   */
+  hoursBetweenLoads?: number;
 };
 
 export type TunedLevel = {
   level: number;
-  /** Ce que ce niveau rapporte par **heure d'enclos**, tout déduit. */
+  /**
+   * Ce que ce niveau rapporte par heure, tout déduit — l'heure étant celle du
+   * **rythme réel** de l'éleveur quand il est plus lent que l'enclos. Voir
+   * `hoursBetweenLoads`.
+   */
   perHour: number;
 };
 
@@ -117,7 +155,12 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
     // Sans Optimakina : elle se décide par croisement et par rang visé, donc
     // elle n'a rien à faire dans un niveau choisi pour toute la fournée.
     const perLoad = valuePerSuccess * targetGenerationRate(level, level);
-    const perHour = (perLoad - input.fuelPerLoad - levelling) / (cycleHours + climbHours);
+    // Le rythme qui borne vraiment : l'enclos, ou l'éleveur. Une montée qui
+    // tient dans l'intervalle qu'il joue ne lui coûte aucune fournée, donc elle
+    // ne doit pas entrer au dénominateur — c'est toute la différence entre
+    // conseiller 23 et conseiller 100.
+    const spacing = Math.max(cycleHours + climbHours, input.hoursBetweenLoads ?? 0);
+    const perHour = (perLoad - input.fuelPerLoad - levelling) / spacing;
     // Strictement mieux : à égalité on garde le niveau le plus bas, qui coûte
     // moins à monter et arrive plus tôt.
     if (best === null || perHour > best.perHour) best = { level, perHour };

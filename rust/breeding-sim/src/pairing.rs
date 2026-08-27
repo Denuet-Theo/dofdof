@@ -165,6 +165,17 @@ pub struct PairOutlook {
     /// raccourci.
     pub leap: i16,
     pub success_rate: f64,
+    /// Le coût de construction le plus haut des **six cases** : ce que le couple
+    /// porte déjà, mesuré en croisements et non en rang. Voir
+    /// `Catalog::build_cost`.
+    pub ancestry_cost: u32,
+    /// Le coût le plus haut que le **bloc cible** sait nommer.
+    ///
+    /// C'est lui que `climbs` compare, parce que le rang entier mélange des
+    /// couleurs du simple au double : sur la dragodinde, fabriquer Ébène-Indigo
+    /// (7 croisements) à partir de deux gen 4 bon marché (4) est le seul chemin
+    /// vers la gen 5, et le rang seul le déclarait « ne monte pas ».
+    pub target_cost: u32,
     /// Les couleurs possibles à la génération visée, la plus probable devant.
     /// **Vide** est un cas normal et fréquent : c'est la recopie.
     pub target_colors: Vec<TargetColor>,
@@ -187,8 +198,28 @@ impl PairOutlook {
     /// « monte » se confondaient. Tout ce qui décide d'un accouplement veut la
     /// seconde.
     #[inline]
+    /// Ce croisement peut-il rendre **mieux** que ce que le couple porte ?
+    ///
+    /// Comparé en **croisements** et non en rang.
+    ///
+    /// `climbs` est une heuristique — « ne perds pas une fournée sur un croisement
+    /// qui n'avance pas » — et elle mesurait l'avancement au rang. Or **le jeu
+    /// autorise** le croisement qu'elle refusait : deux gen 4 bon marché offrent
+    /// bien Ébène-Indigo dans leur bloc cible, une chance sur cinq. Ce n'est donc
+    /// pas l'arbre qui est bizarre, c'est la règle qui mesurait mal.
+    ///
+    /// Le rang entier ment :
+    /// la gen 4 de la dragodinde tient six couleurs à 4 croisements et une à 7,
+    /// et seule celle à 7 compose une gen 5. Croiser deux bon marché pour obtenir
+    /// la chère est donc la seule route vers le haut — et se lisait « ne monte
+    /// pas » tant qu'on comparait des générations, si bien que 194 gen 4
+    /// dormaient en écurie pendant que le plan en réclamait 20 d'une couleur
+    /// qu'il n'avait pas.
+    ///
+    /// Le coût croît strictement le long d'une recette, donc l'ordre reste bien
+    /// fondé : élargir ainsi n'autorise pas de tourner en rond.
     pub fn climbs(&self) -> bool {
-        !self.target_colors.is_empty() && self.target_generation > self.ancestry_generation
+        !self.target_colors.is_empty() && self.target_cost > self.ancestry_cost
     }
 }
 
@@ -391,11 +422,24 @@ pub fn pair_outlook(catalog: &Catalog, male: &Mate, female: &Mate) -> PairOutloo
             .then_with(|| catalog.slug(a.color).cmp(catalog.slug(b.color)))
     });
 
+    let ancestry_cost = mate_ancestry(male)
+        .chain(mate_ancestry(female))
+        .map(|color| catalog.build_cost(color))
+        .max()
+        .unwrap_or(0);
+    let target_cost = target_colors
+        .iter()
+        .map(|target| catalog.build_cost(target.color))
+        .max()
+        .unwrap_or(0);
+
     PairOutlook {
         target_generation,
         ancestry_generation,
         leap: i16::from(target_generation) - i16::from(by_recipe),
         success_rate: target_generation_rate(male.level, female.level),
+        ancestry_cost,
+        target_cost,
         target_colors,
     }
 }

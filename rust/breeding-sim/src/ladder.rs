@@ -1925,7 +1925,7 @@ impl LadderPolicy {
             std::cmp::Reverse((weight(groups[at].sample.color), groups[at].sample.color))
         });
 
-        for subject in order {
+        for &subject in &order {
             while *places < view.capacity && !free[subject].is_empty() {
                 let sex = groups[subject].sex;
 
@@ -2022,6 +2022,63 @@ impl LadderPolicy {
                 free[other].pop();
                 crossings.push(pair);
                 *places += cost;
+            }
+        }
+
+        // La même moisson, sur ce qui ne coûte **aucune** place.
+        //
+        // Le jumeau de `compose_free`, et pour la même raison : deux fécondes
+        // s'accouplent sans enclos, donc la boucle bornée par la capacité les
+        // éteignait dès le parc plein. Mesuré au navigateur, la liste des
+        // accouplements immédiats tombait de 25 à 24 entre parc vide et parc
+        // plein — un de moins, et c'était celui-là.
+        //
+        // Aucun achat ici : une monture neuve arrive fertile, elle doit donc son
+        // cycle et ne peut pas être gratuite. Le reste est la boucle du dessus,
+        // à la prise près — on ne retient qu'une monture déjà féconde.
+        for &subject in &order {
+            loop {
+                let sex = groups[subject].sex;
+                let Some(subject_at) = cycled_at(view.stable, &free[subject]) else {
+                    break;
+                };
+
+                let mut best: Option<(i64, usize)> = None;
+                for &other in &spare {
+                    if other == subject || groups[other].sex == sex {
+                        continue;
+                    }
+                    if cycled_at(view.stable, &free[other]).is_none() {
+                        continue;
+                    }
+                    let (male, female) = if sex == Sex::Male {
+                        (&groups[subject].sample, &groups[other].sample)
+                    } else {
+                        (&groups[other].sample, &groups[subject].sample)
+                    };
+                    if !pair_outlook(catalog, male, female).climbs() {
+                        continue;
+                    }
+                    let cost = weight(groups[other].sample.color);
+                    if best.is_none_or(|(best_cost, _)| cost < best_cost) {
+                        best = Some((cost, other));
+                    }
+                }
+
+                let Some((_, other)) = best else { break };
+                let Some(other_at) = cycled_at(view.stable, &free[other]) else {
+                    break;
+                };
+                // Les deux groupes sont de sexes opposés, donc distincts : le
+                // retrait dans l'un ne décale pas l'indice calculé dans l'autre.
+                let subject_index = free[subject].remove(subject_at);
+                let other_index = free[other].remove(other_at);
+                let pair = if sex == Sex::Male {
+                    [subject_index, other_index]
+                } else {
+                    [other_index, subject_index]
+                };
+                crossings.push(pair);
             }
         }
     }
@@ -2327,13 +2384,21 @@ impl LadderPolicy {
     /// **34 accouplements admissibles et gratuits**, quatre proposés. Parc plein,
     /// c'était zéro pendant toute la durée du cycle.
     ///
-    /// ## Pourquoi elle vient en dernier
+    /// ## Pourquoi elle vient en premier
     ///
-    /// Après le sommet, la moisson et les achats, donc après tout ce qui se
-    /// dispute une place. Elle ne leur retire rien : ce qu'elle prend ne coûtait
-    /// de place à personne. L'inverse était faux — passer devant leur aurait
-    /// pris des fécondes qu'ils apparient parfois à une fertile, et aurait
-    /// déplacé une fournée que la mesure connaît.
+    /// Elle a d'abord été posée en dernier, après tout ce qui se dispute une
+    /// place, au motif qu'elle ne leur retirait rien. C'était le mauvais bout :
+    /// ce ne sont pas les places qu'elle leur prend, c'est **l'ordre du geste**.
+    ///
+    /// L'éleveur accouple avant de charger, et il n'a pas le choix — un poulain
+    /// né du croisement de ce matin doit pouvoir entrer dans l'enclos de ce midi.
+    /// Une gen 9 qui sort d'un accouplement et attend la fournée du lendemain,
+    /// c'est une journée perdue, et il n'y en a qu'une par jour.
+    ///
+    /// Et le parc y gagne deux fois. Passée en dernier, une féconde que la boucle
+    /// d'étages avait déjà mariée à une fertile coûtait **une place** ; passée
+    /// devant, elle se marie à une autre féconde et n'en coûte aucune. La place
+    /// ainsi rendue va à une monture qui, elle, doit vraiment son cycle.
     fn compose_free(
         &self,
         view: &UnitView<'_>,
@@ -2411,19 +2476,21 @@ impl LadderPolicy {
     /// seuil est un levier séparé. Ce qui suit ne fait donc que **classer les
     /// étages** et décider si on les vide ou si on les sert à tour de rôle.
     ///
-    /// Rend ce qu'elle a engagé, par couleur cible : la phase d'achat en a besoin
-    /// pour ne pas racheter ce que la fournée vient déjà de lancer.
+    /// Elle écrit ce qu'elle engage dans `made`, par couleur cible : la phase
+    /// d'achat en a besoin pour ne pas racheter ce que la fournée vient de
+    /// lancer. Le compteur est **prêté** et non créé ici, parce que la passe
+    /// gratuite tourne avant elle et compte dans le même — voir `compose_free`.
     fn compose(
         &self,
         view: &UnitView<'_>,
         by_target: &HashMap<ColorId, Vec<(usize, usize)>>,
         free: &mut [Vec<usize>],
         held: &HashMap<ColorId, f64>,
+        made: &mut HashMap<ColorId, f64>,
         crossings: &mut Vec<[usize; 2]>,
         places: &mut usize,
-    ) -> HashMap<ColorId, f64> {
+    ) {
         let catalog = view.catalog;
-        let mut made: HashMap<ColorId, f64> = HashMap::new();
 
         // Les étages : une génération, et les couleurs voulues qu'elle porte.
         // `BigToSmall` est le seul à ne pas grouper — son unité est la couleur —
@@ -2477,10 +2544,10 @@ impl LadderPolicy {
                 let mut launched = false;
                 for (_, here) in &tiers {
                     if *places >= view.capacity {
-                        return made;
+                        return;
                     }
                     let Some((color, position)) =
-                        self.most_behind(here, by_target, free, held, &made)
+                        self.most_behind(here, by_target, free, held, made)
                     else {
                         continue;
                     };
@@ -2490,18 +2557,18 @@ impl LadderPolicy {
                             launched = true;
                         }
                         Launched::Retry => {}
-                        Launched::Full => return made,
+                        Launched::Full => return,
                     }
                 }
                 if !launched {
-                    return made;
+                    return;
                 }
             }
         }
 
         for (_, here) in &tiers {
             while *places < view.capacity {
-                let Some((color, position)) = self.most_behind(here, by_target, free, held, &made)
+                let Some((color, position)) = self.most_behind(here, by_target, free, held, made)
                 else {
                     break;
                 };
@@ -2512,8 +2579,6 @@ impl LadderPolicy {
                 }
             }
         }
-
-        made
     }
 
     /// La paire de gen 1 à acheter : celle qui produit la gen 2 la plus en retard.
@@ -2755,11 +2820,20 @@ impl Policy for LadderPolicy {
         // L'ordre de composition — la dernière inconnue de l'échelle. Voir
         // `Ordering` pour les cinq candidats, et `compose` pour ce qu'ils
         // partagent.
-        let mut made = self.compose(
+        let mut made: HashMap<ColorId, f64> = HashMap::new();
+
+        // Les gratuits **avant** la distribution des places. Voir `compose_free`,
+        // § « Pourquoi elle vient en premier » : l'éleveur accouple avant de
+        // charger, et un poulain né du croisement de ce matin doit pouvoir entrer
+        // dans l'enclos de ce midi.
+        self.compose_free(view, &by_target, &mut free, &held, &mut made, &mut crossings);
+
+        self.compose(
             view,
             &by_target,
             &mut free,
             &held,
+            &mut made,
             &mut crossings,
             &mut places,
         );
@@ -2849,18 +2923,6 @@ impl Policy for LadderPolicy {
             places += 2;
             budget -= 2 * starter;
         }
-
-        // Ce qui ne coûte aucune place, une fois les places réparties : deux
-        // fécondes s'accouplent sans enclos, donc la capacité ne les borne pas.
-        // Voir `compose_free` — c'est la passe qui manquait.
-        self.compose_free(
-            view,
-            &by_target,
-            &mut free,
-            &held,
-            &mut made,
-            &mut crossings,
-        );
 
         // Le clonage : uniquement entre montures de même ascendance.
         //

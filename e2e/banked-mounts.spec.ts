@@ -177,6 +177,17 @@ test.describe('fécondations sans croisement', () => {
     const [, used, free] = summary.match(/(\d+)\/(\d+) places/)!;
     // Le parc est employé, à deux places près : c'est ce que « dépenser ses
     // places » veut dire.
+    //
+    // Ce seuil a failli être assoupli à 80 %, au motif que la fournée n'occupait
+    // plus que 45 places sur 50 une fois les gratuits composés en premier, et
+    // que la boucle d'achat s'arrêtait faute de demande. C'était faux, et il
+    // faut que ce soit écrit ici : le parc **était plein**, à 50 sur 50. C'est
+    // l'affichage qui comptait 45, parce qu'il ne compte pas les places des
+    // croisements que l'échelle a composés et que `readPlan` refuse ensuite —
+    // ceux de la moisson, hors plan par construction, donc refusés à tous les
+    // coups. Ils mangent 5 places que rien n'occupe en jeu.
+    //
+    // Le seuil a donc raison de rougir, et il ne bouge pas.
     expect(Number(used)).toBeGreaterThanOrEqual(Number(free) - 2);
   });
 

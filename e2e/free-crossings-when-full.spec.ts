@@ -3,13 +3,13 @@ import { mockSupabase } from './support/supabase';
 import { openBreeding } from './support/breeding';
 
 /**
- * Le parc plein n'éteint pas les accouplements gratuits.
+ * Les accouplements sans enclos ne dépendent pas de l'état du parc.
  *
  * ## Le défaut, tel que l'éleveur le vit
  *
  * « Je viens de sortir 60 montures de la fournée, et l'onglet est passé de 0 à
  * 4. » Puis, la fournée suivante chargée : « ça me donne 0 accouplement ». Ses
- * 74 fécondes étaient au coffre, l'écurie de l'app correspondait au jeu, et
+ * 74 fécondes étaient au coffre, l'écurie de l'app d'accord avec le jeu, et
  * l'écran ne proposait rien pendant toute la durée du cycle.
  *
  * ## La cause
@@ -21,23 +21,44 @@ import { openBreeding } from './support/breeding';
  * les bornait quand même : parc plein, la boucle d'étages ne tournait pas du
  * tout, et pas un seul accouplement ne sortait.
  *
- * Mesuré sur l'export de l'éleveur du 27/08 — 74 fécondes, 38 ♂ et 36 ♀,
- * 254 paires admissibles par l'échelle couronnée sur Azur-Doré :
+ * ## L'invariant que ce fichier tient
  *
- * | places libres | avant | après |
- * | --- | --- | --- |
- * | 60 (parc vide) | 4 | 24 |
- * | 20 | 3 | 31 |
- * | 0 (parc plein) | **0** | **32** |
+ * **Remplir le parc n'enlève aucun accouplement.**
  *
- * ## Comment ce test échoue sans le correctif
+ * Pas « le même nombre » : parc plein il peut y en avoir **plus**, et c'est
+ * normal — une féconde que la boucle d'étages aurait mariée à une fertile reste
+ * disponible pour une autre féconde quand il n'y a plus de place à dépenser. Ce
+ * qu'on interdit est la seule direction qui coûte à l'éleveur : en perdre.
  *
- * Mesuré, en retirant la passe `composeFree` de `ladder-policy.ts` : la fixture
- * porte 75 fécondes et 5 enclos, sa fournée en occupe 48 sur 50, et une fois les
- * cinq enclos verrouillés il reste **2** places. À cette capacité-là, le plan
- * tombe à 2 croisements et **0** à saisir — le bouton « reproductions à faire »
- * disparaît, et le premier test échoue sur `toBeGreaterThan(0)`. Avec la passe :
- * 26 croisements et 24 à saisir.
+ * C'est ce qui compte pour lui, parce qu'il accouple **avant** de charger — un
+ * poulain né du croisement de ce matin doit pouvoir entrer dans l'enclos de ce
+ * midi, et une gen 9 qui attend la fournée du lendemain est une journée perdue.
+ *
+ * ## Comment ce test échoue sans les correctifs
+ *
+ * Mesuré au navigateur sur cette fixture — 75 fécondes, 5 enclos :
+ *
+ * | | parc vide | parc plein | |
+ * | --- | --- | --- | --- |
+ * | sans rien | 14 | **0** | rouge |
+ * | passe du plan seule | 21 | 24 | passe |
+ * | passe du plan, moisson non corrigée | 25 | **24** | rouge |
+ * | les deux | 25 | 26 | vert |
+ *
+ * Sans la passe, le bouton « reproductions à faire » disparaît une fois les
+ * enclos verrouillés : `0 >= 14` échoue, puis `toBeGreaterThan(2)` reçoit `0`.
+ * Avec la passe du plan mais la moisson encore bornée par la capacité, il
+ * manque exactement le croisement gratuit que la moisson n'a pas pu composer :
+ * `24 >= 25` échoue.
+ *
+ * ## Ce que ce fichier ne couvre pas
+ *
+ * Que la passe tourne **avant** la distribution des places plutôt qu'après. La
+ * ligne 2 du tableau passe : parc plein 24, parc vide 21, l'invariant tient
+ * quand même. Le gain de l'ordre se lit sur le parc vide — 21 contre 25 — et
+ * l'épingler demanderait un compte absolu, ce que ce dépôt a déjà payé cher
+ * (voir `banked-mounts` : « 17 avant, 18 après » était le compte du champion).
+ * Il est donc mesuré dans le corps de la PR, pas ici.
  *
  * ## Pourquoi le second test saisit deux naissances
  *
@@ -82,21 +103,22 @@ const lockEveryPen = async (page: Page): Promise<number> => {
   return locked;
 };
 
-test.describe('parc plein', () => {
-  test('les couples de fécondes restent proposés', async ({ page }) => {
+test.describe('accoupler avant de charger', () => {
+  test('la liste est la même parc vide et parc plein', async ({ page }) => {
     await mockSupabase(page);
     await openBreeding(page);
 
-    // Parc vide : la liste existe, c'est le point de départ.
     const empty = await matings(page);
     expect(empty).toBeGreaterThan(0);
 
     const pens = await lockEveryPen(page);
     expect(pens).toBeGreaterThan(0);
 
-    // Parc plein : elle doit être là **aussi**. C'était zéro.
-    const full = await matings(page);
-    expect(full).toBeGreaterThan(0);
+    // L'invariant : remplir le parc ne retire aucun accouplement, parce
+    // qu'aucun de ceux-là n'a jamais eu besoin d'une place. Il peut en ajouter,
+    // et c'est sain — les fécondes que la boucle d'étages n'a plus de place pour
+    // marier à une fertile se marient entre elles.
+    expect(await matings(page)).toBeGreaterThanOrEqual(empty);
   });
 
   test('et elle survit aux deux premières saisies', async ({ page }) => {

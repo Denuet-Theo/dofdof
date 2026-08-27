@@ -175,21 +175,20 @@ test.describe('fécondations sans croisement', () => {
 
     const summary = await page.getByTestId('policy-summary').innerText();
     const [, used, free] = summary.match(/(\d+)\/(\d+) places/)!;
-    // Le parc est employé, sans exiger qu'il soit plein.
+    // Le parc est employé, à deux places près : c'est ce que « dépenser ses
+    // places » veut dire.
     //
-    // « À deux places près » était le bon seuil tant que chaque croisement
-    // coûtait une place ou deux. Les croisements entre deux fécondes n'en
-    // coûtent aucune, et ils se composent maintenant en premier : la fournée
-    // sert donc la même demande avec moins de places, et la boucle d'achat
-    // s'arrête d'elle-même quand plus aucune gen 2 n'est en retard — 45 sur 50
-    // au lieu de 48. Ce qu'il resterait à combler ne vaut plus l'achat qui le
-    // comblerait : refaire une couleur qu'on vient d'obtenir gratuitement.
+    // Ce seuil a failli être assoupli à 80 %, au motif que la fournée n'occupait
+    // plus que 45 places sur 50 une fois les gratuits composés en premier, et
+    // que la boucle d'achat s'arrêtait faute de demande. C'était faux, et il
+    // faut que ce soit écrit ici : le parc **était plein**, à 50 sur 50. C'est
+    // l'affichage qui comptait 45, parce qu'il ne compte pas les places des
+    // croisements que l'échelle a composés et que `readPlan` refuse ensuite —
+    // ceux de la moisson, hors plan par construction, donc refusés à tous les
+    // coups. Ils mangent 5 places que rien n'occupe en jeu.
     //
-    // Le seuil garde donc ce qu'il gardait vraiment — le parc à moitié vide de
-    // #189, « 7 places sur 40 », qui échoue toujours ici — et cesse d'épingler
-    // un taux de remplissage que la politique a le droit de faire baisser en
-    // faisant mieux.
-    expect(Number(used)).toBeGreaterThan(Number(free) * 0.8);
+    // Le seuil a donc raison de rougir, et il ne bouge pas.
+    expect(Number(used)).toBeGreaterThanOrEqual(Number(free) - 2);
   });
 
   /**

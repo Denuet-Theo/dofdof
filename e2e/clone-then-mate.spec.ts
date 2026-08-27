@@ -186,6 +186,77 @@ const syntheticStable = () => {
   return rows;
 };
 
+/**
+ * Les gen 2 qui **s'apparient entre elles**, pour la repousse par clonages neufs.
+ *
+ * `syntheticStable` porte quatre gen 2 on-plan, et aucun croisement suivi n'en
+ * sort : `roux` demande `dore_pourpre` **et** `dore_orchidee`, `amande` demande
+ * `indigo_pourpre` **et** `ebene_orchidee`, et la liste n'avait qu'une moitié de
+ * chaque recette. La fournée se rabattait donc entièrement sur du vrac et des gen 1
+ * à procurer — qui n'ont pas de ligne à rendre stérile.
+ *
+ * Mesuré : avec les quatre moitiés présentes, l'onglet annonce **4 accouplements**
+ * jouables tout de suite au lieu de 0, et ils emploient des montures nommées.
+ */
+const PAIRING_GEN2: [string, [string, string]][] = [
+  ['dore_pourpre', ['dore', 'pourpre']],
+  ['dore_orchidee', ['dore', 'orchidee']],
+  ['indigo_pourpre', ['indigo', 'pourpre']],
+  ['ebene_orchidee', ['ebene', 'orchidee']],
+];
+
+/**
+ * Une écurie dont la fournée croise des **lignes suivies**, et rien d'autre.
+ *
+ * Propre au troisième test : `syntheticStable` est calibrée pour les deux premiers,
+ * et lui ajouter des couleurs déplacerait leur plan sans rapport avec ce qu'ils
+ * mesurent.
+ *
+ * Les stériles sont **nommées** parce que `cloneOptions` n'apparie aucune anonyme :
+ * sans nom, les paires que la saisie fabrique n'apparaîtraient pas, et le test
+ * lirait « non exercé » pour une raison qui n'est pas celle qu'il cherche.
+ */
+const pairingStable = () => {
+  const rows: Record<string, unknown>[] = [];
+  const add = (
+    colorId: string,
+    parents: [string, string],
+    sex: 'M' | 'F',
+    fertile: boolean,
+    name: string
+  ) => {
+    rows.push({
+      id: `5018-0000-0000-0000-${String(rows.length + 1).padStart(12, '0')}`,
+      user_id: USER,
+      family: 'muldo',
+      color_id: colorId,
+      sex,
+      level: 100,
+      fertile,
+      parent_a_color: parents[0],
+      parent_b_color: parents[1],
+      parent_a_id: null,
+      parent_b_id: null,
+      created_at: '2026-08-15T12:00:00.000Z',
+      updated_at: '2026-08-15T12:00:00.000Z',
+      name,
+      // Fécondes : elles s'accouplent sans repasser par l'enclos, donc la fournée
+      // les propose **tout de suite** et la saisie peut les rendre stériles dans le
+      // même geste. Une gen 2 non féconde attendrait un cycle et le test ne verrait
+      // jamais la repousse.
+      cycled: fertile,
+    });
+  };
+  for (const [colorId, parents] of PAIRING_GEN2) {
+    const tag = colorId.slice(0, 3).toUpperCase();
+    add(colorId, parents, 'M', true, `G2 ${tag} M`);
+    add(colorId, parents, 'F', true, `G2 ${tag} F`);
+    add(colorId, parents, 'M', false, `G2 ${tag} S1`);
+    add(colorId, parents, 'F', false, `G2 ${tag} S2`);
+  }
+  return rows;
+};
+
 test.describe('clonages puis accouplements', () => {
   test('exécuter les clonages ne change pas la liste d’accouplements', async ({ page }) => {
     const supabase = await mockSupabase(page);
@@ -273,9 +344,13 @@ test.describe('clonages puis accouplements', () => {
     // `check-record-fixpoint` mesure la même chose sur une écurie de synthèse —
     // quatre clonages à l'entrée, six après saisie, quatre couples qui repoussent.
     // Ici c'est l'écran, avec les écritures réelles.
+    // Pas de vrac, et des gen 2 qui s'apparient : c'est ce qui fait que la fournée
+    // croise des **lignes suivies**. Avec le vrac, l'échelle bâtit le bas de
+    // l'échelle avec des gen 1 à procurer, qui n'ont pas de ligne à rendre stérile,
+    // et le mécanisme testé ici ne se déclenche jamais. Voir `pairingStable`.
     const supabase = await mockSupabase(page);
-    supabase.tables[montures] = bulkRows() as never;
-    supabase.tables[individus] = syntheticStable() as never;
+    supabase.tables[montures] = [] as never;
+    supabase.tables[individus] = pairingStable() as never;
     await openBreeding(page);
 
     const promis = await stepCount(page, 'mate');
@@ -313,27 +388,24 @@ test.describe('clonages puis accouplements', () => {
      * la fournée — ses parents étaient des lignes suivies, donc la saisie les
      * rendait stériles et de nouvelles paires apparaissaient.
      *
-     * L'échelle emploie surtout du vrac et des montures procurées, qui n'ont pas
-     * de ligne à elles : rien à marquer stérile, donc aucune paire neuve. Sur
-     * cette fixture, le chemin ne se déclenche plus.
+     * L'échelle, elle, bâtit le bas de l'échelle avec du vrac et des gen 1 à
+     * procurer, qui n'ont pas de ligne à rendre stérile. Sur la fixture d'alors, le
+     * chemin ne se déclenchait donc plus, et la consigne avait été rétrogradée en
+     * simple annotation — un test qui se lit vert sans avoir rien exercé.
      *
-     * On garde donc la consigne **à la lettre** — on le dit — sans faire échouer
-     * la garde de non-repousse juste en dessous, qui elle porte toujours. Une
-     * annotation paraît dans le rapport : le test ne se lit pas comme une preuve
-     * de ce qu'il n'a pas exercé.
+     * `pairingStable` la rétablit en assertion : sans vrac et avec les deux moitiés
+     * de chaque recette de gen 3, la fournée croise des montures nommées, la saisie
+     * les rend stériles, et les paires clonables augmentent. C'est vérifié, pas
+     * annoté.
      */
     const clonagesApres = await stepCount(page, 'clone');
-    if (clonagesApres <= clonagesAvant) {
-      test.info().annotations.push({
-        type: 'non exercé',
-        description:
-          `la saisie n'a créé aucun clonage (avant ${clonagesAvant}, local ${clonagesLocal}, ` +
-          `après rechargement ${clonagesApres}) : la fournée de l'échelle emploie du vrac, ` +
-          `qui n'a pas de ligne à rendre stérile. La non-repousse est vérifiée, la repousse ` +
-          `**par clonages neufs** ne l'est pas — il faudrait une fixture dont la fournée ` +
-          `croise des montures suivies.`,
-      });
-    }
+    expect(
+      clonagesApres,
+      `la saisie doit créer des clonages : avant ${clonagesAvant}, local ${clonagesLocal}, ` +
+        `après rechargement ${clonagesApres}. Si l'écart est nul, la fournée n'a croisé ` +
+        `aucune ligne suivie et ce test ne prouve rien — voir \`pairingStable\`.`
+    ).toBeGreaterThan(clonagesAvant);
+
     expect(await stepCount(page, 'mate'), 'la liste repousse après la saisie').toBe(0);
   });
 });

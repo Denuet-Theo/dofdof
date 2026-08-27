@@ -382,9 +382,26 @@ pub fn muldo() -> Catalog {
 /// génétons sont les mêmes pour toutes les montures — confirmé par l'éleveur le
 /// 25/08.
 pub fn family(id: &str) -> Catalog {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    Catalog::load(root.join("../../src/lib/dofus/breeding/trees.json"), id)
+    Catalog::load(trees_path(), id)
         .unwrap_or_else(|error| panic!("le catalogue {id} doit se charger : {error}"))
+}
+
+/// Où trouver `trees.json`.
+///
+/// `CARGO_MANIFEST_DIR` est figé **à la compilation**, donc un crate rebâti
+/// ailleurs cherche le catalogue à côté de sa copie — et ne le trouve pas, le
+/// fichier vivant hors de l'espace de travail cargo. C'est ce qui obligeait
+/// `cargo mutants` à muter la vraie arborescence (`--in-place`), lequel a déjà
+/// laissé une mutation dans `ladder.rs` en étant interrompu.
+///
+/// `DOFDOF_TREES` lève la contrainte : un chemin absolu, et le catalogue se
+/// charge depuis n'importe quel répertoire de travail. Sans la variable, rien ne
+/// change.
+pub fn trees_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("DOFDOF_TREES") {
+        return std::path::PathBuf::from(path);
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/lib/dofus/breeding/trees.json")
 }
 
 #[cfg(test)]

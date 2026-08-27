@@ -42,7 +42,9 @@ use breeding_sim::baseline::{Greedy, Objective};
 use breeding_sim::config::Prices;
 use breeding_sim::economy::{
     Economy, NeverBreeds, Policy, Rejected, Rng, RunOutcome, Strategy, UnitPlan, UnitView, play,
+    play_from,
 };
+use breeding_sim::stable::Stable;
 use breeding_sim::encode::Census;
 use breeding_sim::economy::MAX_UNITS;
 use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
@@ -71,8 +73,15 @@ fn champion_path() -> Result<&'static str, String> {
         .find(|path| std::path::Path::new(path).exists())
         .ok_or_else(|| format!("aucun champion trouvé, essayé : {}", CHAMPIONS.join(", ")))
 }
-/// Le niveau imposé à toutes les lignes.
+/// Le niveau imposé par défaut à toutes les lignes. `--niveau n` le remplace.
 const LEVEL: u16 = 60;
+
+/// Le niveau retenu pour ce tirage : `--niveau n`, sinon `LEVEL`.
+fn level() -> u16 {
+    flag("--niveau")
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(LEVEL)
+}
 
 struct NetValue<'a>(&'a Network);
 
@@ -117,10 +126,19 @@ fn pinned<P: Policy>(inner: P) -> AtLevel<P> {
         inner,
         Strategy {
             bands: [0; 6],
-            level: LEVEL,
+            level: level(),
             optimakina_from: 11,
         },
     )
+}
+
+/// La valeur d'un argument nommé : `--clef valeur`.
+fn flag(name: &str) -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter()
+        .position(|arg| arg == name)
+        .and_then(|at| args.get(at + 1))
+        .cloned()
 }
 
 fn median(values: &mut [f64]) -> f64 {
@@ -136,6 +154,15 @@ fn mean(values: impl Iterator<Item = f64>) -> f64 {
 struct Row {
     label: String,
     score: f64,
+    /// Le score **sans la liquidation finale** : ce que la partie a réellement
+    /// encaissé, plus les primes, moins les malus.
+    ///
+    /// Pourquoi ça compte : liquider l'écurie au dernier instant vend tout le
+    /// parc d'un coup, ce qu'aucun éleveur ne fait. C'est le terme qui payait la
+    /// thésaurisation — une politique qui accumule sans rien vendre se voyait
+    /// créditer son stock au prix du marché, à la fin, gratuitement. Retiré, le
+    /// score ne compte plus que les kamas passés par la caisse.
+    banked: f64,
     crossings: f64,
     loads: f64,
     top: f64,
@@ -164,7 +191,12 @@ fn row(label: &str, outcomes: &[RunOutcome]) -> Row {
         .filter(|(_, count)| **count > 0)
         .map(|(slot, _)| Rejected::LABELS[slot].to_string())
         .unwrap_or_else(|| "rien a proposer".to_string());
+    let mut banked: Vec<f64> = outcomes
+        .iter()
+        .map(|o| (o.score - o.liquidation) as f64)
+        .collect();
     Row {
+        banked: median(&mut banked),
         rejected: mean(outcomes.iter().map(|o| f64::from(o.rejected_loads))),
         motive,
         label: label.to_string(),
@@ -176,12 +208,22 @@ fn row(label: &str, outcomes: &[RunOutcome]) -> Row {
     }
 }
 
-fn run<P: Policy>(catalog: &Catalog, economy: &Economy, make: impl Fn() -> P + Sync) -> Vec<RunOutcome> {
+fn run<P: Policy>(
+    catalog: &Catalog,
+    economy: &Economy,
+    start: Option<&Stable>,
+    make: impl Fn() -> P + Sync,
+) -> Vec<RunOutcome> {
     (0..SEEDS)
         .into_par_iter()
         .map(|seed| {
             let mut policy = make();
-            play(catalog, economy, &mut policy, seed)
+            match start {
+                // L'écurie réelle : le marché reste tiré par la graine, seul le
+                // point de départ change. Voir `play_from`.
+                Some(held) => play_from(catalog, economy, &mut policy, seed, held),
+                None => play(catalog, economy, &mut policy, seed),
+            }
         })
         .collect()
 }
@@ -221,7 +263,7 @@ fn main() {
     // « échelle » du tableau mesure une configuration que l'app ne peut pas
     // produire. Savoir quel palier elle retient vraiment dit si l'écart vient du
     // palier ou de la politique.
-    if std::env::args().any(|arg| arg == "--niveau") {
+    if std::env::args().any(|arg| arg == "--paliers-regles") {
         let tuned = LadderPolicy::with_ladder(Ladder::of(&catalog, Route::default()))
             .with_strategies([Strategy::default(); MAX_UNITS])
             .tuned_for(&economy);
@@ -245,16 +287,186 @@ fn main() {
         economy
     };
 
+    // `--heures n` : l'horizon en heures, qui prime sur le mode du fichier.
+    let economy = match flag("--heures").and_then(|value| value.parse::<f64>().ok()) {
+        Some(hours) => {
+            let mut economy = economy;
+            economy.horizon_hours = Some(hours);
+            economy
+        }
+        None => economy,
+    };
+
+    // `--solde-steriles` : la règle **uniforme**. Tout le monde solde ce que
+    // l'éleveur solde vraiment — ses gen 9 et gen 10 stériles — et rien d'autre.
+    //
+    // Sans elle on compare des conventions comptables et non des stratégies :
+    // liquider tout crédite le stock de qui n'a jamais vendu, ne rien liquider
+    // punit qui a gardé des stériles que l'éleveur aurait écoulées.
+    let economy = if std::env::args().any(|arg| arg == "--solde-steriles") {
+        let mut economy = economy;
+        economy.liquidation_rule = breeding_sim::economy::Liquidation::SterileSummit;
+        economy
+    } else {
+        economy
+    };
+
+    // `--ecurie fichier.ndjson` : partir du parc réel de l'éleveur.
+    let imported = flag("--ecurie").map(|path| {
+        let json = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            eprintln!("{path} : {error}");
+            std::process::exit(1);
+        });
+        breeding_sim::import::from_export(&json, &wanted, &catalog).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(1);
+        })
+    });
+    let start = imported.as_ref().map(|held| &held.stable);
+    if let Some(held) = imported.as_ref() {
+        let mut by_generation = std::collections::BTreeMap::new();
+        for mount in &held.stable.mounts {
+            *by_generation
+                .entry(catalog.generation(mount.color))
+                .or_insert(0usize) += 1;
+        }
+        println!(
+            "ecurie reelle : {} montures · {} fertiles · par generation {:?}",
+            held.stable.len(),
+            held.stable.mounts.iter().filter(|m| m.fertile).count(),
+            by_generation
+        );
+        if held.unknown > 0 || held.other_families > 0 {
+            println!(
+                "  ignorees : {} couleur(s) hors catalogue · {} autre(s) famille(s)",
+                held.unknown, held.other_families
+            );
+        }
+    }
+
     let plan = Ladder::of(&catalog, Route::default());
+    // `--niveaux 60,80,100` : le balayage **apparié** du niveau.
+    //
+    // Pourquoi apparié, et pourquoi des barres d'erreur : sur l'écurie de
+    // l'éleveur, les niveaux 80, 100 et 120 rendent 85,15 / 86,30 / 85,49 M —
+    // 1 % d'écart sur 86 M. Une médiane nue ne dit pas si c'est un classement ou
+    // un tirage. Les parties étant déterministes par graine, on compare **graine
+    // par graine** contre un niveau de référence : l'écart moyen et son erreur
+    // type tranchent là où trois médianes ne tranchent pas.
+    if let Some(list) = flag("--niveaux") {
+        let levels: Vec<u16> = list
+            .split(',')
+            .filter_map(|piece| piece.trim().parse::<u16>().ok())
+            .collect();
+        if levels.is_empty() {
+            eprintln!("--niveaux attend une liste, par exemple 60,80,100");
+            std::process::exit(1);
+        }
+
+        // Les gains encaissés, graine par graine, pour chaque niveau.
+        let banked: Vec<(u16, Vec<f64>)> = levels
+            .iter()
+            .map(|&lvl| {
+                let outcomes = run(&catalog, &economy, start, || {
+                    let mut policy = LadderPolicy::with_ladder(plan.clone());
+                    policy.harvest_stocked = true;
+                    AtLevel(
+                        policy,
+                        Strategy {
+                            bands: [0; 6],
+                            level: lvl,
+                            optimakina_from: 11,
+                        },
+                    )
+                });
+                let per_seed = outcomes
+                    .iter()
+                    .map(|o| (o.score - o.liquidation) as f64)
+                    .collect();
+                (lvl, per_seed)
+            })
+            .collect();
+
+        // La référence : la meilleure moyenne. Les autres se comparent à elle.
+        let mean_of = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+        let best = banked
+            .iter()
+            .max_by(|a, b| {
+                mean_of(&a.1)
+                    .partial_cmp(&mean_of(&b.1))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("au moins un niveau");
+
+        println!(
+            "{} fournees · {} graines · encaisse, apparie contre le niveau {}",
+            economy.batches, SEEDS, best.0
+        );
+        println!(
+            "{:>7} {:>11} {:>11} {:>12} {:>9} {:>8}",
+            "niveau", "median", "moyenne", "ecart", "err. type", "t"
+        );
+        println!("{}", "-".repeat(64));
+        for (lvl, values) in &banked {
+            let mut sorted = values.clone();
+            let median = median(&mut sorted);
+            let deltas: Vec<f64> = values
+                .iter()
+                .zip(&best.1)
+                .map(|(mine, reference)| mine - reference)
+                .collect();
+            let mean = mean_of(&deltas);
+            let n = deltas.len() as f64;
+            let variance =
+                deltas.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
+            let stderr = (variance / n).sqrt();
+            let t = if stderr > 0.0 { mean / stderr } else { 0.0 };
+            println!(
+                "{:>7} {:>9.2} M {:>9.2} M {:>10.2} M {:>7.2} M {:>8.2}",
+                lvl,
+                median / 1e6,
+                mean_of(values) / 1e6,
+                mean / 1e6,
+                stderr / 1e6,
+                t
+            );
+        }
+        return;
+    }
+
+    // `--seule` : seulement « échelle + tes changements ». Les autres lignes
+    // coûtent le même temps de calcul et ne répondent pas à la question posée
+    // quand on balaie les niveaux.
+    let only = std::env::args().any(|arg| arg == "--seule");
+    if only {
+        let outcomes = run(&catalog, &economy, start, || {
+            let mut policy = LadderPolicy::with_ladder(plan.clone());
+            policy.harvest_stocked = true;
+            pinned(policy)
+        });
+        let r = row("3. echelle + tes changements", &outcomes);
+        println!(
+            "niveau {:>3} · {:>3} fournees · encaisse {:>8.2} M · score {:>8.2} M ·              croisem. {:>5.0} · gen 10 {:>5.1} · ecurie {:>4.0}",
+            level(),
+            economy.batches,
+            r.banked / 1e6,
+            r.score / 1e6,
+            r.crossings,
+            r.top,
+            r.peak,
+        );
+        return;
+    }
+
     let mut rows = vec![
-        row("plancher : ne rien faire", &run(&catalog, &economy, || pinned(NeverBreeds))),
+        row("plancher : ne rien faire", &run(&catalog, &economy, start, || pinned(NeverBreeds))),
         row(
             "1. glouton",
-            &run(&catalog, &economy, || pinned(Greedy::new(Objective::Gen10Profit))),
+            &run(&catalog, &economy, start, || pinned(Greedy::new(Objective::Gen10Profit))),
         ),
         row(
             "2. echelle seule",
-            &run(&catalog, &economy, || {
+            &run(&catalog, &economy, start, || {
                 let mut policy = LadderPolicy::with_ladder(plan.clone());
                 policy.harvest_stocked = false;
                 pinned(policy)
@@ -262,7 +474,7 @@ fn main() {
         ),
         row(
             "3. echelle + changements",
-            &run(&catalog, &economy, || {
+            &run(&catalog, &economy, start, || {
                 let mut policy = LadderPolicy::with_ladder(plan.clone());
                 policy.harvest_stocked = true;
                 pinned(policy)
@@ -277,22 +489,12 @@ fn main() {
     // tableau qui isole le palier.
     rows.push(row(
         "3'. idem, ses propres paliers",
-        &run(&catalog, &economy, || {
+        &run(&catalog, &economy, start, || {
             let mut policy = LadderPolicy::with_ladder(plan.clone())
                 .with_strategies([Strategy::default(); MAX_UNITS])
                 .tuned_for(&economy);
             policy.harvest_stocked = true;
             Unpinned(policy)
-        }),
-    ));
-
-    rows.push(row(
-        "3\"'. idem, mais vend le sommet",
-        &run(&catalog, &economy, || {
-            let mut policy = LadderPolicy::with_ladder(plan.clone());
-            policy.harvest_stocked = true;
-            policy.sell_top = true;
-            pinned(policy)
         }),
     ));
 
@@ -305,13 +507,16 @@ fn main() {
     let network = Network::compile(&genome);
     rows.push(row(
         "4. champion",
-        &run(&catalog, &economy, || pinned(Searching::new(NetValue(&network)))),
+        &run(&catalog, &economy, start, || pinned(Searching::new(NetValue(&network)))),
     ));
     rows.push(row(
         "temoin : valeur myope",
-        &run(&catalog, &economy, || pinned(Searching::new(Myopic))),
+        &run(&catalog, &economy, start, || pinned(Searching::new(Myopic))),
     ));
 
+    if economy.liquidation_rule == breeding_sim::economy::Liquidation::SterileSummit {
+        println!("(regle uniforme : seules les gen 9 et 10 steriles sont soldees)");
+    }
     if economy.daily_price_recovery == 0.0 {
         println!("(reprise quotidienne neutralisee)");
     }
@@ -319,17 +524,18 @@ fn main() {
         Some(hours) => format!("{hours:.0} h"),
         None => format!("{} fournées = {} montures fertile→féconde", economy.batches, economy.batches * 60),
     };
-    println!("famille {wanted} · {SEEDS} graines · niveau {LEVEL} partout · {horizon}");
+    println!("famille {wanted} · {SEEDS} graines · niveau {} partout · {horizon}", level());
     println!(
-        "{:<30} {:>11} {:>9} {:>9} {:>8} {:>8} {:>8}  {}",
-        "strategie", "score med.", "croisem.", "fournees", "gen 10", "ecurie", "refuses", "motif dominant"
+        "{:<30} {:>11} {:>12} {:>9} {:>9} {:>8} {:>8} {:>8}  {}",
+        "strategie", "score med.", "encaisse", "croisem.", "fournees", "gen 10", "ecurie", "refuses", "motif dominant"
     );
-    println!("{}", "-".repeat(104));
+    println!("{}", "-".repeat(110));
     for r in &rows {
         println!(
-            "{:<30} {:>9.2} M {:>9.0} {:>9.0} {:>8.1} {:>8.0} {:>8.1}  {}",
+            "{:<30} {:>9.2} M {:>10.2} M {:>9.0} {:>9.0} {:>8.1} {:>8.0} {:>8.1}  {}",
             r.label,
             r.score / 1e6,
+            r.banked / 1e6,
             r.crossings,
             r.loads,
             r.top,

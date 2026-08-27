@@ -69,9 +69,8 @@ pub fn ladder_policy_cases_for(family: &'static str, catalog: &Catalog) -> Vec<C
             starting_stable(catalog, &economy, &Draws::new(case.wrapping_mul(40_503)))
         };
 
-        // Le niveau par défaut : l'échelle non réglée. `tuned_for` est un levier
-        // séparé, qui n'est pas dans ce portage.
-        let strategy = Strategy::default();
+        // Le niveau par défaut — `run_case` le pose — : l'échelle non réglée.
+        // `tuned_for` est un levier séparé, qui n'est pas dans ce portage.
         let capacity = [4usize, 10, 25, 50][case as usize % 4];
         let kamas = economy.starting_kamas * (1 + case as i64 % 3);
 

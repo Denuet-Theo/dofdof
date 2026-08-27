@@ -76,6 +76,38 @@ test.describe('niveau conseillé', () => {
     // suspect — qu'il sorte *toujours*, si.
     expect(level).toBeLessThan(200);
   });
+
+  /**
+   * Le conseil suit le **rythme de l'éleveur**, pas la durée d'un cycle.
+   *
+   * ## Ce que ce test ferme
+   *
+   * `tunedLevel` divisait par `cycleHours + climbHours` : il traitait les heures
+   * d'enclos comme la rareté, donc il fuyait une montée longue comme si elle
+   * retirait des fournées. Sous cette hypothèse il conseillait **23**.
+   *
+   * L'éleveur lance **une fournée par jour** — il dort et il travaille. La
+   * Mangeoire tourne pendant son absence et ne lui coûte donc aucune fournée. Le
+   * diviseur est `max(cycle + montée, HOURS_BETWEEN_LOADS)`.
+   *
+   * Mesuré sur son écurie réelle, 90 fournées, apparié sur 200 marchés :
+   * l'optimum est autour de **100**, plateau de 80 à 105, et le niveau 60 coûte
+   * 4,7 M sur un trimestre (t = −6,06). Le seuil de 50 retenu ici est donc large
+   * à dessein : il tient tant que le rythme de l'éleveur est le diviseur, et il
+   * tombe si quelqu'un remet les heures d'enclos à sa place — vu rouge à 23 sans
+   * le correctif.
+   */
+  test('le niveau conseillé suit la fournée par jour, pas le cycle', async ({ page }) => {
+    const mock = await mockSupabase(page);
+    (mock.tables.breeding_color_prices as Record<string, unknown>[]).push(CROWN_PRICE);
+    await openBreeding(page);
+
+    const advised = page.getByTestId('advised-level');
+    await expect(advised).toBeVisible({ timeout: 30_000 });
+    const level = Number((await advised.innerText()).match(/(\d+)/)?.[1] ?? 0);
+
+    expect(level).toBeGreaterThanOrEqual(50);
+  });
 });
 
 /**

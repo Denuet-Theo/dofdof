@@ -158,3 +158,18 @@ State what was verified and how. If something was inferred rather than
 reproduced, say which. The maintainer knows the game far better than this side
 does and has caught several wrong inferences — surface them as inferences so he
 can correct them cheaply.
+
+## Les mots-clés de fermeture GitHub échouent en silence
+
+Deux issues d'affilée sont restées **OPEN** après le merge de la PR qui les
+corrigeait, chaque fois pour une raison différente, et chaque fois ça donnait
+l'impression que le travail n'avait pas atterri :
+
+- **#179** — le corps disait « Ferme #179 ». GitHub ne reconnaît que les mots
+  anglais : `Closes` / `Fixes` / `Resolves`.
+- **#181** — le corps disait ``Ferme #181 — enfin, `Closes #181`, …``. Le mot-clé
+  était dans un **span de code**, et GitHub n'y lit pas les fermetures.
+
+Les corps de PR de ce dépôt sont en français par convention, donc **le premier
+piège est structurel et reviendra**. Écrire `Closes #n` en clair, hors backticks,
+et **vérifier l'état de l'issue après chaque merge** plutôt que de le supposer.

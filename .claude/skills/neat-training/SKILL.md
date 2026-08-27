@@ -298,3 +298,97 @@ pricing the resale of the n-th copy.
 | run-off far below training fitness | expected. Only worth acting on if the gap grows every round, which means the population has converged and the maximum is measuring luck |
 | every species suddenly shares one strategy | the threshold reopened or collapsed; check the species count in the generation log before reading the table |
 | generations per hour keeps falling across resumed rounds | topology bloat. Measured here: 11 nodes / 70 links at 297 generations/hour, 44 / 124 at 168 — the search loses half its budget to networks that are not earning it. Watch the topology printed with the champion |
+
+## Four things that have each cost a training round
+
+### The game that matters starts from generation 1
+
+`economy.toml` seeds each game with 100 mounts over **generations 2 to 9**
+(`generation_minimale_du_pool` / `maximale`). Confirmed by the breeder on
+2026-08-21: that pool exists **to help, and to recover from a previous attempt**.
+The game that matters starts from **generation 1**.
+
+It reverses conclusions rather than shading them. Run-off seeds, under the ladder:
+
+| policy | on the gen 2–9 pool | from gen 1 |
+| --- | --- | --- |
+| the shipped champion | 48,06 M | **22,18 M** |
+| a champion trained on the pool | 55,93 M | 15,46 M |
+| greedy | 65,11 M | 13,15 M |
+
+**Greedy only looks unbeatable because it exploits the pool.** From gen 1 it loses
+to everything, and a champion trained on the pool loses to the one it was meant to
+replace. Two full training rounds went into optimising the wrong start.
+
+### Two seeds in three collapse on the do-nothing floor
+
+A gen 1 start gives the search almost **no gradient early**. Nothing a random
+network does beats keeping the starting kamas in the bank, so unless an early
+mutation stumbles onto a profitable crossing the population settles on doing
+nothing and speciation never recovers.
+
+Measured 2026-08-21/22, same tree, same regime, both new score terms at zero:
+
+| seed | after ~3 minutes |
+| --- | --- |
+| 555 | pinned at 10,00 M, 111 generations, never leaves |
+| 20260822 | pinned at 10,00 M, 974 generations, best ever 10,22 M |
+| **20260821** | 10,29 → **15,28 M by generation 51**, then 78 M by 700 |
+
+This was first blamed on `cout_par_croisement = 10_000` being punitive. That
+diagnosis was **wrong**: isolating it with both terms at zero reproduced the same
+collapse.
+
+**The tell is the generation rate.** A dead round does ~36 generations a minute
+because it is simulating a policy that does nothing; a working one does ~2. Best
+still at 10,00 M after a hundred generations means dead. **Probe four minutes
+before spending hours.**
+
+### `replay`'s arguments mislead
+
+`replay [path] [seed-start] [rank]`, and `--ladder` is matched by scanning **all**
+arguments. Three ways it has returned a confident wrong answer:
+
+- **`replay X --ladder on`** — `--ladder` lands in the seed-start slot, fails to
+  parse, so the window silently falls back to the **sealed** set, and `on` becomes
+  the rank.
+- **`replay X 800000`** — no `--ladder`, so the champion is judged **outside** the
+  ladder it trained under. Gave 55,93 M where the ladder gives 38,16 M, and
+  reversed which champion looked better.
+- Correct form: **`replay X 800000 1 --ladder`**.
+
+Seed windows: `800000` run-off (selection), `900000` sealed (publish once, never
+select), `700000` a free independent window for testing whether an ordering is
+noise.
+
+**The output columns are easy to misread**, and doing so invalidated a whole
+bisection. `recherche / NEAT` occupies `$1 $2 $3`, so:
+
+    $4 score   $6 crossings   $7 purchases   $8 sacrifices
+    $9 clones  $10 gen10      $11 loads
+
+### The horizon is a tractability knob, not a play budget
+
+`heures = 300` was chosen only so the search would converge in reasonable
+wall-clock time. **Never rank a real strategy on fitting inside it**, and never
+present it to the breeder as a play budget — he plays about one fournée a day, so
+his budget is in fournées (see AGENTS.md, "How the breeder actually plays").
+
+What it costs the simulation anyway: from a gen 1 start, 300 h is just short of the
+endgame, so everything built for the endgame is silently inert — the summit admits
+gen 10 crossings, depth prices gen 10 sales, the project crown targets a gen 10,
+and none of it ever fires.
+
+| heures | gen 10 held |
+| --- | --- |
+| 300 (configured) | 0,0 |
+| **334** | 0,1 — first appearance |
+| 600 | **10,0** |
+| 1500 | 97,0 |
+
+**600 h is the useful figure**: first appearance is one game in ten, an event
+rather than a strategy. 1500 h runs about three times slower — 0,6 generations a
+minute against 2 — but it was never the disaster first reported: that verdict was
+**a laptop suspending with the lid closed**. `systemd-inhibit --what=sleep:idle`
+does not block the lid switch. Treat a run whose internal clock lags wall time as a
+suspended machine, not a stalled simulator.

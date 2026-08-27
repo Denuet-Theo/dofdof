@@ -41,6 +41,105 @@ ribbon (`timeline.ts`, `model-plans/`, `plan.rs`) and their guards. They were
 unreachable from the app while still being maintained and checked on every run —
 guards protecting code nobody executed.
 
+# How the breeder actually plays
+
+Two facts about the person using this app. Neither is derivable from the code,
+both have been rediscovered the hard way, and both invert measurements when
+ignored.
+
+## One fournée per day — so measure in fournées, never in hours
+
+He sleeps and he works. **The constraint is showing up, not clock time**, and he
+runs roughly one fournée a day.
+
+Everything follows from that:
+
+- **Rank on value per fournée.** An enclos cycle that fits three fournées into a
+  day buys nothing, because the third will not be played. Set budgets in
+  fournées — `economy.toml`'s `mode = "fournees"`, or `table`'s positional count.
+- **`LadderPolicy::tuned_for` under-levels by construction.** It maximises
+  `count × (value − fuel)` where `count` is fournées-per-horizon — the term it
+  trades against is *constant at one* for him, so the whole trade-off collapses.
+  It answers 36 then 50.
+- **The 300 h / 600 h horizons are a NEAT tractability parameter and nothing
+  else.** Do not present one as a play budget, and do not re-derive one.
+
+The counterweight, found on 2026-08-27 and not yet resolved: **levelling costs
+real days**, because a filling of the Mangeoire is capped. Level 100 wants 172 668
+points against 52 544 for level 60 — 3,3× — so at a 70 000 cap it needs three
+fillings, three visits, three days. A sweep run in *fournée* mode gives that level
+its feeding for free and will tell you higher is better; on a calendar it very
+likely inverts. `tunedLevel` handles the cap (`pointsCap`); the level *optimum*
+has not been re-measured on a calendar, so treat any figure near 100 as suspect.
+
+## A gen 10 without a gen 9 in its genealogy is spent — sell it even fertile
+
+Gen 10 × gen 1 names another gen 10 (relevé du 14/08, issue #185), but **only
+through the gen 9 tint the gen 10 carries in its genealogy**. That tint recombines
+with the gen 1's colour; nothing names *(gen 10 + gen 1)* directly, because a
+gen 10's recipe is always gen 9 + gen 1.
+
+So a gen 10 born of a gen 1 and a gen 10 carries only gen 1 and gen 10 tints and
+**can never produce another gen 10**. Its fertility is worth nothing, and
+`Economy::value_of` at the summit ignores `fertile` — the price is identical. It
+is inventory, not breeding stock.
+
+The exact test is "no gen 1 partner makes this name a top-generation colour", not
+the proxy "carries a gen 9": a gen 10 can carry a gen 9 whose recombinations still
+name nothing.
+
+Measured on his export of 2026-08-27 — 240 muldo, gen 1 to 6, then three gen 10,
+**no gen 7, 8 or 9 at all**:
+
+| monture | généalogie | peut relancer la boucle |
+| --- | --- | --- |
+| azur_indigo (g10, féconde) | indigo g1 + azur_turquoise g10 | non |
+| azur_pourpre (g10, féconde) | doré g1 + azur_pourpre g10 | non |
+| azur_turquoise (g10) | **azur g9** + pourpre g1 | oui, mais **stérile** |
+
+His only gen-9-carrying summit is sterile, and cloning needs two steriles of the
+same generation — he has one. **The summit loop therefore cannot start on his
+parc**, and forcing it changes nothing: measured at −1,43 M, which is why the
+implementation was written, ported, parity-covered and then deleted.
+
+# Two things about the stable that are not in the schema
+
+## The plan depends on **row order**, so the stable is canonicalised
+
+`flatten` walks the stable in array order and the search breaks **strict value
+ties** in the order it meets mounts. Two stables with identical content, ordered
+differently, do not produce the same plan — measured on the 15/08 fixture:
+**18 matings proposed in fixture order, 19 in id order**.
+
+That is user-visible because the stable is read with `.order('id')` while every
+local write **appends** — `recordBirths`, `recordClonings`, enclos exit, add,
+remove, and the two rollbacks, six sites. A recorded foal sits at the tail until a
+refresh puts it back at its uuid's place, so the list changes with no change in
+content. That is mechanically the "I refresh and two new matings appear" report.
+
+Canonicalised at `stablePlan`'s entry (`canonicalStable`), keyed on **content** —
+colour, sex, fertile, cycled, level, ancestry — with the id only as a last
+tiebreak, deliberately **not** on the id: projections carry fabricated ids
+(`clone-a-venir:`, `naissance-a-venir:`) while real rows get a uuid, so an
+id-keyed order placed the same animal differently in the projection and in
+reality. Guard: `npm run check:plan-order`.
+
+**The e2e mock had `order` in `NOT_A_FILTER`**, so it served fixture order while
+the real server sorts, and no test in the repo could see any of this. A fake server
+that ignores part of the query greens exactly what it was asked to watch.
+
+## The écurie's 250 places are ergonomics, not a population cap
+
+Storing a mount is **free and lossless** — gauges only move in an enclos — so the
+inventory, havresac and coffre hold ten thousand more at no cost beyond the
+tedium of finding one again. Never model overflow as a cap, and never as a reason
+to clone. What it does cost is the **search**, which is why `prix_du_retrait`
+exists as a score term rather than a constraint.
+
+And "certificat" in this codebase means the **tradeable HDV item**, not storage.
+Designing on the other reading has already produced two proposals that rested on
+a mechanic that does not exist — ask before building on the vocabulary.
+
 # The golden rule: the screen shows only what the base confirmed
 
 Everything below is one sentence:

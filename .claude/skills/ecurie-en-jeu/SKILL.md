@@ -172,3 +172,37 @@ for two niveau 1 against 44.4 % for two niveau 48). The enclos-exit dialog asks
 for levels again on every fournée, so the ones that matter self-correct. This is
 a decision, not an oversight — do not reopen it. Concretely the app says 70
 mounts at niveau 1 and 64 at niveau 48 where the game says 63 and 56.
+
+## Deux pièges de la lecture en jeu
+
+### Les relevés ne coûtent rien tant qu'on ne clique pas ACCOUPLER
+
+Ouvrir la fenêtre d'accouplement affiche **toutes** les issues avec leurs
+probabilités et leurs génétons **sans rien dépenser** — ni monture, ni fécondité.
+Seul le bouton ACCOUPLER consomme. On peut donc promener une même monture devant
+autant de partenaires qu'on veut.
+
+J'ai d'abord conseillé de ne pas acheter une gen 10 pour un relevé, croyant
+l'expérience coûteuse. Elle ne l'est pas : une monture achetée pour relever se
+revend derrière, donc le coût réel est la **taxe HDV**, pas le prix. Le 14/08,
+trois fenêtres ont suffi à résoudre la loi du sommet à 0,005 point près.
+
+**Comment demander un relevé** : plusieurs fenêtres avec une monture
+**constante** et des partenaires variés — c'est ce qui isole la variable. Et
+demander la **généalogie et les niveaux**, sans quoi la fenêtre ne se rejoue pas.
+
+### Un nom de monture n'identifie pas une monture
+
+`mountName` fabrique le nom depuis la **couleur, le sexe et les parents** — rien
+d'individuant. Plusieurs montures partagent donc un nom : sur l'export du 17/08,
+`G1 IN F DO-IN` en désignait **six**, dont deux enfermées en enclos et donc
+absentes de la liste d'écurie du jeu.
+
+J'ai demandé à l'éleveur d'ouvrir une fenêtre sur « G1 IN F DO-IN ». Il a répondu
+ne pas l'avoir et en a conclu qu'une écriture avait été perdue la veille —
+fausse alerte, et de ma faute.
+
+Le nom est la seule prise que la recherche d'écurie du jeu offre, ce qui le rend
+tentant à traiter comme un identifiant. Il n'en est pas un. **Demander par
+forme** — couleur, sexe, généalogie, niveau — et vérifier les enclos avant de
+crier à la perte de données.

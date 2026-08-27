@@ -84,6 +84,36 @@ pub struct Catalog {
     /// Recettes écartées faute d'un composant connu. Doit valoir 0 sur les
     /// arbres livrés ; non nul signalerait un `trees.json` tronqué.
     pub dropped_recipes: usize,
+    /// Croisements nécessaires pour fabriquer chaque couleur depuis des gen 1
+    /// **achetées** — le coût de construction, et non le rang affiché par le jeu.
+    ///
+    /// ## Pourquoi le rang ne suffit pas
+    ///
+    /// La génération entière mélange, dans un même rang, des couleurs dont le
+    /// coût varie du simple au double. Sur la dragodinde, la gen 4 tient six
+    /// couleurs à **4** croisements (`gen 3 + gen 1`) et une seule à **7**
+    /// (`gen 3 + gen 3`) — Ébène-Indigo, la seule qui compose une gen 5. Sur le
+    /// volkorne, seize à 4 et six à 7, et **chaque** recette de gen 5 apparie une
+    /// bon marché avec une chère.
+    ///
+    /// Or `climbs` comparait des générations. Croiser deux gen 4 bon marché pour
+    /// obtenir la gen 4 chère se lisait donc « ne monte pas » et se faisait
+    /// refuser, alors que c'est le seul moyen de la fabriquer. Résultat mesuré à
+    /// quatre mois : 194 gen 4 inemployables en écurie sur la dragodinde, 1,4
+    /// Ébène-Indigo pour 20 demandées, et la gen 5 à 4,8 sur 20.
+    ///
+    /// Le muldo n'a pas ce défaut — ses onze gen 4 coûtent toutes pareil — ce qui
+    /// est exactement pourquoi il compose là où les deux autres s'appauvrissent.
+    ///
+    /// **Ce n'est pas un rang du jeu.** Ébène-Indigo y est bien une gen 4, comme
+    /// les six autres ; l'éleveur a parlé de « génération 4,5 » pour décrire le
+    /// défaut du modèle, pas une mécanique. Ce coût est une mesure interne, et il
+    /// ne doit pas s'afficher comme une génération.
+    ///
+    /// **Monotone le long d'une recette** : une composée coûte strictement plus que
+    /// ses composants, donc l'ordre reste bien fondé et `climbs` ne peut pas
+    /// tourner en rond.
+    build_cost: Vec<u32>,
 }
 
 /// Une couleur telle que le JSON la porte, avant internement.
@@ -229,6 +259,25 @@ impl Catalog {
             }
         }
 
+        // Le coût de construction, par ordre de génération croissante : une
+        // recette ne nomme que des couleurs plus basses, donc un seul passage
+        // suffit et la récursion n'a pas besoin de mémo.
+        let mut build_cost = vec![0u32; colors.len()];
+        let mut order: Vec<ColorId> = (0..colors.len() as ColorId).collect();
+        order.sort_by_key(|&color| colors[usize::from(color)].generation);
+        for color in order {
+            let at = usize::from(color);
+            build_cost[at] = colors[at]
+                .recipes
+                .iter()
+                .map(|[a, b]| {
+                    1 + build_cost[usize::from(*a)] + build_cost[usize::from(*b)]
+                })
+                // Aucune recette : une gen 1, qu'on achète. Zéro croisement.
+                .min()
+                .unwrap_or(0);
+        }
+
         Ok(Self {
             colors,
             by_slug,
@@ -236,7 +285,18 @@ impl Catalog {
             anywhere,
             at_generation,
             dropped_recipes,
+            build_cost,
         })
+    }
+
+    /// Croisements pour fabriquer cette couleur depuis des gen 1 achetées.
+    /// Voir le champ `build_cost` pour ce que le rang entier cache.
+    #[inline]
+    pub fn build_cost(&self, id: ColorId) -> u32 {
+        self.build_cost
+            .get(usize::from(id))
+            .copied()
+            .unwrap_or(u32::MAX)
     }
 
     pub fn load(path: impl AsRef<Path>, family_id: &str) -> Result<Self, String> {

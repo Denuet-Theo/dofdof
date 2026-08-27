@@ -37,7 +37,7 @@ import {
 import { ENCLOS_SLOTS } from '@/lib/dofus/breeding/enclos';
 import { unavailableFor } from '@/lib/dofus/breeding/batch';
 import { formatCountdown } from '@/lib/dofus/breeding/countdown';
-import { acquiredMountId } from '@/lib/dofus/breeding/search';
+import { acquiredMountId } from '@/lib/dofus/breeding/unit-plan';
 import { BULK_MATE_LEVEL } from '@/lib/dofus/breeding/pairing';
 import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
@@ -55,6 +55,22 @@ import type {
   RecordBirthsResult,
 } from '@/lib/hooks/useBreeding';
 import type { BreedingBatchState } from '@/lib/hooks/useBreedingBatch';
+
+/**
+ * Un montant en kamas, court : les millions au centième, sinon les milliers.
+ *
+ * Le rythme mensuel se compte en millions et une fournée en dizaines de milliers,
+ * donc une seule échelle rendrait l'un des deux illisible — « 0,03 M » ne se
+ * compare pas de tête à « 0,76 M », alors que « 25 500 » et « 0,76 M » se lisent.
+ */
+const kamasOf = (value: number): string =>
+  Math.abs(value) >= 1e6
+    ? `${(value / 1e6).toFixed(2).replace('.', ',')} M`
+    : `${Math.round(value).toLocaleString('fr-FR')}`;
+
+/** Le rythme, toujours en millions — c'est l'unité dans laquelle il a été mesuré. */
+const millionsLabel = (value: number): string =>
+  `${(value / 1e6).toFixed(2).replace('.', ',')} M`;
 
 /**
  * Ce que la politique fait de l'écurie : quatre gestes, **un seul à l'écran**.
@@ -559,6 +575,52 @@ const BreedingPolicyPanel = ({
           </span>
         )}
       </div>
+
+      {/* ## Le rythme, en millions de kamas par mois
+
+          C'est l'unité dans laquelle la politique a été choisie — le Rust imprime
+          des mois, parce qu'une fournée par jour est la contrainte de la Mangeoire
+          — et elle n'arrivait pas jusqu'ici. L'éleveur lisait « 32 accouplements ·
+          56/60 places » et devait traduire lui-même.
+
+          Le titre porte les trois réserves, et elles comptent : c'est un rythme à
+          fournée constante, les naissances sont en espérance, et l'écoulement du
+          marché n'y est pas. La première est la plus trompeuse sur une écurie
+          neuve, où les ventes du premier mois liquident un stock qui ne revient
+          pas. */}
+      {fill && (
+        <p
+          data-testid="policy-earnings"
+          data-per-month={Math.round(fill.earnings.perMonth)}
+          className="-mt-2 mb-3 text-[11px] text-dark-500 tabular-nums"
+          title={
+            `À une fournée par jour, trente par mois. Génétons ${kamasOf(fill.earnings.genetons)} ` +
+            `+ ventes ${kamasOf(fill.earnings.sales)} − chargement ${kamasOf(fill.earnings.loadKamas)} ` +
+            `− achats ${kamasOf(fill.earnings.purchases)}` +
+            (fill.earnings.optimakina > 0 ? ` − Optimakina ${kamasOf(fill.earnings.optimakina)}` : '') +
+            `. Un rythme, pas une prévision : la fournée de demain n'est pas celle-ci, ` +
+            `les naissances sont en espérance, et la baisse du marché à la vente n'y est pas.`
+          }
+        >
+          <span
+            className={
+              fill.earnings.perMonth >= 0 ? 'font-medium text-kamas' : 'font-medium text-red-400'
+            }
+          >
+            {millionsLabel(fill.earnings.perMonth)}
+          </span>{' '}
+          par mois à ce rythme — {kamasOf(fill.earnings.net)} par fournée
+          {/* Un poste nul faute de prix saisi, et non faute de recette. Sur une
+              fournée qui ne vend pas encore beaucoup, ce seul zéro suffit à rendre
+              le rythme négatif, et il se lirait comme une politique qui perd de
+              l'argent. Voir `genetonsPriced`. */}
+          {!fill.earnings.genetonsPriced && (
+            <span data-testid="earnings-no-geneton" className="text-amber-500/80">
+              {' '}— sans le prix du géneton, que tu n&apos;as pas saisi
+            </span>
+          )}
+        </p>
+      )}
 
       {/* ## La couronne retenue, dite en toutes lettres
 

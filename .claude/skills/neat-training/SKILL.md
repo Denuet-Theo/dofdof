@@ -154,23 +154,31 @@ champion measured 107,99 M at 800 iterations and 112,66 M at 1500 — the policy
 keeps paying off with a larger search budget at play time, which is worth
 knowing on its own, but it makes the two numbers non-comparable.
 
-## Shipping a champion to the app
+## A champion is no longer shipped to the app
 
-The app **runs the network**. `policy.ts` compiles `champion.json` and calls it
-on every census the search proposes, so shipping a champion is copying one file
-and re-running the guards:
+**As of 27/08 the app does not run a network.** The ladder plays — rules, on both
+sides — and the champion, the search and the 75-entry encoding left TypeScript
+with `champion.json`, `search.ts`, `network.ts` and four parity guards. It lost:
+on all three families the ladder cashed more, and on dragodinde and volkorne the
+champion barely reached generation 10 at all.
+
+So there is no `cp champion.json src/` step any more, and nothing to re-run
+app-side after a training round. A champion is now **a yardstick**, and the only
+place it is played is Rust:
 
 ```sh
-cp rust/champion-e2.json src/lib/dofus/breeding/champion.json
-node scripts/check-network.mjs      # the port evaluates it like Rust does
-node scripts/check-search.mjs       # and composes the same plans
-node scripts/policy-report.mjs      # it still mates, and what it aims at
-rust/target/release/replay.exe src/lib/dofus/breeding/champion.json
+rust/target/release/replay.exe rust/champion-e2.json      # 200 sealed seeds
+rust/target/release/table --heures 4380                   # a six-month calendar
 ```
 
-`replay` is the number to quote. It plays 200 sealed seeds on the full economy
-and prints the greedy and myopic baselines beside it — **both of which the app
-never runs**; they exist so that "did it learn anything" has an answer.
+`table` is the number to quote against the shipped policy, because it plays the
+constraint the breeder actually has — one batch a day. `replay` stays useful for
+comparing two champions to each other on a fixed horizon; it prints the greedy
+and myopic baselines beside them, so "did it learn anything" has an answer.
+
+**Training a champion again is worth doing only to beat the ladder in `table`.**
+If it does, that is the moment to discuss porting a network back — and the two
+mismatches below are the first things to fix, since neither was ever closed.
 
 The ribbon that used to read a pre-computed schedule is gone, and `plan.rs`,
 `model-plans/`, `model-plan.ts`, `timeline.ts` and `check-plan.mjs` went with
@@ -189,18 +197,18 @@ with `capacity: 0` (`treadmill.rs:457`), and `random_action` only offers
 been scored on "bank this mount rather than cross it" — and
 `empty_place_genetons`, the lever the maintainer added to make banking
 arbitrable, is dead code for the same reason: `applied.places` is always 0.
-The app then runs that champion with capacity > 0. It hoarded: half a pen in
-"à féconder sans croiser", and 44 fécondes held against 8 spent. Both were
-patched app-side (#224, #227) rather than trained.
+The app ran that champion with capacity > 0, back when it ran one. It hoarded:
+half a pen in "à féconder sans croiser", and 44 fécondes held against 8 spent.
+Both were patched app-side (#224, #227) rather than trained.
 
-**Training does not apply the ladder.** The app passes
-`SearchConfig.admissible` — `aimsAt` against the crowned ladder — so it only
-ever plays crossings the ladder allows. Training passes nothing, so the champion
-learns to choose in a **wider** space than the one it plays in, and part of what
-it learned is unusable. Closing this means threading the ladder into
-`Searching` in `main.rs`.
+**Training does not apply the ladder.** The ladder answers `aimsAt` against a
+crowned target, and every policy that ships is bound by it. Training passes
+nothing, so the champion learns to choose in a **wider** space than the one it is
+then compared in, and part of what it learned is unusable. Closing this means
+threading the ladder into `Searching` in `main.rs`.
 
-Until both are closed, a training round measures a game the app does not play.
+Until both are closed, a training round measures a game nothing plays — which is
+part of why the ladder won.
 
 ## Retargeting at another mount family
 

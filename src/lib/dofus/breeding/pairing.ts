@@ -545,6 +545,12 @@ export type PairOutlook = {
   /** Générations gagnées sur ce que la recette annoncerait. `0` hors raccourci. */
   leap: number;
   successRate: number;
+  /**
+   * Le coût de construction le plus haut des **six cases**, et celui que le
+   * bloc cible sait nommer — en croisements, pas en rang. Voir `buildCosts`.
+   */
+  ancestryCost: number;
+  targetCost: number;
   /** Génétons rendus, qui suivent la génération des **parents** (relevé #59). */
   genetons: number;
   /** Les couleurs possibles à la génération visée, la plus probable devant. */
@@ -568,8 +574,73 @@ export type PairOutlook = {
  * confondaient ; ce n'est plus le cas, et tout ce qui décide d'un accouplement
  * veut la seconde — l'admissibilité de l'échelle comme les génétons.
  */
+/**
+ * Croisements pour fabriquer chaque couleur depuis des gen 1 **achetées**.
+ *
+ * ## Pourquoi le rang ne suffit pas
+ *
+ * La génération entière mélange, dans un même rang, des couleurs dont le coût
+ * varie du simple au double. Sur la dragodinde, la gen 4 tient six couleurs à
+ * **4** croisements (`gen 3 + gen 1`) et une seule à **7** (`gen 3 + gen 3`) —
+ * Ébène-Indigo, la seule qui compose une gen 5. Sur le volkorne, seize à 4 et six
+ * à 7, et **chaque** recette de gen 5 apparie une bon marché avec une chère.
+ *
+ * Or `climbs` comparait des générations, donc il refusait de croiser deux gen 4
+ * bon marché pour obtenir la chère — le seul moyen de la fabriquer. Mesuré à
+ * quatre mois, une fournée par jour, encaissé :
+ *
+ * | famille | au rang | au coût |
+ * | --- | --- | --- |
+ * | muldo | 103,84 M | 103,67 M |
+ * | volkorne | 35,17 M | **76,39 M** |
+ * | dragodinde | 8,73 M | **42,75 M** |
+ *
+ * Le muldo ne bouge pas : ses onze gen 4 coûtent toutes pareil, donc la règle y
+ * est inerte. C'est exactement pourquoi lui composait là où les deux autres
+ * s'appauvrissaient.
+ *
+ * **Ce n'est pas un rang du jeu** : Ébène-Indigo y est bien une gen 4. C'est une
+ * mesure interne, et elle ne doit pas s'afficher comme une génération.
+ *
+ * Un seul passage suffit, par génération croissante : une recette ne nomme que
+ * des couleurs plus basses.
+ */
+const costCache = new WeakMap<BreedingColor[], Map<string, number>>();
+
+/** `buildCosts`, mémorisé par tableau de couleurs — comme `shapeCache`. */
+const costsFor = (colors: BreedingColor[]): Map<string, number> => {
+  let known = costCache.get(colors);
+  if (!known) {
+    known = buildCosts(colors);
+    costCache.set(colors, known);
+  }
+  return known;
+};
+
+export const buildCosts = (colors: BreedingColor[]): Map<string, number> => {
+  const costs = new Map<string, number>();
+  for (const color of [...colors].sort((a, b) => a.generation - b.generation)) {
+    const options = (color.recipes ?? []).map(
+      (recipe) => 1 + (costs.get(recipe[0]) ?? 0) + (costs.get(recipe[1]) ?? 0)
+    );
+    // Aucune recette : une gen 1, qu'on achète. Zéro croisement.
+    costs.set(color.id, options.length > 0 ? Math.min(...options) : 0);
+  }
+  return costs;
+};
+
+/**
+ * Ce croisement peut-il rendre **mieux** que ce que le couple porte ?
+ *
+ * Comparé en **croisements** et non en rang. `climbs` est une heuristique — « ne
+ * perds pas une fournée sur un croisement qui n'avance pas » — et elle mesurait
+ * l'avancement au rang. Or **le jeu autorise** le croisement qu'elle refusait :
+ * deux gen 4 bon marché offrent bien Ébène-Indigo dans leur bloc cible, une
+ * chance sur cinq. Ce n'est pas l'arbre qui est bizarre, c'est la règle qui
+ * mesurait mal. Voir `buildCosts`.
+ */
 export const climbs = (outlook: PairOutlook): boolean =>
-  outlook.targetColors.length > 0 && outlook.targetGeneration > outlook.ancestryGeneration;
+  outlook.targetColors.length > 0 && outlook.targetCost > outlook.ancestryCost;
 
 /**
  * Ce que vise un couple, tout compris.
@@ -608,6 +679,9 @@ export const climbs = (outlook: PairOutlook): boolean =>
 type PairShape = {
   targetGeneration: number;
   ancestryGeneration: number;
+  /** Voir `buildCosts` : le coût porté, et celui que la cible sait nommer. */
+  ancestryCost: number;
+  targetCost: number;
   leap: number;
   genetons: number;
   targetColors: TargetColor[];
@@ -621,6 +695,7 @@ const pairShape = (
   colors: BreedingColor[],
   generations: Map<string, number>
 ): PairShape | null => {
+  const costs = costsFor(colors);
   let byPair = shapeCache.get(colors);
   if (!byPair) {
     byPair = new Map();
@@ -683,6 +758,14 @@ const pairShape = (
             [generations.get(male.colorId)!, generations.get(female.colorId)!],
             ancestryGeneration
           ),
+    ancestryCost: Math.max(
+      ...mateAncestry(male).map((colorId) => costs.get(colorId) ?? 0),
+      ...mateAncestry(female).map((colorId) => costs.get(colorId) ?? 0)
+    ),
+    targetCost:
+      targetColors.length === 0
+        ? 0
+        : Math.max(...targetColors.map((target) => costs.get(target.colorId) ?? 0)),
     targetColors,
   };
 

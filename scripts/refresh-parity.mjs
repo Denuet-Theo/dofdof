@@ -1,58 +1,52 @@
 /**
- * Réinstaller un champion et refaire les six références de parité.
+ * Refaire les références de parité, et vérifier qu'elles se reproduisent.
  *
  * ```sh
- * node scripts/refresh-parity.mjs                 # rust/champion.json
- * node scripts/refresh-parity.mjs rust/champion-t3.json
- * node scripts/refresh-parity.mjs --check         # ne réécrit rien, vérifie
+ * node scripts/refresh-parity.mjs           # régénère les références
+ * node scripts/refresh-parity.mjs --check   # ne réécrit rien, vérifie
  * ```
  *
- * ## Pourquoi une commande et pas six
+ * ## Ce que cette commande était, et ce qu'elle est
  *
- * Changer de champion demande cinq gestes : copier l'artefact dans `src/`, refaire
- * les deux références qui en dépendent — le réseau et la recherche — refaire les
- * deux qui n'en dépendent pas mais que `FEATURES` peut invalider, et rejouer les
- * six gardes. Les faire à la main, c'est en oublier un ; et l'oubli qui compte
- * ne se voit pas.
+ * Elle réinstallait un champion : copier l'artefact dans `src/`, refaire les six
+ * références — dont deux le prenaient en entrée — et rejouer les six gardes. Le
+ * geste risqué qu'elle rendait impossible était de **régénérer les références sans
+ * copier l'artefact** : les gardes comparaient alors l'ancien champion à des
+ * références faites avec le nouveau, et l'écran tournait sur l'ancien sans que rien
+ * ne le dise.
  *
- * Le pire est celui-ci : régénérer les références **sans** copier l'artefact. Les
- * gardes comparent alors l'ancien champion à des références faites avec le
- * nouveau, et l'écran continue de tourner sur l'ancien sans que rien ne le dise.
- * Ici l'oubli est impossible par construction — le même chemin sert aux deux.
+ * Le champion a quitté le TypeScript — l'échelle joue, et la recherche reste côté
+ * Rust comme étalon. Il n'y a donc plus d'artefact à installer, plus de `FEATURES`
+ * à faire correspondre, et deux références au lieu de six : le **plan** de
+ * l'échelle et sa **fournée**. Les deux ne dépendent que de `trees.json` et de
+ * `ladder.rs`.
  *
+ * ## Ce qui reste, et pourquoi
+ *
+ * Deux questions différentes, et l'une passait inaperçue :
+ *
+ * - **la divergence** — le portage et le Rust ne font plus la même chose. Les
+ *   gardes le disent.
+ * - **la péremption** — ils s'accordent toujours, mais la référence a été produite
+ *   par un Rust antérieur. Aucune garde ne peut le voir, puisqu'une référence
+ *   périmée reste auto-cohérente. C'est le défaut de #161, et c'est ce que
+ *   `--check` regarde en dumpant à côté pour comparer.
  */
 
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // `fileURLToPath` et non `.pathname` : sous Windows ce dernier rend
 // `/C:/Users/...`, que `resolve` prend pour un chemin absolu à rattacher au
-// disque courant et transforme en `C:\C:\Users\...`. La commande échouait donc
-// sur « rust\champion.json est absent » alors que le fichier était là, et le
-// message envoyait réentraîner un champion pour rien.
+// disque courant et transforme en `C:\C:\Users\...`.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const RUST = join(ROOT, 'rust');
 const FIXTURES = join(ROOT, 'scripts/fixtures');
-const EMBEDDED = join(ROOT, 'src/lib/dofus/breeding/champion.json');
 
-const argv = process.argv.slice(2);
-const checkOnly = argv.includes('--check');
-const asked = argv.find((arg) => !arg.startsWith('--'));
-const source = resolve(ROOT, asked ?? 'rust/champion.json');
-
-/**
- * Le champion que les dumpers reçoivent.
- *
- * En vérification sans argument, c'est l'**embarqué** et non `rust/champion.json` :
- * les gardes comparent le portage à l'artefact de `src/`, donc c'est celui-là dont
- * il faut demander « produit-il encore ces références ». Dumper avec un champion
- * fraîchement entraîné qui traîne dans `rust/` ferait crier la reproductibilité
- * pour une raison qui n'en est pas une.
- */
-const dumpChampion = checkOnly && !asked && existsSync(EMBEDDED) ? EMBEDDED : source;
+const checkOnly = process.argv.slice(2).includes('--check');
 
 const say = (message) => console.log(message);
 /** Le chemin, court quand il est dans le dépôt et entier quand il en sort. */
@@ -63,78 +57,31 @@ const shown = (path) => {
 const run = (command, args, cwd) =>
   execFileSync(command, args, { cwd, stdio: 'inherit', env: process.env });
 
-/* ------------------------------------------------------------ l'artefact -- */
-
-if (!existsSync(source)) {
-  console.error(
-    `${shown(source)} est absent.\n` +
-      `Lancer d'abord l'entraînement :\n` +
-      `  cd rust && cargo run --release -p breeding-neat -- --env treadmill --minutes 360`
-  );
-  process.exit(1);
-}
-
-const champion = JSON.parse(readFileSync(dumpChampion, 'utf8'));
-const embedded = existsSync(EMBEDDED) ? JSON.parse(readFileSync(EMBEDDED, 'utf8')) : null;
-
-// L'arité est le seul contrat que l'artefact porte lui-même, et le seul dont la
-// violation ne se voie pas : un vecteur de la mauvaise taille se lit de travers
-// sans rien casser. `network.ts` la vérifie aussi, mais autant refuser ici.
-const FEATURES = Number(
-  /export const FEATURES = (\d+)/.exec(
-    readFileSync(join(ROOT, 'src/lib/dofus/breeding/census.ts'), 'utf8')
-  )?.[1]
-);
-if (champion.features !== FEATURES) {
-  console.error(
-    `${shown(dumpChampion)} attend ${champion.features} entrées, le portage en ` +
-      `déclare ${FEATURES}. Ce champion est d'une autre génération d'encodage : il ` +
-      `n'est pas rechargeable, il faut réentraîner.`
-  );
-  process.exit(1);
-}
-
-const scoreOf = (artifact) =>
-  artifact?.validation_score ? `${(artifact.validation_score / 1e6).toFixed(2)} M au départage` : '—';
-
-say(`champion   : ${shown(dumpChampion)} · ${scoreOf(champion)}`);
-say(`embarqué   : ${embedded ? scoreOf(embedded) : 'aucun'}`);
-
-if (checkOnly) {
-  say('\n--check : rien n’est réécrit, on refait les références à côté pour les comparer.\n');
-} else {
-  copyFileSync(source, EMBEDDED);
-  say(`\n${shown(EMBEDDED)} remplacé.\n`);
-}
-
 /* ------------------------------------------------------------ les fixtures */
 
 /**
- * Les six références et leur dumper. `dump-network` et `dump-search` prennent le
- * champion ; les autres n'en dépendent pas, mais ils dépendent de `FEATURES` et
- * de `trees.json` — les refaire coûte quelques secondes et évite d'avoir à se
- * demander lesquels.
+ * Les deux références et leur dumper.
  *
- * `dump-ladder` se déduit de `trees.json` et de `ladder.rs` : le refaire par
- * réflexe évite d'avoir à se demander s'il a bougé.
+ * `dump-ladder` fige le **plan** — quelles couleurs, quelles recettes, quelle
+ * couronne. `dump-ladder-policy` fige la **fournée** que ce plan produit sur une
+ * écurie donnée. Les deux se déduisent de `trees.json` et de `ladder.rs`, donc les
+ * refaire par réflexe évite d'avoir à se demander laquelle a bougé.
  *
- * `dump-schedule` est parti avec `schedule.ts` : l'ordonnanceur porté n'était plus
- * appelé par l'écran, et une garde de parité sur du code que personne n'exécute
- * coûte à chaque vérification sans rien protéger.
+ * Sont partis avec ce qu'ils gardaient : `dump-network`, `dump-census`,
+ * `dump-delta` et `dump-search` — les binaires existent toujours côté Rust, mais
+ * plus rien ne les rejoue en TypeScript. `dump-schedule` est parti avec
+ * `schedule.ts`. Une garde de parité sur du code que personne n'exécute coûte à
+ * chaque vérification sans rien protéger.
  */
 const DUMPS = [
-  ['dump-network', 'network-parity.json', true],
-  ['dump-census', 'census-parity.json', false],
-  ['dump-delta', 'delta-parity.json', false],
-  ['dump-search', 'search-parity.json', true],
-  ['dump-ladder', 'ladder-parity.json', false],
-  ['dump-ladder-policy', 'ladder-policy-parity.json', false],
+  ['dump-ladder', 'ladder-parity.json'],
+  ['dump-ladder-policy', 'ladder-policy-parity.json'],
 ];
 
-/** Refait les six références dans `outDir`. */
+/** Refait les deux références dans `outDir`. */
 const runDumps = (outDir) => {
-  // Les six dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et
-  // les demander séparément relançait six fois la même vérification de crate.
+  // Les deux dumpers d'un coup : `cargo` ne recompile que ce qui a bougé, et les
+  // demander séparément relançait deux fois la même vérification de crate.
   say('--- compilation des dumpers ---');
   run(
     'cargo',
@@ -143,27 +90,16 @@ const runDumps = (outDir) => {
   );
 
   say('\n--- références ---');
-  for (const [binary, name, takesChampion] of DUMPS) {
-    const args = takesChampion
-      ? [dumpChampion, join(outDir, name)]
-      : [join(outDir, name)];
-    run(join(RUST, 'target/release', binary), args, RUST);
+  for (const [binary, name] of DUMPS) {
+    run(join(RUST, 'target/release', binary), [join(outDir, name)], RUST);
   }
 };
 
-/**
- * Références qui ne se reproduisent plus — vide hors `--check`.
- *
- * C'est le défaut que relevait #161, et il était **silencieux** : les trois
- * références concernées passaient leurs gardes, parce qu'elles portent leur
- * propre économie en entrée et restent donc auto-cohérentes. Ce qu'elles avaient
- * cessé d'être, c'est **reproductibles** — et une référence de parité ne vaut que
- * par là. Sans ce contrôle, la seule façon de s'en apercevoir est de lancer
- * `npm run parity` et de voir trois fichiers salir un diff sans rapport.
- */
+/** Références qui ne se reproduisent plus — vide hors `--check`. */
 const stale = [];
 
 if (checkOnly) {
+  say('--check : rien n’est réécrit, on refait les références à côté pour les comparer.\n');
   // À côté, jamais par-dessus : `--check` ne réécrit rien, c'est son contrat.
   const scratch = mkdtempSync(join(tmpdir(), 'dofdof-parity-'));
   try {
@@ -178,13 +114,14 @@ if (checkOnly) {
   }
 } else {
   runDumps(FIXTURES);
+  say(`\n${shown(FIXTURES)} régénéré.`);
 }
 
 /* --------------------------------------------------------------- les gardes */
 
 say('\n--- gardes ---');
 let failed = 0;
-for (const guard of ['network', 'census', 'delta', 'search', 'ladder-parity', 'ladder-policy']) {
+for (const guard of ['ladder-parity', 'ladder-policy']) {
   try {
     run('node', [join(ROOT, `scripts/check-${guard}.mjs`)], ROOT);
   } catch {
@@ -202,9 +139,9 @@ if (failed > 0) {
 /* ------------------------------------------------- la reproductibilité */
 
 if (stale.length > 0) {
-  // Distinct d'une garde en échec, et le message doit le dire : ici le portage
-  // et le Rust s'accordent toujours, c'est la **référence** qui a vieilli. Le
-  // Rust a bougé dans ce qui l'alimente et personne ne l'a régénérée.
+  // Distinct d'une garde en échec, et le message doit le dire : ici le portage et
+  // le Rust s'accordent toujours, c'est la **référence** qui a vieilli. Le Rust a
+  // bougé dans ce qui l'alimente et personne ne l'a régénérée.
   console.error(
     `\n${stale.length} référence(s) ne se reproduisent plus depuis le Rust ` +
       `d'aujourd'hui :\n` +
@@ -220,6 +157,6 @@ if (failed > 0 || stale.length > 0) process.exit(1);
 
 say(
   checkOnly
-    ? '\nles six gardes passent, et les six références se reproduisent'
-    : '\nles six gardes passent — le portage rejoue ce champion-ci'
+    ? '\nles deux gardes passent, et les deux références se reproduisent'
+    : '\nles deux gardes passent — le portage rejoue ce Rust-ci'
 );

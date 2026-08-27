@@ -1,5 +1,5 @@
 /**
- * Ce que le champion embarqué propose sur une écurie d'éleveur.
+ * Ce que la politique embarquée propose sur une écurie d'éleveur.
  *
  * ```sh
  * node scripts/policy-report.mjs
@@ -7,22 +7,25 @@
  *
  * ## Ce que les quatre gardes ne disent pas
  *
- * Elles prouvent que le portage rejoue le Rust — au bit près pour la recherche.
- * Elles ne disent rien de ce que le champion **fait**. Un artefact peut être
- * reproduit parfaitement et proposer une fournée inutile, et c'est arrivé : le
- * champion entraîné avant la correction du débordement de `cyclable_free` met
- * vingt montures en banque et n'en accouple aucune, sur une écurie où la valeur
- * myope en accouple trente-quatre.
+ * Elles prouvent que le portage rejoue le Rust. Elles ne disent rien de ce que la
+ * politique **fait** : un plan peut être reproduit parfaitement et proposer une
+ * fournée inutile, et c'est arrivé — un champion entraîné avant la correction du
+ * débordement de `cyclable_free` mettait vingt montures en banque et n'en
+ * accouplait aucune. Aucune garde de parité ne pouvait le voir. Celle-ci le voit.
  *
- * Aucune garde de parité ne pouvait le voir. Celle-ci le voit.
+ * ## Ce que le témoin myope disait, et pourquoi il n'est plus là
  *
- * ## Le témoin est la valeur myope
+ * Il passait par le même chemin que le champion et ne savait que compter les
+ * kamas : s'il accouplait et que le champion non, c'était une **préférence
+ * apprise** ; si aucun des deux n'accouplait, c'était le câblage ou l'écurie.
  *
- * Elle passe par exactement le même chemin — même recherche, même encodage, même
- * écurie, même graine — et ne sait rien faire d'autre que compter les kamas. Si
- * elle accouple et que le champion non, c'est une préférence apprise ; si aucune
- * des deux n'accouple, c'est le câblage ou l'écurie. Sans ce témoin, les deux
- * diagnostics se ressemblent.
+ * Le champion a quitté le TypeScript — l'échelle joue, et la recherche reste côté
+ * Rust comme étalon. Il n'y a donc plus de préférence apprise à distinguer d'un
+ * défaut de câblage, et plus de second chemin ici pour le faire : l'échelle est la
+ * seule politique portée. Ce que cette garde prouve encore est plus étroit, et
+ * c'est dit plutôt que sous-entendu — **la politique accouple, et ses croisements
+ * montent**. Le reste se mesure côté Rust, où `Greedy` et `Myopic` vivent
+ * toujours (`bench`, `replay`, `table`).
  *
  * ## L'écurie est fixe, et représentative
  *
@@ -45,11 +48,9 @@ const out = compile(
 );
 
 const { stablePlan, economyView } = await load(out, 'policy.js');
-const { createSearcher, flatten, planUnit, myopic } = await load(out, 'search.js');
-const { seededRandom } = await load(out, 'random.js');
+const { flatten } = await load(out, 'unit-plan.js');
 
 const read = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'));
-const champion = read('src/lib/dofus/breeding/champion.json');
 const trees = read('src/lib/dofus/breeding/trees.json');
 const colors = trees.families.find((family) => family.id === 'muldo').colors;
 const nameOf = Object.fromEntries(colors.map((color) => [color.id, color.name]));
@@ -113,10 +114,6 @@ if (!plan) {
 const nameOfMount = (id) => individuals.find((mount) => mount.id === id)?.name ?? 'Anonyme';
 const listed = (ids) => (ids.length === 0 ? 'achat' : [...new Set(ids.map(nameOfMount))].join(', '));
 
-console.log(
-  `\nchampion : ${champion.features} entrées · ` +
-    `${champion.validation_score ? `${(champion.validation_score / 1e6).toFixed(2)} M au départage` : 'sans score'}`
-);
 console.log(`écurie   : ${flatten(stable).length} montures · ${CAPACITY} places · calculé en ${elapsed} ms\n`);
 console.log(`${plan.raw.crossings.length} accouplements · ${plan.places}/${plan.capacity} places\n`);
 
@@ -144,41 +141,20 @@ console.log(
   join_(plan.purchases.map((entry) => `${nameOf[entry.colorId]} ${entry.males}♂${entry.females}♀`))
 );
 
-/* -------------------------------------------------------------- le témoin */
-
-const control = planUnit(
-  createSearcher({ iterations: 600, sacrifices: false }),
-  {
-    mounts: flatten(stable),
-    colors,
-    generations: new Map(colors.map((color) => [color.id, color.generation])),
-    economy: economyView(colors, market),
-    strategy: { level: champion.strategies?.[0]?.level ?? 0, optimakinaFrom: 11 },
-    kamas: 30_000_000,
-    capacity: CAPACITY,
-    loadKamas: 150_000,
-  },
-  seededRandom(1),
-  myopic
-);
-
-console.log(
-  `\ntémoin myope : ${control.crossings.length} accouplements · ` +
-    `${control.cycles.length} fécondations · ${control.clonings.length} clonages · ` +
-    `${control.purchases.length} achats`
-);
-
-// Un champion qui n'accouple pas là où la valeur myope accouple n'est pas
-// forcément fautif — mais c'est une anomalie, et elle doit se dire. Sortie non
-// nulle pour qu'une chaîne s'arrête plutôt que de publier un écran inutile.
-if (plan.raw.crossings.length === 0 && control.crossings.length > 0) {
+// Une politique qui n'accouple **pas du tout** est une anomalie, quelle qu'en
+// soit la cause. Le témoin myope servait à trancher entre préférence apprise et
+// câblage ; sans lui on ne tranche plus, mais le symptôme se dit quand même —
+// sortie non nulle, pour qu'une chaîne s'arrête plutôt que de publier un écran
+// vide. La cause se cherche alors côté Rust, sur `bench`.
+if (plan.raw.crossings.length === 0) {
   console.error(
-    `\nANOMALIE : le champion n'accouple pas là où la valeur myope accouple ` +
-      `${control.crossings.length} fois. Le câblage est hors de cause — le témoin ` +
-      `passe par le même chemin. C'est l'artefact qu'il faut regarder.`
+    `\nANOMALIE : la politique n'accouple pas sur cette écurie. Elle porte pourtant ` +
+      `${flatten(stable).length} montures et ${CAPACITY} places. Regarder \`bench\` côté ` +
+      `Rust, qui compare l'échelle au glouton et à la valeur myope sur la même physique.`
   );
   process.exit(1);
 }
+
 const recopies = plan.couples
   .filter((line) => line.targetGeneration === null)
   .reduce((sum, line) => sum + line.count, 0);
@@ -186,4 +162,11 @@ console.log(
   `\nsur ${plan.raw.crossings.length} accouplements, ${recopies} ne montent d'aucun rang ` +
     `(${Math.round((recopies / Math.max(plan.raw.crossings.length, 1)) * 100)} %)`
 );
-console.log('\nla politique accouple — cet artefact est utilisable dans l’écran');
+const kamas = (value) => `${(value / 1e6).toFixed(2)} M`;
+console.log(
+  `\nfournée : ${kamas(plan.earnings.genetons)} de génétons · ` +
+    `${kamas(plan.earnings.sales)} de ventes · ` +
+    `-${kamas(plan.earnings.loadKamas + plan.earnings.purchases + plan.earnings.optimakina)} de frais ` +
+    `→ ${kamas(plan.earnings.net)} net, soit ${kamas(plan.earnings.perMonth)} par mois`
+);
+console.log('\nla politique accouple, et ses croisements montent — l’écran a de quoi afficher');

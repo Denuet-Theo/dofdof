@@ -56,7 +56,7 @@ const FLAGS = [
  * Compile un ou plusieurs modules et rend le répertoire de sortie.
  *
  * `entries` est relatif à la racine du dépôt. `json` ouvre `--resolveJsonModule`,
- * dont ont besoin les modules qui lisent `trees.json` ou `champion.json`.
+ * dont ont besoin les modules qui lisent `trees.json`.
  */
 export const compile = (label, entries, { json = false } = {}) => {
   const out = mkdtempSync(join(tmpdir(), `dofdof-${label}-`));

@@ -42,23 +42,20 @@
  * n'a jamais rencontrée. Voir `SearchConfig.sacrifices`.
  */
 
-import championArtifact from './champion.json';
-import { compile, evaluate, isConnected, type Champion } from './network';
-import { featuresOf, pairDelta, MAX_GENERATION, type Census, type EconomyView } from './census';
-import {
-  createSearcher,
-  flatten,
-  parseCountedMountId,
-  planUnit,
-  type SearchStrategy,
-  type UnitPlan,
-} from './search';
-import { seededRandom } from './random';
+import { pairDelta, type EconomyView, type PairDelta } from './census';
+import { batchEarnings, type BatchEarnings } from './earnings';
 import { ascendanceKey, BULK_MATE_LEVEL, type Mate } from './pairing';
 import { aimsAt, crownedLadderOf } from './ladder';
 import { ladderPlan } from './ladder-policy';
 import { carriedGeneration } from './naming';
 import { applySuccess, type SuccessMode } from './success';
+import {
+  DEFAULT_BATCH_LEVEL,
+  flatten,
+  parseCountedMountId,
+  type BatchStrategy,
+  type UnitPlan,
+} from './unit-plan';
 import type { BreedingColor } from './costs';
 import { canonicalStable, consumeCouples, copyStable, projectBirths } from './stable';
 import type { CloneOption } from './cloning';
@@ -313,6 +310,13 @@ export type StablePlan = {
    * exactement ce qui rend un outil impossible à croire. Le compte se rend à
    * l'écran, séparé par motif — voir `ladder.ts` pour la règle.
    */
+  /**
+   * Ce que la fournée rapporte, et le rythme mensuel que ça fait.
+   *
+   * Un **rythme** et non une prévision : voir `earnings.ts`, qui dit les trois
+   * raisons de ne pas le lire comme un horizon.
+   */
+  earnings: BatchEarnings;
   refused: {
     /** Ne nomme aucune couleur : recopie de l'ascendance, zéro géneton. */
     barren: number;
@@ -400,76 +404,20 @@ export type PolicyInput = {
    * Ce que ce mode ne fait pas encore, et qui pèse : la moisson, et le réglage
    * du niveau des montures. Voir l'en-tête de `ladder-policy.ts`.
    */
-  policy?: 'champion' | 'ladder';
+  /**
+   * Le niveau auquel monter le lot.
+   *
+   * Absent, `DEFAULT_BATCH_LEVEL`. C'est le conseil affiché qui doit le
+   * remplir — l'écran en calculait un sur les prix de l'éleveur pendant que le
+   * plan employait celui du génome, deux nombres différents sans que rien ne le
+   * dise. Voir `tunedLevel`.
+   */
+  mountLevel?: number;
   seed?: number;
   iterations?: number;
 };
 
-/**
- * Ce qu'on retire au score pour chaque **féconde restée en stock**.
- *
- * ## Le défaut
- *
- * Une féconde est une place d'enclos déjà payée qui n'a encore rien produit.
- * Le réseau, lui, la compte comme un actif : ses poids sur `cycledMales` /
- * `cycledFemales` sont francs et positifs — sur une écurie qu'il note 9,92, en
- * tenir une de gen 4 vaut +1,48. Il paie donc pour en fabriquer (fermé par
- * `pairedBanking`) **et** pour ne pas les dépenser : sur l'écurie qui l'a fait
- * remonter, 44 fécondes en stock, 8 dépensées, un seul accouplement sans enclos
- * là où la valeur myope en fait cinq.
- *
- * La cause est la même que pour la mise en banque : le champion vient du tapis
- * roulant, où la fécondité **tombe au hasard** et ne s'achète pas. « Plus de
- * fécondes » y était le signe d'une bonne écurie, jamais une décision. Ici c'en
- * est une, et il la prend à l'envers.
- *
- * ## Pourquoi trois, et pourquoi ce n'est pas un réglage
- *
- * Balayé par `replay`, 200 graines scellées, économie complète :
- *
- * | pénalité | score médian | gen 10 tenues | croisements | achats |
- * | --- | --- | --- | --- | --- |
- * | 0 — aujourd'hui | 28,03 M | 17,8 | 390 | 270 |
- * | 1 | 28,80 M | 21,0 | 348 | 207 |
- * | **3** | **30,58 M** | **22,7** | 331 | 189 |
- * | 10 | 30,58 M | 22,7 | 331 | 189 |
- * | 30 | 30,58 M | 22,7 | 331 | 189 |
- *
- * **+2,55 M et +4,9 gen 10**, avec moins de croisements et moins d'achats. Et
- * la courbe **sature** à 3 : au-delà, le plan ne bouge plus d'une action. Ce
- * n'est donc pas une constante à régler mais une **règle** que trois suffit à
- * exprimer — à valeur égale, dépenser une féconde plutôt que la garder. Un
- * nombre plus grand ne dirait rien de plus ; un plus petit dirait moins.
- *
- * ## Ce que ça ne dit pas
- *
- * Le même tableau donne 57,23 M au glouton et 43,11 M à la valeur myope. Le
- * champion perd contre les deux sur cette économie — il a été sélectionné sur le
- * tapis, qui n'en a pas — et cette pénalité ne referme pas cet écart-là. Elle
- * corrige une lecture fausse, elle ne remplace pas un réentraînement.
- */
-const UNSPENT_FERTILITY = 3;
 
-/** Les fécondes encore en stock, tous rangs et les deux sexes. */
-const cycledHeld = (census: Census): number => {
-  let held = 0;
-  for (let generation = 0; generation <= MAX_GENERATION; generation += 1) {
-    held += census.cycledMales[generation] + census.cycledFemales[generation];
-  }
-  return held;
-};
-
-const DEFAULT_SEED = 1;
-
-/**
- * Le nombre de mutations que la recherche tire par fournée.
- *
- * Six cents, qui est le défaut de `breeding-neat` — donc le régime dans lequel le
- * champion a été noté. La recherche est stochastique et la fonction de valeur a
- * été sélectionnée **pour ce budget-là** : lui en donner deux fois plus n'est pas
- * « chercher mieux », c'est la mettre dans un régime qu'elle n'a pas connu.
- */
-const TRAINING_ITERATIONS = 600;
 
 /**
  * Ce que la politique ferait de cette écurie, ou `null` si elle ne peut pas
@@ -480,7 +428,6 @@ const TRAINING_ITERATIONS = 600;
  * d'affichage — mieux vaut ne rien montrer qu'une fournée inventée.
  */
 export const stablePlan = (input: PolicyInput): StablePlan | null => {
-  const champion = championArtifact as Champion;
   // L'ordre canonique **ici**, et pas chez l'appelant : le plan doit être une
   // fonction du contenu de l'écurie, pas de l'ordre où ses lignes sont arrivées.
   // Voir `canonicalStable` — la recherche départage à valeur égale dans l'ordre
@@ -489,12 +436,14 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
   const mounts = flatten(canonicalStable(input.stable));
   if (mounts.length === 0) return null;
 
-  const network = compile(champion);
-  if (network.inputs !== champion.features || !isConnected(network)) return null;
-
   const generations = new Map(input.colors.map((color) => [color.id, color.generation]));
   const economy = economyView(input.colors, input.market);
-  const strategy = strategyOf(champion);
+  // Le réglage de la fournée. Le niveau vient de l'appelant — donc du conseil
+  // affiché — et non plus du génome retiré. Voir `BatchStrategy`.
+  const strategy: BatchStrategy = {
+    level: input.mountLevel ?? DEFAULT_BATCH_LEVEL,
+    optimakinaFrom: 11,
+  };
 
   /**
    * Le plan **couronné**, et pas le plan brut.
@@ -532,84 +481,37 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     loadKamas: input.loadKamas,
   };
 
-  // L'échelle joue elle-même, si on le lui demande. Voir `PolicyInput.policy`.
-  if (input.policy === 'ladder') {
-    return readPlan(
-      ladderPlan(
-        // Le niveau de la fournée vient de la stratégie du génome, faute de
-        // mieux : l'écran ne pilote pas encore la Mangeoire, et c'est le seul
-        // niveau que l'app sache nommer aujourd'hui. Voir `tunedLevel`, qui dit
-        // ce qu'il **devrait** valoir sur les prix de l'éleveur.
-        { ...view, mountLevel: strategy.level },
-        ladder,
-        // La dernière fécondité des couleurs que le plan ne retient plus. Mesuré
-        // sur 200 graines scellées, départ gen 1 : +90,9 M à 2 000 h (56,04 →
-        // 146,98 M) et une écurie **plus petite** au pic — 566 contre 690, parce
-        // que dépenser la fécondité sort la monture de l'écurie au lieu de l'y
-        // laisser dormir. Voir `harvestStocked`.
-        { purchases: input.purchases ?? true, harvestStocked: true }
-      ),
-      mounts,
-      input,
-      generations,
-      economy,
-      strategy
-    );
-  }
-
-  const plan = planUnit(
-    createSearcher({
-      iterations: input.iterations ?? TRAINING_ITERATIONS,
-      // Voir l'en-tête : le champion du tapis n'a jamais vu l'extraction.
-      sacrifices: false,
-      // Rouvert, et c'est la fournée qui l'a tranché : sans procurement, le parc
-      // tombait à **7 places sur 40**. Une gen 1 à mille kamas est le moyen le
-      // moins cher de ne pas laisser une place vide, et trente-trois places
-      // vides coûtent une fournée entière.
-      //
-      // « Commencer par ce que j'ai » ne veut pas dire « ne jamais se
-      // procurer » : c'est un **ordre**, et c'est le parcours qui le porte —
-      // « D'abord, sans enclos » liste les accouplements que le stock permet
-      // tout de suite, puis vient la fournée à charger, où les gen 1 procurées
-      // occupent les places qui restaient. Voir `SearchConfig.purchases`, qui
-      // garde le levier pour qui veut composer sans rien acquérir.
-      purchases: input.purchases ?? true,
-      // La règle de l'échelle entre **dans** la recherche et non après elle.
-      // Filtrer le plan rendu laissait la recherche dépenser ses quarante places
-      // en croisements qu'on jetait ensuite : 22 propositions écartées sur 26, et
-      // une fournée retombée à 10 places sur 40. Ici, les places vont d'emblée à
-      // ce qui peut payer.
-      // `'target'` au sommet : la cible de l'éleveur est une gen 10, et une gen 10
-      // ne monte plus — `climbs` rend `false`, donc `aimsAt` refusait les seuls
-      // croisements qui savent la produire. Sur l'écurie qui l'a fait remonter, 26
-      // partenaires du coffre nommaient Azur-Doré avec ses gen 10 azurées, jusqu'à
-      // 13,95 %, et l'écran n'en proposait aucun. Ce n'est pas la boucle du forum,
-      // qui reste éteinte : seuls les croisements nommant `ladder.summit` passent.
-      // Voir `SummitRule`.
-      admissible: (male, female) =>
-        aimsAt(male, female, input.colors, generations, ladder, 'target') !== null,
-      // La montée s'arrête dès que plus rien ne fait strictement mieux, et il lui
-      // arrive de rendre la main à trente-neuf places sur quarante. L'éleveur
-      // complétait alors au jugé, ce qui est le bon geste — la place est du
-      // carburant déjà payé — mais ce n'est pas à lui de le faire. Voir
-      // `fillSparePlaces` : la passe est fermée dans le modèle, qui doit rester
-      // comparable au Rust, et ouverte ici, où l'on charge un vrai enclos.
-      fillSpare: true,
-      // Une fécondation sans croisement n'est pas une décision que le champion
-      // ait jamais eu à prendre : le tapis roulant tourne à capacité nulle, et
-      // `randomAction` n'offre `cycle` que si `places < capacity`. Ses poids sur
-      // `cycledMales`/`cycledFemales` sont pourtant nettement positifs, et sur un
-      // vrai parc il en achetait jusqu'à épuiser les places — la moitié d'un
-      // enclos en « à féconder sans croiser », dont des montures que rien dans
-      // l'écurie ne pouvait marier. Voir `SearchConfig.pairedBanking` : on garde
-      // l'action, on exige qu'elle prépare un croisement qui existe.
-      pairedBanking: true,
-    }),
-    { ...view, strategy },
-    seededRandom(input.seed ?? DEFAULT_SEED),
-    (census) =>
-      evaluate(network, featuresOf(census, input.colors, economy)) -
-      UNSPENT_FERTILITY * cycledHeld(census)
+  /**
+   * **L'échelle compose, et elle est la seule.**
+   *
+   * Le grimpeur a quitté le TypeScript. Il jouait ici, et il perdait : encaissé
+   * sur l'export de l'éleveur, une fournée par jour, départ gen 1 — l'échelle
+   * rend 87,63 M à trois mois sur le muldo, le champion **−4,70 M**, sous le
+   * plancher du « ne rien faire ». Sur les trois familles il finissait négatif,
+   * avec une écurie gonflée au-delà de mille têtes.
+   *
+   * La recherche reste **côté Rust**, comme étalon : `Greedy` et `Myopic` y
+   * mesurent encore ce que l'échelle vaut, et un champion peut y être réentraîné
+   * puis comparé. Ce qui a disparu est le portage, pas la mesure.
+   *
+   * Deux comportements avaient été perdus en silence quand l'écran a basculé, et
+   * les deux sont revenus ici : le sommet — `aimsAt` retombait sur `'hold'` alors
+   * que le champion recevait `'target'`, ce que `summit-target.spec.ts` a
+   * attrapé — et la **passe des succès** juste en dessous, que la branche de
+   * l'échelle sautait en rendant tôt.
+   */
+  const plan = ladderPlan(
+    // Le niveau de la fournée vient de la stratégie, faute de mieux : l'écran ne
+    // pilote pas encore la Mangeoire. Voir `tunedLevel`, qui dit ce qu'il
+    // **devrait** valoir sur les prix de l'éleveur.
+    { ...view, mountLevel: strategy.level },
+    ladder,
+    // La dernière fécondité des couleurs que le plan ne retient plus. Mesuré sur
+    // 200 graines scellées, départ gen 1 : +90,9 M à 2 000 h (56,04 → 146,98 M)
+    // et une écurie **plus petite** au pic — 566 contre 690, parce que dépenser
+    // la fécondité sort la monture de l'écurie au lieu de l'y laisser dormir.
+    // Voir `harvestStocked`.
+    { purchases: input.purchases ?? true, harvestStocked: true }
   );
 
   const read = readPlan(plan, mounts, input, generations, economy, strategy);
@@ -640,24 +542,6 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
   return read;
 };
 
-/**
- * Les réglages que le génome porte, pour l'unité de tête.
- *
- * Ils ne viennent pas de la recherche mais de l'évolution : une bande rapide ne se
- * justifie que par les chargements supplémentaires qu'elle laisse faire, ce qui
- * n'apparaît nulle part dans l'écurie qu'un chargement laisse derrière lui. Seuls
- * le niveau et le seuil d'Optimakina comptent ici — les bandes règlent les jauges,
- * que cet écran-ci ne pilote pas.
- */
-const strategyOf = (champion: Champion): SearchStrategy => {
-  const first = (champion.strategies ?? [])[0] as
-    | { level?: number; optimakina_from?: number }
-    | undefined;
-  return {
-    level: first?.level ?? 0,
-    optimakinaFrom: first?.optimakina_from ?? 11,
-  };
-};
 
 /**
  * Regroupe deux montures interchangeables : même couleur, même ascendance, même
@@ -692,7 +576,7 @@ const readPlan = (
   input: PolicyInput,
   generations: Map<string, number>,
   economy: EconomyView,
-  strategy: SearchStrategy
+  strategy: BatchStrategy
 ): StablePlan => {
   const bought = (index: number) => plan.purchases[index - mounts.length] ?? null;
 
@@ -703,18 +587,25 @@ const readPlan = (
    * viser. La couleur n'est pas une promesse : le croisement rend une distribution,
    * et c'est la saisie de naissance qui propose toutes les issues.
    */
-  const aimedAt = (maleMate: Mate | null, femaleMate: Mate | null) => {
-    if (!maleMate || !femaleMate) return null;
-    const delta = pairDelta(
-      maleMate,
-      femaleMate,
-      input.colors,
-      generations,
-      economy,
-      strategy.level,
-      strategy.optimakinaFrom
-    );
-    if (!delta) return null;
+  const deltaOf = (maleMate: Mate | null, femaleMate: Mate | null) =>
+    maleMate && femaleMate
+      ? pairDelta(
+          maleMate,
+          femaleMate,
+          input.colors,
+          generations,
+          economy,
+          strategy.level,
+          strategy.optimakinaFrom
+        )
+      : null;
+
+  const aimedAt = (
+    maleMate: Mate | null,
+    femaleMate: Mate | null,
+    delta: PairDelta | null
+  ) => {
+    if (!maleMate || !femaleMate || !delta) return null;
     // `climbs` et non `namesTarget` : hors du sommet, une fenêtre pleine ne gagne
     // rien, donc il n'y a rien à annoncer comme visé.
     //
@@ -738,6 +629,11 @@ const readPlan = (
   const couples = new Map<string, CoupleLine>();
   const refused = { barren: 0, offPlan: 0 };
   let places = 0;
+  // Les recettes et les dépenses de la fournée, cumulées sur les croisements
+  // **retenus** : un couple refusé ne rapporte pas de génétons et ne coûte pas
+  // d'Optimakina, donc le cumul se fait après les deux portes.
+  let genetons = 0;
+  let optimakina = 0;
 
   /**
    * La règle de l'échelle, appliquée à ce que la politique entraînée propose.
@@ -787,7 +683,8 @@ const readPlan = (
 
     const [male, maleMate, maleCycled] = side(maleIndex, 'M');
     const [female, femaleMate, femaleCycled] = side(femaleIndex, 'F');
-    const aimed = aimedAt(maleMate, femaleMate);
+    const delta = deltaOf(maleMate, femaleMate);
+    const aimed = aimedAt(maleMate, femaleMate, delta);
 
     // « Un croisement est admissible si et seulement si ses couleurs cibles sont
     // non vides et toutes dans le plan. » Les deux moitiés se comptent à part :
@@ -809,6 +706,13 @@ const readPlan = (
 
     const cost = (maleCycled ? 0 : 1) + (femaleCycled ? 0 : 1);
     places += cost;
+    // Le même delta que `aimedAt` a lu, et pas un second appel : il porte le taux,
+    // les génétons et le prix de l'Optimakina, et `pairDelta` n'est pas mémoïsé —
+    // le redemander par croisement doublait `matingOutcomes` pour rien.
+    if (delta) {
+      genetons += delta.genetonKamas;
+      optimakina += delta.optimakinaCost;
+    }
 
     const key = `${signatureOf({ colorId: male.colorId, parents: mounts[maleIndex]?.parents ?? null, cycled: male.cycled })}/${signatureOf({ colorId: female.colorId, parents: mounts[femaleIndex]?.parents ?? null, cycled: female.cycled })}`;
     const line = couples.get(key);
@@ -863,8 +767,30 @@ const readPlan = (
     purchases.set(colorId, row);
   }
 
+  /**
+   * Ce que la fournée déplace en kamas.
+   *
+   * Les sacrifices sont la recette : `plan.sacrifices` porte des index d'écurie, et
+   * `valueOf` dit ce que chacun rend — vente ou extraction, au mieux des deux. Le
+   * chargement se paie une fois, et seulement si la fournée croise : c'est la même
+   * condition que `settle` applique à son test de solvabilité, et les deux doivent
+   * s'accorder ou le chiffre affiché contredirait le refus.
+   */
+  const earnings = batchEarnings({
+    genetons,
+    sales: plan.sacrifices.reduce(
+      (sum, index) => sum + (mounts[index] ? economy.valueOf(mounts[index].colorId) : 0),
+      0
+    ),
+    loadKamas: plan.crossings.length === 0 ? 0 : input.loadKamas,
+    purchases: plan.purchases.length * economy.starterPrice,
+    optimakina,
+    genetonValue: economy.genetonValue,
+  });
+
   return {
     refused,
+    earnings,
     // La couronne retenue, et celle qu'on avait demandée. Voir `crown` : le projet
     // pèse au lieu d'imposer, donc les deux peuvent différer et l'écran doit le dire.
     crown: ladder.summit.length > 0

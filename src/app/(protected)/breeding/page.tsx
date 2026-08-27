@@ -584,6 +584,38 @@ const BreedingPage = () => {
         settings.success_mode === 'ignore'
           ? undefined
           : { mode: settings.success_mode, hatched },
+      /**
+       * **L'échelle joue, plus le champion.**
+       *
+       * Décidé par l'éleveur le 27/08 — « on n'utilise plus le champion » — et la
+       * mesure dit la même chose. Encaissé sur son export, une fournée par jour,
+       * départ gen 1 :
+       *
+       * | à 3 mois | échelle | champion |
+       * | --- | --- | --- |
+       * | muldo | 87,63 M | −4,70 M |
+       * | volkorne | 40,22 M | −4,29 M |
+       * | dragodinde | 17,04 M | −10,44 M |
+       *
+       * Le champion finit **sous le plancher du « ne rien faire »** sur les trois
+       * familles, avec une écurie gonflée au-delà de mille têtes et des plans que
+       * le moteur refuse en partie (`monture employée deux fois`). Il a été
+       * entraîné dans un régime qui n'est pas celui joué — voir la compétence
+       * `neat-training` — et rien ne le rattrape à ce niveau d'écart.
+       */
+      /**
+       * Le niveau du lot : **celui que l'écran conseille**.
+       *
+       * Il venait du génome du champion — `level: 47` — pendant que le conseil
+       * affiché en calculait un autre sur les prix de l'éleveur. Deux nombres
+       * différents, aucun des deux ne sachant que l'autre existait.
+       *
+       * `undefined` quand le conseil manque un prix : `stablePlan` retombe alors
+       * sur `DEFAULT_BATCH_LEVEL`, qui est l'ancien 47 — on ne devine pas un
+       * niveau à partir de rien.
+       */
+      mountLevel:
+        advisedLevel !== null && advisedLevel.missing === null ? advisedLevel.level : undefined,
     };
   }, [
     tree,
@@ -602,6 +634,7 @@ const BreedingPage = () => {
     hatched,
     // Les enclos verrouillés décident des places libres : voir `free`.
     batch.pens,
+      advisedLevel,
   ]);
 
   const policyFill = useMemo(

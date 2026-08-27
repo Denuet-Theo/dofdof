@@ -7,7 +7,7 @@ import Button from '@/components/ui/Button';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { colorIconUrl, type BreedingColor } from '@/lib/dofus/breeding/costs';
 import { ANONYMOUS_NAME, colorCoder } from '@/lib/dofus/breeding/naming';
-import { parseCountedMountId } from '@/lib/dofus/breeding/search';
+import { parseCountedMountId } from '@/lib/dofus/breeding/unit-plan';
 import type { Individual, Sex } from '@/lib/dofus/breeding/stable';
 
 /**

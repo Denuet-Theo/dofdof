@@ -141,6 +141,11 @@ fn flag(name: &str) -> Option<String> {
         .cloned()
 }
 
+/// Le nom de la famille, pour l'en-tête du recensement.
+fn wanted_family(_wanted: &[f64; 11], _held: &[f64; 11]) -> String {
+    std::env::args().nth(1).unwrap_or_else(|| "muldo".to_string())
+}
+
 fn median(values: &mut [f64]) -> f64 {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     values[(values.len() - 1) / 2]
@@ -429,6 +434,117 @@ fn main() {
                 mean / 1e6,
                 stderr / 1e6,
                 t
+            );
+        }
+        return;
+    }
+
+    // `--recensement` : ce qui **reste** en écurie à la fin, par génération, et ce
+    // que le plan en voulait.
+    //
+    // La question que ça répond : sur le volkorne et la dragodinde, jouer plus
+    // longtemps appauvrit — l'écurie double en quatre mois pendant que le gain
+    // baisse. L'éleveur le dit de son côté : « j'ai des montures qu'il ne sait pas
+    // employer ». Reste à savoir lesquelles, parce que le remède n'est pas le même
+    // selon qu'elles sont hors du plan (la moisson devrait les écouler) ou au plan
+    // mais en trop (la route ne les consomme pas).
+    if std::env::args().any(|arg| arg == "--recensement") {
+        let outcomes = run(&catalog, &economy, start, || {
+            let mut policy = LadderPolicy::with_ladder(plan.clone());
+            policy.harvest_stocked = true;
+            pinned(policy)
+        });
+        let mut held = [0f64; 11];
+        for outcome in &outcomes {
+            for (slot, count) in outcome.held_by_generation.iter().enumerate() {
+                held[slot] += f64::from(*count) / outcomes.len() as f64;
+            }
+        }
+        // Ce que le plan réclame, par génération : la demande de l'échelle.
+        let mut wanted = [0f64; 11];
+        for (color, demand) in plan.demand.iter() {
+            let slot = usize::from(catalog.generation(*color)).min(10);
+            wanted[slot] += *demand;
+        }
+        println!(
+            "{} · {} fournees · niveau {} · ecurie finale moyenne",
+            wanted_family(&wanted, &held),
+            economy.batches,
+            level()
+        );
+        println!("{:>4} {:>10} {:>10}", "gen", "tenu", "demande");
+        println!("{}", "-".repeat(26));
+        for generation in 1..=10 {
+            if held[generation] < 0.05 && wanted[generation] < 0.05 {
+                continue;
+            }
+            println!(
+                "{:>4} {:>10.1} {:>10.1}",
+                generation, held[generation], wanted[generation]
+            );
+        }
+        println!(
+            "{:>4} {:>10.1} {:>10.1}",
+            "tot",
+            held.iter().sum::<f64>(),
+            wanted.iter().sum::<f64>()
+        );
+        return;
+    }
+
+    // `--couleurs n` : le rang `n`, couleur par couleur.
+    //
+    // Le compte par génération dit qu'un rang déborde. Celui-ci dit **laquelle**,
+    // et c'est la question qui tranche quand une seule couleur du rang compose
+    // quelque chose au-dessus : si ce qui s'entasse est celle qui mène ailleurs,
+    // le problème est la conversion ; si ce sont les autres, c'est la production.
+    if let Some(rank) = flag("--couleurs").and_then(|v| v.parse::<u8>().ok()) {
+        let outcomes = run(&catalog, &economy, start, || {
+            let mut policy = LadderPolicy::with_ladder(plan.clone());
+            policy.harvest_stocked = true;
+            pinned(policy)
+        });
+        let runs = outcomes.len() as f64;
+        let mut held = vec![0f64; catalog.len()];
+        for outcome in &outcomes {
+            for (color, count) in outcome.held_by_color.iter().enumerate() {
+                if color < held.len() {
+                    held[color] += f64::from(*count) / runs;
+                }
+            }
+        }
+        println!(
+            "{} · {} fournees · gen {rank}, couleur par couleur",
+            std::env::args().nth(1).unwrap_or_default(),
+            economy.batches
+        );
+        println!("{:<24} {:>8} {:>9}  {}", "couleur", "tenu", "demande", "compose");
+        println!("{}", "-".repeat(56));
+        let mut rows: Vec<(f64, String, f64, bool)> = (0..catalog.len() as u16)
+            .filter(|&color| catalog.generation(color) == rank)
+            .map(|color| {
+                // Compose-t-elle quelque chose plus haut ? La question de
+                // l'éleveur : sur la dragodinde une seule gen 4 le fait.
+                let leads = catalog.colors().iter().any(|other| {
+                    other.generation > rank
+                        && other.recipes.iter().any(|recipe| recipe.contains(&color))
+                });
+                (
+                    held[usize::from(color)],
+                    catalog.slug(color).to_string(),
+                    plan.demand.get(&color).copied().unwrap_or(0.0),
+                    leads,
+                )
+            })
+            .collect();
+        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (tenu, slug, demande, leads) in rows {
+            println!(
+                "{:<24} {:>8.1} {:>9.1}  {}",
+                slug,
+                tenu,
+                demande,
+                if leads { "oui" } else { "CUL-DE-SAC" }
             );
         }
         return;

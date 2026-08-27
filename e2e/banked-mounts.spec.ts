@@ -175,9 +175,21 @@ test.describe('fécondations sans croisement', () => {
 
     const summary = await page.getByTestId('policy-summary').innerText();
     const [, used, free] = summary.match(/(\d+)\/(\d+) places/)!;
-    // Le parc est employé, à deux places près : c'est ce que « dépenser ses
-    // places » veut dire.
-    expect(Number(used)).toBeGreaterThanOrEqual(Number(free) - 2);
+    // Le parc est employé, sans exiger qu'il soit plein.
+    //
+    // « À deux places près » était le bon seuil tant que chaque croisement
+    // coûtait une place ou deux. Les croisements entre deux fécondes n'en
+    // coûtent aucune, et ils se composent maintenant en premier : la fournée
+    // sert donc la même demande avec moins de places, et la boucle d'achat
+    // s'arrête d'elle-même quand plus aucune gen 2 n'est en retard — 45 sur 50
+    // au lieu de 48. Ce qu'il resterait à combler ne vaut plus l'achat qui le
+    // comblerait : refaire une couleur qu'on vient d'obtenir gratuitement.
+    //
+    // Le seuil garde donc ce qu'il gardait vraiment — le parc à moitié vide de
+    // #189, « 7 places sur 40 », qui échoue toujours ici — et cesse d'épingler
+    // un taux de remplissage que la politique a le droit de faire baisser en
+    // faisant mieux.
+    expect(Number(used)).toBeGreaterThan(Number(free) * 0.8);
   });
 
   /**

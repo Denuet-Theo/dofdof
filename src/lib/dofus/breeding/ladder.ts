@@ -1044,13 +1044,20 @@ export const aimsAt = (
    * Ce qu'on accepte au **sommet**, là où le plafond interdit de monter. Voir
    * `aimsAtSummit`.
    *
-   * `'hold'` par défaut, comme `Summit::Hold` côté Rust, et pour la raison qui y
-   * est écrite : la boucle de duplication gagne dans le modèle et perd au
-   * marché, que le modèle ne sait pas encore chiffrer. Les deux défauts doivent
-   * bouger ensemble, sans quoi l'écran proposerait ce que la politique mesurée
-   * refuse.
+   * `'target'` par défaut, comme `Summit::Target` côté Rust : les croisements qui
+   * nomment la couleur **visée**, et eux seuls.
+   *
+   * Ça n'était pas le défaut, et le basculement de l'écran sur l'échelle l'a
+   * rendu nécessaire : `policy.ts` passait `'target'` au champion, donc une gen 10
+   * qui nomme la cible entrait dans la fournée. L'échelle retombait sur `'hold'`
+   * et retirait ce comportement sans que rien ne le dise —
+   * `summit-target.spec.ts` l'a attrapé. C'est ce que #225 et #236 avaient
+   * ouvert : mesurer ou jouer dans un régime qui n'est pas celui de l'autre côté.
+   *
+   * `'all'` reste éteint : la boucle de duplication a été mesurée à −1,43 M sur
+   * l'écurie de l'éleveur et retirée. Les deux défauts doivent bouger ensemble.
    */
-  summit: SummitRule = 'hold'
+  summit: SummitRule = 'target'
 ): string | null => {
   const outlook = pairOutlook(male, female, colors, generations);
   if (!outlook || outlook.targetColors.length === 0) return null;

@@ -1403,7 +1403,13 @@ struct Building {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Summit {
     /// Rien. La fécondité d'une gen 10 se garde, faute de savoir quoi en faire.
-    #[default]
+    ///
+    /// **N'est plus le défaut.** L'app jouait le champion, et `policy.ts` lui
+    /// passait `'target'` : une gen 10 qui nomme la couleur visée entrait donc
+    /// dans la fournée. Basculer l'écran sur l'échelle, qui retombait sur `Hold`,
+    /// retirait ce comportement en silence — c'est ce que
+    /// `summit-target.spec.ts` a attrapé, et c'est exactement ce que #225 et #236
+    /// avaient ouvert.
     Hold,
     /// Les croisements qui nomment une couleur de `ladder.summit`, et eux seuls.
     ///
@@ -1429,6 +1435,7 @@ pub enum Summit {
     /// refusait toujours ces croisements, donc le champion s'entraînait dans un
     /// espace plus étroit que celui où il joue. C'est la famille de défauts de
     /// #236, et c'est ce qui a motivé cette variante.
+    #[default]
     Target,
     /// La boucle décrite par Olxinos-etenn#1917 sur le forum officiel, et
     /// vérifiée ici sur `mating_outcomes`.

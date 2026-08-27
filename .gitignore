@@ -75,3 +75,8 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# La sortie de `cargo mutants` : des logs et des diffs par mutant, régénérés
+# à chaque passage.
+rust/mutants.out/
+rust/mutants.out.old/

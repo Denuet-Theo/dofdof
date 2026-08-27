@@ -25,18 +25,21 @@
 //! s'exécute donc jamais et son absence du portage est sans effet. La moisson,
 //! elle, est **allumée** — elle l'est par défaut, et le portage l'a maintenant.
 //!
-//! Les **clonages** et les **sacrifices** sont rendus tels quels pour mémoire,
-//! mais `check-ladder-policy.mjs` ne les compare pas : ils viennent de
-//! `clone_by_generation`, qui n'est pas dans ce portage-ci.
+//! Les **clonages** et les **sacrifices** sont comparés depuis que
+//! `clone_by_generation` est porté. Ils ne l'étaient pas, et cette exemption
+//! cachait que l'échelle TypeScript n'extrayait rien du tout.
+//!
+//! ## Les cas viennent d'ailleurs
+//!
+//! `breeding_neat::parity::ladder_policy_cases` les fabrique, et
+//! `tests/ladder_policy_parity.rs` vérifie que le Rust rejoue le fichier écrit
+//! ici. Un dumper et un test qui fabriquent « les mêmes » cas chacun de son côté
+//! finissent par ne plus les fabriquer pareil.
 
-use breeding_sim::config::Prices;
-use breeding_sim::economy::{Draws, Policy, Rng, Strategy, UnitPlan, UnitView, starting_stable};
-use breeding_sim::ladder::{LadderPolicy, Route};
-use breeding_sim::sample::{SampleConfig, sample_stable};
+use breeding_neat::parity::all_cases;
+use breeding_sim::economy::UnitPlan;
 use breeding_sim::stable::Sex;
-use breeding_sim::trees::{Catalog, muldo};
-
-const CASES: u32 = 40;
+use breeding_sim::trees::Catalog;
 
 /// Le plan tel que le portage le compare : des listes d'entiers, rien d'autre.
 fn plan_json(catalog: &Catalog, plan: &UnitPlan) -> serde_json::Value {
@@ -58,97 +61,54 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "../scripts/fixtures/ladder-policy-parity.json".into());
 
-    let catalog = muldo();
-    let base = Prices::load_default()
-        .map(|prices| prices.economy)
-        .unwrap_or_else(|error| {
-            eprintln!("{error}");
-            std::process::exit(1);
-        });
-    let sampling = SampleConfig::default();
-
-    let mut cases = Vec::with_capacity(CASES as usize);
-    for case in 0..CASES {
-        let economy = base.for_run(&catalog, &Draws::new(case.wrapping_mul(2_246_822_519)));
-        let stable = if case % 2 == 0 {
-            sample_stable(
-                &catalog,
-                &mut Rng::new(case.wrapping_mul(2_654_435_761)),
-                &sampling,
-            )
-        } else {
-            starting_stable(&catalog, &economy, &Draws::new(case.wrapping_mul(40_503)))
-        };
-
-        // Le niveau par défaut : l'échelle non réglée. `tuned_for` est un levier
-        // séparé, qui n'est pas dans ce portage.
-        let strategy = Strategy::default();
-        let unit = 0;
-        let capacity = [4usize, 10, 25, 50][case as usize % 4];
-        let kamas = economy.starting_kamas * (1 + case as i64 % 3);
-
-        let view = UnitView {
-            catalog: &catalog,
-            economy: &economy,
-            stable: &stable,
-            kamas,
-            unit,
-            strategy,
-            capacity,
-        };
-
-        // Deux configurations par écurie, et c'est le point : l'app joue
-        // `harvest_stocked` **allumé**, donc une référence qui ne couvre que le
-        // défaut garderait la parité du chemin que personne n'exécute. Voir
-        // `harvest_stocked` dans `ladder.rs`.
-        for stocked in [false, true] {
-        let mut policy = LadderPolicy::new(&catalog, Route::default());
-        policy.harvest_stocked = stocked;
-        let plan = policy.plan(&view, &mut Rng::new(1));
-
-        let mounts: Vec<serde_json::Value> = stable
-            .mounts
-            .iter()
-            .map(|mount| {
-                serde_json::json!({
-                    "color": catalog.slug(mount.color),
-                    "sex": if mount.sex == Sex::Male { "M" } else { "F" },
-                    "fertile": mount.fertile,
-                    "cycled": mount.cycled,
-                    "level": mount.level,
-                    "parents": mount.parents.map(|[a, b]| [catalog.slug(a), catalog.slug(b)]),
+    let mut cases = Vec::new();
+    for (_, catalog, family_cases) in all_cases() {
+        for case in &family_cases {
+            let mounts: Vec<serde_json::Value> = case
+                .stable
+                .mounts
+                .iter()
+                .map(|mount| {
+                    serde_json::json!({
+                        "color": catalog.slug(mount.color),
+                        "sex": if mount.sex == Sex::Male { "M" } else { "F" },
+                        "fertile": mount.fertile,
+                        "cycled": mount.cycled,
+                        "level": mount.level,
+                        "parents": mount.parents.map(|[a, b]| [catalog.slug(a), catalog.slug(b)]),
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
-        cases.push(serde_json::json!({
-            "harvestStocked": stocked,
-            "kamas": kamas,
-            "capacity": capacity,
-            // Ce que la politique retire du solde pour ouvrir la fournée, et qui
-            // borne donc ce qu'elle peut acheter. C'est `batch_cost` et non
-            // `unit_load` : la première est le forfait que `LadderPolicy` déduit,
-            // la seconde le carburant que `feasible` facture à la recherche. Les
-            // confondre faisait acheter le portage à côté du Rust sur 20 cas.
-            "loadKamas": economy.batch_cost,
-            "mountLevel": economy.mount_level,
-            "economy": {
-                "starterPrice": economy.starter_price,
-                "genetonValue": economy.geneton_value,
-                "optimakinaBonus": economy.optimakina_bonus,
-                "values": (0..catalog.len())
-                    .map(|color| serde_json::json!([
-                        catalog.slug(color as u16),
-                        economy.value_of(&catalog, color as u16)
-                    ]))
-                    .collect::<Vec<_>>(),
-            },
-            "crown": catalog.slug(
-                policy.ladder().summit.first().copied().unwrap_or_default()
-            ),
-            "mounts": mounts.clone(),
-            "plan": plan_json(&catalog, &plan),
-        }));
+            cases.push(serde_json::json!({
+                "family": case.family,
+                "harvestStocked": case.harvest_stocked,
+                "cloneTop": case.clone_top,
+                "kamas": case.kamas,
+                "capacity": case.capacity,
+                // Ce que la politique retire du solde pour ouvrir la fournée, et
+                // qui borne donc ce qu'elle peut acheter. C'est `batch_cost` et
+                // non `unit_load` : la première est le forfait que `LadderPolicy`
+                // déduit, la seconde le carburant que `feasible` facture à la
+                // recherche. Les confondre faisait acheter le portage à côté du
+                // Rust sur 20 cas.
+                "loadKamas": case.economy.batch_cost,
+                "mountLevel": case.economy.mount_level,
+                "economy": {
+                    "starterPrice": case.economy.starter_price,
+                    "genetonValue": case.economy.geneton_value,
+                    "optimakinaBonus": case.economy.optimakina_bonus,
+                    "values": (0..catalog.len())
+                        .map(|color| serde_json::json!([
+                            catalog.slug(color as u16),
+                            case.economy.value_of(&catalog, color as u16)
+                        ]))
+                        .collect::<Vec<_>>(),
+                },
+                "crown": catalog.slug(case.crown),
+                "mounts": mounts,
+                "plan": plan_json(&catalog, &case.plan),
+            }));
         }
     }
 

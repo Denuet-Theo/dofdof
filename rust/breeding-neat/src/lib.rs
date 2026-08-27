@@ -2,4 +2,5 @@
 //! partagent la même définition de réseau que l'entraînement.
 
 pub mod champion;
+pub mod parity;
 pub mod neat;

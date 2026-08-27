@@ -1,0 +1,31 @@
+# Les mutants que `cargo mutants` doit laisser tranquilles, et pourquoi.
+#
+# ## À quoi sert ce fichier
+#
+# La garde de parité (`scripts/check-ladder-policy.mjs` d'un côté,
+# `breeding-neat/tests/ladder_policy_parity.rs` de l'autre) se prononce sur
+# 98 fournées. Un mutant qui y survit désigne une ligne que ces fournées
+# n'exercent pas — donc un endroit où les deux ports peuvent divorcer sans que
+# rien ne le dise. C'est un signal, et il ne vaut que s'il n'est pas noyé.
+#
+# D'où ce fichier : ce qui est ici est **volontairement** hors référence, avec
+# la raison écrite. Ce qui n'y est pas et survit est un vrai trou.
+#
+# Ne pas s'en servir pour faire taire un mutant gênant. La bonne réponse à un
+# survivant est presque toujours un cas de référence en plus — voir
+# `parity.rs`, où l'insolvabilité, `clone_top` éteint et le départage à sexe
+# égal ont été ajoutés exactement pour ça.
+
+exclude_re = [
+    # `clone_same_lineage` n'est **jamais appelée** : `clone_across_lineages`
+    # vaut `true` par défaut des deux côtés, et le levier existe « pour la
+    # mesure » — il sert à dire ce que le relâchement vers
+    # `clone_by_generation` rapporte. Aucun portage TypeScript ne l'accompagne,
+    # et il ne doit pas en avoir un : l'app ne l'exécute pas, et ce dépôt a
+    # déjà payé le prix des gardes qui protègent du code que personne ne lance
+    # (voir AGENTS.md, « ce qui n'est plus là »).
+    #
+    # Cinq mutants y survivaient à chaque passage. Les exclure rend les
+    # survivants restants lisibles.
+    "clone_same_lineage",
+]

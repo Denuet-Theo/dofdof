@@ -17,19 +17,25 @@ crossing admissible** (`aimsAt`). `check-ladder.mjs` holds the rule,
 `check-ladder-parity.mjs` holds the equality between the two ports. A change on
 one side without the other is a bug, not a divergence.
 
-**The champion — `champion.json` + `search.ts`/`census.ts`.**
-A value function that scores a stable, and a hill climb that composes a batch and
-asks it. It decides **which** of the admissible crossings to play, and nothing
-else. It is an artefact of `rust/breeding-neat`, and it is only as good as the
-environment it was scored in — see the `neat-training` skill for two measured
-ways that environment has not matched the app.
+**The batch — `ladder-policy.ts` ≡ `rust/breeding-sim/src/ladder.rs`'s
+`LadderPolicy`.** Given the plan, it decides **which** of the admissible
+crossings to play, plus the clonings, the purchases and the sacrifices that pay
+for them. Rules, not a learned artefact. `check-ladder-policy.mjs` holds the
+equality between the two ports, batch for batch.
 
-**The measurement witnesses — `Greedy` and `Myopic`, in Rust only.**
-They are yardsticks, printed by `bench` and `replay`. **They are never played by
-the app**, and no TypeScript port of them exists. If a number quotes "glouton",
-it is telling you what a reference player would have done, not what your screen
-did. Deleting them would make "is the champion any good" unanswerable, which is
-exactly how the shipped champion spent weeks scoring barely above doing nothing.
+**The other players — `Greedy`, `Myopic` and the champion, in Rust only.**
+Yardsticks, printed by `bench`, `replay` and `table`. **None of them is played by
+the app**, and no TypeScript port of any of them exists any more. If a number
+quotes "glouton", it is telling you what a reference player would have done, not
+what your screen did. Deleting them would make "is the ladder any good"
+unanswerable, which is exactly how the shipped champion spent weeks scoring
+barely above doing nothing.
+
+The champion was in TypeScript until 27/08 — `champion.json`, `search.ts`,
+`network.ts`, the 75-entry feature vector in `census.ts`, and four parity guards
+that compared the two searches. It lost to the ladder on all three families, so
+it left the app and stayed in Rust where it can still be measured against. Do not
+port it back to answer "which crossing"; that question has an answer now.
 
 **The screen — everything under `src/components/breeding`.**
 Pens, births, cloning advice, extraction, prices, gauges. It reads the plan; it

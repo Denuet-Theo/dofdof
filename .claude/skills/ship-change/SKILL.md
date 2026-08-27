@@ -80,21 +80,23 @@ once stops being a signal.
 screenshot — the screen renders a ranked list perfectly whether the ranking is
 sound or nonsense. Only playing the policy shows it.
 
-**If the diff touches `ladder.ts`, `policy.ts`, `search.ts`, `census.ts`,
+**If the diff touches `ladder.ts`, `ladder-policy.ts`, `policy.ts`, `census.ts`,
 `pairing.ts` or `cloning.ts`, measure before opening the PR** and put the
-numbers in the body. Three harnesses, in rising cost:
+numbers in the body. Four harnesses, in rising cost:
 
 | harness | cost | what it answers |
 | --- | --- | --- |
 | `node scripts/policy-report.mjs` | ~1 s | does the policy still mate at all, and what share of its crossings climb no rank |
-| `node scripts/check-search.mjs` | ~10 s | does the TypeScript search still replay the Rust one, plan for plan |
-| `rust/target/release/replay.exe <champion>` | ~1 min | what the policy is **worth**: 200 sealed seeds, full economy, against the greedy and the myopic baselines |
+| `node scripts/check-ladder-policy.mjs` | ~40 s | does the TypeScript batch still replay the Rust one, crossing for crossing, on all three families |
+| `rust/target/release/table --heures 4380` | ~2 min | what the ladder is **worth** on a six-month calendar, against the greedy and the myopic baselines |
+| `rust/target/release/bench` | ~1 min | the same, sealed seeds and a fixed horizon, with the per-generation held counts |
 
-`replay` is the one that decides. It prints the median score, the gen 10 held,
-and the same line for two baselines that are **never played in the app** and
-exist only as yardsticks. A policy change that does not move those numbers did
-not change the policy; one that moves them down is a regression however good the
-reasoning looked.
+`table` is the one that decides — it plays a calendar, one batch a day, which is
+the constraint the breeder actually has. It prints the cashed total and the same
+line for baselines that are **never played in the app** and exist only as
+yardsticks. A policy change that does not move those numbers did not change the
+policy; one that moves them down is a regression however good the reasoning
+looked.
 
 The old `simulatePolicy` harness is gone with `simulate.ts`, `loadout.ts` and
 `next-move.ts` — it measured a heuristic the app no longer runs. Its lesson

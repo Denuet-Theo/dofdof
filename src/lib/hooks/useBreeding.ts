@@ -318,11 +318,14 @@ export const DEFAULT_SETTINGS: BreedingSettings = {
  * le type ment sur ce qui arrive vraiment, et `tsc` ne peut rien y voir puisque
  * la valeur ne traverse aucune frontière qu'il inspecte.
  *
- * Le coût de ce mensonge est démesuré. `census.kamas` part de ce champ, et
- * `census.ts` le fait avancer avec `+=` : sur une chaîne, `+=` **concatène**. Le
- * solde devient alors un texte, `expectedScore` et `myopic` rendent un texte à
- * leur tour, et la recherche compare ses candidats **lexicographiquement**. Le
- * classement de la politique n'a plus aucun rapport avec des kamas.
+ * Le coût de ce mensonge est démesuré. Le solde part de ce champ et la politique
+ * le fait avancer avec `+=` : sur une chaîne, `+=` **concatène**. Le solde devient
+ * alors un texte, et tout test de solvabilité le compare **lexicographiquement** —
+ * `'3000000' < '9'` est vrai. Le plan n'a plus aucun rapport avec des kamas.
+ *
+ * C'était la recherche du champion qui trébuchait là en #174 ; elle est partie,
+ * l'arithmétique est restée. `ladder-policy.ts` retranche les achats, les clonages
+ * et les Optimakina du même solde, et se refuse quand il passe sous zéro.
  *
  * Mesuré sur l'écurie du 14/08, à 3 000 000 kamas et 50 places :
  *

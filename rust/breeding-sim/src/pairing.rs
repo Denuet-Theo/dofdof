@@ -30,9 +30,15 @@
 //!
 //! ## Ce qui n'est pas porté
 //!
-//! Les génétons. `pairShape` les calcule côté TS ; l'économie visée ne les
-//! monnaie pas, et une valeur qu'on transporte sans l'utiliser finit par être
-//! crue. La porte de parité les exclut donc explicitement de la comparaison.
+//! Les génétons. `pairShape` les calcule côté TS, ce module non, et la porte de
+//! parité les exclut donc explicitement de la comparaison.
+//!
+//! La raison écrite ici était « l'économie visée ne les monnaie pas », et elle a
+//! cessé d'être vraie : `economy.rs` crédite `génétons × geneton_value` à chaque
+//! fournée, avec un prix tiré par partie. Ce qui reste vrai est plus étroit — ce
+//! sont `ladder.rs` et `economy.rs` qui les comptent, à partir des générations des
+//! parents, sans passer par l'appariement. Les porter **ici** ajouterait un second
+//! calcul du même nombre, et deux calculs d'un même nombre finissent par diverger.
 
 use crate::lineage::lineage_distribution;
 use crate::trees::{Catalog, ColorId};

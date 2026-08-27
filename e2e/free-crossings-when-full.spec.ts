@@ -3,13 +3,13 @@ import { mockSupabase } from './support/supabase';
 import { openBreeding } from './support/breeding';
 
 /**
- * Le parc plein n'éteint pas les accouplements gratuits.
+ * Les accouplements sans enclos ne dépendent pas de l'état du parc.
  *
  * ## Le défaut, tel que l'éleveur le vit
  *
  * « Je viens de sortir 60 montures de la fournée, et l'onglet est passé de 0 à
  * 4. » Puis, la fournée suivante chargée : « ça me donne 0 accouplement ». Ses
- * 74 fécondes étaient au coffre, l'écurie de l'app correspondait au jeu, et
+ * 74 fécondes étaient au coffre, l'écurie de l'app d'accord avec le jeu, et
  * l'écran ne proposait rien pendant toute la durée du cycle.
  *
  * ## La cause
@@ -21,23 +21,36 @@ import { openBreeding } from './support/breeding';
  * les bornait quand même : parc plein, la boucle d'étages ne tournait pas du
  * tout, et pas un seul accouplement ne sortait.
  *
- * Mesuré sur l'export de l'éleveur du 27/08 — 74 fécondes, 38 ♂ et 36 ♀,
- * 254 paires admissibles par l'échelle couronnée sur Azur-Doré :
+ * ## L'invariant que ce fichier tient
  *
- * | places libres | avant | après |
- * | --- | --- | --- |
- * | 60 (parc vide) | 4 | 24 |
- * | 20 | 3 | 31 |
- * | 0 (parc plein) | **0** | **32** |
+ * **Le nombre d'accouplements à saisir est le même, parc vide et parc plein.**
+ *
+ * Ce n'est pas un « au moins un » de confort : c'est vrai par construction, la
+ * passe gratuite tournant avant la distribution des places et n'étant bornée par
+ * aucune. Un « `> 0` » aurait laissé passer la version où la passe venait en
+ * dernier, qui donne 21 parc vide et 24 parc plein sur cette fixture — deux
+ * nombres, deux conseils, pour une écurie identique.
+ *
+ * Et c'est l'invariant qui compte pour l'éleveur, parce qu'il accouple **avant**
+ * de charger : un poulain né du croisement de ce matin doit pouvoir entrer dans
+ * l'enclos de ce midi. Une gen 9 qui attend la fournée du lendemain, c'est une
+ * journée perdue, et il n'y en a qu'une par jour.
  *
  * ## Comment ce test échoue sans le correctif
  *
- * Mesuré, en retirant la passe `composeFree` de `ladder-policy.ts` : la fixture
- * porte 75 fécondes et 5 enclos, sa fournée en occupe 48 sur 50, et une fois les
- * cinq enclos verrouillés il reste **2** places. À cette capacité-là, le plan
- * tombe à 2 croisements et **0** à saisir — le bouton « reproductions à faire »
- * disparaît, et le premier test échoue sur `toBeGreaterThan(0)`. Avec la passe :
- * 26 croisements et 24 à saisir.
+ * Mesuré au navigateur, sur cette fixture — 75 fécondes, 5 enclos, la fournée
+ * occupant 45 places sur 50 :
+ *
+ * | | parc vide | parc plein |
+ * | --- | --- | --- |
+ * | sans la passe | 14 | **0** |
+ * | passe en dernier | 21 | 24 |
+ * | passe en tête | **24** | **24** |
+ *
+ * Sans la passe, le bouton « reproductions à faire » disparaît une fois les
+ * enclos verrouillés et les deux tests échouent — `toBe(14)` reçoit `0`, puis
+ * `toBeGreaterThan(2)` reçoit `0`. Avec la passe en dernier, le premier échoue
+ * sur l'égalité : attendu 21, reçu 24.
  *
  * ## Pourquoi le second test saisit deux naissances
  *
@@ -82,21 +95,20 @@ const lockEveryPen = async (page: Page): Promise<number> => {
   return locked;
 };
 
-test.describe('parc plein', () => {
-  test('les couples de fécondes restent proposés', async ({ page }) => {
+test.describe('accoupler avant de charger', () => {
+  test('la liste est la même parc vide et parc plein', async ({ page }) => {
     await mockSupabase(page);
     await openBreeding(page);
 
-    // Parc vide : la liste existe, c'est le point de départ.
     const empty = await matings(page);
     expect(empty).toBeGreaterThan(0);
 
     const pens = await lockEveryPen(page);
     expect(pens).toBeGreaterThan(0);
 
-    // Parc plein : elle doit être là **aussi**. C'était zéro.
-    const full = await matings(page);
-    expect(full).toBeGreaterThan(0);
+    // L'invariant : remplir le parc ne retire aucun accouplement, parce
+    // qu'aucun de ceux-là n'a jamais eu besoin d'une place.
+    expect(await matings(page)).toBe(empty);
   });
 
   test('et elle survit aux deux premières saisies', async ({ page }) => {

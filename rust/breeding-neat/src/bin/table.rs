@@ -368,8 +368,13 @@ fn main() {
             std::process::exit(1);
         }
 
-        // Les gains encaissés, graine par graine, pour chaque niveau.
-        let banked: Vec<(u16, Vec<f64>)> = levels
+        // Les gains encaissés graine par graine, et les fournées réellement jouées.
+        //
+        // Le compte est une **colonne** et non un en-tête : en mode heures, monter
+        // plus haut allonge le chargement, donc deux niveaux ne jouent pas le même
+        // nombre de fournées sur le même horizon. Un seul chiffre en tête laisserait
+        // croire que la comparaison est à effort égal alors qu'elle ne l'est pas.
+        let banked: Vec<(u16, Vec<f64>, f64)> = levels
             .iter()
             .map(|&lvl| {
                 let outcomes = run(&catalog, &economy, start, || {
@@ -388,7 +393,8 @@ fn main() {
                     .iter()
                     .map(|o| (o.score - o.liquidation) as f64)
                     .collect();
-                (lvl, per_seed)
+                let loads = mean(outcomes.iter().map(|o| f64::from(o.loads_paid)));
+                (lvl, per_seed, loads)
             })
             .collect();
 
@@ -404,15 +410,15 @@ fn main() {
             .expect("au moins un niveau");
 
         println!(
-            "{} fournees · {} graines · encaisse, apparie contre le niveau {}",
-            economy.batches, SEEDS, best.0
+            "{} graines · encaisse, apparie contre le niveau {}",
+            SEEDS, best.0
         );
         println!(
-            "{:>7} {:>11} {:>11} {:>12} {:>9} {:>8}",
-            "niveau", "median", "moyenne", "ecart", "err. type", "t"
+            "{:>7} {:>9} {:>11} {:>11} {:>12} {:>9} {:>8}",
+            "niveau", "fournees", "median", "moyenne", "ecart", "err. type", "t"
         );
         println!("{}", "-".repeat(64));
-        for (lvl, values) in &banked {
+        for (lvl, values, loads) in &banked {
             let mut sorted = values.clone();
             let median = median(&mut sorted);
             let deltas: Vec<f64> = values
@@ -427,8 +433,9 @@ fn main() {
             let stderr = (variance / n).sqrt();
             let t = if stderr > 0.0 { mean / stderr } else { 0.0 };
             println!(
-                "{:>7} {:>9.2} M {:>9.2} M {:>10.2} M {:>7.2} M {:>8.2}",
+                "{:>7} {:>9.0} {:>9.2} M {:>9.2} M {:>10.2} M {:>7.2} M {:>8.2}",
                 lvl,
+                loads,
                 median / 1e6,
                 mean_of(values) / 1e6,
                 mean / 1e6,
@@ -467,9 +474,9 @@ fn main() {
             wanted[slot] += *demand;
         }
         println!(
-            "{} · {} fournees · niveau {} · ecurie finale moyenne",
+            "{} · {:.0} fournees · niveau {} · ecurie finale moyenne",
             wanted_family(&wanted, &held),
-            economy.batches,
+            mean(outcomes.iter().map(|o| f64::from(o.loads_paid))),
             level()
         );
         println!("{:>4} {:>10} {:>10}", "gen", "tenu", "demande");
@@ -514,9 +521,9 @@ fn main() {
             }
         }
         println!(
-            "{} · {} fournees · gen {rank}, couleur par couleur",
+            "{} · {:.0} fournees · gen {rank}, couleur par couleur",
             std::env::args().nth(1).unwrap_or_default(),
-            economy.batches
+            mean(outcomes.iter().map(|o| f64::from(o.loads_paid)))
         );
         println!("{:<24} {:>8} {:>9}  {}", "couleur", "tenu", "demande", "compose");
         println!("{}", "-".repeat(56));
@@ -562,9 +569,9 @@ fn main() {
         });
         let r = row("3. echelle + tes changements", &outcomes);
         println!(
-            "niveau {:>3} · {:>3} fournees · encaisse {:>8.2} M · score {:>8.2} M ·              croisem. {:>5.0} · gen 10 {:>5.1} · ecurie {:>4.0}",
+            "niveau {:>3} · {:>5.0} fournees · encaisse {:>8.2} M · score {:>8.2} M ·              croisem. {:>5.0} · gen 10 {:>5.1} · ecurie {:>4.0}",
             level(),
-            economy.batches,
+            r.loads,
             r.banked / 1e6,
             r.score / 1e6,
             r.crossings,

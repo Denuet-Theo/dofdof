@@ -489,7 +489,36 @@ export const ladderPlan = (
    * Le retard est une **part** : `tenu / demandé`. Comparaison stricte, donc à
    * égalité c'est la première rencontrée qui gagne, et l'étage est trié.
    */
-  const mostBehind = (here: string[]): [string, number] | null => {
+  /** Un groupe a-t-il encore une monture à donner ? Le cas ordinaire. */
+  const available = (group: number): boolean => free[group].length > 0;
+
+  /**
+   * La dernière **féconde** encore libre du groupe, ou `null`.
+   *
+   * « La dernière » pour rejoindre le `pop` de `launch` : les deux passes
+   * descendent la liste dans le même sens, donc le Rust n'a qu'une règle à
+   * suivre au lieu de deux. Voir `cycled_at` là-bas.
+   *
+   * Le cycle se lit sur la **monture** et non sur le groupe : `fertileGroups`
+   * ne met pas `cycled` dans sa clé — voir son en-tête — donc un même groupe
+   * mêle des fécondes et des fertiles.
+   */
+  const takeCycled = (group: number): number | null => {
+    const list = free[group];
+    for (let at = list.length - 1; at >= 0; at -= 1) {
+      if (mounts[list[at]]?.cycled === true) return list.splice(at, 1)[0];
+    }
+    return null;
+  };
+
+  /** Le prédicat jumeau de `takeCycled`, pour `mostBehind`. */
+  const hasCycled = (group: number): boolean =>
+    free[group].some((index) => mounts[index]?.cycled === true);
+
+  const mostBehind = (
+    here: string[],
+    ready: (group: number) => boolean = available
+  ): [string, number] | null => {
     let choice: [number, string, number] | null = null;
     for (const color of here) {
       const want = ladder.demand.get(color) ?? 0;
@@ -497,7 +526,7 @@ export const ladderPlan = (
       const pairs = byTarget.get(color);
       if (!pairs) continue;
       const position = pairs.findIndex(
-        ([male, female]) => male !== female && free[male].length > 0 && free[female].length > 0
+        ([male, female]) => male !== female && ready(male) && ready(female)
       );
       if (position < 0) continue;
 
@@ -791,6 +820,61 @@ export const ladderPlan = (
     plan.optimakina.push(false);
     places += 2;
     budget -= 2 * starter;
+  }
+
+  /**
+   * Les croisements qui n'occupent **aucune** place : deux fécondes.
+   *
+   * ## Ce que cette passe répare
+   *
+   * La boucle d'étages s'arrête sur la capacité, et c'est juste pour tout ce qui
+   * doit encore un cycle : ces montures-là passent par l'enclos, et l'enclos se
+   * compte. Mais un couple dont les **deux** parents ont déjà cyclé ne passe par
+   * aucun enclos — c'est un clic en jeu, `placesFor` le chiffre à zéro — donc la
+   * capacité n'a rien à en dire. Elle le bornait quand même.
+   *
+   * Le prix se lit sur l'écurie de l'éleveur, export du 27/08 : 74 fécondes,
+   * **34 accouplements admissibles et gratuits**, quatre proposés. Et parc plein,
+   * la boucle d'étages ne tournant pas du tout, l'écran n'annonçait plus **aucun**
+   * accouplement pendant toute la durée du cycle — alors que les fécondes du
+   * coffre n'attendaient rien.
+   *
+   * ## Pourquoi elle vient en dernier
+   *
+   * Après le sommet, la moisson et les achats, donc après tout ce qui se dispute
+   * une place. Elle ne leur retire rien : ce qu'elle prend ne coûtait de place à
+   * personne. L'inverse était faux — passer devant leur aurait pris des fécondes
+   * qu'ils apparient parfois à une fertile, et déplacé une fournée que la mesure
+   * connaît.
+   *
+   * ## Les étages sont ceux d'au-dessus
+   *
+   * Le même `tiers`, donc le même ordre : génération la plus haute d'abord,
+   * couleurs dans l'ordre du catalogue. Côté Rust c'est `free_tiers`, qui le
+   * reconstruit — la passe n'y suit pas les cinq `Ordering`, et n'a pas à le
+   * faire : ils n'existent que pour arbitrer une place entre deux étages, et ici
+   * aucun couple n'en prive un autre.
+   */
+  for (const [, here] of tiers) {
+    for (;;) {
+      const next = mostBehind(here, hasCycled);
+      if (!next) break;
+      const [color, position] = next;
+      const [male, female] = byTarget.get(color)![position];
+      // `mostBehind` vient de garantir les deux ; on relit quand même, plutôt
+      // que d'écrire un `!` qui tomberait le jour où le prédicat et la prise
+      // cesseraient de s'accorder.
+      const maleIndex = takeCycled(male);
+      if (maleIndex === null) break;
+      const femaleIndex = takeCycled(female);
+      if (femaleIndex === null) {
+        free[male].push(maleIndex);
+        break;
+      }
+      plan.crossings.push([maleIndex, femaleIndex]);
+      plan.optimakina.push(false);
+      made.set(color, (made.get(color) ?? 0) + 1);
+    }
   }
 
   return settle(plan, view, ladder, topGeneration, options);

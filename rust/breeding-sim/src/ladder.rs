@@ -2249,6 +2249,23 @@ impl LadderPolicy {
         held: &HashMap<ColorId, f64>,
         made: &HashMap<ColorId, f64>,
     ) -> Option<(ColorId, usize)> {
+        self.most_behind_with(here, by_target, held, made, |group| !free[group].is_empty())
+    }
+
+    /// Le même retard, sur une définition de « disponible » qu'on fournit.
+    ///
+    /// La passe gratuite n'a pas la même : elle ne peut prendre qu'une monture
+    /// **déjà féconde**, et un groupe qui n'en a plus ne compte pas comme
+    /// formable même s'il lui reste des fertiles. Sans ce paramètre les deux
+    /// passes divergeaient sur la seule ligne qui décide.
+    fn most_behind_with(
+        &self,
+        here: &[ColorId],
+        by_target: &HashMap<ColorId, Vec<(usize, usize)>>,
+        held: &HashMap<ColorId, f64>,
+        made: &HashMap<ColorId, f64>,
+        ready: impl Fn(usize) -> bool,
+    ) -> Option<(ColorId, usize)> {
         let mut choice: Option<(f64, ColorId, usize)> = None;
         for &color in here {
             let want = self.ladder.demand.get(&color).copied().unwrap_or(0.0);
@@ -2258,9 +2275,9 @@ impl LadderPolicy {
             let Some(pairs) = by_target.get(&color) else {
                 continue;
             };
-            let position = pairs.iter().position(|&(male, female)| {
-                male != female && !free[male].is_empty() && !free[female].is_empty()
-            });
+            let position = pairs
+                .iter()
+                .position(|&(male, female)| male != female && ready(male) && ready(female));
             let Some(position) = position else { continue };
 
             let stock =
@@ -2271,6 +2288,88 @@ impl LadderPolicy {
             }
         }
         choice.map(|(_, color, position)| (color, position))
+    }
+
+    /// Les étages, la génération la plus haute d'abord.
+    ///
+    /// La passe gratuite ne suit pas `self.ordering`, et elle n'a pas à le
+    /// faire : les cinq ordres n'existent que pour arbitrer une **place** entre
+    /// deux étages, et ici il n'y en a aucune à arbitrer — tous les couples de
+    /// la passe sont gratuits, donc aucun ne prive l'autre de quoi que ce soit.
+    /// L'ordre ne décide plus que du départage, et on prend celui du défaut
+    /// expédié, qui est aussi le seul que le portage TypeScript connaisse.
+    fn free_tiers(&self, catalog: &Catalog) -> Vec<Vec<ColorId>> {
+        let mut grouped: HashMap<u8, Vec<ColorId>> = HashMap::new();
+        for &color in &self.ladder.wanted {
+            grouped
+                .entry(catalog.generation(color))
+                .or_default()
+                .push(color);
+        }
+        let mut tiers: Vec<(u8, Vec<ColorId>)> = grouped.into_iter().collect();
+        for (_, here) in &mut tiers {
+            here.sort_unstable();
+        }
+        tiers.sort_unstable_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+        tiers.into_iter().map(|(_, here)| here).collect()
+    }
+
+    /// Les croisements qui n'occupent **aucune** place : deux fécondes.
+    ///
+    /// ## Ce que cette passe répare
+    ///
+    /// `compose` s'arrête sur la capacité, et c'est juste pour tout ce qui doit
+    /// encore un cycle : ces montures-là passent par l'enclos, et l'enclos se
+    /// compte. Mais un couple dont les **deux** parents ont déjà cyclé ne passe
+    /// par aucun enclos — c'est un clic en jeu, `places_for` le chiffre à zéro —
+    /// donc la capacité n'a rien à en dire. Elle le bornait quand même, et le
+    /// prix se lit sur une écurie réelle : sur l'export du 27/08, 74 fécondes,
+    /// **34 accouplements admissibles et gratuits**, quatre proposés. Parc plein,
+    /// c'était zéro pendant toute la durée du cycle.
+    ///
+    /// ## Pourquoi elle vient en dernier
+    ///
+    /// Après le sommet, la moisson et les achats, donc après tout ce qui se
+    /// dispute une place. Elle ne leur retire rien : ce qu'elle prend ne coûtait
+    /// de place à personne. L'inverse était faux — passer devant leur aurait
+    /// pris des fécondes qu'ils apparient parfois à une fertile, et aurait
+    /// déplacé une fournée que la mesure connaît.
+    fn compose_free(
+        &self,
+        view: &UnitView<'_>,
+        by_target: &HashMap<ColorId, Vec<(usize, usize)>>,
+        free: &mut [Vec<usize>],
+        held: &HashMap<ColorId, f64>,
+        made: &mut HashMap<ColorId, f64>,
+        crossings: &mut Vec<[usize; 2]>,
+    ) {
+        let stable = view.stable;
+        for here in self.free_tiers(view.catalog) {
+            loop {
+                let Some((color, position)) =
+                    self.most_behind_with(&here, by_target, held, made, |group| {
+                        cycled_at(stable, &free[group]).is_some()
+                    })
+                else {
+                    break;
+                };
+                let (male, female) = by_target[&color][position];
+                // `most_behind_with` vient de garantir les deux ; on relit quand
+                // même, parce qu'un `unwrap` ici tomberait sur une fournée réelle
+                // le jour où le prédicat et la prise cesseraient de s'accorder.
+                let Some(at) = cycled_at(stable, &free[male]) else {
+                    break;
+                };
+                let male_index = free[male].remove(at);
+                let Some(at) = cycled_at(stable, &free[female]) else {
+                    free[male].push(male_index);
+                    break;
+                };
+                let female_index = free[female].remove(at);
+                crossings.push([male_index, female_index]);
+                *made.entry(color).or_default() += 1.0;
+            }
+        }
     }
 
     /// Engager un couple, si la place le permet.
@@ -2656,7 +2755,7 @@ impl Policy for LadderPolicy {
         // L'ordre de composition — la dernière inconnue de l'échelle. Voir
         // `Ordering` pour les cinq candidats, et `compose` pour ce qu'ils
         // partagent.
-        let made = self.compose(
+        let mut made = self.compose(
             view,
             &by_target,
             &mut free,
@@ -2750,6 +2849,18 @@ impl Policy for LadderPolicy {
             places += 2;
             budget -= 2 * starter;
         }
+
+        // Ce qui ne coûte aucune place, une fois les places réparties : deux
+        // fécondes s'accouplent sans enclos, donc la capacité ne les borne pas.
+        // Voir `compose_free` — c'est la passe qui manquait.
+        self.compose_free(
+            view,
+            &by_target,
+            &mut free,
+            &held,
+            &mut made,
+            &mut crossings,
+        );
 
         // Le clonage : uniquement entre montures de même ascendance.
         //
@@ -2865,6 +2976,16 @@ impl Policy for LadderPolicy {
 /// n'est plus borné — seules les places le sont.
 ///
 /// Une monture achetée n'existe pas encore en écurie : elle doit son cycle.
+/// La position, dans la liste, de la dernière monture **déjà féconde**.
+///
+/// « La dernière » pour rejoindre `Vec::pop`, que `launch` emploie sur les
+/// montures ordinaires : les deux passes descendent la liste dans le même sens,
+/// et le portage TypeScript n'a qu'une règle à suivre au lieu de deux.
+fn cycled_at(stable: &Stable, list: &[usize]) -> Option<usize> {
+    list.iter()
+        .rposition(|&index| stable.mounts.get(index).is_some_and(|mount| mount.cycled))
+}
+
 fn places_for(stable: &Stable, pair: [usize; 2]) -> usize {
     pair.iter()
         .filter(|&&index| stable.mounts.get(index).is_none_or(|mount| !mount.cycled))

@@ -537,6 +537,23 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     // et l'app cesse d'être le seul endroit où le drapeau est forcé. La ligne de
     // `table` qui correspond à l'écran devient « 2. echelle seule ».
     //
+    // ## Et le test qu'il pilotait ne discriminait rien
+    //
+    // La raison la plus forte est venue après coup, en mesurant. `stocked` vaut
+    // `ratio > goulot && ratio > 0`, où le goulot est le minimum de `tenu /
+    // demande` sur les couleurs voulues. L'éleveur ne tient **aucune** monture de
+    // gen 7 ou au-dessus — c'est l'état normal de qui n'a pas fini de monter —
+    // donc le goulot vaut **zéro** et le test se lit « tu en as au moins une ».
+    //
+    // Sur son export du 28/08, plan couronné : **16 des 31 couleurs du plan**
+    // comptent comme stockées, c'est-à-dire tout ce qu'il possède de la gen 2 à la
+    // gen 6. « Moissonner le surplus » voulait dire « moissonner tout ce qui n'est
+    // pas encore au sommet ».
+    //
+    // Le même ratio reste sain pour `mostBehind`, qui prend le **minimum** ;
+    // il ne dégénère que pour une comparaison **au-dessus** de ce minimum. Voir
+    // `AGENTS.md`, « Les 60 places d'enclos sont un plafond dur ».
+    //
     // `harvest` — monnayer le **hors-plan**, vrai par défaut — n'est pas touché :
     // c'est l'autre drapeau, et il ne touche pas aux couleurs du plan.
     { purchases: input.purchases ?? true }

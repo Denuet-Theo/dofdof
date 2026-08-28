@@ -441,6 +441,47 @@ And "certificat" in this codebase means the **tradeable HDV item**, not storage.
 Designing on the other reading has already produced two proposals that rested on
 a mechanic that does not exist — ask before building on the vocabulary.
 
+## Les 60 places d'enclos, elles, sont un plafond dur — et `demand` ne le voit pas
+
+« Il est impossible de monter plus que 60 en jeu » — l'éleveur, 28/08. C'est la
+seule capacité du modèle qui soit une vraie borne : le coffre en absorbe dix
+mille, l'enclos en élève **soixante**, et `enclos_count` est ce que le jeu donne.
+
+**Ce que ça condamne.** `Ladder::demand` compte des **croisements** — la doc du
+Rust le dit : « chaque unité d'une couleur voulue se produit par un croisement,
+donc `demand` compte déjà les croisements ». Il est pourtant lu comme un objectif
+de **stock**, dans `ratio = tenu / demande`. Les deux grandeurs ne sont pas les
+mêmes, et le plafond le rend visible : le plan couronné sur Azur-Doré réclame
+**52,9** unités pour **une seule** gen 10. Lu comme un stock, une couronne sature
+déjà les soixante places ; le projet de l'éleveur en demande dix, soit 529.
+
+**Et le ratio dégénère.** Mesuré sur son export du 28/08, plan couronné : il ne
+tient **aucune** monture de gen 7 ou au-dessus, donc le goulot — le minimum des
+ratios sur les couleurs voulues — vaut **zéro**. Le test de la moisson étendue
+était `ratio > goulot && ratio > 0`, c'est-à-dire, sur son parc, « tu en as au
+moins une » :
+
+| gen | tenu | ratio | « stocké » |
+| --- | --- | --- | --- |
+| 2 | 11 à 17 | 1,8 à 4,3 | oui |
+| 4 | 7 à 21 | 3,5 à 10,5 | oui |
+| 6 | 3 à 4 | 3,0 à 4,0 | oui |
+| 7 à 10 | 0 | 0 | non |
+
+**16 des 31 couleurs du plan** — tout ce qu'il possède de la gen 2 à la gen 6.
+« Moissonner le surplus » voulait donc dire « moissonner tout ce qui n'est pas
+encore au sommet », et c'est l'état normal de qui n'a pas fini de monter.
+
+Une nuance qui décide de ce qu'il faut réparer : le **même** ratio est sain pour
+`mostBehind`, qui prend le **minimum** — « fabrique ce dont tu as le moins » reste
+vrai avec des unités bancales. Il ne casse que pour `stocked`, qui compare
+**au-dessus** de ce minimum. C'est le seul usage qui dégénère, et il n'a plus de
+consommateur dans l'app depuis le 28/08.
+
+Ne pas rallumer `harvestStocked` en croyant qu'il dit « surplus » : sur un parc
+réel il dit « tout ». Et ne pas rebâtir un objectif de stock sur `demand` sans
+lui donner d'abord une unité et un horizon.
+
 # The golden rule: the screen shows only what the base confirmed
 
 Everything below is one sentence:

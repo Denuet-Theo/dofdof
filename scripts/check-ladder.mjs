@@ -51,9 +51,10 @@ execFileSync(
   { stdio: 'inherit' }
 );
 
-const { ladderOf, crownAt, aimsAt, namesSomething } = await import(
+const { ladderOf, crownAt, aimsAt, namesSomething, CLIMB_MUST_GAIN_GENERATION } = await import(
   pathToFileURL(join(out, 'ladder.js')).href
 );
+const { pairOutlook } = await import(pathToFileURL(join(out, 'pairing.js')).href);
 
 const trees = JSON.parse(readFileSync(join(ROOT, 'src/lib/dofus/breeding/trees.json'), 'utf8'));
 
@@ -62,6 +63,29 @@ const fail = (message) => {
   console.error(`ÉCHEC — ${message}`);
   failures += 1;
 };
+
+/**
+ * La liste elle-même est une décision mesurée, donc elle est épinglée.
+ *
+ * Sans cette ligne, la garde du rang ci-dessous reste verte si on **retire**
+ * `muldo` de `CLIMB_MUST_GAIN_GENERATION` : elle vérifie alors « la règle ne
+ * s'applique pas et ne change rien », ce qui est vrai. Vérifié en la retirant :
+ * 60 latéraux sans elle, 60 livrés, aucune ligne rouge.
+ *
+ * Le muldo y est parce qu'un relevé le dit — export de l'éleveur du 28/08,
+ * 100 graines, couronne du projet, moisson étendue éteinte : +3,8 M à
+ * 120 fournées et +4,8 M à 150, et plus de gen 10 tenues aux cinq horizons.
+ * Les deux autres familles n'y sont **pas** parce qu'elles ne sont pas mesurées
+ * dans ce régime, et que le relevé qui a fondé `climbs` au coût y était franc.
+ *
+ * Changer cette liste demande donc une mesure, pas un avis.
+ */
+if (!CLIMB_MUST_GAIN_GENERATION.includes('muldo')) {
+  fail(
+    'CLIMB_MUST_GAIN_GENERATION ne contient plus « muldo ». La règle du rang y a ' +
+      'été mesurée gagnante ; la retirer demande une nouvelle mesure.'
+  );
+}
 
 for (const family of trees.families) {
   const colors = family.colors;
@@ -218,6 +242,101 @@ for (const family of trees.families) {
     }
   }
   if (crownedRuns === 0) fail(`${family.id} : aucune couronne posable.`);
+
+  /**
+   * La règle par famille : un croisement doit **gagner un rang**, pas seulement
+   * du coût de construction.
+   *
+   * Vraie sur le muldo seul — mesurée sur l'export de l'éleveur du 28/08 — et
+   * fausse ailleurs, où `climbs` au coût est ce qui ouvre le seul chemin vers la
+   * couleur chère d'un rang (+41 M au volkorne, +34 M à la dragodinde). Voir
+   * `CLIMB_MUST_GAIN_GENERATION`.
+   *
+   * Les deux moitiés sont vérifiées, et la seconde est l'**anti-vacuité** : sans
+   * elle, une règle qui refuserait tout, ou un catalogue sans croisement latéral,
+   * rendrait la première vraie sans rien dire.
+   *
+   * Le **sommet est exclu**, et pas par commodité : au plafond
+   * `targetGeneration === ancestryGeneration` par construction, une gen 10 croisée
+   * avec une gen 1 visant la gen 10. La règle est posée après cette porte-là dans
+   * les deux ports, et `check-summit.mjs` tient ce qu'elle laisse passer.
+   */
+  const attendu = CLIMB_MUST_GAIN_GENERATION.includes(family.id);
+  const sommet = Math.max(...generations.values());
+  // Des montures **nées de leur recette**, et non achetées.
+  //
+  // C'est ce qui rend le cas latéral représentable : une monture sans ascendance
+  // ne porte que sa propre génération, donc sa cible est toujours au-dessus et
+  // aucun couple n'est jamais latéral. La première version de cette garde
+  // énumérait des `parents: null` et annonçait « 0 croisement latéral » sur les
+  // trois familles — vraie, et vide. L'éleveur, lui, croise ce qu'il a fait
+  // naître : sa Turquoise-Indigo est née d'une Indigo et d'une Turquoise.
+  const nes = colors
+    .filter((color) => (color.recipes ?? []).length > 0)
+    .map((color) => ({ color, parents: color.recipes[0] }));
+  // Le même comptage sous les deux régimes : la règle éteinte donne le témoin,
+  // la règle telle qu'elle est livrée donne le résultat. Comparer une famille à
+  // une autre ne dirait rien — leurs plans n'ont pas les mêmes barreaux.
+  const compter = (ladder) => {
+    let n = 0;
+    const exemples = [];
+    for (const male of nes) {
+      for (const female of nes) {
+        const mate = (entry, sex) => ({
+          id: null,
+          colorId: entry.color.id,
+          sex,
+          level: 1,
+          parents: [...entry.parents],
+        });
+        const pair = [mate(male, 'M'), mate(female, 'F')];
+        const outlook = pairOutlook(pair[0], pair[1], colors, generations);
+        if (!outlook || outlook.targetGeneration > outlook.ancestryGeneration) continue;
+        if (outlook.targetGeneration >= sommet) continue; // le sommet, décidé ailleurs
+        if (aimsAt(pair[0], pair[1], colors, generations, ladder) === null) continue;
+        n += 1;
+        if (exemples.length < 3) {
+          exemples.push(
+            `${male.color.id} × ${female.color.id} -> gen ${outlook.targetGeneration} ` +
+              `(le couple porte gen ${outlook.ancestryGeneration})`
+          );
+        }
+      }
+    }
+    return { n, exemples };
+  };
+
+  const sansRegle = compter(ladderOf(colors, undefined, null));
+  const livre = compter(ladderOf(colors, undefined, family.id));
+
+  if (attendu) {
+    // L'anti-vacuité vit ici, et nulle part ailleurs : sans latéral à refuser, un
+    // « zéro » ne prouverait rien. Une première version l'avait cherchée chez les
+    // autres familles, qui n'en portent aucun — la garde était verte et vide.
+    if (sansRegle.n === 0) {
+      fail(
+        `${family.id} : la règle du rang est appliquée mais le plan n'admettait ` +
+          `aucun croisement latéral sans elle. Le zéro ne prouve rien.`
+      );
+    }
+    if (livre.n !== 0) {
+      fail(
+        `${family.id} : ${livre.n} croisement(s) latéral(aux) restent admis malgré ` +
+          `la règle du rang. Par exemple ${livre.exemples[0]}.`
+      );
+    }
+  } else if (livre.n !== sansRegle.n) {
+    fail(
+      `${family.id} : la règle du rang ne s'y applique pas, mais le plan livré ` +
+        `admet ${livre.n} latéraux contre ${sansRegle.n} sans elle.`
+    );
+  }
+
+  console.log(
+    `${family.id.padEnd(11)} · règle du rang ${attendu ? 'appliquée' : 'non appliquée'} · ` +
+      `latéraux hors sommet : ${sansRegle.n} sans elle, ${livre.n} livrés` +
+      (sansRegle.exemples.length > 0 ? ` · ex. ${sansRegle.exemples[0]}` : '')
+  );
 
   console.log(
     `${family.id.padEnd(11)} · ${ladder.wanted.size} couleurs au plan · ` +

@@ -371,6 +371,16 @@ export type PolicyInput = {
    */
   target?: string | null;
   /**
+   * La famille de l'arbre, pour les règles qui n'en concernent qu'une.
+   *
+   * Aujourd'hui une seule : `climbMustGainGeneration`, mesurée sur le muldo et
+   * appliquée à lui seul — voir `CLIMB_MUST_GAIN_GENERATION`. Absente, aucune
+   * règle par famille ne s'applique, ce qui est la physique d'avant à
+   * l'identique : c'est ce qui laisse les gardes de parité et les scripts de
+   * mesure comparer ce qu'ils comparaient.
+   */
+  family?: string | null;
+  /**
    * Le succès de collection, ou rien.
    *
    * Absent, la passe ne s'applique pas — c'est ce qui garde les gardes de parité,
@@ -482,7 +492,7 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
    * égales : le critère se rabat alors sur le partenaire, qui ne dépend pas du
    * marché.
    */
-  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
+  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target, input.family);
 
   const view = {
     mounts,
@@ -705,7 +715,7 @@ const readPlan = (
    * comparer le filet d'affichage à un plan plus large que celui du filtre ferait
    * compter zéro refus par construction, ce qui ne vérifierait rien.
    */
-  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target);
+  const ladder = crownedLadderOf(input.colors, economy.valueOf, undefined, input.target, input.family);
 
   for (const [at, [maleIndex, femaleIndex]] of plan.crossings.entries()) {
     const side = (index: number, sex: Sex): [CoupleSide, Mate | null, boolean] => {

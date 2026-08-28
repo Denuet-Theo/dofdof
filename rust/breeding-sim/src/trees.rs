@@ -72,6 +72,17 @@ pub struct Color {
 }
 
 pub struct Catalog {
+    /// La famille chargée, gardée telle que `Catalog::load` l'a reçue.
+    ///
+    /// Elle était jetée à la porte : `read_family` s'en servait pour trouver le
+    /// bon bloc de `trees.json` puis l'oubliait. Or une règle peut ne valoir que
+    /// pour une famille — voir `Ladder::climb_must_gain_generation`, mesurée sur
+    /// le muldo et sur lui seul — et il n'y avait alors plus rien pour le dire.
+    ///
+    /// Pas dans `trees.json` : ce fichier est régénéré par
+    /// `extract-breeding-trees.mjs`, donc un drapeau posé dedans disparaîtrait au
+    /// prochain extract sans que rien ne rougisse.
+    family: String,
     colors: Vec<Color>,
     by_slug: HashMap<String, ColorId>,
     top_generation: u8,
@@ -279,6 +290,7 @@ impl Catalog {
         }
 
         Ok(Self {
+            family: family_id.to_string(),
             colors,
             by_slug,
             top_generation,
@@ -358,6 +370,12 @@ impl Catalog {
 
     pub fn id_of(&self, slug: &str) -> Option<ColorId> {
         self.by_slug.get(slug).copied()
+    }
+
+    /// La famille de cet arbre, telle que le chargement l'a nommée.
+    #[inline]
+    pub fn family(&self) -> &str {
+        &self.family
     }
 
     /// Quelle couleur ces deux teintes nomment **à cette génération**, s'il en

@@ -145,7 +145,48 @@ export type Ladder = {
   blocks: string[][];
   /** Les couleurs les plus hautes du plan : ce qu'on cherche à produire. */
   summit: string[];
+  /**
+   * Un croisement doit-il **gagner une génération**, et pas seulement des
+   * croisements de construction ?
+   *
+   * `climbs` compare des coûts et non des rangs, ce qui admet un croisement
+   * latéral — même génération, couleur plus chère à bâtir. C'est délibéré et
+   * mesuré : c'est le seul chemin vers la couleur chère d'un rang, et le retirer
+   * coûtait 41 M au volkorne et 34 M à la dragodinde. Voir `climbs`.
+   *
+   * Sur le **muldo**, l'éleveur a signalé le contraire depuis sa fenêtre de jeu :
+   * une gen 6 dépensée pour une autre gen 6, sans géneton et sans rang gagné.
+   * Mesuré sur son export du 28/08, 100 graines, couronne du projet, moisson
+   * étendue éteinte, encaissé :
+   *
+   * | fournées | sans la règle | avec |
+   * | --- | --- | --- |
+   * | 30 | 26,75 M | 24,82 M |
+   * | 60 | 42,97 M | 42,45 M |
+   * | 90 | 52,21 M | 52,40 M |
+   * | 120 | 57,28 M | **61,10 M** |
+   * | 150 | 64,11 M | **68,94 M** |
+   *
+   * Elle perd court et gagne long, et tient plus de gen 10 aux cinq horizons —
+   * 4,8 contre 2,6 à 120 fournées. **Les deux autres familles ne sont pas
+   * mesurées** dans ce régime, d'où une règle par famille plutôt qu'un
+   * renversement général.
+   */
+  climbMustGainGeneration: boolean;
 };
+
+/**
+ * Les familles où un croisement doit gagner un rang, et pas seulement du coût.
+ *
+ * Le jumeau de `CLIMB_MUST_GAIN_GENERATION` dans `ladder.rs`. **Les deux côtés
+ * doivent bouger ensemble** — `check-ladder-parity.mjs` compare les plans, et
+ * `check-ladder.mjs` la règle elle-même.
+ *
+ * Pas dans `trees.json` : ce fichier est régénéré par
+ * `extract-breeding-trees.mjs`, donc un drapeau posé dedans disparaîtrait au
+ * prochain extract sans que rien ne rougisse.
+ */
+export const CLIMB_MUST_GAIN_GENERATION: readonly string[] = ['muldo'];
 
 /**
  * Le plafond a été retiré.
@@ -226,6 +267,7 @@ const emptyLadder = (): Ladder => ({
   demand: new Map(),
   blocks: [],
   summit: [],
+  climbMustGainGeneration: false,
 });
 
 /**
@@ -512,7 +554,14 @@ const spreadDemand = (ladder: Ladder, colors: BreedingColor[]) => {
 };
 
 /** Les échelles déjà posées, une par catalogue et par route. */
-const ladderCache = new WeakMap<BreedingColor[], Map<Route, Ladder>>();
+/**
+ * Clé : `route|climbMustGainGeneration`, et non la route seule.
+ *
+ * Le plan lui-même ne dépend pas du drapeau — il ne change que ce qu'`aimsAt`
+ * admet — mais un plan mis en cache le **porte**, donc le premier appelant
+ * fixerait la règle pour tous les suivants.
+ */
+const ladderCache = new WeakMap<BreedingColor[], Map<string, Ladder>>();
 
 /**
  * Le plan de l'échelle pour cette famille.
@@ -521,22 +570,46 @@ const ladderCache = new WeakMap<BreedingColor[], Map<Route, Ladder>>();
  * gen 2 et de gen 4 est un produit cartésien, négligeable une fois mais pas à
  * chaque rendu.
  */
-export const ladderOf = (colors: BreedingColor[], route: Route = DEFAULT_ROUTE): Ladder => {
+export const ladderOf = (
+  colors: BreedingColor[],
+  route: Route = DEFAULT_ROUTE,
+  /**
+   * La famille de cet arbre, quand l'appelant la connaît.
+   *
+   * Elle ne sert qu'à `climbMustGainGeneration`, donc elle est optionnelle : les
+   * appelants qui ne construisent un plan que pour **chiffrer** ou pour afficher
+   * une collection ne consultent jamais `aimsAt`, et le drapeau ne change aucun
+   * autre champ. Le seul chemin qui décide d'un croisement — `stablePlan` — la
+   * passe. Voir `CLIMB_MUST_GAIN_GENERATION`.
+   *
+   * **Elle entre dans la clé du cache**, et ce n'est pas de la prudence : le
+   * premier appelant à demander cet arbre fixerait sinon le drapeau pour tous les
+   * suivants. `costs.ts` chiffre un coût de revient sans famille au premier rendu,
+   * `stablePlan` demande le même arbre juste après **avec** — et récupérerait un
+   * plan qui n'applique pas la règle, sans que rien ne le dise.
+   */
+  family?: string | null
+): Ladder => {
+  const climbMustGainGeneration =
+    family !== null && family !== undefined && CLIMB_MUST_GAIN_GENERATION.includes(family);
+  const key = `${route}|${climbMustGainGeneration}`;
+
   let byRoute = ladderCache.get(colors);
   if (!byRoute) {
     byRoute = new Map();
     ladderCache.set(colors, byRoute);
   }
-  const cached = byRoute.get(route);
+  const cached = byRoute.get(key);
   if (cached) return cached;
 
   const index: Index = new Map(colors.map((color, position) => [color.id, position]));
   const ladder = emptyLadder();
+  ladder.climbMustGainGeneration = climbMustGainGeneration;
 
   // Le premier barreau porte la fermeture ; la route ne le concerne pas, mais
   // elle voyage avec pour que le poseur reste unique.
   if (!layRung(ladder, colors, index, BUYABLE_RUNG, route)) {
-    byRoute.set(route, ladder);
+    byRoute.set(key, ladder);
     return ladder;
   }
 
@@ -553,7 +626,7 @@ export const ladderOf = (colors: BreedingColor[], route: Route = DEFAULT_ROUTE):
   }
 
   spreadDemand(ladder, colors);
-  byRoute.set(route, ladder);
+  byRoute.set(key, ladder);
   return ladder;
 };
 
@@ -573,6 +646,7 @@ const copyOf = (ladder: Ladder): Ladder => ({
   demand: new Map(ladder.demand),
   blocks: ladder.blocks.map((block) => [...block]),
   summit: [...ladder.summit],
+  climbMustGainGeneration: ladder.climbMustGainGeneration,
 });
 
 /**
@@ -932,9 +1006,11 @@ export const crownedLadderOf = (
    * non couronné serait plus large que celui que la politique applique — donc
    * `aimsAt` y admettrait des croisements que le Rust refuse.
    */
-  wanted?: string | null
+  wanted?: string | null,
+  /** La famille, pour `climbMustGainGeneration`. Voir `ladderOf`. */
+  family?: string | null
 ): Ladder => {
-  const plan = copyOf(ladderOf(colors, route));
+  const plan = copyOf(ladderOf(colors, route, family));
   const crownable = wanted !== null && wanted !== undefined && isCrownable(plan, colors, wanted);
   // À défaut de cible : **le prix seul**, et c'est un changement du 24/08.
   //
@@ -1074,6 +1150,20 @@ export const aimsAt = (
     // l'échelle entière existe, et on rend **celle-là** plutôt que la plus
     // probable — c'est ce que la tentative vise, et ce que l'écran doit dire.
     return outlook.targetColors.find((t) => ladder.summit.includes(t.colorId))?.colorId ?? null;
+  }
+  // La règle par famille : gagner un rang, et pas seulement du coût de
+  // construction.
+  //
+  // **Après** la porte du sommet ci-dessus, et c'est ce qui compte. Au plafond
+  // `targetGeneration === ancestryGeneration` par construction — une gen 10
+  // croisée avec une gen 1 vise la gen 10 — donc la poser plus haut refuserait
+  // toutes les tentatives du sommet et viderait `'target'`, que l'app joue.
+  // Le jumeau exact vit dans `aims_at`, `ladder.rs`.
+  if (
+    ladder.climbMustGainGeneration &&
+    outlook.targetGeneration <= outlook.ancestryGeneration
+  ) {
+    return null;
   }
   if (!outlook.targetColors.every((target) => ladder.wanted.has(target.colorId))) return null;
   return outlook.targetColors[0].colorId;

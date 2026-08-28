@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllRows } from '@/lib/supabase/pagination';
-import { priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
+import { mergePrice, priceSaveMessage, saveItemPrice } from '@/lib/hooks/useItemPrices';
 import { toNumber } from '@/lib/supabase/types';
 import type {
   BreedingColorPrice,
@@ -2507,6 +2507,26 @@ export const useBreeding = (
     [itemPrices]
   );
 
+  /**
+   * Un prix que la base **a déjà confirmé**, fusionné dans l'état local.
+   *
+   * À ne pas confondre avec `saveFuelPrice`, juste au-dessus, qui écrit : celui-ci
+   * n'écrit rien. Il sert aux surfaces qui portent leur propre écriture — la carte
+   * de recette et sa `PriceModal`, ouvertes sur une Optimakina — et qui appellent
+   * après coup, `updated_at` en main. La règle d'or n'a donc rien à dire ici : on
+   * ne pose pas à l'écran un état que la base n'a pas pris, on recopie celui
+   * qu'elle vient de rendre.
+   *
+   * Sans lui, corriger le prix d'un ingrédient depuis la carte laissait la puce
+   * qui l'a ouverte sur l'ancien coût jusqu'au rechargement — soit exactement la
+   * vérification qu'on venait faire, rendue invisible.
+   */
+  const applyItemPrice = useCallback(
+    (itemId: number, price: number, updatedAt: string) =>
+      setItemPrices((current) => mergePrice(current, itemId, price, updatedAt)),
+    []
+  );
+
   /** Idem pour un carburant en réserve. */
   const saveItemStock = useCallback(async (itemId: number, quantity: number) => {
     // La quantité d'avant, pour pouvoir la remettre : même règle que le vrac.
@@ -2562,6 +2582,7 @@ export const useBreeding = (
     fuelItems,
     itemPrices,
     saveFuelPrice,
+    applyItemPrice,
     stable,
     stockBySex,
     mountStock,

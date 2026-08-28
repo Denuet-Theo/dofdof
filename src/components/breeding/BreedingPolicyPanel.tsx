@@ -12,6 +12,7 @@ import {
   LockOpen,
   LogOut,
   RefreshCw,
+  Hammer,
   Store,
   Trophy,
 } from 'lucide-react';
@@ -43,6 +44,10 @@ import type { BreedingColor } from '@/lib/dofus/breeding/costs';
 import type { CloneOption, SterileMount } from '@/lib/dofus/breeding/cloning';
 import type { ExtractionCandidate } from '@/lib/dofus/breeding/extraction';
 import type { Stable } from '@/lib/dofus/breeding/stable';
+import RecipeModal from '@/components/recipes/RecipeModal';
+import type { PriceTarget } from '@/components/recipes/RecipeDetails';
+import type { ItemPrice } from '@/lib/supabase/types';
+import type { RecipeIndex } from '@/lib/utils/recipes';
 import type { BreedingRow, DEFAULT_SETTINGS } from '@/lib/hooks/useBreeding';
 
 type Settings = typeof DEFAULT_SETTINGS;
@@ -240,6 +245,8 @@ type Props = {
    */
   optimakina?: {
     generation: number;
+    /** L'item, pour ouvrir sa carte de recette. */
+    itemId: number;
     name: string;
     source: 'achat' | 'fabrication';
     price: number;
@@ -247,11 +254,22 @@ type Props = {
     buy: number | null;
     craft: number | null;
     ceiling: number;
-    /** Le taux avec elle, pour le croisement de cette génération. */
-    rateWith: number;
     /** L'icône de l'item, ou `null` s'il n'est pas tarifé. */
     iconUrl?: string | null;
   }[];
+  /**
+   * Les prix relevés, pour la carte de recette qu'une puce d'Optimakina ouvre.
+   *
+   * La table entière et non les seuls montants : la carte montre les noms, les
+   * icônes et **l'ancienneté** de chaque saisie, et c'est cette dernière qui
+   * répond à « est-ce que les prix ont bougé depuis ». Absente, la puce reste ce
+   * qu'elle était et ne s'ouvre pas.
+   */
+  itemPrices?: Map<number, ItemPrice>;
+  /** L'index qui a chiffré la puce — voir `useOptimakinaCraft`. */
+  craftIndex?: RecipeIndex;
+  /** Un prix confirmé par la base, à répercuter sur le conseil sans recharger. */
+  onItemPriceSaved?: (itemId: number, price: number, updatedAt: string) => void;
   individuals?: Individual[];
   colors?: BreedingColor[];
   /** Les coûts de revient par couleur, pour l'onglet « HDV ». */
@@ -309,6 +327,9 @@ const BreedingPolicyPanel = ({
   sacrificeName = 'ambre',
   nameOf,
   optimakina = [],
+  itemPrices,
+  craftIndex,
+  onItemPriceSaved,
   individuals = [],
   colors,
   rows,
@@ -345,6 +366,15 @@ const BreedingPolicyPanel = ({
   const [step, setStep] = useState<Step>('mate');
   /** La fenêtre ouverte : saisie de naissances, de clonages, ou sortie d'un enclos. */
   const [open, setOpen] = useState<'mate' | 'clone' | { exit: number } | null>(null);
+  /**
+   * L'item dont la carte de recette est ouverte, `null` si aucune.
+   *
+   * Un identifiant et non une recette : `RecipeModal` sait la charger seul, et
+   * c'est ce qui permet de **repointer la même fenêtre** sur un ingrédient au
+   * lieu d'en empiler une deuxième. Une descente de profondeur libre pour un état
+   * de plus, voir `onOpenSubRecipe`.
+   */
+  const [recipeItemId, setRecipeItemId] = useState<number | null>(null);
   /**
    * Une naissance au moins a été écrite depuis l'ouverture de la fenêtre.
    *
@@ -903,14 +933,26 @@ const BreedingPolicyPanel = ({
                       {source === 'achat' ? 'À acheter' : 'À fabriquer'} :
                     </span>
                     {list.map((offer) => (
-                      <span
+                      <button
                         key={offer.generation}
+                        type="button"
                         data-testid="optimakina-line"
                         data-generation={offer.generation}
                         data-quantity={offer.quantity}
-                        className="inline-flex flex-col items-start gap-0.5 rounded-lg
-                          border border-kamas/25 bg-kamas/5 px-2 py-1"
-                        title={`${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas pièce, ${offer.quantity} pour les ${offer.quantity} accouplement${offer.quantity > 1 ? 's' : ''} de gen ${offer.generation} qui restent. Elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.`}
+                        // Sans la table des prix il n'y a pas de carte à ouvrir, et
+                        // un bouton qui ne fait rien vaut moins qu'un bouton éteint.
+                        disabled={!itemPrices}
+                        onClick={() => setRecipeItemId(offer.itemId)}
+                        className={`inline-flex flex-col items-start gap-0.5 rounded-lg border
+                          border-kamas/25 bg-kamas/5 px-2 py-1 text-left transition-colors
+                          ${itemPrices ? 'hover:border-kamas/60 hover:bg-kamas/10' : ''}`}
+                        title={
+                          `${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas pièce, ` +
+                          `${offer.quantity} pour les ${offer.quantity} accouplement${offer.quantity > 1 ? 's' : ''} ` +
+                          `de gen ${offer.generation} qui restent. ` +
+                          `Elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.` +
+                          (itemPrices ? ' Cliquer pour ouvrir la recette et l’âge de ses prix.' : '')
+                        }
                       >
                         <span className="inline-flex items-center gap-1">
                           {/* L'icône d'abord : c'est elle qu'on cherche des yeux dans
@@ -934,6 +976,13 @@ const BreedingPolicyPanel = ({
                           <span className="text-dark-500 tabular-nums">
                             {(offer.price * offer.quantity).toLocaleString('fr-FR')}
                           </span>
+                          {/* Le marteau dit que la puce s'ouvre. Sans lui, la
+                              carte existait sans que rien ne l'annonce — et une
+                              vérification qu'on ne sait pas possible n'est pas
+                              une vérification. */}
+                          {itemPrices && (
+                            <Hammer size={11} className="shrink-0 text-dark-500" />
+                          )}
                         </span>
                         {/* La comparaison **sous** le total, et à l'unité : le total
                             dit combien sortir, la comparaison dit pourquoi de ce
@@ -946,7 +995,7 @@ const BreedingPolicyPanel = ({
                           craft={offer.craft}
                           ceiling={offer.ceiling}
                         />
-                      </span>
+                      </button>
                     ))}
                   </div>
                 );
@@ -1395,6 +1444,29 @@ const BreedingPolicyPanel = ({
           La politique ne propose rien sur cette écurie : soit elle n&apos;a plus de monture
           fertile, soit les prix ne sont pas saisis et tout lui paraît sans valeur.
         </p>
+      )}
+
+      {/* La carte de recette d'une Optimakina : ses ingrédients, leurs prix, et
+          **depuis quand** chacun est saisi. C'est cette dernière colonne qui
+          répond à la question posée — la puce affirme « fabrication 600 », la
+          carte dit sur quels relevés, et de quel âge.
+
+          `RecipeModal` porte sa propre `PriceModal`, donc un prix qui a bougé se
+          corrige sans quitter l'écran ; `onItemPriceSaved` remonte ce que la base
+          a confirmé et la puce se recalcule aussitôt. Voir `applyItemPrice`.
+
+          Une seule fenêtre, repointée : `onOpenSubRecipe` descend dans un
+          ingrédient lui-même craftable au lieu d'empiler une deuxième carte. */}
+      {itemPrices && (
+        <RecipeModal
+          isOpen={recipeItemId !== null}
+          onClose={() => setRecipeItemId(null)}
+          itemId={recipeItemId ?? undefined}
+          prices={itemPrices}
+          index={craftIndex}
+          onOpenSubRecipe={(item: PriceTarget) => setRecipeItemId(item.id)}
+          onPriceSaved={onItemPriceSaved}
+        />
       )}
 
       {colors && onRecordBirths && (

@@ -9,7 +9,6 @@ import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { tunedLevel, valuePerSuccessToward } from '@/lib/dofus/breeding/tuned-level';
 import {
   worthwhileOptimakina,
-  rateWithOptimakina,
 } from '@/lib/dofus/breeding/optimakina';
 import { genetonsForCrossing } from '@/lib/dofus/breeding/mating';
 import { useOptimakinaCraft } from '@/lib/hooks/useOptimakinaCraft';
@@ -155,6 +154,7 @@ const BreedingPage = () => {
     fuelItems,
     itemPrices,
     saveFuelPrice,
+    applyItemPrice,
     stable,
     stockBySex,
     itemStock,
@@ -456,7 +456,10 @@ const BreedingPage = () => {
         .sort((a, b) => a - b),
     [tree]
   );
-  const optimakinaCraft = useOptimakinaCraft(optimakinaItemIds, itemPrices);
+  const { costs: optimakinaCraft, index: optimakinaIndex } = useOptimakinaCraft(
+    optimakinaItemIds,
+    itemPrices
+  );
 
   /**
    * Les Optimakina qui se remboursent, et par quelle source les avoir.
@@ -489,7 +492,10 @@ const BreedingPage = () => {
     // Le niveau conseillé porte aussi ce qu'un succès rapporte ; sans lui il n'y
     // a pas de plafond, donc rien à conseiller.
     if (!tree || advisedLevel === null || advisedLevel.missing !== null) return [];
-    const { level, valuePerSuccess } = advisedLevel;
+    // Ce qu'un succès rapporte, et **rien d'autre** : le niveau conseillé ne sert
+    // plus ici depuis que le taux avec Optimakina se lit sur le couple qui la
+    // pose, et non sur un niveau de référence. Voir `rateWithOptimakina`.
+    const { valuePerSuccess } = advisedLevel;
     const offers = Object.entries(tree.optimakinaByGeneration).flatMap(
       ([generation, item]) => {
         const target = Number(generation);
@@ -514,7 +520,6 @@ const BreedingPage = () => {
     };
     return worthwhileOptimakina(offers, valueOfSuccess).map((advice) => ({
       ...advice,
-      rateWith: rateWithOptimakina(level),
       // L'icône vient du prix saisi : c'est la seule source qui la porte, et une
       // Optimakina qu'on n'a pas tarifée n'apparaît de toute façon pas à l'achat.
       // `null` sur une fabrication dont l'item n'est pas relevé — l'écran retombe
@@ -843,6 +848,14 @@ const BreedingPage = () => {
         // Les Optimakina qui se remboursent : au-dessus du bouton pour savoir
         // quoi préparer, et entre les deux montures au moment d'accoupler.
         optimakina={optimakina}
+        // De quoi ouvrir la carte de recette sur une puce. La table complète et
+        // non les seuls prix : la carte montre les noms, les icônes et surtout
+        // l'ancienneté de chaque saisie, qui est la réponse à « est-ce que les
+        // prix ont bougé ». L'index est celui qui a chiffré la puce, sans quoi la
+        // carte compterait autrement — voir `useOptimakinaCraft`.
+        itemPrices={itemPrices}
+        craftIndex={optimakinaIndex}
+        onItemPriceSaved={applyItemPrice}
         fill={policyFill}
         // Ce qui est réellement en enclos, par opposition à ce que la politique
         // proposerait maintenant : c'est la distinction que le verrou introduit.

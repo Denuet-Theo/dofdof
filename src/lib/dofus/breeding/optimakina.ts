@@ -33,7 +33,6 @@
  */
 
 import { OPTIMAKINA_BONUS } from './costs';
-import { targetGenerationRate } from './mating';
 
 /** Une Optimakina et les deux prix auxquels on peut l'avoir. */
 export type OptimakinaOffer = {
@@ -137,6 +136,33 @@ export const worthwhileOptimakina = (
     // Par génération croissante : c'est l'ordre où on les rencontre en montant.
     .sort((a, b) => a.generation - b.generation);
 
-/** Le taux qu'un croisement atteint avec l'Optimakina, plafonné à 1. */
-export const rateWithOptimakina = (level: number): number =>
-  Math.min(1, targetGenerationRate(level, level) + OPTIMAKINA_BONUS);
+/**
+ * Le taux qu'un croisement atteint avec l'Optimakina — **à partir du sien**.
+ *
+ * ## Elle prenait un niveau, et c'était le défaut
+ *
+ * La signature était `(level: number)` et recalculait
+ * `targetGenerationRate(level, level)` sur le niveau **conseillé**. L'écran
+ * soustrayait ensuite ce taux de celui du couple, qui vient de ses deux parents
+ * réels — deux bases différentes dans une seule soustraction. La pastille
+ * annonçait « +5,2 pts » là où le jeu montre 49,8 % puis 59,8 % : relevé de
+ * l'éleveur, 28/08, deux fenêtres d'accouplement sur le même couple.
+ *
+ * Le bonus **est** plat : `OPTIMAKINA_BONUS` s'ajoute, il ne remplace pas. Ce
+ * n'était donc pas le modèle de l'Optimakina qui était faux, seulement la base
+ * sur laquelle l'écart se lisait. Prendre un taux plutôt qu'un niveau rend la
+ * confusion impossible à écrire : il n'y a plus qu'une base dans la portée.
+ *
+ * Le plafond à 1 reste, et il compte : sur un couple déjà à 95 %, l'Optimakina
+ * n'achète que cinq points, pas dix.
+ */
+export const rateWithOptimakina = (rate: number): number =>
+  Math.min(1, rate + OPTIMAKINA_BONUS);
+
+/**
+ * Ce que l'Optimakina ajoute à ce taux-ci, en probabilité.
+ *
+ * C'est ce que l'écran affiche, donc c'est ce que le calcul rend — la
+ * soustraction ne vit plus dans une vue, où elle a déjà mélangé deux bases.
+ */
+export const optimakinaGain = (rate: number): number => rateWithOptimakina(rate) - rate;

@@ -32,16 +32,34 @@ import { useEffect, useMemo, useState } from 'react';
 import { fetchRecipesForItems } from '@/lib/dofus/fetch-recipes';
 import { useCraftIndex } from '@/lib/hooks/useCraftIndex';
 import type { DofusDBRecipe, ItemPrice } from '@/lib/supabase/types';
-import { computeCraftCost, unitCostOf, type UnitCost } from '@/lib/utils/recipes';
+import {
+  computeCraftCost,
+  unitCostOf,
+  type RecipeIndex,
+  type UnitCost,
+} from '@/lib/utils/recipes';
 
 /**
- * Le coût de fabrication par identifiant d'item, ou `null` quand la recette
- * manque ou qu'un ingrédient n'a pas de prix.
+ * Les coûts de fabrication, **et l'index qui les a calculés**.
+ *
+ * L'index sort avec eux parce que l'écran ouvre désormais la carte de recette
+ * sur une Optimakina, et que `RecipeDetails` sans index chiffre chaque
+ * ingrédient à son prix d'achat — le comportement d'avant #123. La carte
+ * annoncerait alors un total **plus élevé** que la puce qui l'a ouverte, sur
+ * l'écran même qu'on ouvre pour vérifier ce total. Deux chiffres pour une
+ * question, c'est pire que pas de carte.
  */
+export type OptimakinaCraft = {
+  /** Par identifiant d'item : le coût, ou `null` si rien ne le chiffre. */
+  costs: Map<number, number | null>;
+  /** Les recettes des ingrédients, pour que la carte compte comme la puce. */
+  index: RecipeIndex;
+};
+
 export const useOptimakinaCraft = (
   itemIds: number[],
   prices: Map<number, ItemPrice>
-): Map<number, number | null> => {
+): OptimakinaCraft => {
   // Les recettes **et la clé qui les a demandées**. Les deux ensemble, parce
   // qu'un lot chargé pour d'autres ids ne doit pas servir : sans la clé, changer
   // d'arbre chiffrerait une fabrication avec la recette de la famille d'avant.
@@ -85,20 +103,22 @@ export const useOptimakinaCraft = (
   // chiffré au moins cher des deux. C'est ce que fait la page des jauges.
   const { index } = useCraftIndex(recipes);
 
-  return useMemo(() => {
-    const costs = new Map<number, UnitCost>();
+  const costs = useMemo(() => {
+    const cache = new Map<number, UnitCost>();
     const byResult = new Map(recipes.map((recipe) => [recipe.resultId, recipe]));
     return new Map(
       itemIds.map((itemId) => {
         const recipe = byResult.get(itemId);
         if (!recipe) return [itemId, null];
         const priced = recipe.ingredientIds.every(
-          (ingredient) => unitCostOf(ingredient, prices, index, costs).source !== 'none'
+          (ingredient) => unitCostOf(ingredient, prices, index, cache).source !== 'none'
         );
         if (!priced) return [itemId, null];
-        const cost = computeCraftCost(recipe, prices, index, costs);
+        const cost = computeCraftCost(recipe, prices, index, cache);
         return [itemId, cost > 0 ? cost : null];
       })
     );
   }, [itemIds, recipes, index, prices]);
+
+  return useMemo(() => ({ costs, index }), [costs, index]);
 };

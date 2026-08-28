@@ -155,6 +155,7 @@ const BreedingPage = () => {
     fuelItems,
     itemPrices,
     saveFuelPrice,
+    applyItemPrice,
     stable,
     stockBySex,
     itemStock,
@@ -456,7 +457,10 @@ const BreedingPage = () => {
         .sort((a, b) => a - b),
     [tree]
   );
-  const optimakinaCraft = useOptimakinaCraft(optimakinaItemIds, itemPrices);
+  const { costs: optimakinaCraft, index: optimakinaIndex } = useOptimakinaCraft(
+    optimakinaItemIds,
+    itemPrices
+  );
 
   /**
    * Les Optimakina qui se remboursent, et par quelle source les avoir.
@@ -843,6 +847,14 @@ const BreedingPage = () => {
         // Les Optimakina qui se remboursent : au-dessus du bouton pour savoir
         // quoi préparer, et entre les deux montures au moment d'accoupler.
         optimakina={optimakina}
+        // De quoi ouvrir la carte de recette sur une puce. La table complète et
+        // non les seuls prix : la carte montre les noms, les icônes et surtout
+        // l'ancienneté de chaque saisie, qui est la réponse à « est-ce que les
+        // prix ont bougé ». L'index est celui qui a chiffré la puce, sans quoi la
+        // carte compterait autrement — voir `useOptimakinaCraft`.
+        itemPrices={itemPrices}
+        craftIndex={optimakinaIndex}
+        onItemPriceSaved={applyItemPrice}
         fill={policyFill}
         // Ce qui est réellement en enclos, par opposition à ce que la politique
         // proposerait maintenant : c'est la distinction que le verrou introduit.

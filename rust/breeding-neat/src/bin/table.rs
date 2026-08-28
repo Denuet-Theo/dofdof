@@ -73,6 +73,33 @@ fn champion_path() -> Result<&'static str, String> {
         .find(|path| std::path::Path::new(path).exists())
         .ok_or_else(|| format!("aucun champion trouvé, essayé : {}", CHAMPIONS.join(", ")))
 }
+/// La bande de Mangeoire que toutes les lignes tiennent.
+///
+/// **1 et non 0**, parce que c'est ce que l'éleveur fait : « je la remplis en une
+/// fois », donc jusqu'à 70 000 points, ce qui est le plafond de la bande 1. La
+/// bande 0 s'arrête à 40 000 et demande une seconde visite pour un niveau 67.
+///
+/// Ce n'est pas un détail de tarif, ça renverse le classement des niveaux. En
+/// bande 0, le niveau 67 gagne et le 50 est à −0,83 M ; en bande 1, le 50 gagne et
+/// le 67 tombe à −2,71 M (t = −13,36), parce que la montée y traverse la tranche
+/// chère. Le banc préférait donc les hauts niveaux en modélisant un rythme de
+/// remplissage qui n'est pas le sien.
+///
+/// `--bande-mangeoire n` le remplace, pour comparer les deux régimes.
+fn mangeoire_band() -> usize {
+    flag("--bande-mangeoire")
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|band| band.min(3))
+        .unwrap_or(1)
+}
+
+/// Les bandes tenues : la Mangeoire au régime de l'éleveur, le reste au tarif bas.
+fn bands() -> [usize; 6] {
+    let mut out = [0usize; 6];
+    out[5] = mangeoire_band();
+    out
+}
+
 /// Le niveau imposé par défaut à toutes les lignes. `--niveau n` le remplace.
 const LEVEL: u16 = 60;
 
@@ -125,7 +152,7 @@ fn pinned<P: Policy>(inner: P) -> AtLevel<P> {
     AtLevel(
         inner,
         Strategy {
-            bands: [0; 6],
+            bands: bands(),
             level: level(),
             optimakina_from: 11,
         },
@@ -383,7 +410,7 @@ fn main() {
                     AtLevel(
                         policy,
                         Strategy {
-                            bands: [0; 6],
+                            bands: bands(),
                             level: lvl,
                             optimakina_from: 11,
                         },

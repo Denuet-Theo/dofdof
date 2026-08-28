@@ -79,6 +79,15 @@ pub struct Band {
     pub stats_per_point: f64,
 }
 
+/// Les plafonds des quatre bandes, en points de jauge.
+///
+/// Ce sont les plafonds des carburants du jeu, et ils tombent exactement sur les
+/// paliers de débit — c'est ce qui fait que « tenir une bande » veut dire
+/// « acheter le carburant qui va jusque-là ». Ils n'existaient que dans les
+/// commentaires et dans la prose d'`economy.toml` ; `layered_gauge_cost` en a
+/// besoin comme donnée.
+pub const BAND_CAPS: [f64; 4] = [40_000.0, 70_000.0, 90_000.0, 100_000.0];
+
 /// Points de Mangeoire pour atteindre un niveau : `3,795 × niveau^2,329`.
 ///
 /// Niveau 67 → 67 700 points, niveau 200 → 867 900 : treize fois plus pour faire
@@ -827,6 +836,61 @@ impl Economy {
     #[inline]
     pub fn gauge_price(&self, gauge: usize, band: usize) -> f64 {
         self.gauge_prices[gauge.min(5)][band.min(3)]
+    }
+
+    /// Ce que coûte de transférer `points` sur une jauge, **remplie par tranches**.
+    ///
+    /// ## Le relevé qui corrige le modèle
+    ///
+    /// L'éleveur, le 28/08 : « je la remplis en une fois : 40 000 points de niveau
+    /// 0 et 30 000 points de niveau 1 ». Un carburant ne remplit que jusqu'à son
+    /// plafond, donc atteindre 70 000 demande le carburant de bande 0 pour les
+    /// 40 000 premiers points puis celui de bande 1 pour les 30 000 suivants, à des
+    /// prix différents. Le coût est **convexe**.
+    ///
+    /// `schedule` facturait `points × gauge_price(bande retenue)` : un seul prix
+    /// pour tous les points. Au niveau 67, `economy.toml` s'en explique lui-même —
+    /// « 38 200 par enclos » — soit 67 942 points au tarif de la bande 0. Par
+    /// tranches, la même montée coûte **77 455**. Le banc sous-payait donc la
+    /// montée de moitié, ce qui rendait les hauts niveaux artificiellement
+    /// attirants dans tous les classements qu'il imprime.
+    ///
+    /// ## Au-delà d'un remplissage
+    ///
+    /// La jauge se vide et se recharge : au-dessus du plafond retenu, les
+    /// remplissages entiers se répètent et le prix moyen redevient constant. La
+    /// convexité ne se voit qu'**à l'intérieur** d'un remplissage — ce qui est le
+    /// régime d'une fournée, puisqu'on ne remplit qu'une fois par jour.
+    ///
+    /// Jumeau de `layeredTransferCost` (`src/lib/dofus/breeding/enclos.ts`), qui
+    /// porte le même relevé et rend le même nombre.
+    pub fn layered_gauge_cost(&self, gauge: usize, band: usize, points: f64) -> f64 {
+        if points <= 0.0 {
+            return 0.0;
+        }
+        let top = band.min(BAND_CAPS.len() - 1);
+        // Une tranche par bande jusqu'à celle retenue, au prix de chaque bande.
+        let slice_cost = |up_to: f64| -> f64 {
+            let mut spent = 0.0;
+            let mut floor = 0.0;
+            for at in 0..=top {
+                let cap = BAND_CAPS[at];
+                let slice = up_to.min(cap) - floor;
+                if slice > 0.0 {
+                    spent += slice * self.gauge_price(gauge, at);
+                }
+                floor = cap;
+                if up_to <= cap {
+                    return spent;
+                }
+            }
+            // Au-dessus du plafond retenu, seul ce carburant remplit encore.
+            spent + (up_to - floor) * self.gauge_price(gauge, top)
+        };
+
+        let ceiling = BAND_CAPS[top];
+        let fillings = (points / ceiling).floor();
+        fillings * slice_cost(ceiling) + slice_cost(points - fillings * ceiling)
     }
 
     /// Les prix par jauge sont-ils renseignés ? Sans eux, pas d'ordonnancement.

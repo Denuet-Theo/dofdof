@@ -96,14 +96,21 @@ factor of four. That is a real effect in the simulator and a false one for him: 
 plays one fournée a day whether the Mangeoire took two hours or twenty. **Never
 compare levels on an hours budget.**
 
-Measured in fournée mode on his export of 2026-08-27, 200 seeds, paired against
-level 67, kamas cashed:
+Measured in fournée mode on his export of 2026-08-27, 200 seeds, paired, kamas
+cashed, **with the Mangeoire on band 1** — the band he actually fills, one filling
+to 70 000:
 
 | horizon | 36 | 50 | 60 | 67 |
 | --- | --- | --- | --- | --- |
-| 30 fournées | −2,66 M | −1,35 M | −0,66 M | best |
-| 60 fournées | −11,20 M | −5,39 M | −1,99 M | best |
-| 150 fournées | −15,38 M | −8,40 M | −3,94 M | best |
+| 30 fournées | −1,34 M | **best** | −1,24 M | −2,71 M |
+| 60 fournées | −5,42 M | **best** | −0,13 M | −1,37 M |
+| 150 fournées | −7,72 M | **best** | −2,77 M | −11,58 M |
+
+An earlier version of this table had level 67 winning at every horizon. It was
+measured on band 0, where the climb is charged at the cheap fuel throughout — two
+fillings and two visits for a level 67, which is not what he does. Pass
+`--bande-mangeoire 0` to reproduce it; the ranking inverts, and 67 goes from worst
+to best. **A level comparison is meaningless without saying which band it holds.**
 
 **Settled on 2026-08-28, and the answer is 50 — but only after two wrong turns
 that are worth keeping, because each looked like the end.**
@@ -145,10 +152,30 @@ through it. `mangeoireCostPerMountPoint` survives as an **average** — it divid
 867 582 points, a dozen fillings, by their number — and must never be multiplied
 by a level's points. Guard: `npm run check:tuned-level`.
 
-**Unresolved, and it matters for any level measurement:** the bench still charges
-band 0 flat. Every `table --niveaux` figure in this file therefore undercharges the
-climb, and the level rankings above should be read as favouring high levels more
-than reality does.
+**Resolved on 2026-08-28, and it changed the answer.** The bench charged the whole
+climb at one band's price; `layered_gauge_cost` now slices the Mangeoire the way
+the breeder fills it, and `table` holds band 1 by default instead of band 0. The
+level ranking inverted — see the table above — and the bench now agrees with the
+app, which advises 50.
+
+**The slicing applies to the Mangeoire only, and that distinction is load-bearing.**
+A cycle gauge held on band 2 means keeping it *above* 70 000 for the rate: you buy
+high fuel continuously, so every point costs the held band's price. The Mangeoire
+is filled from empty, once. Treating them alike broke
+`payer_le_chemin_critique_seul_est_moins_cher` — on 5 628 points everything fits in
+band 0, so choosing a band stopped costing anything and paying for the critical
+path became free. The test was right.
+
+**Two traps found on the way, both still there:**
+
+- `[mangeoire] prix_par_point` is parsed into `Economy::mangeoire_per_point` and
+  **never read by the simulation** — `schedule` uses `gauge_prices`, from
+  `[carburant]`. Editing it to run a what-if silently changes nothing, and a
+  measurement of "the sweep at his Mangeoire price" was published on that basis
+  before the identical figures gave it away. Edit `[carburant] mangeoire` instead.
+- The TypeScript slices **every** gauge, not just the Mangeoire — #305 shipped it
+  that way, so `fuelPerCrossing` and the advised level currently undercharge the
+  cycle. Aligning it is a separate change.
 
 **`table`'s printed fournée count was a budget, not a measurement**, until
 2026-08-27: it printed `economy.batches`, which only bounds the run in fournée

@@ -171,13 +171,38 @@ pub struct Slot {
 
 /// La durée et le coût d'une fournée, pour un choix de bande par jauge.
 pub fn schedule(economy: &Economy, bands: [usize; GAUGES], xp_points: f64) -> Schedule {
-    let price = |gauge: usize| economy.gauge_price(gauge, bands[gauge]);
     let (climber, _) = climb_and_return(economy, bands);
     let tasks = task_list(climber, other_serenity(climber), xp_points);
 
+    /*
+     * La Mangeoire par **tranches**, le cycle au tarif de sa bande. Les deux
+     * régimes sont réels et ils ne se confondent pas.
+     *
+     * La Mangeoire se remplit **depuis vide**, en une fois : « 40 000 points de
+     * niveau 0 et 30 000 points de niveau 1 », relevé de l'éleveur le 28/08. Les
+     * quarante mille premiers points s'y paient donc au carburant bas quelle que
+     * soit la bande visée, et le coût est convexe.
+     *
+     * Une jauge de cycle, non. Tenir la bande 2 veut dire **maintenir la jauge
+     * au-dessus de 70 000** pour en avoir le débit : on rachète du carburant haut
+     * en continu, et chaque point se paie au tarif de la bande tenue. Le prix plat
+     * y est le bon modèle.
+     *
+     * Les traiter pareil cassait une propriété que ce fichier garde depuis
+     * longtemps : `payer_le_chemin_critique_seul_est_moins_cher`. Sur 5 628 points
+     * — le régime d'une jauge de stat — tout tient dans la bande 0, donc la bande
+     * choisie ne changeait plus le prix et payer le chemin critique devenait
+     * gratuit. Ce n'est pas le test qui avait tort.
+     */
     let cost_per_enclos: f64 = tasks
         .iter()
-        .map(|task| task.points * price(task.gauge))
+        .map(|task| {
+            if task.gauge == MANGEOIRE {
+                economy.layered_gauge_cost(task.gauge, bands[task.gauge], task.points)
+            } else {
+                task.points * economy.gauge_price(task.gauge, bands[task.gauge])
+            }
+        })
         .sum();
 
     let rate = |gauge: usize| economy.band_rate(bands[gauge]);
@@ -1096,5 +1121,80 @@ mod tests {
             "la Mangeoire à 0 point ne devrait rien émettre : {placed:?}"
         );
         assert_eq!(placed.len(), TASKS - 1, "les six autres tâches restent");
+    }
+}
+
+#[cfg(test)]
+mod tranches {
+    use crate::economy::{mount_xp_for_level, Economy, BAND_CAPS};
+
+    /// Le relevé de l'éleveur, au kama, et le même que le portage TypeScript.
+    ///
+    /// « Je la remplis en une fois : 40 000 points de niveau 0 et 30 000 points de
+    /// niveau 1 ». Aux prix de Mangeoire d'`economy.toml` — 0,564 puis 1,9646 —
+    /// ça fait 40 000 × 0,564 + 30 000 × 1,9646 = **81 498**.
+    /// `layeredTransferCost` rend exactement ce nombre côté TypeScript.
+    #[test]
+    fn un_remplissage_coute_ses_deux_tranches() {
+        let mut economy = Economy::default();
+        // Jauge 5 = Mangeoire, bandes 0 et 1.
+        economy.gauge_prices[5][0] = 0.564;
+        economy.gauge_prices[5][1] = 1.9646;
+        let attendu = 40_000.0 * 0.564 + 30_000.0 * 1.9646;
+        let rendu = economy.layered_gauge_cost(5, 1, 70_000.0);
+        assert!(
+            (rendu - attendu).abs() < 1.0,
+            "un remplissage de 70 000 doit coûter {attendu:.0}, il coûte {rendu:.0}"
+        );
+    }
+
+    /// Sous le premier plafond, rien ne change : c'est la bande 0 seule.
+    #[test]
+    fn sous_le_premier_plafond_le_prix_est_celui_de_la_bande_basse() {
+        let mut economy = Economy::default();
+        economy.gauge_prices[5][0] = 0.564;
+        economy.gauge_prices[5][1] = 1.9646;
+        let points = mount_xp_for_level(50);
+        assert!(points < BAND_CAPS[0], "le niveau 50 doit tenir dans la bande 0");
+        let rendu = economy.layered_gauge_cost(5, 1, points);
+        assert!(
+            (rendu - points * 0.564).abs() < 1.0,
+            "une montée qui tient dans la bande basse se paie au tarif bas"
+        );
+    }
+
+    /// Ce que le modèle plat sous-payait, chiffré.
+    ///
+    /// Le niveau 67 demande 67 942 points. À plat, `economy.toml` s'en explique
+    /// lui-même : « 38 200 par enclos », soit tout au tarif de la bande 0. Par
+    /// tranches c'est **77 455**, soit le double.
+    #[test]
+    fn le_niveau_67_coute_le_double_de_ce_que_le_plat_disait() {
+        let mut economy = Economy::default();
+        economy.gauge_prices[5][0] = 0.564;
+        economy.gauge_prices[5][1] = 1.9646;
+        let points = mount_xp_for_level(67);
+        let plat = points * 0.564;
+        let tranches = economy.layered_gauge_cost(5, 1, points);
+        assert!(
+            tranches > plat * 1.9,
+            "par tranches {tranches:.0} contre {plat:.0} à plat : l'écart doit être du simple au double"
+        );
+    }
+
+    /// Au-dessus du plafond, les remplissages se répètent et la moyenne redevient
+    /// constante — c'est ce qui rend le prix par point utilisable en gros.
+    #[test]
+    fn au_dela_du_plafond_les_remplissages_se_repetent() {
+        let mut economy = Economy::default();
+        economy.gauge_prices[5][0] = 0.564;
+        economy.gauge_prices[5][1] = 1.9646;
+        let un = economy.layered_gauge_cost(5, 1, 70_000.0);
+        let trois = economy.layered_gauge_cost(5, 1, 210_000.0);
+        assert!(
+            (trois - 3.0 * un).abs() < 1.0,
+            "trois remplissages doivent coûter trois fois un : {trois:.0} contre {:.0}",
+            3.0 * un
+        );
     }
 }

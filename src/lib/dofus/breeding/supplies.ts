@@ -1,7 +1,13 @@
 import type { FuelBand } from './enclos';
-import { toNumber } from '@/lib/supabase/types';
-import type { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
-import { parseGaugeInfo } from '@/lib/utils/gauges';
+// Relatifs et non `@/` : ces deux-là portent des **valeurs**, et l'alias survit
+// tel quel dans le JS que `scripts/lib/tsc.mjs` émet — un `require("@/lib/...")`
+// que Node ne résout pas. C'est ce qui rendait ce module intestable par une garde,
+// et donc ce qui a laissé passer un régime de facturation appliqué à la mauvaise
+// jauge. `--paths` ne corrige rien : TypeScript résout à la compilation et
+// n'écrit pas le spécificateur.
+import { toNumber } from '../../supabase/types';
+import type { DofusDBItem, ItemPrice } from '../../supabase/types';
+import { parseGaugeInfo } from '../../utils/gauges';
 import {
   bestFuelFor,
   transferRatePerSecond,
@@ -165,6 +171,12 @@ const fallbackPlanFor = (
  * « au plus vite » n'avait plus rien à trier, et l'écran annonçait qu'aucune
  * route n'existait.
  */
+/**
+ * La seule jauge qu'on remplit **depuis vide**, et donc la seule qui se paie par
+ * tranches. Voir le paramètre `filledFromEmpty` de `bestFuelFor`.
+ */
+const FILLED_FROM_EMPTY = 'Mangeoire';
+
 const planFor = (
   gauge: string,
   fuels: Fuel[] | undefined,
@@ -172,8 +184,9 @@ const planFor = (
   kamasPerHour: number,
   forcedCap: number | null
 ) =>
-  (fuels && fuels.length > 0 ? bestFuelFor(points, fuels, kamasPerHour, forcedCap) : null) ??
-  fallbackPlanFor(gauge, points, kamasPerHour, forcedCap);
+  (fuels && fuels.length > 0
+    ? bestFuelFor(points, fuels, kamasPerHour, forcedCap, gauge === FILLED_FROM_EMPTY)
+    : null) ?? fallbackPlanFor(gauge, points, kamasPerHour, forcedCap);
 
 export type SupplyCosts = {
   /**

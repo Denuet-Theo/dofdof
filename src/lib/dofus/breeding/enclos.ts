@@ -297,7 +297,28 @@ export const bestFuelFor = (
    * aller vite parce qu'on a peu de sessions, ou lentement parce qu'on laisse
    * tourner. Fixer le palier court-circuite alors `kamasPerHour`.
    */
-  forcedCap: number | null = null
+  forcedCap: number | null = null,
+  /**
+   * La jauge se remplit-elle **depuis vide**, ou se tient-elle en haut de bande ?
+   *
+   * Les deux régimes sont réels et ils ne se facturent pas pareil.
+   *
+   * La **Mangeoire** se remplit depuis vide, en une fois — « 40 000 points de
+   * niveau 0 et 30 000 points de niveau 1 », relevé de l'éleveur du 28/08 — donc
+   * les quarante mille premiers points s'y paient au carburant bas quelle que soit
+   * la bande visée. C'est `layeredTransferCost`, et le coût y est convexe.
+   *
+   * Une **jauge de cycle**, non. Tenir la bande 2 veut dire maintenir la jauge
+   * au-dessus de 70 000 pour en avoir le débit : on rachète du carburant haut en
+   * continu, et chaque point se paie au tarif de la bande tenue.
+   *
+   * #305 avait appliqué les tranches partout, ce qui sous-facture le cycle. Côté
+   * Rust le même excès a cassé `payer_le_chemin_critique_seul_est_moins_cher` — sur
+   * 5 628 points tout tient dans la bande 0, donc choisir une bande ne coûtait plus
+   * rien et payer le chemin critique devenait gratuit. Le test avait raison, et ce
+   * paramètre est ce qui rétablit la distinction ici aussi.
+   */
+  filledFromEmpty = false
 ): FuelPlan | null => {
   let best: FuelPlan | null = null;
   const eligible = forcedCap === null ? fuels : fuels.filter((fuel) => fuel.cap === forcedCap);
@@ -305,16 +326,15 @@ export const bestFuelFor = (
   for (const fuel of eligible) {
     if (fuel.rechargeAmount <= 0 || fuel.price < 0) continue;
 
-    // Le palier retenu dit **jusqu'où** on monte la jauge, pas à quel prix on
-    // remplit tout : les points sous 40 000 se paient au carburant de bande 0,
-    // qu'on vise 70 000 ou non. Voir `layeredTransferCost` — le calcul facturait
-    // `points × costPerPoint` du seul carburant retenu, ce qui surfacture de 55 %
-    // une montée qui tient dans la bande basse.
     const bands = bandsFor(fuels, fuel.cap);
     const costPerPoint = fuel.price / fuel.rechargeAmount;
     const pointsPerHour = transferRatePerSecond(fuel.cap) * 3600;
     const hours = hoursToTransfer(points, pointsPerHour);
-    const fuelCost = layeredTransferCost(points, bands) ?? points * costPerPoint;
+    // Par tranches si la jauge part de vide, au tarif de la bande tenue sinon.
+    // Voir `filledFromEmpty`.
+    const fuelCost = filledFromEmpty
+      ? layeredTransferCost(points, bands) ?? points * costPerPoint
+      : points * costPerPoint;
     const timeCost = hours * kamasPerHour;
     const totalCost = fuelCost + timeCost;
 

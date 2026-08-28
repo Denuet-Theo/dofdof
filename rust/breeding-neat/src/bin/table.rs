@@ -489,9 +489,13 @@ fn main() {
             pinned(policy)
         });
         let mut held = [0f64; 11];
+        let mut carried = [0f64; 11];
         for outcome in &outcomes {
             for (slot, count) in outcome.held_by_generation.iter().enumerate() {
                 held[slot] += f64::from(*count) / outcomes.len() as f64;
+            }
+            for (slot, count) in outcome.held_by_carried.iter().enumerate() {
+                carried[slot] += f64::from(*count) / outcomes.len() as f64;
             }
         }
         // Ce que le plan réclame, par génération : la demande de l'échelle.
@@ -506,21 +510,26 @@ fn main() {
             mean(outcomes.iter().map(|o| f64::from(o.loads_paid))),
             level()
         );
-        println!("{:>4} {:>10} {:>10}", "gen", "tenu", "demande");
-        println!("{}", "-".repeat(26));
+        // Deux colonnes d'effectif, et l'écart est le diagnostic : « couleur » est
+        // ce que la monture affiche, « porté » ce qu'elle peut viser. Une gen 1 née
+        // d'une gen 9 vise la gen 10, et la ranger sous gen 1 la fait passer pour
+        // du rebut.
+        println!("{:>4} {:>10} {:>10} {:>10}", "gen", "couleur", "porté", "demande");
+        println!("{}", "-".repeat(37));
         for generation in 1..=10 {
-            if held[generation] < 0.05 && wanted[generation] < 0.05 {
+            if held[generation] < 0.05 && carried[generation] < 0.05 && wanted[generation] < 0.05 {
                 continue;
             }
             println!(
-                "{:>4} {:>10.1} {:>10.1}",
-                generation, held[generation], wanted[generation]
+                "{:>4} {:>10.1} {:>10.1} {:>10.1}",
+                generation, held[generation], carried[generation], wanted[generation]
             );
         }
         println!(
-            "{:>4} {:>10.1} {:>10.1}",
+            "{:>4} {:>10.1} {:>10.1} {:>10.1}",
             "tot",
             held.iter().sum::<f64>(),
+            carried.iter().sum::<f64>(),
             wanted.iter().sum::<f64>()
         );
         return;

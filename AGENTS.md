@@ -221,10 +221,51 @@ separated by measurement:
   single month says it is negligible, and that conclusion was published before the
   longer horizons contradicted it.
 - **The pipeline delivers one wave.** The collapse survives with the decay off —
-  36,62 then 12,95 — so it is not the market alone. The census shows gen 9 at 8,5
-  in month 2, **1,6** in month 3, and flat after; gen 2 sits at 18 against a demand
-  of 80. His stable is converted into a single cohort of gen 10, sold, and the base
-  is never replenished fast enough to build a second.
+  36,62 then 12,95 — so it is not the market alone. His stable is converted into a
+  single cohort of gen 10, sold, and the base is never replenished fast enough to
+  build a second.
+
+### Read the census on what a mount **carries**, not on its colour
+
+The breeder had to point this out: the name carries the ancestry — `G4 DO M
+DOAM-ROEB` is a **dore**, a gen 1 colour, born of two gen 4 — and it is the
+ancestry that decides what a crossing can aim at. Counting colours files that
+mount under gen 1, as raw material about to be bought again.
+
+On his starting stable the two counts differ on **30 of 83 gen 1**: twelve carry
+gen 3, six carry gen 4, one carries gen 10. `held_by_carried` exists so the census
+prints both, and the gap is the diagnostic. At month 4, simulated:
+
+| gen | by colour | **carried** | wanted |
+| --- | --- | --- | --- |
+| 1 | 39,0 | 16,8 | 0 |
+| 2 | 17,9 | 17,2 | **80** |
+| 3 | 9,4 | 6,9 | **40** |
+| 8 | 8,9 | **14,3** | 8 |
+| 9 | 1,8 | 2,8 | 4 |
+| 10 | 2,3 | **13,6** | **0** |
+
+Read by colour it says "40 idle gen 1 and 2,3 gen 10". Read by ancestry: **13,6
+mounts carry gen 10**, gen 8 sits at 179 % of demand, gen 2 runs at a fifth.
+
+**And the obvious conclusion from that is wrong.** "A fifth of the park is material
+the plan has no use for, recycle it" was written here and measured the next hour:
+sacrificing everything that carries the top generation without being it costs
+23,30 / 75,01 / 84,85 / 97,96 against 23,31 / 77,16 / 86,04 / 98,78 — **−2,15 M at
+month 3**, and never a gain.
+
+Two reasons, both of which the breeder gave before the measurement did:
+
+- **They sell for nothing.** Most carry gen 10 on a gen 1 *colour*, and `value_of`
+  is zero below generation 2. `settle` skips them for that reason alone; forcing
+  them out destroys them for 0.
+- **A high ancestry is worth holding.** A gen 1 born of a gen 9 aims at gen 10 —
+  that is #59, and it is why `pairAncestryGeneration` exists. Carrying the top
+  generation makes a mount a **good partner**, not a spent one.
+
+The rule about a spent gen 10 (below) is about mounts whose *colour* is gen 10 and
+whose genealogy holds no gen 9. It does not extend to carriers, and reading the
+census as if it did cost a wrong recommendation.
 
 **It is not the tier ordering**, which was the natural suspect since `Ordering`
 documents "the ladder underuses its base". Measured with `table --ordre` on his

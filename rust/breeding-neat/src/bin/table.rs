@@ -47,7 +47,7 @@ use breeding_sim::economy::{
 use breeding_sim::stable::Stable;
 use breeding_sim::encode::Census;
 use breeding_sim::economy::MAX_UNITS;
-use breeding_sim::ladder::{Ladder, LadderPolicy, Route};
+use breeding_sim::ladder::{Ladder, LadderPolicy, Ordering, Route};
 use breeding_sim::search::{Myopic, Searching, ValueFn};
 use breeding_sim::trees::{Catalog, family};
 use rayon::prelude::*;
@@ -589,10 +589,30 @@ fn main() {
     // quand on balaie les niveaux.
     let only = std::env::args().any(|arg| arg == "--seule");
     if only {
+        // `--ordre bas|tourniquet` : l'ordre des étages, pour diagnostiquer un
+        // effondrement. Il a servi à écarter l'hypothèse la plus naturelle sur la
+        // chute du mois 4 — « l'échelle sous-emploie sa base », que `Ordering`
+        // documente. Mesuré sur l'écurie de l'éleveur, encaissé :
+        //
+        //   ordre        30 f      90 f     120 f
+        //   haut       23,31 M   77,16 M   86,04 M
+        //   bas         5,50 M   44,54 M   71,85 M
+        //   tourniquet 16,75 M   69,96 M   85,77 M
+        //
+        // Nourrir la base coûte donc plus que ça ne rapporte, à tous les horizons
+        // essayés. Le défaut n'est pas là — mais l'ordre bas **ne s'effondre pas**
+        // au mois 4 (+27 contre +8,9), ce qui a orienté vers une saturation plutôt
+        // qu'une famine.
+        let ordering = match flag("--ordre").as_deref() {
+            Some("bas") => Ordering::BottomUp,
+            Some("tourniquet") => Ordering::RoundRobin,
+            _ => Ordering::TopDown,
+        };
         let outcomes = run(&catalog, &economy, start, || {
             let mut policy = LadderPolicy::with_ladder(plan.clone());
             policy.harvest_stocked = true;
-            pinned(policy)
+            let gating = policy.gating;
+            pinned(policy.with_ordering(ordering, gating))
         });
         let r = row("3. echelle + tes changements", &outcomes);
         println!(

@@ -184,6 +184,78 @@ crossings went from 90 to 3 660 — and that is what made the hours-mode level
 ranking look like a comparison at equal effort. Guard:
 `rust/breeding-neat/tests/loads_played.rs`.
 
+## The margin is read month by month, and never as one batch times thirty
+
+He asked for this three times before it was written down, which is why it is here
+rather than in a commit message. **What he wants to know is the margin his stable
+throws off month after month, with nothing liquidated.** Not a score, not a total
+over an arbitrary horizon, not a rate extrapolated from one batch.
+
+`encaisse` — `score − liquidation` — is the right column: it is cash that actually
+passed through the till during the run. `score` is not, and neither is anything
+from `--heures`, whose horizon is not months.
+
+Measured on his export of 2026-08-27, level 50, Mangeoire band 1, 200 seeds:
+
+| month | cumulative | **the month's margin** | gen 10 held |
+| --- | --- | --- | --- |
+| 1 | 23,31 M | 23,31 M | 3,2 |
+| 2 | 50,13 M | **+26,82 M** | 8,9 |
+| 3 | 77,16 M | **+27,03 M** | 2,7 |
+| 4 | 86,04 M | **+8,88 M** | 2,3 |
+| 5 | 98,78 M | **+12,74 M** | 2,8 |
+
+Two things this table says that a total hides.
+
+**Of month 1's 23,31 M, 11,93 M is cashed in the very first fournée** — the sale of
+what the parc already holds, his three gen 10 and his unpaired steriles. Once. The
+operation itself yields about 11,4 M that month while the pipeline fills. Any
+figure that multiplies one batch by thirty inherits this and overstates.
+
+**And it collapses at month 4**, from 27 M to 9 M with the same policy. Two causes,
+separated by measurement:
+
+- **The market runs dry, and it compounds.** Setting `baisse_par_vente = 0`:
+  23,62 / 57,14 / 93,76 / 106,71 / 127,45 against 23,31 / 50,13 / 77,16 / 86,04 /
+  98,78. That is −1 % at one month and **−22 % at five**. Measuring the decay on a
+  single month says it is negligible, and that conclusion was published before the
+  longer horizons contradicted it.
+- **The pipeline delivers one wave.** The collapse survives with the decay off —
+  36,62 then 12,95 — so it is not the market alone. The census shows gen 9 at 8,5
+  in month 2, **1,6** in month 3, and flat after; gen 2 sits at 18 against a demand
+  of 80. His stable is converted into a single cohort of gen 10, sold, and the base
+  is never replenished fast enough to build a second.
+
+**It is not the tier ordering**, which was the natural suspect since `Ordering`
+documents "the ladder underuses its base". Measured with `table --ordre` on his
+stable: TopDown 86,04 M at 120 fournées, RoundRobin 85,77, BottomUp 71,85. Feeding
+the base costs more than it returns at every horizon tried — though BottomUp is the
+only one that does not collapse at month 4, which is what pointed at saturation
+rather than starvation.
+
+**And it is not which gen 1 get bought.** `Purchasing::RoundRobin` against the
+default, same stable: 23,31 / 77,36 / 86,04 against 23,31 / 77,16 / 86,04. Two
+tenths of a million at month 3 and nothing anywhere else.
+
+**Buying *more* gen 1 is not available either, and that is the finding.** The
+purchase loop stops on `places + 2 <= capacity`, and his park reads 60/60 — there
+is no room to put them. What the base is short of is **places**, not kamas:
+
+| park | month 1 | month 3 | month 4 | the month-4 margin |
+| --- | --- | --- | --- | --- |
+| 60 places — his | 23,31 M | 77,16 M | 86,04 M | **+8,88 M** |
+| 90 places | 21,54 M | 86,49 M | 100,74 M | **+14,25 M** |
+| 130 places | 25,91 M | 93,54 M | 116,68 M | **+23,14 M** |
+
+Doubling the park roughly triples the fourth month. That is the lever, and it is
+the one the app cannot pull — `enclos_count` is what the game gives him. It also
+explains why BottomUp failed: it takes room from the top instead of adding room.
+
+**What the screen shows is not this.** `earnings.ts` prices one batch and
+multiplies by thirty, which lands near the good months (27 M) and about 70 % above
+the five-month average. Its header says "a rate, not a forecast"; this table is
+what the forecast actually looks like.
+
 ## A gen 10 without a gen 9 in its genealogy is spent — sell it even fertile
 
 Gen 10 × gen 1 names another gen 10 (relevé du 14/08, issue #185), but **only

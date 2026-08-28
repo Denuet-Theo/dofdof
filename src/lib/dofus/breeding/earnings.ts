@@ -3,6 +3,13 @@
  *
  * ## Pourquoi le chiffre existe
  *
+ * **Ce chiffre n'est pas la marge.** Voir `AGENTS.md`, « the margin is read month
+ * by month » : sur son parc, une fournée × trente donne 30 M quand les cinq
+ * premiers mois rendent 23, 27, 27, 9 puis 13 — le rythme affiché tombe près des
+ * bons mois et environ 70 % au-dessus de la moyenne. Ce qu'il mesure est ce que la
+ * fournée d'aujourd'hui vaut, répétée ; ce que la fournée d'aujourd'hui vaut ne se
+ * répète pas.
+ *
  * Les mesures qui ont décidé de la politique sont en **millions de kamas par
  * mois** : c'est l'unité dans laquelle l'échelle a battu le champion, le glouton
  * et la valeur myope, et c'est celle que le Rust imprime (`table --heures`). Rien
@@ -26,8 +33,11 @@
  *   ici et 0 ou 1 en jeu. Sur une fournée de trente c'est juste ; sur un
  *   accouplement, non.
  * - **Le marché ne s'écoule pas.** Le Rust baisse une couleur de 10 % à chaque
- *   vente et la laisse remonter de 1 % par jour. Vendre trente Ébène le même jour
- *   rapporte donc moins que trente fois la première, et ce calcul-ci l'ignore.
+ *   vente et la laisse remonter de 1 % par jour. Ce calcul-ci l'ignore, et le prix
+ *   de cet oubli **compose** : mesuré sur son parc, l'écoulement coûte 1 % au bout
+ *   d'un mois et **22 % au bout de cinq**. Le mesurer sur un seul mois conclut à
+ *   tort qu'il est négligeable — c'est ce qui a été fait, et publié, avant que les
+ *   horizons longs ne le démentent.
  *
  * ## Calibré contre le Rust, et l'écart est connu
  *

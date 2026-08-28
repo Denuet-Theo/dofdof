@@ -430,6 +430,7 @@ const BreedingPage = () => {
       // `fuelPerCrossing`.
       fuelPerCrossing: (supplies.fuelCostPerCycle ?? 0) * 2,
       mangeoireCostPerMountPoint: supplies.mangeoireCostPerMountPoint ?? 0,
+      mangeoireBands: supplies.mangeoireBands,
       levelUpHours: supplies.levelUpHours ?? 0,
       valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
       hoursBetweenLoads: HOURS_BETWEEN_LOADS,
@@ -992,18 +993,20 @@ const BreedingPage = () => {
               ) : (
                 <>
                   {advisedLevel.level}
-                  {/* Ce qui borne vraiment, et ce n'est pas ce qui était écrit ici.
+                  {/* Ce qui borne, et il a fallu s'y reprendre à deux fois.
                       La phrase disait « au-delà, la Mangeoire coûte plus d'heures
-                      qu'elle n'en fait gagner ». Relevé sur son écurie : au niveau
-                      conseillé, cycle plus montée font 17,1 h contre 24 disponibles
-                      — les heures ne mordent pas du tout. Ce qui écarte le palier
-                      au-dessus est double, et les deux tiennent en kamas ou en
-                      visites : il demande deux remplissages de Mangeoire (118 257
-                      points contre un plafond de 70 000), et il rend 8 % de moins
-                      une fois le carburant payé. */}
+                      qu'elle n'en fait gagner » : faux, au niveau conseillé cycle
+                      plus montée font 17,1 h contre 24 disponibles. Puis « le palier
+                      au-dessus demande deux remplissages » : faux dès que le conseil
+                      redescend, puisque le palier au-dessus de 50 est 67, qui tient
+                      dans un remplissage.
+                      Ce qui borne vraiment est le seul énoncé qui vaille à tous les
+                      paliers : la Mangeoire coûte plus en kamas que le taux n'en
+                      rapporte. Et elle coûte par **tranches** — les 40 000 premiers
+                      points au tarif bas, les suivants au tarif haut — ce qu'un prix
+                      moyen cache. */}
                   <span className="text-dark-500 font-normal">
-                    {' '}· le palier au-dessus demande deux remplissages, et rend moins une fois
-                    la Mangeoire payée
+                    {' '}· au-delà, la Mangeoire coûte plus en kamas que le taux n’en rapporte
                   </span>
                 </>
               )}

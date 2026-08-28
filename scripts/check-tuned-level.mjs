@@ -50,9 +50,17 @@ const fail = (message) => {
 /**
  * Les entrées relevées sur l'écurie de l'éleveur, export du 27/08.
  *
- * `mangeoireCostPerMountPoint` est **le sien** — 0,1266 le point — et non les
- * 0,5640 d'`economy.toml` : c'est ce que ses prix saisis donnent, et c'est ce qui
- * a longtemps fait croire que le désaccord avec le banc venait des prix.
+ * `mangeoireCostPerMountPoint` n'est **pas** son prix : c'est le repli
+ * `DEFAULT_POINTS_PER_KAMA.Mangeoire = 0,79`, soit 1,266 le point de jauge divisé
+ * par les dix places. Le harnais ne charge pas les items de carburant, donc
+ * `planFor` retombe dessus. Une note antérieure l'appelait « le sien » et le
+ * comparait aux 0,5640 d'`economy.toml` — en comparant un prix **par monture** à
+ * un prix **par point de jauge**. À unité égale c'est 1,266 contre 0,564 : le
+ * repli facture plus du double, pas moins.
+ *
+ * `mangeoireBands` porte le vrai modèle, et c'est lui qui décide : un carburant ne
+ * remplit que jusqu'à son plafond, donc les 40 000 premiers points se paient à la
+ * bande basse quel que soit le niveau visé.
  */
 const RELEVE = {
   cycleHours: 7.6403,
@@ -62,6 +70,19 @@ const RELEVE = {
   valuePerSuccess: 162_500,
   hoursBetweenLoads: 24,
   pointsCap: 70_000,
+  /**
+   * Les deux bandes, ramenées à une monture — les prix par point de jauge
+   * d'`economy.toml` divisés par les dix places de l'enclos.
+   *
+   * Relevé de l'éleveur le 28/08 : « je la remplis en une fois : 40 000 points de
+   * niveau 0 et 30 000 points de niveau 1 ». C'est ce que `layeredTransferCost`
+   * modélise, et le moteur redonne exactement 81 498 kamas pour un remplissage de
+   * 70 000 — soit 40 000 × 0,564 + 30 000 × 1,9646.
+   */
+  mangeoireBands: [
+    { cap: 40_000, costPerPoint: 0.0564 },
+    { cap: 70_000, costPerPoint: 0.19646 },
+  ],
 };
 
 /* --------------------------------------------------- le net est un gain -- */
@@ -80,11 +101,32 @@ if (conseil === null) {
         `compté à l'enclos au lieu du croisement.`
     );
   }
-  // Le banc tranche 67 sur cette écurie, à son prix de Mangeoire : 200 graines
-  // appariées, −0,83 M pour le niveau 50 (t = −4,09).
-  if (conseil.level !== 67) {
-    fail(`conseil ${conseil.level}, attendu 67 — voir le tableau du banc dans l'en-tête`);
+  // Par tranches, 50 devance 67 de 6,5 % — 54 743 par heure contre 51 415. Ce
+  // n'est plus une quasi-égalité, donc plus rien à départager.
+  if (conseil.level !== 50) {
+    fail(`conseil ${conseil.level}, attendu 50 — voir le tableau des tranches dans l'en-tête`);
   }
+}
+
+/* ------------------------------------------- les tranches, et ce qu'elles font */
+
+/**
+ * Sans les bandes, le prix moyen surfacture le bas et sous-facture le haut.
+ *
+ * C'est la mesure qui justifie tout ce fichier : au prix moyen, une montée au
+ * niveau 50 coûte 8 700 par croisement quand elle en coûte 3 876 par tranches —
+ * **55 % de trop** — pendant qu'une montée au niveau 67 passe de 17 201 à 15 491,
+ * soit 10 % seulement. Le prix moyen rend donc les hauts niveaux artificiellement
+ * attirants, et c'est ce qui a fait conseiller 67.
+ */
+const auPrixMoyen = tunedLevel({ ...RELEVE, mangeoireBands: null });
+if (auPrixMoyen === null) {
+  fail('aucun conseil au prix moyen');
+} else if (!(conseil !== null && conseil.perHour > auPrixMoyen.perHour)) {
+  fail(
+    `les tranches devraient rendre la montée moins chère, donc le conseil meilleur : ` +
+      `${auPrixMoyen.perHour.toFixed(0)} au prix moyen contre ${conseil?.perHour.toFixed(0)} par tranches`
+  );
 }
 
 /* ------------------------------------- le carburant est bien par croisement */
@@ -117,7 +159,11 @@ if (dixFois !== null && dixFois.perHour >= 0) {
  * pour que monter reste payant au-delà : à un dixième de son prix, la grille part
  * plus haut, et le plafond doit la retenir.
  */
-const presqueGratuit = { ...RELEVE, mangeoireCostPerMountPoint: RELEVE.mangeoireCostPerMountPoint / 10 };
+const presqueGratuit = {
+  ...RELEVE,
+  mangeoireCostPerMountPoint: RELEVE.mangeoireCostPerMountPoint / 10,
+  mangeoireBands: RELEVE.mangeoireBands.map((band) => ({ ...band, costPerPoint: band.costPerPoint / 10 })),
+};
 const sansPlafond = tunedLevel({ ...presqueGratuit, pointsCap: undefined });
 const avecPlafond = tunedLevel({ ...presqueGratuit, pointsCap: 70_000 });
 if (sansPlafond === null || avecPlafond === null) {

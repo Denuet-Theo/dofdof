@@ -1,3 +1,4 @@
+import type { FuelBand } from './enclos';
 import { toNumber } from '@/lib/supabase/types';
 import type { DofusDBItem, ItemPrice } from '@/lib/supabase/types';
 import { parseGaugeInfo } from '@/lib/utils/gauges';
@@ -141,6 +142,11 @@ const fallbackPlanFor = (
     fuelCost,
     timeCost: hours * kamasPerHour,
     totalCost: fuelCost + hours * kamasPerHour,
+    // Une seule bande, au prix plat du relevé : sans carburant tarifé on ne sait
+    // pas ce que coûte le palier bas séparément du haut. Le repli reste donc
+    // linéaire, et c'est une approximation qu'il faut savoir en lisant un conseil
+    // — voir `layeredTransferCost`.
+    bands: [{ cap, costPerPoint }],
   };
 };
 
@@ -192,6 +198,21 @@ export type SupplyCosts = {
    * carburant.
    */
   mangeoireCostPerMountPoint: number | null;
+  /**
+   * Les bandes de la Mangeoire, pour chiffrer une montée **par tranches**.
+   *
+   * `mangeoireCostPerMountPoint` juste au-dessus est une **moyenne**, et elle ne
+   * peut pas être autre chose : elle divise le coût de 867 582 points — une
+   * douzaine de remplissages — par leur nombre. Multipliée par les points d'un
+   * niveau, elle surfacture de 55 % ce qui tient dans la bande basse et
+   * sous-facture ce qui la dépasse.
+   *
+   * Tout ce qui chiffre le **coût d'un niveau** doit donc passer par ces bandes et
+   * `layeredTransferCost`, pas par le scalaire. Celui-ci reste pour ce qui a
+   * vraiment besoin d'un prix moyen — l'affichage, et le coût d'une montée jusqu'au
+   * plafond.
+   */
+  mangeoireBands: FuelBand[] | null;
   /**
    * Heures d'enclos pour amener **une fournée** de montures à la fécondité.
    *
@@ -429,6 +450,15 @@ export const computeSupplyCosts = (
     cycleFreeSlotHours: complete ? cycleFreeSlotHours : null,
     levelUpHours: mangeoirePlan?.hours ?? null,
     mangeoirePointsPerHour: mangeoirePlan?.pointsPerHour ?? null,
+    // Le partage par les dix places s'applique aux bandes comme au scalaire : la
+    // Mangeoire monte l'enclos d'un bloc.
+    mangeoireBands:
+      mangeoirePlan && mountsInEnclos > 0
+        ? mangeoirePlan.bands.map((band) => ({
+            cap: band.cap,
+            costPerPoint: band.costPerPoint / mountsInEnclos,
+          }))
+        : null,
     mangeoirePointsCap: mangeoirePlan?.fuel.cap ?? null,
     mangeoireFuel: mangeoirePlan?.fuel.name ?? null,
     // Les heures libres du cycle, converties au débit de la Mangeoire.

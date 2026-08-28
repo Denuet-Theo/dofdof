@@ -33,7 +33,7 @@
  * | terme | ici | côté Rust |
  * | --- | --- | --- |
  * | la durée d'une fournée | `cycleHours` + la montée au prorata | `unit_load`, second membre |
- * | ce qu'une fournée coûte | `fuelPerLoad` + la Mangeoire du niveau | `unit_load` |
+ * | ce qu'un croisement coûte | `fuelPerCrossing` + la Mangeoire du niveau | `unit_load` |
  * | ce qu'une réussite rapporte | prix de la couronne ÷ barreaux restants | `value_per_success_toward` |
  * | le taux | `targetGenerationRate` | `success_rate` |
  *
@@ -53,8 +53,24 @@ import { targetGenerationRate } from './mating';
 export type TunedLevelInput = {
   /** Durée d'un cycle d'enclos, relevée sur ses jauges. */
   cycleHours: number;
-  /** Ce qu'un chargement coûte en carburant, hors Mangeoire. */
-  fuelPerLoad: number;
+  /**
+   * Ce qu'**un croisement** coûte en carburant, hors Mangeoire.
+   *
+   * Deux cycles de fécondité, un par parent — `fuelCostPerCycle × 2`, exactement
+   * ce que `computeBreedingCosts` facture (`costs.ts`, `fuelCost`).
+   *
+   * Le champ s'appelait `fuelPerLoad` et recevait `fuelCostPerCycle × 10`, soit le
+   * carburant d'un **enclos plein**. Il était soustrait de `perLoad`, qui est la
+   * valeur d'**un** croisement, et de `levelling`, qui monte **deux** parents :
+   * une dépense pour dix montures retranchée d'une recette pour deux. Cinq fois
+   * trop, et dans la seule soustraction du calcul.
+   *
+   * Le prix, mesuré sur l'export du 27/08 : le net était **négatif à tous les
+   * niveaux** — −8 106 au niveau 50, −8 321 au niveau 67 — donc le conseil ne
+   * choisissait pas le niveau qui rapporte le plus mais celui qui **perd le
+   * moins**, ce qui n'est pas la même courbe et n'a pas le même sommet.
+   */
+  fuelPerCrossing: number;
   /** Prix d'un point d'XP sur une monture, Mangeoire comprise. */
   mangeoireCostPerMountPoint: number;
   /**
@@ -155,7 +171,7 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
   // comme une mesure. On préfère ne rien dire.
   if (!(input.mangeoireCostPerMountPoint > 0)) return null;
 
-  let best: TunedLevel | null = null;
+  const scored: TunedLevel[] = [];
   for (const level of STEPS) {
     // Le plafond d'un remplissage : au-delà, le niveau demande un second passage
     // que l'éleveur ne fera pas dans la même fournée. Voir `pointsCap`.
@@ -176,11 +192,52 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
     // ne doit pas entrer au dénominateur — c'est toute la différence entre
     // conseiller 23 et conseiller 100.
     const spacing = Math.max(cycleHours + climbHours, input.hoursBetweenLoads ?? 0);
-    const perHour = (perLoad - input.fuelPerLoad - levelling) / spacing;
-    // Strictement mieux : à égalité on garde le niveau le plus bas, qui coûte
-    // moins à monter et arrive plus tôt.
-    if (best === null || perHour > best.perHour) best = { level, perHour };
+    const perHour = (perLoad - input.fuelPerCrossing - levelling) / spacing;
+    scored.push({ level, perHour });
   }
+  if (scored.length === 0) return null;
+
+  /**
+   * Le sommet est **plat**, et c'est la simulation qui le tranche.
+   *
+   * Sur l'export du 27/08, une fois le carburant remis à l'échelle du croisement :
+   * niveau 50 rend 49 919 par heure, niveau 67 en rend 49 706 — **0,4 % d'écart**.
+   * La courbe n'a pas de sommet net : son maximum continu tombe vers 57, entre
+   * deux paliers de la grille, donc lequel des deux gagne tient à l'arrondi de la
+   * grille et non à l'économie.
+   *
+   * Le banc, lui, tranche. Sur la même écurie, 200 graines appariées, en mode
+   * fournée — le seul qui corresponde à un calendrier d'une fournée par jour — et
+   * **à son prix de Mangeoire** (0,1266 le point, et non les 0,5640
+   * d'`economy.toml`) :
+   *
+   * | niveau | écart contre 67 | t |
+   * | --- | --- | --- |
+   * | 36 | −2,18 M | −10,77 |
+   * | 50 | −0,83 M | −4,09 |
+   * | 60 | −0,49 M | −2,15 |
+   * | 67 | référence | |
+   *
+   * Ce que la formule ne voit pas : elle chiffre **un croisement** en régime
+   * permanent, quand la partie **capitalise** — un taux plus haut rend plus de
+   * montures par fournée, qui alimentent les fournées suivantes. Un calcul par
+   * croisement ne peut pas voir un stock qui grossit.
+   *
+   * D'où la règle : à écart négligeable, **le niveau le plus haut**. Elle ne
+   * renverse jamais un écart réel — 36 reste écarté, la simulation le confirme à
+   * −2,18 M — et elle laisse le banc décider là où la formule dit « je ne sais
+   * pas ».
+   *
+   * La marge s'applique sur l'**amplitude** et non sur la valeur signée : un net
+   * négatif — écurie pauvre, réussite qui ne paie pas le carburant — inverserait
+   * une comparaison écrite `max × (1 − marge)`.
+   */
+  const MARGE = 0.02;
+  const sommet = scored.reduce((a, b) => (b.perHour > a.perHour ? b : a));
+  const plancher = sommet.perHour - Math.abs(sommet.perHour) * MARGE;
+  const best = scored
+    .filter((candidate) => candidate.perHour >= plancher)
+    .reduce((a, b) => (b.level > a.level ? b : a));
 
   return best;
 };

@@ -299,6 +299,25 @@ what the forecast actually looks like.
 
 ## A gen 10 without a gen 9 in its genealogy is spent — sell it even fertile
 
+> **REFUTED IN GAME, 2026-08-28. Do not act on this section. See #309.**
+>
+> `G10 AZPO M AZPO-DO` — Azur-Pourpre gen 10, genealogy Azur-Pourpre (g10) + Doré
+> (g1), **no gen 9** — crossed with a gen 1 Pourpre names **Azur-Pourpre, GEN. 10,
+> at 47,55 %** in the game's own "Génération cible" box. The table below lists that
+> exact mount as unable to relaunch the loop. It can.
+>
+> The model gets the rate right and the target wrong: it puts the 47,55 % on three
+> gen 2 colours and leaves the gen 10 at 10,91 %. Génétons are zero on both sides,
+> so the geneton rule is not what is broken — the target assignment is.
+>
+> What is still open is whether **any** gen 1 does it or only the one that
+> completes the recipe (here Pourpre, and Azur-Pourpre = azur + pourpre). One more
+> window settles it; the breeder is out of féconde females for now.
+>
+> Until then: `sellTop` sells gen 10 by default, and `Summit::Duplicate` was turned
+> off on a −1,43 M measurement taken with this broken model. **That measurement is
+> void.**
+
 Gen 10 × gen 1 names another gen 10 (relevé du 14/08, issue #185), but **only
 through the gen 9 tint the gen 10 carries in its genealogy**. That tint recombines
 with the gen 1's colour; nothing names *(gen 10 + gen 1)* directly, because a

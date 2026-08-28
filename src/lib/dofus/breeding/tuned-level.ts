@@ -48,6 +48,7 @@
  */
 
 import { mountXpForLevel, MAX_MOUNT_LEVEL } from './costs';
+import { layeredTransferCost, type FuelBand } from './enclos';
 import { targetGenerationRate } from './mating';
 
 export type TunedLevelInput = {
@@ -73,6 +74,26 @@ export type TunedLevelInput = {
   fuelPerCrossing: number;
   /** Prix d'un point d'XP sur une monture, Mangeoire comprise. */
   mangeoireCostPerMountPoint: number;
+  /**
+   * Les bandes de la Mangeoire, ramenées à **une monture**.
+   *
+   * Quand elles sont là, la montée se chiffre par tranches et non au prix moyen —
+   * un carburant ne remplit que jusqu'à son plafond, donc les 40 000 premiers
+   * points se paient à la bande basse quel que soit le niveau visé. Le relevé de
+   * l'éleveur, 28/08 : « je la remplis en une fois : 40 000 points de niveau 0 et
+   * 30 000 points de niveau 1 ».
+   *
+   * L'écart n'est pas un détail de deuxième ordre et il n'est pas uniforme : au
+   * prix moyen, une montée au niveau 50 est facturée **55 % de trop**, une montée
+   * au niveau 67 seulement 10 % de trop. Le prix moyen rend donc les hauts niveaux
+   * artificiellement attirants, ce qui est exactement le sens dans lequel le
+   * conseil se trompait.
+   *
+   * Absentes — carburants non tarifés, donc repli sur le prix relevé — on retombe
+   * sur le scalaire, et le conseil hérite de ce biais. Il vaut mieux le savoir que
+   * de croire l'avoir corrigé partout.
+   */
+  mangeoireBands?: FuelBand[] | null;
   /**
    * Heures pour monter une fournée au niveau 200, relevées sur la Mangeoire.
    *
@@ -183,7 +204,12 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
 
     // La Mangeoire monte les dix places d'un bloc, et `mangeoireCostPerMountPoint`
     // porte déjà ce partage. Deux parents par croisement, comme dans `costs.ts`.
-    const levelling = 2 * input.mangeoireCostPerMountPoint * mountXpForLevel(level);
+    const points = mountXpForLevel(level);
+    const parTranches =
+      input.mangeoireBands && input.mangeoireBands.length > 0
+        ? layeredTransferCost(points, input.mangeoireBands)
+        : null;
+    const levelling = 2 * (parTranches ?? input.mangeoireCostPerMountPoint * points);
     // Sans Optimakina : elle se décide par croisement et par rang visé, donc
     // elle n'a rien à faire dans un niveau choisi pour toute la fournée.
     const perLoad = valuePerSuccess * targetGenerationRate(level, level);
@@ -198,46 +224,26 @@ export const tunedLevel = (input: TunedLevelInput): TunedLevel | null => {
   if (scored.length === 0) return null;
 
   /**
-   * Le sommet est **plat**, et c'est la simulation qui le tranche.
+   * Le meilleur, strictement — et **plus de départage**.
    *
-   * Sur l'export du 27/08, une fois le carburant remis à l'échelle du croisement :
-   * niveau 50 rend 49 919 par heure, niveau 67 en rend 49 706 — **0,4 % d'écart**.
-   * La courbe n'a pas de sommet net : son maximum continu tombe vers 57, entre
-   * deux paliers de la grille, donc lequel des deux gagne tient à l'arrondi de la
-   * grille et non à l'économie.
+   * #304 avait ajouté une règle « à écart négligeable (2 %), le niveau le plus
+   * haut », au motif que la formule ne séparait pas 50 de 67 — 0,4 % — et que le
+   * banc, lui, tranchait pour 67.
    *
-   * Le banc, lui, tranche. Sur la même écurie, 200 graines appariées, en mode
-   * fournée — le seul qui corresponde à un calendrier d'une fournée par jour — et
-   * **à son prix de Mangeoire** (0,1266 le point, et non les 0,5640
-   * d'`economy.toml`) :
+   * Les deux moitiés de ce motif étaient fausses, et pour la même raison. Le prix
+   * moyen de la Mangeoire surfacture de **55 %** ce qui tient dans la bande basse
+   * et de **10 %** seulement ce qui la dépasse : il rendait donc les hauts niveaux
+   * artificiellement attirants, ce qui écrasait l'écart entre 50 et 67. Et le banc
+   * facture toute la montée au tarif de la bande basse — 38 200 par enclos au
+   * niveau 67 quand le relevé en donne 77 455 — donc il sous-paie exactement ce
+   * qu'il fallait payer pour préférer 50.
    *
-   * | niveau | écart contre 67 | t |
-   * | --- | --- | --- |
-   * | 36 | −2,18 M | −10,77 |
-   * | 50 | −0,83 M | −4,09 |
-   * | 60 | −0,49 M | −2,15 |
-   * | 67 | référence | |
-   *
-   * Ce que la formule ne voit pas : elle chiffre **un croisement** en régime
-   * permanent, quand la partie **capitalise** — un taux plus haut rend plus de
-   * montures par fournée, qui alimentent les fournées suivantes. Un calcul par
-   * croisement ne peut pas voir un stock qui grossit.
-   *
-   * D'où la règle : à écart négligeable, **le niveau le plus haut**. Elle ne
-   * renverse jamais un écart réel — 36 reste écarté, la simulation le confirme à
-   * −2,18 M — et elle laisse le banc décider là où la formule dit « je ne sais
-   * pas ».
-   *
-   * La marge s'applique sur l'**amplitude** et non sur la valeur signée : un net
-   * négatif — écurie pauvre, réussite qui ne paie pas le carburant — inverserait
-   * une comparaison écrite `max × (1 − marge)`.
+   * Par tranches, l'écart n'a plus rien de négligeable : 54 743 par heure au
+   * niveau 50 contre 51 415 au niveau 67, soit **6,5 %**. Il n'y a plus de
+   * quasi-égalité à départager, et une règle dont la raison est morte se retire
+   * plutôt que de rester au cas où.
    */
-  const MARGE = 0.02;
-  const sommet = scored.reduce((a, b) => (b.perHour > a.perHour ? b : a));
-  const plancher = sommet.perHour - Math.abs(sommet.perHour) * MARGE;
-  const best = scored
-    .filter((candidate) => candidate.perHour >= plancher)
-    .reduce((a, b) => (b.level > a.level ? b : a));
+  const best = scored.reduce((a, b) => (b.perHour > a.perHour ? b : a));
 
   return best;
 };

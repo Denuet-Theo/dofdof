@@ -175,6 +175,103 @@ export type FuelPlan = {
   timeCost: number;
   /** Ce que coûte réellement l'opération, temps de jeu valorisé. */
   totalCost: number;
+  /**
+   * Les bandes traversées, du plafond le plus bas au retenu.
+   *
+   * Le plan n'est pas « un carburant » mais un **empilement** : `fuel` dit
+   * jusqu'où on monte, `bands` dit ce qu'on paie en chemin. Elles remontent
+   * jusqu'à l'appelant parce qu'un coût par point n'a plus de sens seul — voir
+   * `layeredTransferCost`.
+   */
+  bands: FuelBand[];
+};
+
+/**
+ * Le prix au point, bande par bande, du moins cher de chaque palier.
+ *
+ * `null` quand aucun carburant tarifé n'est connu : l'appelant retombe alors sur
+ * le prix plat du relevé, qui ne sait pas distinguer les bandes.
+ */
+export type FuelBand = { cap: number; costPerPoint: number };
+
+/**
+ * Les bandes tarifées d'une jauge, du plafond le plus bas au plus haut.
+ *
+ * Une bande par plafond de carburant, au prix du moins cher qui l'atteint.
+ * `forcedCap` coupe ce qui est au-dessus : le réglage dit jusqu'où l'éleveur
+ * accepte de monter, donc les paliers supérieurs n'existent pas pour lui.
+ */
+export const bandsFor = (fuels: Fuel[], forcedCap: number | null = null): FuelBand[] => {
+  const cheapest = new Map<number, number>();
+  for (const fuel of fuels) {
+    if (fuel.rechargeAmount <= 0 || fuel.price < 0) continue;
+    if (forcedCap !== null && fuel.cap > forcedCap) continue;
+    const perPoint = fuel.price / fuel.rechargeAmount;
+    const known = cheapest.get(fuel.cap);
+    if (known === undefined || perPoint < known) cheapest.set(fuel.cap, perPoint);
+  }
+  return [...cheapest]
+    .map(([cap, costPerPoint]) => ({ cap, costPerPoint }))
+    .sort((a, b) => a.cap - b.cap);
+};
+
+/**
+ * Ce que coûte de transférer `points`, **une jauge remplie par tranches**.
+ *
+ * ## Le relevé qui a corrigé le modèle
+ *
+ * L'éleveur, le 28/08 : « je la remplis en une fois : 40 000 points de niveau 0
+ * et 30 000 points de niveau 1 ». Un carburant ne remplit que jusqu'à son
+ * plafond — c'est ce que `Fuel.cap` dit déjà — donc atteindre 70 000 demande le
+ * carburant de bande 0 pour les 40 000 premiers points, puis celui de bande 1
+ * pour les 30 000 suivants. Les deux prix au point sont différents, et le second
+ * est le plus cher.
+ *
+ * Le calcul facturait `points × costPerPoint` d'**un seul** carburant, celui que
+ * `bestFuelFor` retenait. Une montée de 34 365 points — le niveau 50 — était donc
+ * chiffrée au tarif du palier haut alors qu'elle tient entière dans le bas ; et
+ * une montée de 67 942 — le niveau 67 — au même tarif alors qu'elle n'y déborde
+ * que de 27 942. Le coût était **linéaire** là où il est convexe, ce qui rend les
+ * petites montées trop chères et les grandes trop bon marché, l'une par rapport à
+ * l'autre.
+ *
+ * ## Au-delà d'un remplissage
+ *
+ * La jauge se vide et se recharge : au-dessus du plafond le plus haut, on paie
+ * autant de remplissages entiers que nécessaire, plus le reste. Le prix moyen au
+ * point y redevient donc constant — c'est seulement **à l'intérieur** d'un
+ * remplissage que la convexité se voit. Elle s'y voit d'autant plus que
+ * `pointsCap` impose une fournée à un seul remplissage.
+ *
+ * ## Ce que ce modèle suppose, et qui n'est pas neutre
+ *
+ * Qu'on remplit **depuis vide**. Un éleveur qui maintiendrait sa jauge en haut de
+ * plage — le régime que `bestFuelFor` suppose pour le **débit** — rachèterait
+ * toujours du carburant de palier haut, et paierait tout au prix fort. Les deux
+ * régimes sont réels ; celui-ci est celui qui a été relevé.
+ */
+export const layeredTransferCost = (points: number, bands: FuelBand[]): number | null => {
+  if (bands.length === 0 || points <= 0) return bands.length === 0 ? null : 0;
+
+  /** Le coût d'un remplissage complet, du vide jusqu'au plafond le plus haut. */
+  const sliceCost = (upTo: number): number => {
+    let spent = 0;
+    let floor = 0;
+    for (const band of bands) {
+      const slice = Math.min(upTo, band.cap) - floor;
+      if (slice > 0) spent += slice * band.costPerPoint;
+      floor = band.cap;
+      if (upTo <= band.cap) break;
+    }
+    // Au-dessus du plafond le plus haut, le dernier prix continue de s'appliquer :
+    // c'est le seul carburant qui remplit encore.
+    if (upTo > floor) spent += (upTo - floor) * bands[bands.length - 1].costPerPoint;
+    return spent;
+  };
+
+  const ceiling = bands[bands.length - 1].cap;
+  const fillings = Math.floor(points / ceiling);
+  return fillings * sliceCost(ceiling) + sliceCost(points - fillings * ceiling);
 };
 
 /**
@@ -208,15 +305,21 @@ export const bestFuelFor = (
   for (const fuel of eligible) {
     if (fuel.rechargeAmount <= 0 || fuel.price < 0) continue;
 
+    // Le palier retenu dit **jusqu'où** on monte la jauge, pas à quel prix on
+    // remplit tout : les points sous 40 000 se paient au carburant de bande 0,
+    // qu'on vise 70 000 ou non. Voir `layeredTransferCost` — le calcul facturait
+    // `points × costPerPoint` du seul carburant retenu, ce qui surfacture de 55 %
+    // une montée qui tient dans la bande basse.
+    const bands = bandsFor(fuels, fuel.cap);
     const costPerPoint = fuel.price / fuel.rechargeAmount;
     const pointsPerHour = transferRatePerSecond(fuel.cap) * 3600;
     const hours = hoursToTransfer(points, pointsPerHour);
-    const fuelCost = points * costPerPoint;
+    const fuelCost = layeredTransferCost(points, bands) ?? points * costPerPoint;
     const timeCost = hours * kamasPerHour;
     const totalCost = fuelCost + timeCost;
 
     if (!best || totalCost < best.totalCost) {
-      best = { fuel, costPerPoint, pointsPerHour, hours, fuelCost, timeCost, totalCost };
+      best = { fuel, costPerPoint, pointsPerHour, hours, fuelCost, timeCost, totalCost, bands };
     }
   }
 

@@ -105,31 +105,50 @@ level 67, kamas cashed:
 | 60 fournées | −11,20 M | −5,39 M | −1,99 M | best |
 | 150 fournées | −15,38 M | −8,40 M | −3,94 M | best |
 
-**Settled on 2026-08-28, and it was not a price disagreement.** `tunedLevel`
-advised **50** where the bench says 67, and the suspicion was that the two charged
-different Mangeoire prices. His is **0,1266 kamas a point** — 4,5× cheaper than
-`economy.toml`'s 0,5640 — and re-running the sweep at *his* price still gives 67,
-by 0,83 M a month over 50 (t = −4,09). So the prices were never the disagreement.
+**Settled on 2026-08-28, and the answer is 50 — but only after two wrong turns
+that are worth keeping, because each looked like the end.**
 
-The disagreement was a **unit**. `tunedLevel` subtracted `fuelCostPerCycle × 10`,
-the fuel of a full enclos, from a revenue worth **one crossing** and a Mangeoire
-cost that levels **two** parents. Five times too much, in the calculation's only
-subtraction — and `costs.ts` had it right all along with
-`const fuelCost = fuelCostPerCycle * 2`. The net came out **negative at every
-level**, so the advice was picking the level that loses least, which is not the
-same curve and does not have the same peak.
+*First turn.* `tunedLevel` subtracted `fuelCostPerCycle × 10`, the fuel of a full
+enclos, from a revenue worth **one crossing** and a Mangeoire cost that levels
+**two** parents. Five times too much, in the calculation's only subtraction, while
+`costs.ts` had `fuelCostPerCycle * 2` all along. The net came out **negative at
+every level**, so the advice ranked losses, not gains. Real defect, real fix.
 
-Corrected, the net is positive and the peak is **flat**: 49 919 an hour at level
-50 against 49 706 at 67, a 0,4 % gap, with the continuous optimum near 57 —
-between two rungs of `STEPS`. The formula genuinely cannot separate them, so it
-breaks a near-tie (2 %) toward the **higher** level, and the bench is what
-justifies that direction. What the formula cannot see: it prices one crossing in
-a steady state, while a run **compounds** — a higher rate yields more mounts per
-fournée, which feed the next ones.
+*Second turn, and it was wrong.* With the net positive the peak looked flat — 0,4 %
+between 50 and 67 — so a near-tie went to the higher level, on the grounds that the
+bench prefers 67. Both halves of that reasoning were false, for one reason.
 
-The advice is now **67**, and the monthly rate on his stable reads 30,59 M instead
-of 30,05 M. Guard: `npm run check:tuned-level`, whose inputs are the ones read in
-the browser on his export.
+*What settles it: the gauges fill in slices, and nothing modelled that.* A fuel
+only fills up to its own cap, so reaching 70 000 costs 40 000 points of band-0 fuel
+plus 30 000 of band-1 — the breeder's own reading, 28/08: « je la remplis en une
+fois : 40 000 points de niveau 0 et 30 000 points de niveau 1 ». The cost is
+**convex**, and every price in this repo was linear:
+
+| | level 50 (34 365 pts) | level 67 (67 942 pts) |
+| --- | --- | --- |
+| flat average, per enclos | 43 499 | 86 001 |
+| in slices | 19 382 | 77 455 |
+| overcharge | **55 %** | **10 %** |
+
+A flat average therefore makes high levels artificially attractive — which is
+exactly the direction the advice was wrong in. And the bench does the opposite
+error: it charges the whole climb at band 0 — 38 200 an enclos at level 67, against
+77 455 measured — so it undercharges precisely what it takes to prefer 50. Two
+models wrong in opposite directions, both pointing at 67.
+
+In slices, level 50 pays **54 743** an hour against **51 415** for 67 — 6,5 %, not
+a tie. The near-tie rule was removed with it: a rule whose reason is dead is not
+kept in case.
+
+`layeredTransferCost` is the one door, and everything priced per enclos goes
+through it. `mangeoireCostPerMountPoint` survives as an **average** — it divides
+867 582 points, a dozen fillings, by their number — and must never be multiplied
+by a level's points. Guard: `npm run check:tuned-level`.
+
+**Unresolved, and it matters for any level measurement:** the bench still charges
+band 0 flat. Every `table --niveaux` figure in this file therefore undercharges the
+climb, and the level rankings above should be read as favouring high levels more
+than reality does.
 
 **`table`'s printed fournée count was a budget, not a measurement**, until
 2026-08-27: it printed `economy.batches`, which only bounds the run in fournée

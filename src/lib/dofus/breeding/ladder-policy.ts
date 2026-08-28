@@ -451,7 +451,30 @@ const settle = (
     0
   );
   if (view.kamas + raised < needed) {
-    return { ...emptyPlan(), clonings, sacrifices };
+    /**
+     * Insolvable pour le chargement — mais ce qui ne coûte **aucune place** ne le
+     * demande pas.
+     *
+     * Un croisement entre deux fécondes est un clic en jeu : il n'ouvre pas
+     * d'enclos, donc il ne consomme pas le carburant que le solde ne peut pas
+     * payer. Les jeter avec le reste reprend à l'éleveur la seule chose qu'il
+     * pouvait encore faire — et c'est la cinquième fois que la même confusion
+     * entre « croisement » et « place » lui coûte un geste. Voir `placesUsed`.
+     *
+     * Les achats partent, eux, et il le faut : une gen 1 neuve se paie, et elle
+     * arrive fertile donc elle doit son cycle. Les clonages et les sacrifices
+     * restent, comme avant — ils ne coûtent rien et le second **rapporte**.
+     */
+    const gratuits: [number, number][] = [];
+    const harvested: boolean[] = [];
+    const optimakina: boolean[] = [];
+    plan.crossings.forEach((pair, at) => {
+      if (placesFor(mounts, pair) > 0) return;
+      gratuits.push(pair);
+      harvested.push(plan.harvested[at] === true);
+      optimakina.push(plan.optimakina[at] === true);
+    });
+    return { ...emptyPlan(), crossings: gratuits, harvested, optimakina, clonings, sacrifices };
   }
 
   return plan;

@@ -121,6 +121,20 @@ pub fn ladder_policy_cases_for(family: &'static str, catalog: &Catalog) -> Vec<C
         ));
     }
 
+    // Insolvable, mais avec des croisements gratuits : la fournée doit les garder,
+    // puisque le solde ne les paie pas — ils n'ouvrent aucun enclos.
+    let economy = base.for_run(catalog, &Draws::new(13));
+    cases.push(run_case(
+        family,
+        catalog,
+        &economy,
+        &insolvent_with_free_crossings_stable(catalog),
+        0,
+        10,
+        true,
+        true,
+    ));
+
     // L'écurie qui départage à sexe égal, construite à la main.
     //
     // Le balayage de `clone_by_generation` ne regarde que le groupe de porté
@@ -203,6 +217,54 @@ fn top_sterile_stable(catalog: &Catalog) -> Stable {
     Stable {
         mounts: vec![sterile(Sex::Male), sterile(Sex::Male)],
     }
+}
+
+/// Une écurie insolvable où **une partie seulement** des croisements est gratuite.
+///
+/// Elle épingle la branche que le cinquième exemplaire de la confusion
+/// « croisement / place » a ouverte : à court d'argent pour le chargement, la
+/// fournée gardait le clonage et l'extraction et **jetait tous les croisements**.
+/// Or un couple de deux fécondes est un clic en jeu — il n'ouvre aucun enclos,
+/// donc il ne consomme pas le carburant que le solde ne paie pas.
+///
+/// Les trois conditions doivent tenir **ensemble**, et c'est ce qui rend l'écurie
+/// délicate :
+///
+/// - des **fécondes** appariables, sinon il n'y a rien à sauver ;
+/// - des montures **non cyclées**, sinon la fournée n'ouvre aucun enclos, ne doit
+///   pas le chargement, et reste solvable — la branche n'est alors jamais
+///   atteinte. Une première version de ce cas n'avait que des fécondes : elle
+///   était **inerte**, et la référence l'a montré en n'y écrivant aucun
+///   croisement ;
+/// - des couleurs de **gen 1**, dont `value_of` vaut zéro, pour qu'aucun sacrifice
+///   ne renfloue le solde et ne rende la fournée solvable par la bande.
+///
+/// Le cas `kamas = 0` qui existait déjà passe par la même branche, mais sur des
+/// écuries tirées : les vingt-quatre n'y composaient **aucun** croisement gratuit,
+/// donc aucune n'aurait vu le comportement se reperdre.
+fn insolvent_with_free_crossings_stable(catalog: &Catalog) -> Stable {
+    let gen1: Vec<u16> = (0..catalog.len() as u16)
+        .filter(|&color| catalog.generation(color) == 1)
+        .take(4)
+        .collect();
+    let mount = |color: u16, sex: Sex, cycled: bool| Mount {
+        color,
+        sex,
+        level: 1,
+        fertile: true,
+        cycled,
+        parents: None,
+    };
+    let mut mounts = Vec::new();
+    for &color in &gen1 {
+        // Fécondes : `places_for` les chiffre à zéro, leurs couples survivent.
+        mounts.push(mount(color, Sex::Male, true));
+        mounts.push(mount(color, Sex::Female, true));
+        // Non cyclées : elles doivent l'enclos, donc la fournée doit le chargement.
+        mounts.push(mount(color, Sex::Male, false));
+        mounts.push(mount(color, Sex::Female, false));
+    }
+    Stable { mounts }
 }
 
 /// La première couleur de chaque génération demandée.

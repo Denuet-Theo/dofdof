@@ -73,6 +73,84 @@ const millionsLabel = (value: number): string =>
   `${(value / 1e6).toFixed(2).replace('.', ',')} M`;
 
 /**
+ * Les deux prix d'une Optimakina : celui qu'on paie, et celui qu'on évite.
+ *
+ * La liste disait « À fabriquer » et donnait un montant, sans dire à quoi il se
+ * comparait. C'est un ordre sans sa raison : devant l'hôtel de vente, l'éleveur
+ * voit une enchère et n'a rien pour savoir si elle bat sa recette — il a demandé
+ * la comparaison, et c'est elle.
+ *
+ * Le prix retenu est en kamas, l'autre **barré** : le trait dit « celui-là, tu ne
+ * le paies pas » sans qu'il faille relire l'en-tête de la liste. L'écart suit,
+ * parce qu'un chiffre absolu ne dit pas s'il vaut le détour par l'atelier.
+ *
+ * L'écart est toujours une économie, et ce n'est pas une supposition :
+ * `OptimakinaAdvice` garantit que la source non retenue n'est jamais moins
+ * chère. Le cas nul est donc « même prix », qui arrive à égalité — l'achat gagne
+ * alors, parce qu'il est immédiat.
+ *
+ * **Et le plafond ferme la ligne.** Il vivait dans l'infobulle, donc nulle part :
+ * une infobulle ne se lit pas au moment où l'on compare des enchères à l'hôtel de
+ * vente. C'est pourtant le seul des quatre nombres qui vaille pour **demain** —
+ * les deux prix sont ceux du jour, l'écart en découle, tandis que « rentable
+ * jusqu'à 14 940 » se garde en tête et tranche une enchère qu'on n'avait pas
+ * prévue. L'éleveur l'a demandé directement à l'écran, et c'est là qu'il sert.
+ */
+const OptimakinaPrices = ({
+  source,
+  price,
+  buy,
+  craft,
+  ceiling,
+}: {
+  source: 'achat' | 'fabrication';
+  price: number;
+  buy: number | null;
+  craft: number | null;
+  ceiling: number;
+}) => {
+  const mine = source === 'achat' ? 'HDV' : 'fabrication';
+  const other = source === 'achat' ? craft : buy;
+  const otherLabel = source === 'achat' ? 'fabrication' : 'HDV';
+  // Pourquoi l'autre source manque, et non un silence : « aucun prix HDV » et
+  // « fabrication non chiffrable » se corrigent, l'un en relevant une enchère,
+  // l'autre en tarifant un ingrédient. Un tiret ne se corrige pas.
+  const absent = source === 'achat' ? 'fabrication non chiffrable' : 'aucun prix HDV';
+
+  return (
+    <span
+      data-testid="optimakina-comparison"
+      data-source={source}
+      data-alternative={other ?? ''}
+      data-ceiling={Math.round(ceiling)}
+      className="text-[10px] leading-none text-dark-500 tabular-nums"
+    >
+      <span className="text-kamas">
+        {mine} {Math.round(price).toLocaleString('fr-FR')}
+      </span>
+      {' · '}
+      {other === null ? (
+        <span className="italic">{absent}</span>
+      ) : (
+        <>
+          <span className="line-through decoration-dark-500/70">
+            {otherLabel} {Math.round(other).toLocaleString('fr-FR')}
+          </span>
+          {' · '}
+          <span>
+            {other > price ? `−${Math.round((1 - price / other) * 100)} %` : 'même prix'}
+          </span>
+        </>
+      )}
+      {' · '}
+      <span className="text-dark-400">
+        rentable jusqu’à {Math.round(ceiling).toLocaleString('fr-FR')}
+      </span>
+    </span>
+  );
+};
+
+/**
  * Ce que la politique fait de l'écurie : quatre gestes, **un seul à l'écran**.
  *
  * ## Pourquoi les onglets sont étanches
@@ -165,6 +243,9 @@ type Props = {
     name: string;
     source: 'achat' | 'fabrication';
     price: number;
+    /** Les deux prix relevés, pour montrer ce que la source retenue fait gagner. */
+    buy: number | null;
+    craft: number | null;
     ceiling: number;
     /** Le taux avec elle, pour le croisement de cette génération. */
     rateWith: number;
@@ -827,31 +908,44 @@ const BreedingPolicyPanel = ({
                         data-testid="optimakina-line"
                         data-generation={offer.generation}
                         data-quantity={offer.quantity}
-                        className="inline-flex items-center gap-1 rounded-lg border border-kamas/25
-                          bg-kamas/5 px-1.5 py-0.5"
+                        className="inline-flex flex-col items-start gap-0.5 rounded-lg
+                          border border-kamas/25 bg-kamas/5 px-2 py-1"
                         title={`${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas pièce, ${offer.quantity} pour les ${offer.quantity} accouplement${offer.quantity > 1 ? 's' : ''} de gen ${offer.generation} qui restent. Elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.`}
                       >
-                        {/* L'icône d'abord : c'est elle qu'on cherche des yeux dans
-                            l'hôtel de vente, pas le mot « gen ». Absente quand
-                            l'item n'est pas tarifé — on retombe alors sur le texte,
-                            qui suffit. */}
-                        {offer.iconUrl && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={offer.iconUrl}
-                            alt=""
-                            width={18}
-                            height={18}
-                            className="h-[18px] w-[18px] shrink-0"
-                          />
-                        )}
-                        <span className="font-semibold text-kamas tabular-nums">
-                          ×{offer.quantity}
+                        <span className="inline-flex items-center gap-1">
+                          {/* L'icône d'abord : c'est elle qu'on cherche des yeux dans
+                              l'hôtel de vente, pas le mot « gen ». Absente quand
+                              l'item n'est pas tarifé — on retombe alors sur le texte,
+                              qui suffit. */}
+                          {offer.iconUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={offer.iconUrl}
+                              alt=""
+                              width={18}
+                              height={18}
+                              className="h-[18px] w-[18px] shrink-0"
+                            />
+                          )}
+                          <span className="font-semibold text-kamas tabular-nums">
+                            ×{offer.quantity}
+                          </span>
+                          <span className="text-dark-400">gen {offer.generation}</span>
+                          <span className="text-dark-500 tabular-nums">
+                            {(offer.price * offer.quantity).toLocaleString('fr-FR')}
+                          </span>
                         </span>
-                        <span className="text-dark-400">gen {offer.generation}</span>
-                        <span className="text-dark-500 tabular-nums">
-                          {(offer.price * offer.quantity).toLocaleString('fr-FR')}
-                        </span>
+                        {/* La comparaison **sous** le total, et à l'unité : le total
+                            dit combien sortir, la comparaison dit pourquoi de ce
+                            côté-là. Les mêler sur une ligne ferait quatre nombres
+                            dans deux unités. */}
+                        <OptimakinaPrices
+                          source={offer.source}
+                          price={offer.price}
+                          buy={offer.buy}
+                          craft={offer.craft}
+                          ceiling={offer.ceiling}
+                        />
                       </span>
                     ))}
                   </div>

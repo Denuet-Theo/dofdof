@@ -51,6 +51,34 @@ import type { Sex } from '@/lib/dofus/breeding/stable';
 const SEX_GLYPH: Record<Sex, string> = { M: '♂', F: '♀' };
 const SEX_LABEL: Record<Sex, string> = { M: 'Mâle', F: 'Femelle' };
 
+/** Où l'on se procure une Optimakina, dit en toutes lettres. */
+const SOURCE_LABEL = {
+  achat: 'à l’hôtel de vente',
+  fabrication: 'à fabriquer',
+} as const;
+
+/**
+ * « contre tant, de l'autre côté » — ou rien si l'autre source n'est pas chiffrée.
+ *
+ * La pastille n'a pas la place des deux prix, mais l'infobulle si, et une
+ * recommandation sans le chiffre qu'elle bat est à croire plutôt qu'à vérifier.
+ * La liste d'avant-fournée, elle, les montre à l'écran — voir `OptimakinaPrices`.
+ */
+const versus = ({
+  source,
+  buy,
+  craft,
+}: {
+  source: 'achat' | 'fabrication';
+  buy: number | null;
+  craft: number | null;
+}): string => {
+  const other = source === 'achat' ? craft : buy;
+  if (other === null) return '';
+  const otherSource = source === 'achat' ? 'fabrication' : 'achat';
+  return `, contre ${Math.round(other).toLocaleString('fr-FR')} ${SOURCE_LABEL[otherSource]}`;
+};
+
 type CardProps = {
   mate: Mate;
   sex: Sex;
@@ -181,6 +209,16 @@ type Props = {
     name: string;
     price: number;
     source: 'achat' | 'fabrication';
+    /**
+     * Les deux prix relevés — l'infobulle nomme celui qu'on évite.
+     *
+     * La pastille garde deux lignes et pas quatre : ici l'Optimakina est déjà en
+     * poche, la question n'est plus « où l'avoir » mais « la poser ou non ». La
+     * comparaison, elle, se lit avant la fournée — voir `OptimakinaPrices` dans
+     * `BreedingPolicyPanel`.
+     */
+    buy: number | null;
+    craft: number | null;
     /** Le taux **avec** elle, plafonné à 1. */
     rateWith: number;
     /** Le prix au-delà duquel elle ne se rembourserait plus. */
@@ -445,7 +483,13 @@ const BreedingMatingPanel = ({
                   className="flex flex-col items-center gap-0.5 text-[10px] leading-tight
                     text-kamas border border-kamas/30 bg-kamas/5 rounded-lg px-1.5 py-1
                     whitespace-nowrap"
-                  title={`Optimakina ${optimakina.name} : ${optimakina.price.toLocaleString('fr-FR')} kamas ${optimakina.source === 'fabrication' ? 'à fabriquer' : 'à l’hôtel de vente'}, pour ${((optimakina.rateWith - successRate) * 100).toFixed(1)} points de réussite en plus. Elle se rembourse jusqu’à ${Math.round(optimakina.ceiling).toLocaleString('fr-FR')} kamas.`}
+                  title={
+                    `Optimakina ${optimakina.name} : ${optimakina.price.toLocaleString('fr-FR')} kamas ` +
+                    `${SOURCE_LABEL[optimakina.source]}` +
+                    versus(optimakina) +
+                    `, pour ${((optimakina.rateWith - successRate) * 100).toFixed(1)} points de réussite en plus. ` +
+                    `Elle se rembourse jusqu’à ${Math.round(optimakina.ceiling).toLocaleString('fr-FR')} kamas.`
+                  }
                 >
                   {optimakina.iconUrl && (
                     // eslint-disable-next-line @next/next/no-img-element

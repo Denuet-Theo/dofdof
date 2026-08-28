@@ -108,7 +108,11 @@ for (const [index, entry] of reference.cases.entries()) {
   // défaut des deux côtés. On vérifie qu'elle tombe sur la même avant de
   // comparer quoi que ce soit, sans quoi les deux politiques ne viseraient même
   // pas la même chose et la fournée différerait pour une raison sans intérêt.
-  const ladder = crownedLadderOf(colors, economy.valueOf);
+  // La famille voyage jusqu'ici : `climbMustGainGeneration` ne vaut que pour le
+  // muldo, et une garde qui ne la passerait pas comparerait un port qui applique
+  // la règle à un port qui l'ignore. C'est exactement le trou que la parité
+  // existe pour fermer.
+  const ladder = crownedLadderOf(colors, economy.valueOf, undefined, undefined, entry.family ?? 'muldo');
   if (!ladder.summit.includes(entry.crown)) {
     fail(`cas ${index} : couronne ${ladder.summit.join('+')} ici, ${entry.crown} côté Rust.`);
     continue;

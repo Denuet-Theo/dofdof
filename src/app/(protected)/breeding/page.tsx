@@ -587,6 +587,9 @@ const BreedingPage = () => {
       // gonfler une gen 10 pour l'atteindre fausserait leur marché — et les coûts
       // affichés avec, puisque le prix sert aussi à chiffrer.
       target: selectedColorId,
+      // La famille, pour les règles qui n'en concernent qu'une — aujourd'hui la
+      // seule est `climbMustGainGeneration`, mesurée sur le muldo.
+      family,
       /**
        * Le succès de collection, et il ne voyage que s'il est demandé.
        *
@@ -632,6 +635,7 @@ const BreedingPage = () => {
         advisedLevel !== null && advisedLevel.missing === null ? advisedLevel.level : undefined,
     };
   }, [
+    family,
     tree,
     rows,
     available,

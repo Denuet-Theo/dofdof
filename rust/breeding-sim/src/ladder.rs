@@ -272,7 +272,43 @@ pub struct Ladder {
     ///
     /// Zéro pour une échelle vide, ce que `Default` donne déjà.
     pub summit_generation: u8,
+    /// Un croisement doit-il **gagner une génération**, et pas seulement des
+    /// croisements de construction ?
+    ///
+    /// `climbs` compare des coûts et non des rangs, ce qui admet un croisement
+    /// latéral — même génération, couleur plus chère à bâtir. C'est délibéré et
+    /// mesuré : c'est le seul chemin vers la couleur chère d'un rang, et le retirer
+    /// coûtait 41 M au volkorne et 34 M à la dragodinde. Voir `PairOutlook::climbs`.
+    ///
+    /// Sur le **muldo**, l'éleveur a signalé le contraire depuis sa fenêtre de jeu :
+    /// une gen 6 dépensée pour une autre gen 6, sans géneton et sans rang gagné.
+    /// Mesuré sur son export du 28/08, 100 graines, couronne du projet, moisson
+    /// étendue éteinte, encaissé :
+    ///
+    /// | fournées | sans la règle | avec |
+    /// | --- | --- | --- |
+    /// | 30 | 26,75 M | 24,82 M |
+    /// | 60 | 42,97 M | 42,45 M |
+    /// | 90 | 52,21 M | 52,40 M |
+    /// | 120 | 57,28 M | **61,10 M** |
+    /// | 150 | 64,11 M | **68,94 M** |
+    ///
+    /// Elle perd court et gagne long, et tient plus de gen 10 aux cinq horizons —
+    /// 4,8 contre 2,6 à 120 fournées. **Les deux autres familles ne sont pas
+    /// mesurées** dans ce régime, et le relevé qui a fondé `climbs` au coût y était
+    /// franc : d'où une règle par famille plutôt qu'un renversement général.
+    ///
+    /// Vient de `Catalog::family` et non de `trees.json`, que
+    /// `extract-breeding-trees.mjs` régénère.
+    pub climb_must_gain_generation: bool,
 }
+
+/// Les familles où un croisement doit gagner un rang, et pas seulement du coût.
+///
+/// Le jumeau de `CLIMB_MUST_GAIN_GENERATION` dans `ladder.ts`. **Les deux côtés
+/// doivent bouger ensemble** — `check-ladder-parity.mjs` compare les plans, et
+/// `check-ladder.mjs` la règle elle-même.
+pub const CLIMB_MUST_GAIN_GENERATION: &[&str] = &["muldo"];
 
 /// La composition d'une couleur : ses deux teintes, telles que l'arbre les
 /// nomme. Une composée n'a qu'une composition, c'est ce qui la définit.
@@ -309,8 +345,15 @@ impl Ladder {
 
     pub fn of(catalog: &Catalog, route: Route) -> Self {
         let mut ladder = Self::default();
+        // Posé avant tout retour, y compris celui de l'échelle vide : une échelle
+        // sans barreau ne propose rien, mais un drapeau qui dépendrait du succès de
+        // la construction serait une source de divergence entre les deux ports.
+        ladder.climb_must_gain_generation =
+            CLIMB_MUST_GAIN_GENERATION.contains(&catalog.family());
         if !ladder.lay_third(catalog) {
-            return Self::default();
+            let mut empty = Self::default();
+            empty.climb_must_gain_generation = ladder.climb_must_gain_generation;
+            return empty;
         }
         // On monte de deux en deux : les couleurs simples sont aux générations
         // impaires, et c'est elles qui font les barreaux. On part de 5 parce que
@@ -2729,6 +2772,19 @@ impl LadderPolicy {
                     .find(|t| self.ladder.summit.contains(&t.color))
                     .map(|t| t.color)
             }
+        } else if self.ladder.climb_must_gain_generation
+            && outlook.target_generation <= outlook.ancestry_generation
+        {
+            // La règle par famille : gagner un rang, et pas seulement du coût de
+            // construction.
+            //
+            // **Après** la porte du sommet, et c'est ce qui compte. Au plafond
+            // `target_generation == ancestry_generation` par construction — une
+            // gen 10 croisée avec une gen 1 vise la gen 10 — donc la poser plus haut
+            // refuserait toutes les tentatives du sommet et viderait
+            // `Summit::Target`, que l'app joue. La branche du dessus a déjà rendu la
+            // main pour ces couples-là.
+            None
         } else if !targets
             .iter()
             .all(|t| self.ladder.wanted.contains(&t.color))

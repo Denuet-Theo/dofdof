@@ -3008,7 +3008,21 @@ impl Policy for LadderPolicy {
             })
             .sum();
         if view.kamas + raised < needed {
+            // Insolvable pour le chargement — mais ce qui ne coûte **aucune
+            // place** ne le demande pas. Un croisement entre deux fécondes est un
+            // clic en jeu : il n'ouvre pas d'enclos, donc il ne consomme pas le
+            // carburant que le solde ne peut pas payer. Les jeter avec le reste
+            // reprend à l'éleveur la seule chose qu'il pouvait encore faire.
+            //
+            // Les achats partent, et il le faut : une gen 1 neuve se paie, et elle
+            // arrive fertile donc elle doit son cycle.
+            let free: Vec<[usize; 2]> = crossings
+                .iter()
+                .copied()
+                .filter(|&pair| places_for(view.stable, pair) == 0)
+                .collect();
             return UnitPlan {
+                crossings: free,
                 clonings,
                 sacrifices,
                 ..Default::default()

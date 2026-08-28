@@ -70,12 +70,22 @@ import { openBreeding } from './support/breeding';
  * accouplements là où l'écurie en permet quatre. Aucune régression connue ne
  * l'exerce ; c'est un absolu, pas un témoin d'un défaut passé.
  *
- * Le troisième garde en plus le défaut trouvé en relisant #299 et #301, corrigé
- * dans le même lot : `settle` facturait le chargement de la Mangeoire dès qu'un
- * croisement existait, alors qu'il achète le carburant des jauges et ne se doit
- * que si un enclos s'ouvre. Vu rouge en remettant `plan.crossings.length === 0`
- * à la place de `placesUsed(mounts, plan) === 0` : « mate : 4 à 3 000 000 kamas,
- * 0 à 1 000 ».
+ * Le troisième garde en plus **deux** défauts de la même famille, trouvés en
+ * relisant #299 et #301 et corrigés avec lui :
+ *
+ * 1. `settle` facturait le chargement dès qu'un croisement existait, alors qu'il
+ *    achète le carburant des jauges et ne se doit que si un enclos s'ouvre. Vu
+ *    rouge en remettant `plan.crossings.length === 0` à la place de
+ *    `placesUsed(mounts, plan) === 0` : « mate : 4 à 3 000 000 kamas, 0 à 1 000 ».
+ * 2. Et quand le solde ne payait vraiment pas le chargement — parce que l'écurie
+ *    porte aussi des montures à cycler, comme ici — `settle` jetait **tous** les
+ *    croisements, y compris ceux qui ne coûtaient aucune place. Vu rouge en
+ *    remettant le `return { ...emptyPlan(), clonings, sacrifices }` : même
+ *    message, même chiffres.
+ *
+ * Les deux sont le même mot pris pour l'autre — « croisement » là où le code
+ * pensait « place ». C'est la quatrième et la cinquième fois, après les deux
+ * bornes de capacité de #299 et #301.
  */
 
 const USER = '00000000-0000-0000-0000-0000000000e2';
@@ -151,11 +161,39 @@ const RECETTES: [string, [string, string]][] = [
  * `cloneOptions` apparie deux stériles de même génération et n'en apparie aucune
  * anonyme — d'où les noms. Quatre en font deux paires.
  *
+ * **Extractions : 1.** Une stérile `roux`, **seule de sa génération**.
+ * `extractionOrder` part de toutes les stériles, écarte les gen 1 — le jeu ne les
+ * extrait pas — et écarte celles qu'un clonage rattrape, c'est-à-dire les
+ * **appariables** dont la valeur de reproduction dépasse l'ambre. Une stérile
+ * dépareillée n'est appariable par personne, donc rien ne la rattrape : elle est
+ * extraite quels que soient les prix. C'est ce qui la rend comptable à la main,
+ * là où les quatre stériles gen 2 dépendent du rapport valeur/ambre — elles sont
+ * appariées deux à deux, et sortent de la liste.
+ *
+ * **HDV : 2.** Deux gen 1 **fécondes** dont un parent est `azur`, une gen 9.
+ * `sellSheet` ne nomme une monture que si `bestShortcut` lui trouve une
+ * ascendance qui **dépasse sa couleur** — `carried > own`, ici 9 contre 1 — et un
+ * partenaire avec qui ce saut rapporte. C'est le cas que `cloning.ts` décrit
+ * depuis #59 : une gen 1 à parent gen 9 vise la gen 10, et sa valeur n'est plus
+ * celle de sa couleur. Un mâle et une femelle, donc deux lignes.
+ *
  * **Succès : 120.** Le muldo a 120 couleurs et la fixture n'en a fait naître
  * aucune : le compte est la collection entière. Il ne dépend d'aucun réglage,
  * c'est ce qui en fait un témoin — s'il bouge, c'est le harnais qui a bougé.
+ *
+ * **Fournée : hors du fort, et ce n'est pas un oubli.** Ce que l'écran propose de
+ * charger dépend des gen 1 qu'il achète pour finir de remplir le parc, donc des
+ * prix et du solde — ça ne se compte pas à la main. Et c'est déjà gardé ailleurs :
+ * `banked-mounts` exige que la fournée emploie le parc à deux places près.
+ *
+ * ## Les cinq ajouts sont indépendants
+ *
+ * Vérifié en les posant un par un : la stérile gen 3 seule ne change ni `mate` ni
+ * `clone`, les deux gen 1 à ascendance azur non plus — elles ne sont pas fécondes,
+ * donc elles n'ajoutent aucun croisement gratuit. Chaque nombre attendu tient
+ * donc à sa propre cause, et un test qui rougit désigne un onglet, pas l'écurie.
  */
-const ATTENDU = { mate: 4, clone: 2, success: 120 } as const;
+const ATTENDU = { mate: 4, clone: 2, extract: 1, hdv: 2, success: 120 } as const;
 
 const ecurieQuiSeCompte = () => {
   const rows: Record<string, unknown>[] = [];
@@ -197,6 +235,29 @@ const ecurieQuiSeCompte = () => {
     add(colorId, parents, 'M', false, `G2 ${tag} SM`);
     add(colorId, parents, 'F', false, `G2 ${tag} SF`);
   }
+  // Seule de sa génération, donc appariable par personne : rien ne la rattrape et
+  // elle s'extrait quels que soient les prix. Voir `ATTENDU.extract`.
+  add('roux', ['dore_pourpre', 'dore_orchidee'], 'M', false, 'G3 ROU S');
+  // Gen 1 dont un parent est `azur`, une gen 9 : l'ascendance dépasse la couleur,
+  // donc l'HDV les nomme au lieu de les ranger avec leur couleur. Fécondes pour
+  // que `bestShortcut` les regarde, **non cyclées** pour qu'elles n'ajoutent aucun
+  // accouplement gratuit et laissent `mate` à quatre.
+  rows.push(
+    {
+      id: `7017-0000-0000-0000-${String(rows.length + 1).padStart(12, '0')}`,
+      user_id: USER, family: 'muldo', color_id: 'dore', sex: 'M', level: 100, fertile: true,
+      parent_a_color: 'azur', parent_b_color: 'dore', parent_a_id: null, parent_b_id: null,
+      created_at: '2026-08-15T12:00:00.000Z', updated_at: '2026-08-15T12:00:00.000Z',
+      name: 'G1 DO ascendance azur', cycled: false,
+    },
+    {
+      id: `7017-0000-0000-0000-${String(rows.length + 2).padStart(12, '0')}`,
+      user_id: USER, family: 'muldo', color_id: 'pourpre', sex: 'F', level: 100, fertile: true,
+      parent_a_color: 'azur', parent_b_color: 'pourpre', parent_a_id: null, parent_b_id: null,
+      created_at: '2026-08-15T12:00:00.000Z', updated_at: '2026-08-15T12:00:00.000Z',
+      name: 'G1 POU ascendance azur', cycled: false,
+    }
+  );
   return rows;
 };
 
@@ -224,6 +285,10 @@ test.describe('l’écran montre ce que l’écurie permet', () => {
     const vu = await tousLesBadges(page);
     expect(vu.mate, 'quatre couples disjoints, huit fécondes employées').toBe(ATTENDU.mate);
     expect(vu.clone, 'quatre stériles gen 2 nommées, donc deux paires').toBe(ATTENDU.clone);
+    expect(vu.extract, 'une stérile gen 3 seule de son rang, que rien ne rattrape').toBe(
+      ATTENDU.extract
+    );
+    expect(vu.hdv, 'deux gen 1 dont l’ascendance porte une gen 9').toBe(ATTENDU.hdv);
     expect(vu.success, 'les 120 couleurs du muldo, aucune éclose').toBe(ATTENDU.success);
   });
 
@@ -244,13 +309,12 @@ test.describe('l’écran montre ce que l’écurie permet', () => {
     await remplirLeParc(page);
     const apres = await tousLesBadges(page);
 
-    for (const id of ['mate', 'clone', 'success'] as const) {
+    for (const id of ['mate', 'clone', 'extract', 'hdv', 'success'] as const) {
       expect(apres[id], `${id} : ${avant[id]} parc vide, ${apres[id]} parc plein`).toBe(avant[id]);
+      // Et les nombres restent les **bons**, pas seulement égaux à eux-mêmes :
+      // deux états d'accord sur une valeur fausse s'accorderaient aussi.
+      expect(apres[id]).toBe(ATTENDU[id]);
     }
-    // Et les nombres restent les bons, pas seulement égaux à eux-mêmes : deux
-    // états d'accord sur une valeur fausse s'accorderaient aussi.
-    expect(apres.mate).toBe(ATTENDU.mate);
-    expect(apres.clone).toBe(ATTENDU.clone);
   });
 
   /**
@@ -281,13 +345,13 @@ test.describe('l’écran montre ce que l’écurie permet', () => {
     await openBreeding(page);
     const sansKamas = await tousLesBadges(page);
 
-    for (const id of ['mate', 'clone', 'success'] as const) {
+    for (const id of ['mate', 'clone', 'extract', 'hdv', 'success'] as const) {
       expect(
         sansKamas[id],
         `${id} : ${avecKamas[id]} à 3 000 000 kamas, ${sansKamas[id]} à 1 000`
       ).toBe(avecKamas[id]);
+      expect(sansKamas[id]).toBe(ATTENDU[id]);
     }
-    expect(sansKamas.mate).toBe(ATTENDU.mate);
   });
 
   /**

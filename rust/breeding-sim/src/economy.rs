@@ -1363,6 +1363,9 @@ pub struct RunOutcome {
     /// La demande, elle, appartient à la politique et non au moteur : c'est
     /// l'appelant qui la croise (voir le binaire `table`).
     pub held_by_generation: [u32; 11],
+    /// Le même effectif, compté sur la génération **portée**. Voir la boucle qui
+    /// le remplit : la couleur ment sur ce qu'une monture peut faire.
+    pub held_by_carried: [u32; 11],
     /// L'écurie finale **couleur par couleur**.
     ///
     /// Le compte par génération dit qu'un rang déborde ; celui-ci dit **laquelle**
@@ -2045,6 +2048,7 @@ fn run(
         best_generation: stable.top_generation(catalog),
         gen10_held: 0,
         held_by_generation: [0; 11],
+        held_by_carried: [0; 11],
         held_by_color: [0; MAX_COLORS],
         crown_held: 0,
         rejected_loads: 0,
@@ -2285,6 +2289,21 @@ fn run(
     for mount in &stable.mounts {
         let slot = usize::from(catalog.generation(mount.color)).min(10);
         outcome.held_by_generation[slot] += 1;
+        // Ce que la monture **porte**, ascendance comprise, et non ce que sa
+        // couleur annonce. Les deux divergent largement : sur l'écurie de
+        // l'éleveur, trente de ses quatre-vingt-trois « gen 1 » portent plus haut —
+        // douze de la gen 3, six de la gen 4, une de la gen 10. Compter la couleur
+        // les range au rebut alors que c'est du matériel, et c'est ce qui a fait
+        // lire « quarante gen 1 dormantes » dans un recensement où il n'y en avait
+        // pas. C'est l'ascendance qui décide de ce qu'un croisement peut viser —
+        // voir `pair_ancestry_generation`.
+        let carried = mount
+            .parents
+            .into_iter()
+            .flatten()
+            .map(|parent| catalog.generation(parent))
+            .fold(catalog.generation(mount.color), u8::max);
+        outcome.held_by_carried[usize::from(carried).min(10)] += 1;
         outcome.held_by_color[usize::from(mount.color).min(MAX_COLORS - 1)] += 1;
     }
     outcome.crown_held = match economy.project {

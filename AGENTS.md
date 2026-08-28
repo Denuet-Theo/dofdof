@@ -184,7 +184,139 @@ crossings went from 90 to 3 660 — and that is what made the hours-mode level
 ranking look like a comparison at equal effort. Guard:
 `rust/breeding-neat/tests/loads_played.rs`.
 
+## The margin is read month by month, and never as one batch times thirty
+
+He asked for this three times before it was written down, which is why it is here
+rather than in a commit message. **What he wants to know is the margin his stable
+throws off month after month, with nothing liquidated.** Not a score, not a total
+over an arbitrary horizon, not a rate extrapolated from one batch.
+
+`encaisse` — `score − liquidation` — is the right column: it is cash that actually
+passed through the till during the run. `score` is not, and neither is anything
+from `--heures`, whose horizon is not months.
+
+Measured on his export of 2026-08-27, level 50, Mangeoire band 1, 200 seeds:
+
+| month | cumulative | **the month's margin** | gen 10 held |
+| --- | --- | --- | --- |
+| 1 | 23,31 M | 23,31 M | 3,2 |
+| 2 | 50,13 M | **+26,82 M** | 8,9 |
+| 3 | 77,16 M | **+27,03 M** | 2,7 |
+| 4 | 86,04 M | **+8,88 M** | 2,3 |
+| 5 | 98,78 M | **+12,74 M** | 2,8 |
+
+Two things this table says that a total hides.
+
+**Of month 1's 23,31 M, 11,93 M is cashed in the very first fournée** — the sale of
+what the parc already holds, his three gen 10 and his unpaired steriles. Once. The
+operation itself yields about 11,4 M that month while the pipeline fills. Any
+figure that multiplies one batch by thirty inherits this and overstates.
+
+**And it collapses at month 4**, from 27 M to 9 M with the same policy. Two causes,
+separated by measurement:
+
+- **The market runs dry, and it compounds.** Setting `baisse_par_vente = 0`:
+  23,62 / 57,14 / 93,76 / 106,71 / 127,45 against 23,31 / 50,13 / 77,16 / 86,04 /
+  98,78. That is −1 % at one month and **−22 % at five**. Measuring the decay on a
+  single month says it is negligible, and that conclusion was published before the
+  longer horizons contradicted it.
+- **The pipeline delivers one wave.** The collapse survives with the decay off —
+  36,62 then 12,95 — so it is not the market alone. His stable is converted into a
+  single cohort of gen 10, sold, and the base is never replenished fast enough to
+  build a second.
+
+### Read the census on what a mount **carries**, not on its colour
+
+The breeder had to point this out: the name carries the ancestry — `G4 DO M
+DOAM-ROEB` is a **dore**, a gen 1 colour, born of two gen 4 — and it is the
+ancestry that decides what a crossing can aim at. Counting colours files that
+mount under gen 1, as raw material about to be bought again.
+
+On his starting stable the two counts differ on **30 of 83 gen 1**: twelve carry
+gen 3, six carry gen 4, one carries gen 10. `held_by_carried` exists so the census
+prints both, and the gap is the diagnostic. At month 4, simulated:
+
+| gen | by colour | **carried** | wanted |
+| --- | --- | --- | --- |
+| 1 | 39,0 | 16,8 | 0 |
+| 2 | 17,9 | 17,2 | **80** |
+| 3 | 9,4 | 6,9 | **40** |
+| 8 | 8,9 | **14,3** | 8 |
+| 9 | 1,8 | 2,8 | 4 |
+| 10 | 2,3 | **13,6** | **0** |
+
+Read by colour it says "40 idle gen 1 and 2,3 gen 10". Read by ancestry: **13,6
+mounts carry gen 10**, gen 8 sits at 179 % of demand, gen 2 runs at a fifth.
+
+**And the obvious conclusion from that is wrong.** "A fifth of the park is material
+the plan has no use for, recycle it" was written here and measured the next hour:
+sacrificing everything that carries the top generation without being it costs
+23,30 / 75,01 / 84,85 / 97,96 against 23,31 / 77,16 / 86,04 / 98,78 — **−2,15 M at
+month 3**, and never a gain.
+
+Two reasons, both of which the breeder gave before the measurement did:
+
+- **They sell for nothing.** Most carry gen 10 on a gen 1 *colour*, and `value_of`
+  is zero below generation 2. `settle` skips them for that reason alone; forcing
+  them out destroys them for 0.
+- **A high ancestry is worth holding.** A gen 1 born of a gen 9 aims at gen 10 —
+  that is #59, and it is why `pairAncestryGeneration` exists. Carrying the top
+  generation makes a mount a **good partner**, not a spent one.
+
+The rule about a spent gen 10 (below) is about mounts whose *colour* is gen 10 and
+whose genealogy holds no gen 9. It does not extend to carriers, and reading the
+census as if it did cost a wrong recommendation.
+
+**It is not the tier ordering**, which was the natural suspect since `Ordering`
+documents "the ladder underuses its base". Measured with `table --ordre` on his
+stable: TopDown 86,04 M at 120 fournées, RoundRobin 85,77, BottomUp 71,85. Feeding
+the base costs more than it returns at every horizon tried — though BottomUp is the
+only one that does not collapse at month 4, which is what pointed at saturation
+rather than starvation.
+
+**And it is not which gen 1 get bought.** `Purchasing::RoundRobin` against the
+default, same stable: 23,31 / 77,36 / 86,04 against 23,31 / 77,16 / 86,04. Two
+tenths of a million at month 3 and nothing anywhere else.
+
+**Buying *more* gen 1 is not available either, and that is the finding.** The
+purchase loop stops on `places + 2 <= capacity`, and his park reads 60/60 — there
+is no room to put them. What the base is short of is **places**, not kamas:
+
+| park | month 1 | month 3 | month 4 | the month-4 margin |
+| --- | --- | --- | --- | --- |
+| 60 places — his | 23,31 M | 77,16 M | 86,04 M | **+8,88 M** |
+| 90 places | 21,54 M | 86,49 M | 100,74 M | **+14,25 M** |
+| 130 places | 25,91 M | 93,54 M | 116,68 M | **+23,14 M** |
+
+Doubling the park roughly triples the fourth month. That is the lever, and it is
+the one the app cannot pull — `enclos_count` is what the game gives him. It also
+explains why BottomUp failed: it takes room from the top instead of adding room.
+
+**What the screen shows is not this.** `earnings.ts` prices one batch and
+multiplies by thirty, which lands near the good months (27 M) and about 70 % above
+the five-month average. Its header says "a rate, not a forecast"; this table is
+what the forecast actually looks like.
+
 ## A gen 10 without a gen 9 in its genealogy is spent — sell it even fertile
+
+> **REFUTED IN GAME, 2026-08-28. Do not act on this section. See #309.**
+>
+> `G10 AZPO M AZPO-DO` — Azur-Pourpre gen 10, genealogy Azur-Pourpre (g10) + Doré
+> (g1), **no gen 9** — crossed with a gen 1 Pourpre names **Azur-Pourpre, GEN. 10,
+> at 47,55 %** in the game's own "Génération cible" box. The table below lists that
+> exact mount as unable to relaunch the loop. It can.
+>
+> The model gets the rate right and the target wrong: it puts the 47,55 % on three
+> gen 2 colours and leaves the gen 10 at 10,91 %. Génétons are zero on both sides,
+> so the geneton rule is not what is broken — the target assignment is.
+>
+> What is still open is whether **any** gen 1 does it or only the one that
+> completes the recipe (here Pourpre, and Azur-Pourpre = azur + pourpre). One more
+> window settles it; the breeder is out of féconde females for now.
+>
+> Until then: `sellTop` sells gen 10 by default, and `Summit::Duplicate` was turned
+> off on a −1,43 M measurement taken with this broken model. **That measurement is
+> void.**
 
 Gen 10 × gen 1 names another gen 10 (relevé du 14/08, issue #185), but **only
 through the gen 9 tint the gen 10 carries in its genealogy**. That tint recombines

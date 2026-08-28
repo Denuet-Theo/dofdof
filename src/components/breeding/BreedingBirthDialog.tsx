@@ -107,6 +107,9 @@ type Props = {
     name: string;
     price: number;
     source: 'achat' | 'fabrication';
+    /** Les deux prix relevés, que l'infobulle du panneau compare. */
+    buy: number | null;
+    craft: number | null;
     rateWith: number;
     ceiling: number;
     /** L'icône de l'item, pour la reconnaître dans l'inventaire. */

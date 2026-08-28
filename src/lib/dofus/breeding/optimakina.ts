@@ -23,6 +23,13 @@
  * Relevé de l'éleveur le 27/08 : la gen 6 se fabrique pour 11 000 là où l'hôtel
  * la vend 15 000, et le seuil est à 14 940. Elle passe donc en fabrication, et
  * elle ne passerait pas en achat.
+ *
+ * **Une liste, deux prix.** Ne publier que le prix retenu était un pas de trop :
+ * l'éleveur lisait « à fabriquer » sans pouvoir le vérifier devant l'hôtel de
+ * vente, et a demandé la comparaison — c'est ce qu'`OptimakinaAdvice.buy` et
+ * `.craft` portent. La règle d'origine tient toujours, parce qu'elle portait sur
+ * la **recommandation** et non sur ce qui la justifie : une génération ne paraît
+ * qu'une fois, du côté le moins cher, avec l'autre somme à côté d'elle.
  */
 
 import { OPTIMAKINA_BONUS } from './costs';
@@ -48,6 +55,28 @@ export type OptimakinaAdvice = {
   /** La source la moins chère parmi celles qui passent le seuil. */
   source: 'achat' | 'fabrication';
   price: number;
+  /**
+   * Les **deux** prix relevés, celui retenu compris. `null` quand la source n'a
+   * rien donné : aucune enchère à l'hôtel, ou une recette qu'un ingrédient sans
+   * prix rend incalculable.
+   *
+   * `source` dit quoi faire, ceux-ci disent **pourquoi**, et l'éleveur a demandé
+   * les deux : « à fabriquer » sans le prix de l'autre côté est un ordre sans sa
+   * raison, invérifiable devant l'hôtel de vente. Les publier ne rouvre pas les
+   * deux listes — la recommandation reste unique, ce qui était tout l'objet de
+   * n'en garder qu'une.
+   *
+   * Ils sont rendus **tels quels**, sans le filtre du seuil : une gen 6 vendue
+   * 15 000 pour un plafond à 14 940 ne se conseille pas, mais c'est justement
+   * cette somme-là qu'il faut voir pour comprendre qu'on la fabrique.
+   *
+   * Invariant : le prix non retenu n'est **jamais** inférieur à `price`. S'il
+   * passait le seuil il était candidat, donc plus cher que le vainqueur ; s'il ne
+   * le passait pas il dépasse `ceiling`, donc `price` aussi. L'écart affiché est
+   * toujours une économie.
+   */
+  buy: number | null;
+  craft: number | null;
   /** Le prix au-delà duquel elle ne vaut plus le geste. */
   ceiling: number;
 };
@@ -96,6 +125,11 @@ export const worthwhileOptimakina = (
           name: offer.name,
           source: best.source,
           price: best.price,
+          // Les deux prix suivent le conseil, normalisés comme les candidats le
+          // sont : un zéro relevé n'est pas une offre à zéro kama, c'est une
+          // absence de relevé, et l'afficher ferait lire « gratuit ».
+          buy: offer.buy !== null && offer.buy > 0 ? offer.buy : null,
+          craft: offer.craft !== null && offer.craft > 0 ? offer.craft : null,
           ceiling,
         },
       ];

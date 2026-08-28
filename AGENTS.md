@@ -184,6 +184,60 @@ crossings went from 90 to 3 660 — and that is what made the hours-mode level
 ranking look like a comparison at equal effort. Guard:
 `rust/breeding-neat/tests/loads_played.rs`.
 
+## La moisson ne l'intéresse pas — et l'app la force quand même
+
+Dit deux fois par l'éleveur, jamais écrit nulle part, et retrouvé la troisième
+fois : « je ne suis pas du tout intéressé par la moisson » (28/08). C'est une
+préférence de joueur, elle n'est dérivable d'aucune mesure, et elle **change le
+régime dans lequel toute comparaison de politique doit se lire**.
+
+Deux drapeaux portent ce nom, et les confondre est le premier piège :
+
+| drapeau | défaut des deux côtés | ce qu'il fait |
+| --- | --- | --- |
+| `harvest` | **vrai** | monnayer pour leurs génétons les montures que le plan ne sait pas employer |
+| `harvestStocked` / `harvest_stocked` | **faux** | l'étendre aux couleurs **du plan** qui ne le retiennent plus — les gen 9 qui s'accumulent |
+
+**Et `policy.ts:530` force `harvestStocked: true`.** L'app joue donc, en dur,
+l'extension que les deux modules laissent éteinte par défaut et que l'éleveur ne
+veut pas. C'est aussi exactement ce qui sépare les lignes « 2. echelle seule » et
+« 3. echelle + changements » de `table` : la ligne 3 est celle que l'écran joue.
+
+Ce n'est pas gratuit à éteindre, et le chiffre doit être dit avec la préférence.
+Sur son export du 28/08, muldo, 200 graines, mode fournées, encaissé :
+
+| fournées | moisson étendue (ligne 3, livrée) | sans (ligne 2) |
+| --- | --- | --- |
+| 60 | 58,09 M | 41,71 M |
+| 120 | 84,19 M | 55,39 M |
+| 150 | 97,13 M | 61,80 M |
+
+Trente-cinq millions à cinq mois. **Et c'est précisément la forme de gain que le
+modèle sur-estime** : la moisson produit du hors-plan pour le vendre, et la
+profondeur de marché n'est modélisée nulle part — voir la compétence
+`neat-training`, « toute politique qui accumule est sur-notée ». Le chiffre est
+juste selon le modèle ; c'est l'éleveur qui sait ce que l'hôtel de vente absorbe,
+et il a tranché.
+
+**La conséquence pratique, et elle a déjà inversé un classement.** Une règle se
+mesure dans le régime où elle sera jouée, exactement comme une comparaison de
+niveaux est vide sans dire quelle bande la Mangeoire tient. Mesuré le 28/08 sur
+son export, `climbs` au coût seul (livré) contre `climbs` au coût **et** au rang,
+encaissé :
+
+| fournées | ligne 3 : coût / rang | ligne 2 : coût / rang |
+| --- | --- | --- |
+| 30 | 25,69 / 24,28 | 25,38 / 24,06 |
+| 60 | 58,09 / 57,43 | 41,71 / **42,29** |
+| 120 | 84,19 / 81,28 | 55,39 / **60,10** |
+| 150 | 97,13 / 93,87 | 61,80 / **69,77** |
+
+**Le signe s'inverse.** Moisson étendue allumée, exiger le gain de rang perd aux
+six horizons essayés ; éteinte, il gagne de 4,7 M à 120 fournées et de 8,0 M à
+150. La règle du coût et la moisson composent toutes deux hors du chemin le plus
+court, et l'une devient nuisible quand l'autre s'arrête. Publier l'un des deux
+tableaux sans nommer le régime, c'est publier la moitié qui arrange.
+
 ## The margin is read month by month, and never as one batch times thirty
 
 He asked for this three times before it was written down, which is why it is here

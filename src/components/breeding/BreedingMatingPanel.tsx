@@ -5,6 +5,7 @@ import { Egg } from 'lucide-react';
 import CopyableText from '@/components/ui/CopyableText';
 import ColorChip, { GenBadge } from '@/components/breeding/ColorChip';
 import { ANONYMOUS_NAME } from '@/lib/dofus/breeding/naming';
+import { optimakinaGain, rateWithOptimakina } from '@/lib/dofus/breeding/optimakina';
 import { copyToClipboard } from '@/lib/utils/clipboard';
 
 /**
@@ -51,6 +52,15 @@ import type { Sex } from '@/lib/dofus/breeding/stable';
 const SEX_GLYPH: Record<Sex, string> = { M: '♂', F: '♀' };
 const SEX_LABEL: Record<Sex, string> = { M: 'Mâle', F: 'Femelle' };
 
+/**
+ * Le gain de l'Optimakina se calcule **sur le taux du couple**, ici, et pas
+ * ailleurs.
+ *
+ * Il arrivait tout calculé dans la prop, sur le niveau conseillé, et la vue en
+ * soustrayait le taux réel du couple : deux bases, une soustraction, « +5,2 pts »
+ * pour un bonus que le jeu montre à +10,0. `successRate` est la seule base en
+ * portée ici, ce qui est exactement ce qui empêche de refaire l'erreur.
+ */
 /** Où l'on se procure une Optimakina, dit en toutes lettres. */
 const SOURCE_LABEL = {
   achat: 'à l’hôtel de vente',
@@ -219,8 +229,6 @@ type Props = {
      */
     buy: number | null;
     craft: number | null;
-    /** Le taux **avec** elle, plafonné à 1. */
-    rateWith: number;
     /** Le prix au-delà duquel elle ne se rembourserait plus. */
     ceiling: number;
     /**
@@ -470,7 +478,10 @@ const BreedingMatingPanel = ({
           {targets.length > 0 && targetGeneration !== null ? (
             <>
               <GenBadge generation={targetGeneration} target />
-              <span className="text-[10px] text-dark-500 tabular-nums whitespace-nowrap">
+              <span
+                data-testid="mate-success-rate"
+                className="text-[10px] text-dark-500 tabular-nums whitespace-nowrap"
+              >
                 {(successRate * 100).toFixed(1)} %
               </span>
               {/* L'Optimakina se pose **ici**, entre les deux montures, parce que
@@ -487,7 +498,9 @@ const BreedingMatingPanel = ({
                     `Optimakina ${optimakina.name} : ${optimakina.price.toLocaleString('fr-FR')} kamas ` +
                     `${SOURCE_LABEL[optimakina.source]}` +
                     versus(optimakina) +
-                    `, pour ${((optimakina.rateWith - successRate) * 100).toFixed(1)} points de réussite en plus. ` +
+                    `, pour ${(optimakinaGain(successRate) * 100).toFixed(1)} points de réussite ` +
+                    `en plus — ${(rateWithOptimakina(successRate) * 100).toFixed(1)} % au lieu de ` +
+                    `${(successRate * 100).toFixed(1)} %. ` +
                     `Elle se rembourse jusqu’à ${Math.round(optimakina.ceiling).toLocaleString('fr-FR')} kamas.`
                   }
                 >
@@ -502,7 +515,7 @@ const BreedingMatingPanel = ({
                     />
                   )}
                   <span className="font-semibold tabular-nums">
-                    +{((optimakina.rateWith - successRate) * 100).toFixed(1)} pts
+                    +{(optimakinaGain(successRate) * 100).toFixed(1)} pts
                   </span>
                   <span className="text-dark-500">
                     {optimakina.source === 'fabrication' ? 'à fabriquer' : 'à acheter'}

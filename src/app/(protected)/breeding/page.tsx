@@ -9,7 +9,6 @@ import { isCrownable, ladderOf } from '@/lib/dofus/breeding/ladder';
 import { tunedLevel, valuePerSuccessToward } from '@/lib/dofus/breeding/tuned-level';
 import {
   worthwhileOptimakina,
-  rateWithOptimakina,
 } from '@/lib/dofus/breeding/optimakina';
 import { genetonsForCrossing } from '@/lib/dofus/breeding/mating';
 import { useOptimakinaCraft } from '@/lib/hooks/useOptimakinaCraft';
@@ -493,7 +492,10 @@ const BreedingPage = () => {
     // Le niveau conseillé porte aussi ce qu'un succès rapporte ; sans lui il n'y
     // a pas de plafond, donc rien à conseiller.
     if (!tree || advisedLevel === null || advisedLevel.missing !== null) return [];
-    const { level, valuePerSuccess } = advisedLevel;
+    // Ce qu'un succès rapporte, et **rien d'autre** : le niveau conseillé ne sert
+    // plus ici depuis que le taux avec Optimakina se lit sur le couple qui la
+    // pose, et non sur un niveau de référence. Voir `rateWithOptimakina`.
+    const { valuePerSuccess } = advisedLevel;
     const offers = Object.entries(tree.optimakinaByGeneration).flatMap(
       ([generation, item]) => {
         const target = Number(generation);
@@ -518,7 +520,6 @@ const BreedingPage = () => {
     };
     return worthwhileOptimakina(offers, valueOfSuccess).map((advice) => ({
       ...advice,
-      rateWith: rateWithOptimakina(level),
       // L'icône vient du prix saisi : c'est la seule source qui la porte, et une
       // Optimakina qu'on n'a pas tarifée n'apparaît de toute façon pas à l'achat.
       // `null` sur une fabrication dont l'item n'est pas relevé — l'écran retombe

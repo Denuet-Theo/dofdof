@@ -254,8 +254,6 @@ type Props = {
     buy: number | null;
     craft: number | null;
     ceiling: number;
-    /** Le taux avec elle, pour le croisement de cette génération. */
-    rateWith: number;
     /** L'icône de l'item, ou `null` s'il n'est pas tarifé. */
     iconUrl?: string | null;
   }[];

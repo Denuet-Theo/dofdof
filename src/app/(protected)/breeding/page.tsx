@@ -515,6 +515,11 @@ const BreedingPage = () => {
     return worthwhileOptimakina(offers, valueOfSuccess).map((advice) => ({
       ...advice,
       rateWith: rateWithOptimakina(level),
+      // L'icône vient du prix saisi : c'est la seule source qui la porte, et une
+      // Optimakina qu'on n'a pas tarifée n'apparaît de toute façon pas à l'achat.
+      // `null` sur une fabrication dont l'item n'est pas relevé — l'écran retombe
+      // alors sur le texte seul, ce qui est le comportement d'avant.
+      iconUrl: itemPrices.get(advice.itemId)?.icon_url ?? null,
     }));
   }, [tree, advisedLevel, itemPrices, genetonValuation, optimakinaCraft]);
 

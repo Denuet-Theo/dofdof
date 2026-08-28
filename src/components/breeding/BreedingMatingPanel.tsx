@@ -185,6 +185,14 @@ type Props = {
     rateWith: number;
     /** Le prix au-delà duquel elle ne se rembourserait plus. */
     ceiling: number;
+    /**
+     * L'icône de l'item, ou `null` s'il n'est pas tarifé.
+     *
+     * C'est elle qu'on cherche des yeux dans l'inventaire au moment de la poser :
+     * le nom d'une Optimakina ne diffère du suivant que par un chiffre, et la
+     * fenêtre du jeu montre des images. Absente, la pastille garde son texte.
+     */
+    iconUrl?: string | null;
   } | null;
   /** Accouplements de cette forme dans la fournée. */
   total: number;
@@ -439,6 +447,16 @@ const BreedingMatingPanel = ({
                     whitespace-nowrap"
                   title={`Optimakina ${optimakina.name} : ${optimakina.price.toLocaleString('fr-FR')} kamas ${optimakina.source === 'fabrication' ? 'à fabriquer' : 'à l’hôtel de vente'}, pour ${((optimakina.rateWith - successRate) * 100).toFixed(1)} points de réussite en plus. Elle se rembourse jusqu’à ${Math.round(optimakina.ceiling).toLocaleString('fr-FR')} kamas.`}
                 >
+                  {optimakina.iconUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={optimakina.iconUrl}
+                      alt=""
+                      width={20}
+                      height={20}
+                      className="h-5 w-5"
+                    />
+                  )}
                   <span className="font-semibold tabular-nums">
                     +{((optimakina.rateWith - successRate) * 100).toFixed(1)} pts
                   </span>

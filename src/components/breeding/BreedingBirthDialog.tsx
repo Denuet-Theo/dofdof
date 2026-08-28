@@ -109,6 +109,8 @@ type Props = {
     source: 'achat' | 'fabrication';
     rateWith: number;
     ceiling: number;
+    /** L'icône de l'item, pour la reconnaître dans l'inventaire. */
+    iconUrl?: string | null;
   } | null;
   onRecord: (entries: BirthEntry[]) => Promise<RecordBirthsResult>;
   /** Défait une naissance déjà écrite — voir `undoBirth` dans `useBreeding`. */
@@ -574,6 +576,14 @@ const BreedingBirthDialog = ({
             genetons={group.genetons}
             successRate={group.successRate}
             optimakina={
+              /* Le rang que la **paire** vise, et non celui que le plan retient.
+                 Les deux diffèrent : `turquoise_dore × indigo_pourpre`, relevé le
+                 28/08, vise la gen 6 sur deux couleurs et ne rend **aucun
+                 géneton** — le rang ne monte pas — mais l'échelle le joue quand
+                 même, parce qu'il baisse le coût de construction vers la
+                 couronne. L'Optimakina augmente la chance de tomber sur l'une des
+                 deux cibles, donc elle sert le plan. Arbitré par l'éleveur le
+                 28/08 : c'est le plan qui décide, pas les génétons. */
               group.targetGeneration !== null
                 ? optimakinaFor?.(group.targetGeneration) ?? null
                 : null

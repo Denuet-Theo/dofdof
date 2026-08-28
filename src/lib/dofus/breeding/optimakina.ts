@@ -42,6 +42,8 @@ export type OptimakinaOffer = {
 /** Ce qu'on conseille d'une Optimakina, une fois les deux prix connus. */
 export type OptimakinaAdvice = {
   generation: number;
+  /** L'item, pour aller y chercher son icône. */
+  itemId: number;
   name: string;
   /** La source la moins chère parmi celles qui passent le seuil. */
   source: 'achat' | 'fabrication';
@@ -90,6 +92,7 @@ export const worthwhileOptimakina = (
       return [
         {
           generation: offer.generation,
+          itemId: offer.itemId,
           name: offer.name,
           source: best.source,
           price: best.price,

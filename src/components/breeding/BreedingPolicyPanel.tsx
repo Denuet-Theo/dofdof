@@ -168,6 +168,8 @@ type Props = {
     ceiling: number;
     /** Le taux avec elle, pour le croisement de cette génération. */
     rateWith: number;
+    /** L'icône de l'item, ou `null` s'il n'est pas tarifé. */
+    iconUrl?: string | null;
   }[];
   individuals?: Individual[];
   colors?: BreedingColor[];
@@ -299,6 +301,48 @@ const BreedingPolicyPanel = ({
    * il ignore les trois. Ce que la politique planifie continue d'exister dans le
    * plan ; ce qui a disparu, c'est un second écran qui le contredisait.
    */
+  /**
+   * Les accouplements **immédiats** qui restent, par génération visée.
+   *
+   * C'est ce qui décide de la quantité d'Optimakina à se procurer, et le relevé
+   * de l'éleveur dit pourquoi : « pas d'achat d'Optimakina gen 10 s'il n'y en a
+   * pas de prévu ». La liste conseillait jusque-là toutes les générations qui se
+   * remboursent, sans regarder si la fournée en visait une seule.
+   *
+   * On compte sur `toRecord` et non sur la fournée entière : l'Optimakina se pose
+   * dans la fenêtre de jeu qu'on ouvre **maintenant**, et les croisements qui
+   * attendent la sortie d'enclos se rachèteront à leur tour. Acheter d'avance pour
+   * eux, c'est immobiliser des kamas sur un plan qui aura changé d'ici là.
+   *
+   * `targetGeneration` et non la génération de `targetColorId` : sur une recopie
+   * la couleur est celle du mâle — voir `Couple.targetGeneration` — et la compter
+   * ferait acheter pour un croisement qui ne monte nulle part.
+   */
+  const immediateByGeneration = useMemo(() => {
+    const out = new Map<number, number>();
+    for (const couple of toRecord) {
+      if (couple.targetGeneration === null) continue;
+      out.set(couple.targetGeneration, (out.get(couple.targetGeneration) ?? 0) + 1);
+    }
+    return out;
+  }, [toRecord]);
+
+  /**
+   * Ce qu'il faut vraiment se procurer : le conseil, croisé avec la fournée.
+   *
+   * Une Optimakina qui se rembourse mais dont aucun accouplement immédiat ne vise
+   * le rang ne sert à rien aujourd'hui, et l'annoncer fait acheter pour rien. Le
+   * croisement est donc un **filtre** autant qu'une quantité.
+   */
+  const besoin = useMemo(
+    () =>
+      optimakina.flatMap((offer) => {
+        const quantity = immediateByGeneration.get(offer.generation) ?? 0;
+        return quantity > 0 ? [{ ...offer, quantity }] : [];
+      }),
+    [optimakina, immediateByGeneration]
+  );
+
   const toClone = useMemo(
     () =>
       cloneAdvice
@@ -760,29 +804,53 @@ const BreedingPolicyPanel = ({
 
               Deux listes plutôt qu'une, et une génération ne paraît que dans la
               moins chère des deux : se voir proposer la même à l'achat et à la
-              fabrication ne dit pas quoi faire. Voir `worthwhileOptimakina`. */}
-          {optimakina.length > 0 && (
+              fabrication ne dit pas quoi faire. Voir `worthwhileOptimakina`.
+
+              Et **une quantité**, celle des accouplements immédiats qui visent ce
+              rang : une génération que la fournée ne vise pas ne paraît plus du
+              tout. La liste conseillait jusque-là tout ce qui se rembourse, ce qui
+              faisait lire « gen 10 » à quelqu'un qui n'a aucun croisement de gen 10
+              à faire. Voir `immediateByGeneration`. */}
+          {besoin.length > 0 && (
             <div data-testid="optimakina-advice" className="space-y-1.5">
               {(['achat', 'fabrication'] as const).map((source) => {
-                const list = optimakina.filter((offer) => offer.source === source);
+                const list = besoin.filter((offer) => offer.source === source);
                 if (list.length === 0) return null;
                 return (
-                  <div key={source} className="text-[11px] leading-snug">
+                  <div key={source} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-snug">
                     <span className="text-dark-500">
-                      {source === 'achat' ? 'À acheter' : 'À fabriquer'} :{' '}
+                      {source === 'achat' ? 'À acheter' : 'À fabriquer'} :
                     </span>
-                    {list.map((offer, at) => (
-                      <span key={offer.generation}>
-                        {at > 0 && <span className="text-dark-600">· </span>}
-                        <span
-                          className="text-kamas"
-                          title={`${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas, et elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.`}
-                        >
-                          gen {offer.generation}
+                    {list.map((offer) => (
+                      <span
+                        key={offer.generation}
+                        data-testid="optimakina-line"
+                        data-generation={offer.generation}
+                        data-quantity={offer.quantity}
+                        className="inline-flex items-center gap-1 rounded-lg border border-kamas/25
+                          bg-kamas/5 px-1.5 py-0.5"
+                        title={`${offer.name} — ${offer.price.toLocaleString('fr-FR')} kamas pièce, ${offer.quantity} pour les ${offer.quantity} accouplement${offer.quantity > 1 ? 's' : ''} de gen ${offer.generation} qui restent. Elle se rembourse jusqu’à ${Math.round(offer.ceiling).toLocaleString('fr-FR')}.`}
+                      >
+                        {/* L'icône d'abord : c'est elle qu'on cherche des yeux dans
+                            l'hôtel de vente, pas le mot « gen ». Absente quand
+                            l'item n'est pas tarifé — on retombe alors sur le texte,
+                            qui suffit. */}
+                        {offer.iconUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={offer.iconUrl}
+                            alt=""
+                            width={18}
+                            height={18}
+                            className="h-[18px] w-[18px] shrink-0"
+                          />
+                        )}
+                        <span className="font-semibold text-kamas tabular-nums">
+                          ×{offer.quantity}
                         </span>
+                        <span className="text-dark-400">gen {offer.generation}</span>
                         <span className="text-dark-500 tabular-nums">
-                          {' '}
-                          {offer.price.toLocaleString('fr-FR')}
+                          {(offer.price * offer.quantity).toLocaleString('fr-FR')}
                         </span>
                       </span>
                     ))}

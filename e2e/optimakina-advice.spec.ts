@@ -74,38 +74,62 @@ test.describe('les Optimakina conseillées', () => {
     // « gen 2 » sans dire quoi en faire renvoie chercher l'information ailleurs.
     await expect(advice).toContainText('À acheter');
     await expect(advice).toContainText('gen 2');
-    await expect(advice).toContainText('1 000');
+    // Le prix **unitaire** vit désormais dans l'infobulle, et la ligne porte le
+    // total : elle sert à savoir combien sortir à l'hôtel de vente, pas à comparer
+    // une enchère. Les deux comptent, donc les deux sont vérifiés.
+    const ligne = advice.getByTestId('optimakina-line').filter({ hasText: 'gen 2' });
+    // `\s` et non un espace : `toLocaleString('fr-FR')` sépare les milliers par
+    // une espace **insécable étroite**, invisible à la relecture et qui fait
+    // échouer un motif littéral.
+    await expect(ligne).toHaveAttribute('title', /1\s000 kamas pièce/);
+    const attendu = Number(await ligne.getAttribute('data-quantity')) * 1000;
+    await expect(ligne).toContainText(new RegExp(String(attendu).replace(/\B(?=(\d{3})+(?!\d))/g, '\\s')));
   });
 
   /**
    * Le seuil **rejette** ce qui ne se rembourse pas.
    *
-   * L'assertion qui compte : une liste qui montre tout ce qui a un prix ne
-   * conseille rien. La fixture tarife déjà quatre Optimakina — gen 5 à 15 000,
-   * gen 6 à 16 000, gen 7 à 23 000, gen 8 à 35 000 — donc la liste paraît de
-   * toute façon ; ce qu'on vérifie ici, c'est qu'une gen 2 hors de prix n'y
-   * entre pas.
+   * ## Pourquoi le même écran est chargé deux fois
    *
-   * Gen 2 parce que c'est le plafond le plus bas : deux génétons et le plus long
-   * chemin restant vers la couronne.
+   * L'anti-vacuité de cette spec reposait sur les quatre Optimakina que la fixture
+   * tarife — gen 5 à 15 000, gen 6 à 16 000, gen 7 à 23 000, gen 8 à 35 000 : la
+   * liste paraissait de toute façon, donc l'absence de la gen 2 disait quelque
+   * chose.
+   *
+   * Elle ne paraît plus. Depuis que le conseil ne retient que les générations que
+   * la fournée **vise**, ces quatre-là disparaissent — aucun accouplement immédiat
+   * ne les vise — et « la gen 2 n'y est pas » redeviendrait vrai sur un écran vide.
+   *
+   * D'où deux chargements de la **même** écurie, où seul le prix de la gen 2
+   * change : à 1 000 elle est conseillée, à dix millions elle ne l'est plus. Les
+   * croisements sont les mêmes des deux côtés, donc c'est bien le prix qui
+   * tranche, et rien d'autre. Gen 2 parce que c'est le plafond le plus bas : deux
+   * génétons et le plus long chemin restant vers la couronne.
    */
   test('une Optimakina hors de prix n’est pas conseillée', async ({ page }) => {
-    const mock = await mockSupabase(page);
-    (mock.tables.breeding_color_prices as Record<string, unknown>[]).push(CROWN_PRICE);
-    (mock.tables.item_prices as Record<string, unknown>[]).push({
+    const abordable = await mockSupabase(page);
+    (abordable.tables.breeding_color_prices as Record<string, unknown>[]).push(CROWN_PRICE);
+    (abordable.tables.item_prices as Record<string, unknown>[]).push(OPTIMAKINA_GEN2);
+    await openBreeding(page);
+    await page.getByTestId('step-mate').click();
+    await expect(page.getByTestId('optimakina-advice')).toBeVisible({ timeout: 30_000 });
+    // Le témoin : à 1 000 kamas, la fournée la réclame.
+    await expect(
+      page.getByTestId('optimakina-line').filter({ hasText: 'gen 2' })
+    ).toHaveCount(1);
+
+    const horsDePrix = await mockSupabase(page);
+    (horsDePrix.tables.breeding_color_prices as Record<string, unknown>[]).push(CROWN_PRICE);
+    (horsDePrix.tables.item_prices as Record<string, unknown>[]).push({
       ...OPTIMAKINA_GEN2,
       price: '10000000',
     });
     await openBreeding(page);
-
     await page.getByTestId('step-mate').click();
-    const advice = page.getByTestId('optimakina-advice');
-    await expect(advice).toBeVisible({ timeout: 30_000 });
-
-    // Les moins chères de la fixture restent conseillées : la liste marche.
-    await expect(advice).toContainText('À acheter');
-    // La gen 2 à dix millions, non. Dix pour cent de ce qu'un succès de gen 2
-    // rapporte n'atteint pas cette somme, de très loin.
-    await expect(advice).not.toContainText('gen 2');
+    // Les mêmes croisements, dix mille fois le prix : dix pour cent de ce qu'un
+    // succès de gen 2 rapporte n'atteint pas cette somme, de très loin.
+    await expect(
+      page.getByTestId('optimakina-line').filter({ hasText: 'gen 2' })
+    ).toHaveCount(0);
   });
 });

@@ -229,6 +229,22 @@ export type CoupleLine = {
   targetColorId: string | null;
   /** Places d'enclos que la ligne engage : une par parent qui doit son cycle. */
   places: number;
+  /**
+   * Le rang que la **paire** vise, admissible ou non.
+   *
+   * Distinct de `targetGeneration` juste au-dessus, qui est `null` dès que le plan
+   * n'y voit rien à annoncer — recopie, ou cible qui ne dépasse pas l'ascendance.
+   * Celui-ci est ce que `pairTargetGeneration` nomme, et il reste rempli dans ces
+   * cas-là.
+   *
+   * Il existe pour l'**Optimakina**, qui s'achète par rang visé. Relevé du 28/08 :
+   * `turquoise_dore × indigo_pourpre` vise la gen 6 sur deux couleurs et ne rend
+   * aucun géneton — le rang ne monte pas — mais l'échelle le joue parce qu'il
+   * baisse le coût de construction. La fenêtre d'accouplement y propose donc une
+   * Optimakina, et le conseil d'achat doit la compter, sans quoi les deux écrans
+   * se contredisent : l'un dit « pose-la », l'autre « n'en achète pas ».
+   */
+  pairTargetGeneration: number | null;
 };
 
 /** Une couleur à sortir de l'écurie, sexes détaillés — ils ne s'échangent pas. */
@@ -752,6 +768,7 @@ const readPlan = (
       targetGeneration: aimed?.generation ?? null,
       targetColorId: aimed?.colorId ?? null,
       places: cost,
+      pairTargetGeneration: delta?.targetGeneration ?? null,
     });
   }
 
@@ -901,6 +918,11 @@ export const couplesToRecord = (plan: StablePlan): Couple[] => {
         // champ ne sert qu'à intituler la fenêtre, et mentir sur un rang serait
         // pire que de nommer ce qu'on a sous la main.
         targetColorId: line.targetColorId ?? line.male.colorId,
+        // Le rang de la **paire**, et non celui que le plan retient : c'est lui que
+        // la fenêtre d'accouplement emploie pour proposer une Optimakina, donc
+        // c'est lui que le conseil d'achat doit compter. Voir
+        // `CoupleLine.pairTargetGeneration`.
+        targetGeneration: line.pairTargetGeneration,
         // `mountIds` vide veut dire achat : la politique a proposé une gen 1
         // qu'on n'a pas encore. Le drapeau suit jusqu'à la fenêtre
         // d'accouplement, qui affichait sinon « Anonyme » — indiscernable d'une

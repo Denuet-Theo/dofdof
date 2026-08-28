@@ -503,6 +503,21 @@ export type Pairing = {
 export type Couple = {
   /** La couleur que ce croisement vise. */
   targetColorId: string;
+  /**
+   * Le rang que la **paire** vise, ou `null` si elle ne nomme rien.
+   *
+   * `targetColorId` ne suffit pas à le déduire : faute de cible nommée, il porte
+   * la couleur du mâle — mentir sur un rang serait pire que nommer ce qu'on a
+   * sous la main, dit `couplesToRecord`. Lire sa génération rendrait donc celle
+   * du parent.
+   *
+   * Le champ existe parce que l'**Optimakina** se compte par rang visé, et il
+   * porte le rang de la paire plutôt que celui que le plan retient : les deux
+   * diffèrent sur un croisement qui ne gagne pas de rang mais baisse le coût de
+   * construction, et c'est la paire qui décide de ce que la fenêtre propose. Voir
+   * `CoupleLine.pairTargetGeneration`.
+   */
+  targetGeneration: number | null;
   male: Pairing;
   female: Pairing;
 };
@@ -725,7 +740,16 @@ export const formCouples = (
   /** La couleur visée, que les couples formés portent pour l'affichage. */
   targetColorId: string,
   recipe: readonly [string, string],
-  count: number
+  count: number,
+  /**
+   * Le rang visé, que les couples portent tels quels.
+   *
+   * `null` par défaut, et ce défaut vaut « je ne sais pas » plutôt que
+   * « recopie » : cette fonction ne reçoit qu'une couleur, elle ne peut pas
+   * déduire le rang. Un appelant qui compte par génération — le conseil
+   * d'Optimakina, par exemple — doit donc le passer.
+   */
+  targetGeneration: number | null = null
 ): Couple[] => {
   if (count <= 0) return [];
 
@@ -796,6 +820,7 @@ export const formCouples = (
 
       couples.push({
         targetColorId,
+        targetGeneration,
         male: a.sex === 'M' ? a : b,
         female: a.sex === 'F' ? a : b,
       });

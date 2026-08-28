@@ -198,10 +198,13 @@ Deux drapeaux portent ce nom, et les confondre est le premier piège :
 | `harvest` | **vrai** | monnayer pour leurs génétons les montures que le plan ne sait pas employer |
 | `harvestStocked` / `harvest_stocked` | **faux** | l'étendre aux couleurs **du plan** qui ne le retiennent plus — les gen 9 qui s'accumulent |
 
-**Et `policy.ts:530` force `harvestStocked: true`.** L'app joue donc, en dur,
+**`policy.ts` la forçait à `true`, et ne le fait plus.** L'app jouait en dur
 l'extension que les deux modules laissent éteinte par défaut et que l'éleveur ne
-veut pas. C'est aussi exactement ce qui sépare les lignes « 2. echelle seule » et
-« 3. echelle + changements » de `table` : la ligne 3 est celle que l'écran joue.
+veut pas ; elle retombe sur ce défaut depuis le 28/08. C'est exactement ce qui
+sépare les lignes « 2. echelle seule » et « 3. echelle + changements » de `table`,
+donc **la ligne qui correspond à l'écran est désormais la ligne 2** — les tableaux
+ci-dessous portent encore la ligne 3 parce qu'ils datent d'avant, et c'est la
+colonne « sans » qu'il faut y lire.
 
 Ce n'est pas gratuit à éteindre, et le chiffre doit être dit avec la préférence.
 Sur son export du 28/08, muldo, 200 graines, mode fournées, encaissé :

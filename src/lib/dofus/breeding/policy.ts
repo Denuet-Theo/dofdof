@@ -522,12 +522,24 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     // **devrait** valoir sur les prix de l'éleveur.
     { ...view, mountLevel: strategy.level },
     ladder,
-    // La dernière fécondité des couleurs que le plan ne retient plus. Mesuré sur
-    // 200 graines scellées, départ gen 1 : +90,9 M à 2 000 h (56,04 → 146,98 M)
-    // et une écurie **plus petite** au pic — 566 contre 690, parce que dépenser
-    // la fécondité sort la monture de l'écurie au lieu de l'y laisser dormir.
-    // Voir `harvestStocked`.
-    { purchases: input.purchases ?? true, harvestStocked: true }
+    // La moisson **étendue** est éteinte, et ce n'est pas une mesure qui l'a
+    // décidé : l'éleveur n'en veut pas. « Je ne suis pas du tout intéressé par la
+    // moisson », 28/08, dit deux fois avant d'être écrit — voir `AGENTS.md`.
+    //
+    // Elle valait +90,9 M à 2 000 h sur 200 graines scellées depuis la gen 1
+    // (56,04 → 146,98 M), et 35 M à cinq mois sur son propre parc. Le chiffre
+    // n'est pas contesté ; c'est sa monnaie qui l'est. La moisson produit du
+    // hors-plan pour le **vendre**, et la profondeur de marché n'est modélisée
+    // nulle part — même piège que la boucle du sommet à +43 M, que l'éleveur avait
+    // tranchée d'une phrase. Il est l'oracle de ce que l'hôtel de vente absorbe.
+    //
+    // On retombe donc sur le défaut des deux modules, `false` de part et d'autre,
+    // et l'app cesse d'être le seul endroit où le drapeau est forcé. La ligne de
+    // `table` qui correspond à l'écran devient « 2. echelle seule ».
+    //
+    // `harvest` — monnayer le **hors-plan**, vrai par défaut — n'est pas touché :
+    // c'est l'autre drapeau, et il ne touche pas aux couleurs du plan.
+    { purchases: input.purchases ?? true }
   );
 
   const read = readPlan(plan, mounts, input, generations, economy, strategy);

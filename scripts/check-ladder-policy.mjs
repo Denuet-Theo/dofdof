@@ -137,9 +137,13 @@ for (const [index, entry] of reference.cases.entries()) {
       mountLevel: entry.mountLevel,
     },
     ladder,
-    // La référence porte les deux configurations, une paire de cas par écurie :
-    // l'app joue la moisson stockée allumée, donc la garde doit couvrir ce
-    // chemin-là et pas seulement le défaut. Voir `harvestStocked`.
+    // La référence porte les deux configurations, une paire de cas par écurie.
+    //
+    // L'app jouait la moisson stockée **allumée**, et c'était la raison écrite ici
+    // de couvrir ce chemin. Elle ne la joue plus depuis le 28/08 — l'éleveur n'en
+    // veut pas, voir `AGENTS.md` — donc la garde couvre désormais le chemin joué
+    // *et* celui qui ne l'est plus. On garde les deux : le drapeau existe des deux
+    // côtés, il doit rester porté à l'identique, et c'est ce que la parité vérifie.
     {
       harvestStocked: entry.harvestStocked === true,
       // `cloneTop` éteint sur quelques cas : c'est le seul moyen que `clonable`

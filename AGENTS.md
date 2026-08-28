@@ -105,12 +105,31 @@ level 67, kamas cashed:
 | 60 fournées | −11,20 M | −5,39 M | −1,99 M | best |
 | 150 fournées | −15,38 M | −8,40 M | −3,94 M | best |
 
-**Open, and it is a decision about his money:** `tunedLevel` advises **50** on his
-data, which the table above prices at −1,35 M a month. The two calculations do not
-use the same prices — the Rust charges `economy.toml`'s Mangeoire at 0,5640 kamas
-a point, the app charges what he has entered — and the app's advice is very
-sensitive to that number: 0,1 kamas a point advises 67, 0,5 advises 36. Do not
-"fix" `tunedLevel` toward 67 without settling which Mangeoire price is his.
+**Settled on 2026-08-28, and it was not a price disagreement.** `tunedLevel`
+advised **50** where the bench says 67, and the suspicion was that the two charged
+different Mangeoire prices. His is **0,1266 kamas a point** — 4,5× cheaper than
+`economy.toml`'s 0,5640 — and re-running the sweep at *his* price still gives 67,
+by 0,83 M a month over 50 (t = −4,09). So the prices were never the disagreement.
+
+The disagreement was a **unit**. `tunedLevel` subtracted `fuelCostPerCycle × 10`,
+the fuel of a full enclos, from a revenue worth **one crossing** and a Mangeoire
+cost that levels **two** parents. Five times too much, in the calculation's only
+subtraction — and `costs.ts` had it right all along with
+`const fuelCost = fuelCostPerCycle * 2`. The net came out **negative at every
+level**, so the advice was picking the level that loses least, which is not the
+same curve and does not have the same peak.
+
+Corrected, the net is positive and the peak is **flat**: 49 919 an hour at level
+50 against 49 706 at 67, a 0,4 % gap, with the continuous optimum near 57 —
+between two rungs of `STEPS`. The formula genuinely cannot separate them, so it
+breaks a near-tie (2 %) toward the **higher** level, and the bench is what
+justifies that direction. What the formula cannot see: it prices one crossing in
+a steady state, while a run **compounds** — a higher rate yields more mounts per
+fournée, which feed the next ones.
+
+The advice is now **67**, and the monthly rate on his stable reads 30,59 M instead
+of 30,05 M. Guard: `npm run check:tuned-level`, whose inputs are the ones read in
+the browser on his export.
 
 **`table`'s printed fournée count was a budget, not a measurement**, until
 2026-08-27: it printed `economy.batches`, which only bounds the run in fournée

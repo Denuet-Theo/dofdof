@@ -425,7 +425,10 @@ const BreedingPage = () => {
 
     const tuned = tunedLevel({
       cycleHours: supplies.cycleHours ?? 0,
-      fuelPerLoad: (supplies.fuelCostPerCycle ?? 0) * ENCLOS_SLOTS,
+      // Deux cycles, un par parent — et non les dix d'un enclos plein : le calcul
+      // raisonne par **croisement**, comme `costs.ts` le fait déjà. Voir
+      // `fuelPerCrossing`.
+      fuelPerCrossing: (supplies.fuelCostPerCycle ?? 0) * 2,
       mangeoireCostPerMountPoint: supplies.mangeoireCostPerMountPoint ?? 0,
       levelUpHours: supplies.levelUpHours ?? 0,
       valuePerSuccess: valuePerSuccessToward(crownValue, crown.generation, frontier),
@@ -989,7 +992,19 @@ const BreedingPage = () => {
               ) : (
                 <>
                   {advisedLevel.level}
-                  <span className="text-dark-500 font-normal"> · au-delà, la Mangeoire coûte plus d’heures qu’elle n’en fait gagner</span>
+                  {/* Ce qui borne vraiment, et ce n'est pas ce qui était écrit ici.
+                      La phrase disait « au-delà, la Mangeoire coûte plus d'heures
+                      qu'elle n'en fait gagner ». Relevé sur son écurie : au niveau
+                      conseillé, cycle plus montée font 17,1 h contre 24 disponibles
+                      — les heures ne mordent pas du tout. Ce qui écarte le palier
+                      au-dessus est double, et les deux tiennent en kamas ou en
+                      visites : il demande deux remplissages de Mangeoire (118 257
+                      points contre un plafond de 70 000), et il rend 8 % de moins
+                      une fois le carburant payé. */}
+                  <span className="text-dark-500 font-normal">
+                    {' '}· le palier au-dessus demande deux remplissages, et rend moins une fois
+                    la Mangeoire payée
+                  </span>
                 </>
               )}
             </strong>

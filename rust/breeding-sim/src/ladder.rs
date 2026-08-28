@@ -2979,7 +2979,23 @@ impl Policy for LadderPolicy {
             .map(|(index, _)| index)
             .collect();
 
-        let needed = if crossings.is_empty() {
+        // Le chargement se paie **par enclos ouvert**, pas par croisement.
+        //
+        // Il achète le carburant qui remplit les jauges du parc, donc une fournée
+        // qui n'ouvre aucun enclos ne le doit pas. Le test portait sur
+        // `crossings.is_empty()`, ce qui était synonyme tant que tout croisement
+        // passait par une place. Depuis #299 ce n'est plus vrai : un couple de deux
+        // fécondes est un clic en jeu, et `places_for` le chiffre à zéro.
+        //
+        // Mesuré côté écran, huit fécondes formant quatre couples admissibles : à
+        // 3 000 000 kamas l'app en propose quatre, à 1 000 kamas aucun — quatre
+        // accouplements gratuits refusés faute de payer un enclos que personne
+        // n'ouvre.
+        let places: usize = crossings
+            .iter()
+            .map(|&pair| places_for(view.stable, pair))
+            .sum();
+        let needed = if places == 0 {
             0
         } else {
             view.economy.batch_cost

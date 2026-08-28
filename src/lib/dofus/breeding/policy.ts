@@ -790,10 +790,20 @@ const readPlan = (
    * Ce que la fournée déplace en kamas.
    *
    * Les sacrifices sont la recette : `plan.sacrifices` porte des index d'écurie, et
-   * `valueOf` dit ce que chacun rend — vente ou extraction, au mieux des deux. Le
-   * chargement se paie une fois, et seulement si la fournée croise : c'est la même
-   * condition que `settle` applique à son test de solvabilité, et les deux doivent
-   * s'accorder ou le chiffre affiché contredirait le refus.
+   * `valueOf` dit ce que chacun rend — vente ou extraction, au mieux des deux.
+   *
+   * Le chargement se paie une fois, et seulement si la fournée **ouvre un
+   * enclos** : `places` est le compte que la boucle ci-dessus vient d'établir
+   * croisement par croisement, et une fournée qui ne fait que marier des fécondes
+   * n'en emploie aucune.
+   *
+   * C'est la même condition que `settle` applique à sa solvabilité, et les deux
+   * doivent s'accorder ou le chiffre affiché contredirait le refus. Elles
+   * s'accordaient déjà — sur « y a-t-il un croisement », qui était faux des deux
+   * côtés. Une condition recopiée d'un endroit à l'autre hérite du défaut sans
+   * hériter de la justification : celle-ci a voyagé jusqu'ici avec la mention
+   * explicite qu'elle devait rester jumelle, ce qui a rendu le défaut jumeau au
+   * lieu de le signaler.
    */
   const earnings = batchEarnings({
     genetons,
@@ -801,7 +811,7 @@ const readPlan = (
       (sum, index) => sum + (mounts[index] ? economy.valueOf(mounts[index].colorId) : 0),
       0
     ),
-    loadKamas: plan.crossings.length === 0 ? 0 : input.loadKamas,
+    loadKamas: places === 0 ? 0 : input.loadKamas,
     purchases: plan.purchases.length * economy.starterPrice,
     optimakina,
     genetonValue: economy.genetonValue,

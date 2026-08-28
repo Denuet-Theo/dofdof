@@ -174,6 +174,24 @@ const fertileGroups = (mounts: Individual[]): MateGroup[] => {
 const placesFor = (mounts: Individual[], pair: [number, number]): number =>
   pair.filter((index) => mounts[index]?.cycled !== true).length;
 
+/**
+ * Les places d'enclos que la fournée engage **en tout**.
+ *
+ * Une seule porte, et c'est délibéré. Tout ce qui se paie par enclos — la borne
+ * de capacité, le chargement de la Mangeoire — doit passer par ici plutôt que de
+ * demander « y a-t-il un croisement ». Les deux questions ont été confondues
+ * aussi longtemps que tout croisement impliquait un cycle ; le découplage de la
+ * fécondité les a séparées, et depuis, chaque endroit qui dit « croisement » en
+ * pensant « place » est un défaut en attente. Il y en a eu quatre.
+ *
+ * L'index hors bornes est un **achat** : une gen 1 neuve arrive fertile et doit
+ * son cycle, donc elle coûte une place. `mounts[index]` vaut alors `undefined`,
+ * et `?.cycled !== true` la compte — ce qui est juste, et pas un hasard.
+ */
+const placesUsed = (mounts: Individual[], plan: UnitPlan): number =>
+  plan.crossings.reduce((total, pair) => total + placesFor(mounts, pair), 0) +
+  plan.cycles.length;
+
 /** Ce que rend un engagement de couple. */
 type Launched = 'yes' | 'retry' | 'full';
 
@@ -409,8 +427,24 @@ const settle = (
   plan.clonings = clonings;
   plan.sacrifices = sacrifices;
 
+  /**
+   * Le chargement se paie **par enclos ouvert**, pas par croisement.
+   *
+   * Il achète le carburant qui remplit les jauges du parc — `loadKamas` vaut
+   * `fuelCostPerCycle × capacity` — donc une fournée qui n'ouvre aucun enclos ne
+   * le doit pas. Le test portait sur « y a-t-il un croisement », ce qui était
+   * synonyme tant que tout croisement passait par une place. Depuis #299 ce n'est
+   * plus vrai : un couple de deux fécondes est un clic en jeu.
+   *
+   * Le prix de la confusion, mesuré au navigateur sur huit fécondes formant
+   * quatre couples admissibles : à 3 000 000 kamas l'écran en propose **4**, à
+   * 1 000 kamas il en propose **0**. Quatre accouplements gratuits refusés faute
+   * de payer un enclos que personne n'ouvre — et l'éleveur retrouve exactement le
+   * silence que #299 était venu supprimer, par la porte de l'argent au lieu de
+   * celle des places.
+   */
   const needed =
-    (plan.crossings.length === 0 ? 0 : view.loadKamas) +
+    (placesUsed(mounts, plan) === 0 ? 0 : view.loadKamas) +
     plan.purchases.length * economy.starterPrice;
   const raised = sacrifices.reduce(
     (sum, index) => sum + economy.valueOf(mounts[index].colorId),

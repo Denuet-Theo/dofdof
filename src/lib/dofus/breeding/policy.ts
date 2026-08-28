@@ -522,12 +522,41 @@ export const stablePlan = (input: PolicyInput): StablePlan | null => {
     // **devrait** valoir sur les prix de l'éleveur.
     { ...view, mountLevel: strategy.level },
     ladder,
-    // La dernière fécondité des couleurs que le plan ne retient plus. Mesuré sur
-    // 200 graines scellées, départ gen 1 : +90,9 M à 2 000 h (56,04 → 146,98 M)
-    // et une écurie **plus petite** au pic — 566 contre 690, parce que dépenser
-    // la fécondité sort la monture de l'écurie au lieu de l'y laisser dormir.
-    // Voir `harvestStocked`.
-    { purchases: input.purchases ?? true, harvestStocked: true }
+    // La moisson **étendue** est éteinte, et ce n'est pas une mesure qui l'a
+    // décidé : l'éleveur n'en veut pas. « Je ne suis pas du tout intéressé par la
+    // moisson », 28/08, dit deux fois avant d'être écrit — voir `AGENTS.md`.
+    //
+    // Elle valait +90,9 M à 2 000 h sur 200 graines scellées depuis la gen 1
+    // (56,04 → 146,98 M), et 35 M à cinq mois sur son propre parc. Le chiffre
+    // n'est pas contesté ; c'est sa monnaie qui l'est. La moisson produit du
+    // hors-plan pour le **vendre**, et la profondeur de marché n'est modélisée
+    // nulle part — même piège que la boucle du sommet à +43 M, que l'éleveur avait
+    // tranchée d'une phrase. Il est l'oracle de ce que l'hôtel de vente absorbe.
+    //
+    // On retombe donc sur le défaut des deux modules, `false` de part et d'autre,
+    // et l'app cesse d'être le seul endroit où le drapeau est forcé. La ligne de
+    // `table` qui correspond à l'écran devient « 2. echelle seule ».
+    //
+    // ## Et le test qu'il pilotait ne discriminait rien
+    //
+    // La raison la plus forte est venue après coup, en mesurant. `stocked` vaut
+    // `ratio > goulot && ratio > 0`, où le goulot est le minimum de `tenu /
+    // demande` sur les couleurs voulues. L'éleveur ne tient **aucune** monture de
+    // gen 7 ou au-dessus — c'est l'état normal de qui n'a pas fini de monter —
+    // donc le goulot vaut **zéro** et le test se lit « tu en as au moins une ».
+    //
+    // Sur son export du 28/08, plan couronné : **16 des 31 couleurs du plan**
+    // comptent comme stockées, c'est-à-dire tout ce qu'il possède de la gen 2 à la
+    // gen 6. « Moissonner le surplus » voulait dire « moissonner tout ce qui n'est
+    // pas encore au sommet ».
+    //
+    // Le même ratio reste sain pour `mostBehind`, qui prend le **minimum** ;
+    // il ne dégénère que pour une comparaison **au-dessus** de ce minimum. Voir
+    // `AGENTS.md`, « Les 60 places d'enclos sont un plafond dur ».
+    //
+    // `harvest` — monnayer le **hors-plan**, vrai par défaut — n'est pas touché :
+    // c'est l'autre drapeau, et il ne touche pas aux couleurs du plan.
+    { purchases: input.purchases ?? true }
   );
 
   const read = readPlan(plan, mounts, input, generations, economy, strategy);
